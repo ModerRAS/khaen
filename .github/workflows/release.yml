@@ -17,6 +17,8 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: System deps (ALSA dev headers)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Build daemon
         run: cargo build --release --locked -p khaen-daemon
       - name: Package and describe
