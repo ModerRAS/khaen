@@ -1,0 +1,8 @@
+[package]
+name = "khaen-designer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FIR filter toolbox: linear-phase, minimum-phase, brickwall and apodizing designs"
+
+[dependencies]

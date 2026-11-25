@@ -1,0 +1,8 @@
+[package]
+name = "khaen-room-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shoebox image-source room simulation for offline fixtures"
+
+[dependencies]

@@ -1,0 +1,8 @@
+[package]
+name = "khaen-modal-design"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Modal MIMO design: ingest, timebase, targets, solver and validation"
+
+[dependencies]

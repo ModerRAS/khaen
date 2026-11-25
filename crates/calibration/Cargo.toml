@@ -1,0 +1,8 @@
+[package]
+name = "khaen-calibration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Calibration math: deconvolution, parametric-EQ fitting and plan compilation"
+
+[dependencies]

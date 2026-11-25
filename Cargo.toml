@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/core",
+  "crates/designer",
+  "crates/calibration",
+  "crates/mimo-design",
+  "crates/modal-design",
+  "crates/room-sim",
+  "crates/aoip-aes67",
+  "crates/rt-check",
+  "crates/host",
+  "crates/daemon",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+rust-version = "1.80"
+
+[workspace.dependencies]

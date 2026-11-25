@@ -1,0 +1,8 @@
+[package]
+name = "khaen-rt-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Offline contract checker: ABI layout, forbidden calls and destructor audits"
+
+[dependencies]

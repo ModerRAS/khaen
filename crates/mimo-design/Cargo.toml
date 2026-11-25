@@ -1,0 +1,8 @@
+[package]
+name = "khaen-mimo-design"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MIMO matrix design: solver, measurement quality gate, authority weighting and safety limits"
+
+[dependencies]

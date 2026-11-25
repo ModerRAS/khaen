@@ -1,0 +1,8 @@
+[package]
+name = "khaen-aoip-aes67"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "AES67 receiver/sender: SDP, RTP, jitter buffer and media clock"
+
+[dependencies]

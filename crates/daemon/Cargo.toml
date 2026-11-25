@@ -1,0 +1,8 @@
+[package]
+name = "khaen-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Control plane: REST API, host socket client and calibration job orchestration"
+
+[dependencies]
