@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use khaen_calibration::fir_plan::{compile_fir_plan, FirPlanConfig, LaneFir};
 use khaen_calibration::{compile_peq_design, PlanCompileOptions};
 use khaen_daemon::{router, DaemonState};
 use khaen_designer::modal_peq::{BandType, ChannelPeq, DesignMode, ModalBand, PeqDesign};
@@ -972,6 +973,165 @@ async fn calibration_plan_roundtrips_through_control_plane() {
         restored, calibrated,
         "rollback 后应与第一次下发的校准图逐样本一致"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fir_plan_roundtrips_through_control_plane() {
+    let (server, state) = spawn().await;
+
+    // 真实尺寸 FIR：2 lane × 2048 taps；lane 0 = 延迟 1024 的冲激，lane 1 = 全静音。
+    let taps = 2048usize;
+    let mut lane0 = vec![0.0f64; taps];
+    lane0[1024] = 1.0;
+    let lanes = vec![
+        LaneFir {
+            lane: 0,
+            taps: lane0,
+        },
+        LaneFir {
+            lane: 1,
+            taps: vec![0.0; taps],
+        },
+    ];
+    let config = FirPlanConfig::new(BLOCK_FRAMES, SAMPLE_RATE, CHANNELS);
+    let compiled = compile_fir_plan(&lanes, &config).expect("compile fir plan");
+    assert_eq!(compiled.sha256(), sha256_hex(compiled.bytes()));
+    // 同输入再编译一次：字节与 sha256 逐位相同（目标④的可复现 sha）。
+    let again = compile_fir_plan(&lanes, &config).expect("compile again");
+    assert_eq!(compiled.bytes(), again.bytes());
+    assert_eq!(compiled.sha256(), again.sha256());
+
+    let file = TempPlan::new("fir-calibration", compiled.bytes());
+    let body = json!({ "plan_path": file.path(), "plan_sha256": file.sha256 }).to_string();
+
+    // 只读 inspect：准入接受、不产生草稿。
+    let (status, inspected) = request(
+        "POST",
+        &format!("{}/api/plan/inspect", server.base),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(inspected["staged"], Value::Bool(false));
+    assert_eq!(inspected["admission"]["accepted"], Value::Bool(true));
+    assert_eq!(
+        inspected["graph_id"],
+        Value::String(compiled.graph_id().into())
+    );
+
+    // 两阶段下发：prepare 草稿 -> commit 生效。
+    let (status, prepared) =
+        request("POST", &format!("{}/api/prepare", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(prepared["planned_version"], Value::from(1));
+    assert_eq!(
+        prepared["graph_id"],
+        Value::String(compiled.graph_id().into())
+    );
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let (status, committed) = request(
+        "POST",
+        &format!("{}/api/commit", server.base),
+        Some(&json!({ "engine_token": token }).to_string()),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(committed["version"], Value::from(1));
+    assert_eq!(
+        committed["graph_id"],
+        Value::String(compiled.graph_id().into())
+    );
+
+    // 图内 FIR：单脉冲进，应在第 1024 帧出现、其余为 0（lane 1 全程静音）。
+    let channels = usize::from(CHANNELS);
+    let frames = BLOCK_FRAMES as usize;
+    let mut impulse = vec![0.0f32; frames * channels];
+    impulse[0] = 1.0;
+    let zeros = vec![0.0f32; frames * channels];
+    let mut output = Vec::new();
+    for block in 0..9usize {
+        let input = if block == 0 { &impulse } else { &zeros };
+        output.extend(run_block(&state, input));
+    }
+    let impulse_frame = 1024usize;
+    for frame in 0..output.len() / channels {
+        for lane in 0..channels {
+            let value = output[frame * channels + lane];
+            if frame == impulse_frame && lane == 0 {
+                assert!(
+                    (value - 1.0).abs() <= 1e-6,
+                    "impulse at frame {frame}: {value}"
+                );
+            } else {
+                assert!(
+                    value.abs() <= 1e-6,
+                    "frame {frame} lane {lane} should be silent, got {value}"
+                );
+            }
+        }
+    }
+
+    // 换回恒等方案 v2：直通。
+    let identity_file = TempPlan::new("fir-identity", &identity_plan().encode());
+    let identity_body =
+        json!({ "plan_path": identity_file.path(), "plan_sha256": identity_file.sha256 })
+            .to_string();
+    let (_, prepared) = request(
+        "POST",
+        &format!("{}/api/prepare", server.base),
+        Some(&identity_body),
+    )
+    .await;
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let _ = request(
+        "POST",
+        &format!("{}/api/commit", server.base),
+        Some(&json!({ "engine_token": token }).to_string()),
+    )
+    .await;
+    let probe = signal(frames * channels, 31);
+    assert_eq!(run_block(&state, &probe), probe);
+
+    // rollback 回 v1 FIR 方案：图回到 FIR，脉冲延迟行为重新出现。
+    let (status, rolled) =
+        request("POST", &format!("{}/api/rollback", server.base), Some("{}")).await;
+    assert_eq!(status, 200);
+    assert_eq!(rolled["rolled_back_to"], Value::from(1));
+    assert_eq!(
+        rolled["graph_id"],
+        Value::String(compiled.graph_id().into())
+    );
+    let token = rolled["engine_token"].as_str().expect("token").to_string();
+    let _ = request(
+        "POST",
+        &format!("{}/api/commit", server.base),
+        Some(&json!({ "engine_token": token }).to_string()),
+    )
+    .await;
+    let mut restored = Vec::new();
+    for block in 0..9usize {
+        let input = if block == 0 { &impulse } else { &zeros };
+        restored.extend(run_block(&state, input));
+    }
+    for frame in 0..restored.len() / channels {
+        for lane in 0..channels {
+            let value = restored[frame * channels + lane];
+            if frame == impulse_frame && lane == 0 {
+                assert!((value - 1.0).abs() <= 1e-6, "restored impulse: {value}");
+            } else {
+                assert!(
+                    value.abs() <= 1e-6,
+                    "restored frame {frame} lane {lane}: {value}"
+                );
+            }
+        }
+    }
 }
 
 /// 用方案里的保护项系数独立复算一条 lane 的期望输出（f64 计算，f32 系数）。
