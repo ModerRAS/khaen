@@ -75,8 +75,10 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 
 ### 4.2 控制面冒烟测试（只读）
 
-    ./deploy/smoke-test.sh                     # 默认 http://127.0.0.1:8730
-    ./deploy/smoke-test.sh http://127.0.0.1:8730 1
+    bash deploy/smoke-test.sh                     # 默认 http://127.0.0.1:8730
+    bash deploy/smoke-test.sh http://127.0.0.1:8730 1
+
+（Windows 检出把脚本记成 644，没有执行位；用 `bash` 调用即可。）
 
 检查 `/api/status` / `/api/device` / `/api/coeff` 的结构与协议版本，**不做任何设备写入、不 prepare/commit、不出声**。`device.wired=false` 属合法状态（未配置监督器），只打印原因；设备 `faulted` 同样只打印，是否升级处理由人工判断。
 
