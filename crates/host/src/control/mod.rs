@@ -158,6 +158,22 @@ impl ControlState {
         }
     }
 
+    /// 状态快照（与 status op 同一份 JSON，供 REST 层直接复用）。
+    pub fn status_json(&self) -> Value {
+        self.status()
+    }
+
+    /// 静音请求（与 mute op 同一份 JSON，供 REST 层直接复用）。
+    pub fn mute_json(&mut self, mute: bool) -> Value {
+        let receipt = self.engine.request_mute(mute);
+        json!({
+            "ok": true,
+            "mute": receipt.mute,
+            "applied_block": receipt.applied_block,
+            "idempotent": receipt.idempotent,
+        })
+    }
+
     fn status(&self) -> Value {
         let stats = self.engine.stats();
         let mut reasons = Map::new();

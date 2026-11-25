@@ -1,8 +1,12 @@
 [package]
 name = "khaen-daemon"
+description = "Control daemon: REST/UI over the host control plane"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Control plane: REST API, host socket client and calibration job orchestration"
 
 [dependencies]
+khaen-host = { path = "../host" }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "io-util"] }
+serde_json = "1"
