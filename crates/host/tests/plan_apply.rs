@@ -137,6 +137,125 @@ impl Drop for TempPlan {
     }
 }
 
+// ===========================================================================
+// rollback：两阶段回到历史版本（可回滚是验收项）
+// ===========================================================================
+
+fn commit_plan(state: &mut ControlState, plan: &Plan) -> String {
+    let file = TempPlan::new("commit", &plan.encode());
+    let prepared = prepare(state, &file);
+    token_of(&prepared)
+}
+
+#[test]
+fn rollback_restores_previous_plan_at_next_block_boundary() {
+    let mut state = state();
+    let identity = identity_plan();
+    let identity_id = identity.graph_id_hex();
+    let token = commit_plan(&mut state, &identity);
+    commit(&mut state, &token);
+
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x1111);
+    let first = run_block(&mut state, &input);
+    assert_bit_eq(&first, &input);
+
+    // 第二个方案：+6 dB，生效后再回滚。
+    let gain = gain_plan(6.0);
+    let gain_file = TempPlan::new("gain", &gain.encode());
+    let gain_prepared = prepare(&mut state, &gain_file);
+    let gain_token = token_of(&gain_prepared);
+    commit(&mut state, &gain_token);
+    let gained = run_block(&mut state, &input);
+    for (actual, sample) in gained.iter().zip(input.iter()) {
+        let expected = sample * GAIN_6DB;
+        assert!((actual - expected).abs() <= 1e-6, "{actual} vs {expected}");
+    }
+
+    // rollback 默认回到上一个已生效版本（这里 = v1 identity），版本号递增到 3。
+    let rolled = request(&mut state, json!({ "op": "rollback" }));
+    assert_eq!(rolled["ok"], Value::Bool(true));
+    assert_eq!(rolled["rolled_back_to"], Value::from(1));
+    assert_eq!(rolled["planned_version"], Value::from(3));
+    assert_eq!(rolled["graph_id"], Value::String(identity_id.clone()));
+    let rollback_token = token_of(&rolled);
+
+    // commit 前仍跑 v2（不提前生效）。
+    let before_commit = run_block(&mut state, &input);
+    for (actual, sample) in before_commit.iter().zip(input.iter()) {
+        let expected = sample * GAIN_6DB;
+        assert!((actual - expected).abs() <= 1e-6);
+    }
+    assert_eq!(status(&mut state)["actual_version"], Value::from(2));
+
+    // commit 后排到下一块边界：该块从头就是 identity。
+    let committed = commit(&mut state, &rollback_token);
+    assert_eq!(committed["version"], Value::from(3));
+    let restored = run_block(&mut state, &input);
+    assert_bit_eq(&restored, &input);
+    let after = status(&mut state);
+    assert_eq!(after["actual_version"], Value::from(3));
+    assert_eq!(after["graph_id"], Value::String(identity_id));
+    // 回滚后历史仍保留 v1/v2/v3（历史不被改写）。
+    let coeff = coeff(&mut state);
+    assert_eq!(coeff["available_versions"], json!([1, 2, 3]));
+}
+
+#[test]
+fn rollback_without_history_reports_no_history() {
+    let mut state = state();
+    let response = request(&mut state, json!({ "op": "rollback" }));
+    assert_eq!(response["ok"], Value::Bool(false));
+    assert_eq!(response["error"], Value::String(error::NO_HISTORY.into()));
+    assert!(response["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("no committed plan history")));
+}
+
+#[test]
+fn rollback_rejects_unknown_current_and_single_version_targets() {
+    let mut state = state();
+    let identity = identity_plan();
+    let token = commit_plan(&mut state, &identity);
+    commit(&mut state, &token);
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x2222);
+    run_block(&mut state, &input);
+
+    // 只有一个历史版本：默认回滚没有目标。
+    let single = request(&mut state, json!({ "op": "rollback" }));
+    assert_eq!(single["error"], Value::String(error::BAD_REQUEST.into()));
+    assert!(single["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("only one committed plan version")));
+
+    // 回滚到当前版本：错误（不是"成功但什么也没做"）。
+    let current = request(&mut state, json!({ "op": "rollback", "target": 1 }));
+    assert_eq!(current["error"], Value::String(error::BAD_REQUEST.into()));
+    assert!(current["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("already the running graph")));
+
+    // 历史里没有的版本：点名可用版本。
+    let unknown = request(&mut state, json!({ "op": "rollback", "target": 99 }));
+    assert_eq!(unknown["error"], Value::String(error::BAD_REQUEST.into()));
+    assert!(unknown["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("available: [1]")));
+
+    // 失败的 rollback 不产生草稿：commit 必须报 token 无效。
+    let commit_after = request(
+        &mut state,
+        json!({ "op": "commit", "engine_token": "deadbeef" }),
+    );
+    assert_eq!(
+        commit_after["error"],
+        Value::String(error::ENGINE_TOKEN_INVALID.into())
+    );
+
+    // 非法 target 类型。
+    let bad_type = request(&mut state, json!({ "op": "rollback", "target": "one" }));
+    assert_eq!(bad_type["error"], Value::String(error::BAD_REQUEST.into()));
+}
+
 fn request(state: &mut ControlState, request: Value) -> Value {
     serde_json::from_str(&state.handle_line(&request.to_string())).expect("response json")
 }

@@ -98,6 +98,7 @@
 | coeff | — | 当前系数版本与 last-good |
 | inspect | plan_path、可选 plan_sha256 | 只读试运行：读文件→校验 sha→解码→准入→图编译；返回 sha256/graph_id/plan 摘要/admission（accepted+rejections+budget）/compile（compiled+latency 或 error_code）；`staged` 恒 false，不产生草稿、不改变正在跑的图 |
 | surface | surface、data | 语义界面两阶段：准备补丁草稿（engine_token、planned_version、graph_id、admission）；生效仍走 commit |
+| rollback | 可选 target(版本号) | 回滚第一阶段：把历史里的旧版本重新准备成草稿（engine_token、planned_version、**rolled_back_to**、graph_id、admission）；版本号**递增**、历史不改写；生效仍走 commit；无历史返回 no_history(409) |
 
 ### B.1.1 字段形状
 
@@ -123,6 +124,20 @@
 界面报成可用。补丁只搬运字段，ABI 字段域由 `encode_checked`、语义由 host 准入与图编译各自校验，
 不在 surface 层重复实现契约。
 
+### B.1.3 回滚（rollback）
+
+控制面保留**有限历史**（最近 16 个已生效方案，按版本升序；超出丢弃最旧）。`rollback` 是两阶段
+第一阶段，只准备草稿：
+
+- `target` 缺省 = 上一个已生效版本（历史倒数第二项）；给出版本号则必须存在于历史里。
+- 回滚是**前进式提交**：版本号取"下一个生效版本"，历史不被改写、不被删除；响应里
+  `rolled_back_to` 指明草稿内容来自哪个旧版本。`coeff` 的 `available_versions` 列出可回滚版本。
+- 目标等于当前运行版本 → `bad_request`（不允许"成功但什么也没做"）；只有一个版本时缺省回滚 →
+  `bad_request`（没有更旧版本）；目标不在历史 → `bad_request` 并列出可用版本。
+- 没有任何已生效方案 → `no_history`(409)。
+- 与 prepare/surface 相同：读文件之外全部在控制线程完成，草稿只由 `commit` 在下一块边界生效，
+  `abort` 丢弃；回滚方案会重新过准入与图编译，不复用旧处理器对象。
+
 ### B.2 语义
 
 - `status` 为原子快照，不阻塞音频线程。
@@ -134,7 +149,9 @@
 
 ### B.3 错误码
 
-`bad_request` / `unknown_op` / `unsupported` / `not_applied` / `runtime_not_running` / `admission_rejected` / `engine_token_invalid` / `no_base_plan`。
+`bad_request` / `unknown_op` / `unsupported` / `not_applied` / `runtime_not_running` / `admission_rejected` / `engine_token_invalid` / `no_base_plan` / `no_history`。
+
+完整能力列表随 `status.wired` 上报：`status / mute / prepare / commit / abort / coeff / surface / inspect / rollback`。
 
 ## C. 校准产物 manifest
 

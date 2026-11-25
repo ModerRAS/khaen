@@ -11,6 +11,8 @@
 //! - `unsupported` → 501：op 存在但当前未实现。
 //! - `admission_rejected` → 409：方案超预算/结构非法，或与当前运行时配置不匹配。
 //! - `engine_token_invalid` → 409：没有对应草稿或 token 不符（先 prepare / 用正确 token）。
+//! - `no_base_plan` → 409：surface 补丁前还没有已生效方案。
+//! - `no_history` → 409：rollback 前还没有任何已生效版本。
 //! - 其余 → 500。
 
 pub mod device;
@@ -97,6 +99,7 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/api/coeff", get(coeff))
         .route("/api/plan/inspect", post(inspect))
         .route("/api/surface", post(surface))
+        .route("/api/rollback", post(rollback))
         .route("/api/device", get(device_status))
         .route("/api/device/retry", post(device_retry))
         .with_state(state)
@@ -202,6 +205,25 @@ async fn surface(
     }
 }
 
+/// 回滚第一阶段：把历史里的旧版本准备成草稿（版本号递增），commit 仍走 /api/commit。
+async fn rollback(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let target = match payload.get("target") {
+        Some(Value::Number(number)) => match number.as_u64() {
+            Some(version) => Some(version),
+            None => return bad_request("field target must be a non-negative integer version"),
+        },
+        Some(Value::Null) | None => None,
+        Some(_) => return bad_request("field target must be a non-negative integer version"),
+    };
+    match state.control().rollback_json(target) {
+        Ok(body) => (StatusCode::OK, Json(body)),
+        Err(err) => error_response(err),
+    }
+}
+
 async fn coeff(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(state.control().coeff_json()))
 }
@@ -236,9 +258,10 @@ fn http_status(code: &str) -> StatusCode {
         error::BAD_REQUEST => StatusCode::BAD_REQUEST,
         error::UNKNOWN_OP => StatusCode::NOT_FOUND,
         error::UNSUPPORTED => StatusCode::NOT_IMPLEMENTED,
-        error::ADMISSION_REJECTED | error::ENGINE_TOKEN_INVALID | error::NO_BASE_PLAN => {
-            StatusCode::CONFLICT
-        }
+        error::ADMISSION_REJECTED
+        | error::ENGINE_TOKEN_INVALID
+        | error::NO_BASE_PLAN
+        | error::NO_HISTORY => StatusCode::CONFLICT,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

@@ -646,3 +646,69 @@ async fn plan_inspect_bad_payloads_are_400() {
     assert_eq!(status, 400);
     assert_eq!(body["error"], Value::String("bad_request".into()));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn rollback_prepares_old_version_and_commits_over_http() {
+    let (server, state) = spawn().await;
+    // 没有历史：409 + no_history（如实报，不是 500）。
+    let (status, body) =
+        request("POST", &format!("{}/api/rollback", server.base), Some("{}")).await;
+    assert_eq!(status, 409);
+    assert_eq!(body["error"], Value::String("no_history".into()));
+
+    // v1: identity
+    let identity = identity_plan();
+    let identity_id = identity.graph_id_hex();
+    let file1 = TempPlan::new("rb-identity", &identity.encode());
+    let body = json!({ "plan_path": file1.path(), "plan_sha256": file1.sha256 }).to_string();
+    let (_, prepared) = request("POST", &format!("{}/api/prepare", server.base), Some(&body)).await;
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, _) = request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 9);
+    let output = run_block(&state, &input);
+    assert_eq!(output, input);
+
+    // v2: +6 dB
+    let gain = gain_plan(6.0);
+    let file2 = TempPlan::new("rb-gain", &gain.encode());
+    let body = json!({ "plan_path": file2.path(), "plan_sha256": file2.sha256 }).to_string();
+    let (_, prepared) = request("POST", &format!("{}/api/prepare", server.base), Some(&body)).await;
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (_, _) = request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    let _ = run_block(&state, &input);
+
+    // rollback 默认回到 v1，版本号递增到 3；commit 后输出恢复 identity。
+    let (status, rolled) =
+        request("POST", &format!("{}/api/rollback", server.base), Some("{}")).await;
+    assert_eq!(status, 200);
+    assert_eq!(rolled["rolled_back_to"], Value::from(1));
+    assert_eq!(rolled["planned_version"], Value::from(3));
+    assert_eq!(rolled["graph_id"], Value::String(identity_id.clone()));
+    let token = rolled["engine_token"].as_str().expect("token").to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, committed) =
+        request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(committed["version"], Value::from(3));
+    let output = run_block(&state, &input);
+    assert_eq!(output, input);
+
+    // 非法 target 类型：400 bad_request。
+    let (status, body) = request(
+        "POST",
+        &format!("{}/api/rollback", server.base),
+        Some(r#"{"target":"one"}"#),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], Value::String("bad_request".into()));
+}

@@ -35,8 +35,11 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 /// 已实现的 op。
 pub const WIRED_OPS: &[&str] = &[
-    "status", "mute", "prepare", "commit", "abort", "coeff", "surface", "inspect",
+    "status", "mute", "prepare", "commit", "abort", "coeff", "surface", "inspect", "rollback",
 ];
+
+/// 可回滚历史的长度上限：只保留最近 N 个已生效方案（完整方案对象，控制线程内存）。
+const HISTORY_LIMIT: usize = 16;
 
 /// 已接通的语义界面（"surface" op 的 surface 字段可接受值）。
 ///
@@ -80,6 +83,8 @@ pub mod error {
     pub const ENGINE_TOKEN_INVALID: &str = "engine_token_invalid";
     /// 还没有已生效的方案可打补丁（surface op 前置条件）。
     pub const NO_BASE_PLAN: &str = "no_base_plan";
+    /// 没有可回滚的历史版本（rollback 前置条件）。
+    pub const NO_HISTORY: &str = "no_history";
 }
 
 /// 控制面错误：稳定错误码 + 给人看的说明。
@@ -386,6 +391,17 @@ pub struct ControlState {
     draft: Option<DraftPlan>,
     /// 最近一次 commit 生效的方案：语义界面（volume/routing/layout）以它为基线打补丁。
     base_plan: Option<Plan>,
+    /// 已生效方案的有限历史（版本升序），供 rollback 回到旧版本。
+    history: Vec<CommittedPlan>,
+}
+
+/// 一份已生效方案的历史条目（完整方案 + 版本 + graph_id）。
+#[derive(Debug, Clone)]
+struct CommittedPlan {
+    /// 生效时的版本号。
+    version: u64,
+    /// 完整方案：回滚时重新编译，不依赖任何旧处理器对象。
+    plan: Plan,
 }
 
 impl ControlState {
@@ -398,6 +414,7 @@ impl ControlState {
             safe_mode: false,
             draft: None,
             base_plan: None,
+            history: Vec::new(),
         })
     }
 
@@ -467,6 +484,20 @@ impl ControlState {
                 self.abort_json(engine_token)
             }
             "coeff" => Ok(self.coeff_json()),
+            "rollback" => {
+                let target = match object.get("target") {
+                    Some(Value::Number(number)) => Some(number.as_u64().ok_or_else(|| {
+                        bad_request("field target must be a non-negative integer version")
+                    })?),
+                    Some(Value::Null) | None => None,
+                    Some(_) => {
+                        return Err(bad_request(
+                            "field target must be a non-negative integer version",
+                        ))
+                    }
+                };
+                self.rollback_json(target)
+            }
             "inspect" => {
                 let plan_path = string_field(object, "plan_path")?;
                 let plan_sha256 = match object.get("plan_sha256") {
@@ -677,8 +708,12 @@ impl ControlState {
         let applied_block =
             self.engine
                 .stage_processor(draft.processor, draft.version, draft.graph_id.clone());
-        // 生效后成为后续语义界面（volume/routing/layout）的补丁基线。
-        self.base_plan = Some(draft.plan);
+        // 生效后：成为语义界面（volume/routing/layout）的补丁基线，并进入可回滚历史。
+        self.base_plan = Some(draft.plan.clone());
+        self.push_history(CommittedPlan {
+            version: draft.version,
+            plan: draft.plan,
+        });
         Ok(json!({
             "ok": true,
             "applied_block": applied_block,
@@ -759,6 +794,99 @@ impl ControlState {
         });
         Ok(response)
     }
+    /// 记录一个已生效版本到有限历史；超出上限丢最旧（drop 最旧完整方案）。
+    fn push_history(&mut self, entry: CommittedPlan) {
+        self.history.push(entry);
+        if self.history.len() > HISTORY_LIMIT {
+            self.history.remove(0);
+        }
+    }
+
+    /// 回滚第一阶段（两阶段）：把有限历史里的旧版本重新准备成草稿。
+    ///
+    /// 语义：版本号**递增**（回滚是一次前进式的新提交，历史不被改写）；不改变正在跑的图；
+    /// 真正生效仍由 `commit` 在下一块边界完成，`abort` 丢弃。响应里的 `rolled_back_to`
+    /// 指明草稿内容来自哪个旧版本。
+    pub fn rollback_json(&mut self, target: Option<u64>) -> Result<Value, ControlError> {
+        let Some(current) = self.history.last() else {
+            return Err(ControlError::new(
+                error::NO_HISTORY,
+                "no committed plan history to roll back to: prepare + commit at least one plan first",
+            ));
+        };
+        let target_version = match target {
+            Some(version) => version,
+            None => {
+                if self.history.len() < 2 {
+                    return Err(bad_request(
+                        "nothing to roll back: only one committed plan version exists",
+                    ));
+                }
+                self.history[self.history.len() - 2].version
+            }
+        };
+        if target_version == current.version {
+            return Err(bad_request(format!(
+                "version {target_version} is already the running graph; rollback target must be an older version"
+            )));
+        }
+        let available: Vec<u64> = self.history.iter().map(|entry| entry.version).collect();
+        let entry = self
+            .history
+            .iter()
+            .find(|entry| entry.version == target_version)
+            .cloned()
+            .ok_or_else(|| {
+                bad_request(format!(
+                    "version {target_version} is not in rollback history (available: {available:?})"
+                ))
+            })?;
+        let plan = entry.plan;
+        let bytes = plan
+            .encode_checked()
+            .map_err(|err| bad_request(format!("rollback plan cannot be encoded: {err}")))?;
+        let version = self.next_plan_version();
+        let token = engine_token(version, &sha256(&bytes));
+        if let Some(draft) = &self.draft {
+            if draft.token == token {
+                return Ok(draft.response.clone());
+            }
+        }
+        let admission = admit(&plan, &self.limits);
+        if !admission.accepted {
+            return Err(ControlError::new(
+                error::ADMISSION_REJECTED,
+                format!(
+                    "rollback plan rejected by admission: {}",
+                    admission.summary()
+                ),
+            ));
+        }
+        let config = self.engine.config().clone();
+        let graph =
+            PlanGraph::compile(&plan, &config, &self.limits).map_err(compile_error_to_control)?;
+        let graph_id = plan.graph_id_hex();
+        let response = json!({
+            "ok": true,
+            "rolled_back_to": target_version,
+            "engine_token": token,
+            "planned_version": version,
+            "graph_id": graph_id,
+            "admission": {
+                "accepted": true,
+                "budget": budget_json(&admission.budget),
+            },
+        });
+        self.draft = Some(DraftPlan {
+            token,
+            version,
+            graph_id,
+            processor: Box::new(graph),
+            response: response.clone(),
+            plan,
+        });
+        Ok(response)
+    }
     /// 丢弃草稿（abort）：无副作用，正在跑的图不受影响。
     ///
     /// token 不符或没有草稿都返回 `engine_token_invalid`；成功返回 `{"ok":true,"aborted":true}`。
@@ -806,12 +934,14 @@ impl ControlState {
                 json!("no plan applied yet; applied_block is the block where the running graph took over"),
             );
         }
+        let available_versions: Vec<u64> = self.history.iter().map(|entry| entry.version).collect();
         json!({
             "ok": true,
             "version": info.version,
             "last_good_version": info.version,
             "graph_id": info.graph_id,
             "applied_block": info.applied_block,
+            "available_versions": available_versions,
             "reasons": reasons,
         })
     }
