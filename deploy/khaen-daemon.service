@@ -1,0 +1,23 @@
+[Unit]
+Description=khaen control daemon
+Documentation=https://github.com/ModerRAS/khaen
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/khaen/current/bin/khaen-daemon
+EnvironmentFile=-/etc/khaen/daemon.env
+Environment=KHAEN_STATE_DIR=/var/lib/khaen
+Restart=on-failure
+RestartSec=2
+StateDirectory=khaen
+# 控制面不碰实时音频线程；实时侧由 rt-host 进程负责。
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/khaen
+
+[Install]
+WantedBy=multi-user.target

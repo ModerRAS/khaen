@@ -4,6 +4,7 @@
 
 - [设计说明](docs/DESIGN.md)
 - [契约](docs/CONTRACTS.md)
+- [部署](docs/DEPLOY.md)
 - 许可证：GPL-3.0（见 [LICENSE](LICENSE)）
 
 > 重写中。v1 实现保留在分支 `legacy/pre-rewrite`。

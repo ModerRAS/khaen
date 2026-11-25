@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build daemon
+        run: cargo build --release --locked -p khaen-daemon
+      - name: Package and describe
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse HEAD)"
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="khaen-${VERSION}-linux-x86_64"
+          mkdir -p "dist/${STAGE}/bin" "dist/${STAGE}/deploy"
+          cp target/release/khaen-daemon "dist/${STAGE}/bin/"
+          cp deploy/install.sh deploy/rollback.sh deploy/khaen-daemon.service "dist/${STAGE}/deploy/"
+          ( cd "dist/${STAGE}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
+          ( cd "dist/${STAGE}" && sha256sum -c SHA256SUMS > /dev/null )
+          python3 - "${STAGE}" "${VERSION}" "${COMMIT}" <<'PY'
+          import hashlib, json, pathlib, sys
+          stage, version, commit = sys.argv[1:4]
+          root = pathlib.Path("dist") / stage
+          files = []
+          for item in sorted(root.rglob("*")):
+              if item.is_file() and item.name != "SHA256SUMS":
+                  digest = hashlib.sha256(item.read_bytes()).hexdigest()
+                  files.append({"path": str(item.relative_to(root)), "bytes": item.stat().st_size, "sha256": digest})
+          manifest = {
+              "schema": "khaen-release/v1",
+              "version": version,
+              "commit": commit,
+              "target": "x86_64-unknown-linux-gnu",
+              "files": files,
+          }
+          (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          PY
+          ( cd dist && tar -czf "${STAGE}.tar.gz" "${STAGE}" )
+          ( cd dist && sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256" )
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: khaen-linux-x86_64
+          path: dist/*
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
