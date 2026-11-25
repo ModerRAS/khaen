@@ -16,6 +16,8 @@
 //!   graph_id 与自增的 epoch。换图路径与处理路径都不分配、不加锁、不做 IO、不 panic。
 //!   换下的旧图不在实时线程析构：先移入退役槽，等下一次 `stage_processor`（控制线程）释放。
 
+use khaen_core::rt::SAMPLE_RATES_HZ;
+
 use crate::backend::{AudioBackend, BackendError, DeviceConfig};
 
 /// 默认块长（帧）。
@@ -60,6 +62,13 @@ impl EngineConfig {
         }
         if self.sample_rate == 0 {
             return Err(EngineError::BadConfig("sample_rate must be positive"));
+        }
+        // 速率是方案数据，也是运行时能力：集合由 core::rt::SAMPLE_RATES_HZ 唯一决定。
+        // 不在集合里的速率必须在构造引擎时就 fail-closed，而不是等设备打开后才发现。
+        if !SAMPLE_RATES_HZ.contains(&self.sample_rate) {
+            return Err(EngineError::BadConfig(
+                "sample_rate is not in khaen_core::rt::SAMPLE_RATES_HZ (supported: 48000, 96000)",
+            ));
         }
         Ok(())
     }

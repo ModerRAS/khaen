@@ -5,6 +5,7 @@
 //!
 //! 这里所有数字都是**估算下界**（由 taps/延迟/系数直接算），不是实测；实测延迟归 T22/T26。
 
+use khaen_core::rt::SAMPLE_RATES_HZ;
 use khaen_core::Plan;
 
 /// 方案文件字节上限（默认 4 MiB）。
@@ -137,7 +138,20 @@ pub fn admit(plan: &Plan, limits: &AdmissionLimits) -> Admission {
             "sample_rate",
             "plan declares sample_rate = 0",
         ));
+    } else if !SAMPLE_RATES_HZ.contains(&plan.sample_rate) {
+        // 运行时能力集合由 core::rt::SAMPLE_RATES_HZ 唯一决定；不在集合里的速率
+        // 不能进实时图（与 EngineConfig::validate 同一口径，fail-closed）。
+        rejections.push(Rejection::new(
+            "sample_rate",
+            format!(
+                "sample_rate {} is not supported at runtime; supported: {:?}",
+                plan.sample_rate, SAMPLE_RATES_HZ
+            ),
+        ));
     }
+    // 注意：host 引擎本身允许更宽的块长（见 EngineConfig::validate 的 MAX_BLOCK_FRAMES），
+    // ABI 的 BLOCK_SIZES 是"方案文件规范集合"，由 plan-builder 与格式契约负责；
+    // 准入这里只拒绝 0，不再二次收窄，否则 graph_executor 的块长无关性测试会被误杀。
 
     // 编码同样 fail-closed：手工构造的超限方案必须在这里变成一条 rejection，
     // 而不是让 panic 版 encode 把控制面线程带崩（decode/plan-builder 产物不可达此分支）。

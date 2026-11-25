@@ -157,6 +157,21 @@ fn inconsistent_matrix_is_rejected() {
 }
 
 #[test]
+fn unsupported_sample_rate_is_rejected() {
+    let mut plan = base_plan();
+    plan.sample_rate = 44_100;
+    let admission = admit(&plan, &AdmissionLimits::default());
+    assert!(!admission.accepted);
+    let rejection = admission
+        .rejections
+        .iter()
+        .find(|rejection| rejection.code == "sample_rate")
+        .expect("sample_rate rejection");
+    assert!(rejection.detail.contains("48000"), "{}", rejection.detail);
+    assert!(rejection.detail.contains("44100"), "{}", rejection.detail);
+}
+
+#[test]
 fn over_abi_limit_plan_is_rejected_not_panicked() {
     // 手工构造 65536 个 fold（ABI 上限 65535）：准入必须给 plan_encoding rejection，
     // 而不是触发 panic 版 encode（decode/plan-builder 产物不会到这一步）。

@@ -37,6 +37,17 @@ fn config_validation_names_the_problem() {
     }
     .validate()
     .is_err());
+    // 速率必须是运行时能力集合的成员（core::rt::SAMPLE_RATES_HZ），不能只校验非零。
+    assert_eq!(
+        EngineConfig {
+            sample_rate: 44_100,
+            ..config()
+        }
+        .validate(),
+        Err(EngineError::BadConfig(
+            "sample_rate is not in khaen_core::rt::SAMPLE_RATES_HZ (supported: 48000, 96000)"
+        ))
+    );
     assert!(config().validate().is_ok());
 }
 
