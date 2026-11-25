@@ -254,7 +254,9 @@ name = "khaen-cal-tools"
 version = "0.1.0"
 dependencies = [
  "khaen-calibration",
+ "khaen-core",
  "khaen-mimo-design",
+ "khaen-plan-builder",
  "serde_json",
 ]
 
