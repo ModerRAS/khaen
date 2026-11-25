@@ -141,6 +141,11 @@ sha256sum baseline.wav > baseline.wav.sha256
    已在离线测试里验证：图内脉冲按预期延迟 1024 帧出现，rollback 后行为逐帧恢复
    （`crates/daemon/tests/rest.rs::fir_plan_roundtrips_through_control_plane`）。真机仍为 NOT_RUN。
 
+`khaen-rt-host` 启动时会先做方案预检（ABI v3 解码 + 准入预算），再交给运行时；失败时
+退出码与稳定码可区分问题：读失败 / 解码失败 = 退出 2（`startup_plan_read` / `startup_plan_decode`），
+准入拒绝 = 退出 1（`startup_plan_admission_rejected`，消息里带具体预算项）。成功日志会打印
+`plan applied at version N (graph_id ...)`，与 daemon 的 `/api/status` 对照即可确认同一方案。
+
 禁止：在未确认版本与 graph_id 前开始录音；禁止批量 CueMix 写入。
 
 ### 4.6 施加录音（状态：NOT_RUN）

@@ -66,6 +66,8 @@ mod app {
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
 
+    use khaen_core::plan::Plan;
+    use khaen_host::admission::admit;
     use khaen_host::aes67_input::Aes67InputConfig;
     use khaen_host::alsa_backend::PcmOutput;
     use khaen_host::runtime::{
@@ -147,6 +149,99 @@ mod app {
         pub stats_every: u64,
     }
 
+    /// 启动方案读取/解码失败（退出码 2：输入或配置问题）。
+    pub const STARTUP_PLAN_READ: &str = "startup_plan_read";
+    /// 启动方案不是合法的 ABI v3 文件（退出码 2）。
+    pub const STARTUP_PLAN_DECODE: &str = "startup_plan_decode";
+    /// 启动方案没通过准入预算（退出码 1：与运行时拒绝同一类）。
+    pub const STARTUP_PLAN_REJECTED: &str = "startup_plan_admission_rejected";
+
+    /// 启动方案错误：稳定码 + 退出码 + 人读消息。
+    #[derive(Debug)]
+    pub struct StartupPlanError {
+        code: &'static str,
+        exit_code: u8,
+        message: String,
+    }
+
+    impl StartupPlanError {
+        fn new(code: &'static str, exit_code: u8, message: impl Into<String>) -> Self {
+            Self {
+                code,
+                exit_code,
+                message: message.into(),
+            }
+        }
+
+        /// 稳定错误码。
+        pub fn code(&self) -> &'static str {
+            self.code
+        }
+
+        /// 进程退出码（2 = 输入/配置，1 = 运行时拒绝）。
+        pub fn exit_code(&self) -> u8 {
+            self.exit_code
+        }
+
+        /// 人读消息。
+        pub fn message(&self) -> &str {
+            &self.message
+        }
+    }
+
+    /// 通过预检的启动方案。
+    #[derive(Debug)]
+    pub struct StartupPlan {
+        /// 方案文件字节（交给 Runtime::apply_plan）。
+        pub bytes: Vec<u8>,
+        /// graph_id（十六进制）。
+        pub graph_id: String,
+        /// 准入估算延迟（样本）。
+        pub latency_samples: u64,
+    }
+
+    /// 读方案文件并做启动预检：ABI v3 解码 + 准入预算。
+    ///
+    /// 预检不碰实时线程（在 Runtime::apply_plan 之前），失败时用稳定码与退出码报告；
+    /// 这样设备窗口里第一眼就能区分「文件不对」和「预算不够」。
+    pub fn load_startup_plan(path: &Path) -> Result<StartupPlan, StartupPlanError> {
+        let bytes = std::fs::read(path).map_err(|err| {
+            StartupPlanError::new(
+                STARTUP_PLAN_READ,
+                2,
+                format!("cannot read plan {}: {err}", path.display()),
+            )
+        })?;
+        let plan = Plan::decode(&bytes).map_err(|err| {
+            StartupPlanError::new(
+                STARTUP_PLAN_DECODE,
+                2,
+                format!("plan {} is not a valid ABI v3 file: {err}", path.display()),
+            )
+        })?;
+        let admission = admit(&plan, &AdmissionLimits::default());
+        if !admission.accepted {
+            let reasons: Vec<String> = admission
+                .rejections
+                .iter()
+                .map(|rejection| format!("{} ({})", rejection.code, rejection.detail))
+                .collect();
+            return Err(StartupPlanError::new(
+                STARTUP_PLAN_REJECTED,
+                1,
+                format!(
+                    "plan {} rejected by admission: {}",
+                    path.display(),
+                    reasons.join("; ")
+                ),
+            ));
+        }
+        Ok(StartupPlan {
+            graph_id: plan.graph_id_hex(),
+            latency_samples: admission.budget.latency_samples,
+            bytes,
+        })
+    }
     pub fn build_settings() -> Result<Settings, ConfigError> {
         let alsa_device = env_string("KHAEN_ALSA_DEVICE", "default")?;
         let sample_rate: u32 = env_parse("KHAEN_SAMPLE_RATE", 48_000)?;
@@ -345,15 +440,22 @@ mod app {
         };
 
         if let Some(path) = settings.plan_path.as_deref() {
-            let bytes = match std::fs::read(path) {
-                Ok(bytes) => bytes,
+            let startup = match load_startup_plan(path) {
+                Ok(startup) => startup,
                 Err(err) => {
-                    eprintln!("khaen-rt-host: cannot read plan {}: {err}", path.display());
-                    return ExitCode::from(2);
+                    eprintln!(
+                        "khaen-rt-host: startup plan failed: [{}] {}",
+                        err.code(),
+                        err.message()
+                    );
+                    return ExitCode::from(err.exit_code());
                 }
             };
-            match runtime.apply_plan(&bytes, &AdmissionLimits::default()) {
-                Ok(version) => println!("khaen-rt-host: plan applied at version {version}"),
+            match runtime.apply_plan(&startup.bytes, &AdmissionLimits::default()) {
+                Ok(version) => println!(
+                    "khaen-rt-host: plan applied at version {version} (graph_id {})",
+                    startup.graph_id
+                ),
                 Err(err) => {
                     eprintln!("khaen-rt-host: plan rejected: [{:?}] {err}", err.code());
                     return ExitCode::from(1);
@@ -489,6 +591,123 @@ mod tests {
         assert_eq!(doc["last_error"], serde_json::Value::Null);
         // 原子替换：临时文件不残留。
         assert!(!path.with_extension("tmp").exists());
+    }
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use khaen_core::plan::{
+        ContentSection, CrossoverFilter, CrossoverSection, Fold, MatrixSection, Plan,
+        ProtectionEntry, ProtectionSection, RoutingSection,
+    };
+
+    static TEMP_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn temp_plan_path(tag: &str) -> std::path::PathBuf {
+        let unique = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
+        std::env::temp_dir().join(format!(
+            "khaen-rt-host-plan-{}-{}-{}.bin",
+            std::process::id(),
+            tag,
+            unique
+        ))
+    }
+
+    /// 全恒等方案 + crossover 每 lane 一条 `taps` 抽头 FIR（lane 0 冲激，其余静音）。
+    fn fir_plan(lanes: u16, taps: usize) -> Vec<u8> {
+        let folds: Vec<Fold> = (0..lanes)
+            .map(|lane| Fold {
+                src: lane,
+                dst: lane,
+                gain: 1.0,
+            })
+            .collect();
+        let filters: Vec<CrossoverFilter> = (0..lanes)
+            .map(|lane| {
+                let mut coeffs = vec![0.0f32; taps];
+                if lane == 0 {
+                    coeffs[0] = 1.0;
+                }
+                CrossoverFilter { lane, coeffs }
+            })
+            .collect();
+        let mut matrix_coeffs = vec![0.0f32; usize::from(lanes) * usize::from(lanes)];
+        for lane in 0..usize::from(lanes) {
+            matrix_coeffs[lane * usize::from(lanes) + lane] = 1.0;
+        }
+        let entries: Vec<ProtectionEntry> = (0..lanes)
+            .map(|lane| ProtectionEntry {
+                lane,
+                delay: 0,
+                polarity: 1,
+                gain_db: 0.0,
+                peq: Vec::new(),
+            })
+            .collect();
+        let plan = Plan {
+            block_size: 128,
+            sample_rate: 48_000,
+            content: Some(ContentSection {
+                in_channels: lanes,
+                out_lanes: lanes,
+                folds,
+            }),
+            crossover: Some(CrossoverSection { lanes, filters }),
+            matrix: Some(MatrixSection {
+                rows: lanes,
+                cols: lanes,
+                decimation: 1,
+                interpolation: 1,
+                taps: 1,
+                coeffs: matrix_coeffs,
+            }),
+            protection: Some(ProtectionSection { lanes, entries }),
+            routing: Some(RoutingSection {
+                dac_channels: lanes,
+                routes: (0..lanes).map(|lane| (lane, lane)).collect(),
+            }),
+        };
+        plan.encode_checked().expect("encode fir plan")
+    }
+
+    #[test]
+    fn startup_plan_preflights_2048_tap_fir() {
+        let bytes = fir_plan(2, 2048);
+        let path = temp_plan_path("fir");
+        std::fs::write(&path, &bytes).expect("write plan");
+        let startup = app::load_startup_plan(&path).expect("preflight");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(startup.bytes, bytes);
+        assert_eq!(startup.graph_id.len(), 64);
+        assert!(startup
+            .graph_id
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()));
+        // 2048 抽头 => 估算延迟 (2048-1)/2 = 1023 样本（48 kHz）。
+        assert_eq!(startup.latency_samples, 1023);
+    }
+
+    #[test]
+    fn startup_plan_reports_read_decode_and_admission_failures() {
+        let missing = temp_plan_path("missing");
+        let error = app::load_startup_plan(&missing).expect_err("missing plan");
+        assert_eq!(error.code(), app::STARTUP_PLAN_READ);
+        assert_eq!(error.exit_code(), 2);
+
+        let garbage = temp_plan_path("garbage");
+        std::fs::write(&garbage, b"not a plan").expect("write garbage");
+        let error = app::load_startup_plan(&garbage).expect_err("garbage plan");
+        let _ = std::fs::remove_file(&garbage);
+        assert_eq!(error.code(), app::STARTUP_PLAN_DECODE);
+        assert_eq!(error.exit_code(), 2);
+
+        // 33 lane 超过准入默认上限 32 => 准入拒绝（退出码 1）。
+        let over_budget = temp_plan_path("lanes");
+        std::fs::write(&over_budget, fir_plan(33, 1)).expect("write plan");
+        let error = app::load_startup_plan(&over_budget).expect_err("over budget");
+        let _ = std::fs::remove_file(&over_budget);
+        assert_eq!(error.code(), app::STARTUP_PLAN_REJECTED);
+        assert_eq!(error.exit_code(), 1);
+        assert!(error.message().contains("lanes"), "{}", error.message());
     }
 
     #[test]
