@@ -400,10 +400,13 @@ impl Plan {
     }
 
     /// graph_id（十六进制）。
+    ///
+    /// trailer 里存的就是 32 字节摘要 `sha256("khaen-plan/v3" || body)`；这里只做十六进制
+    /// 编码，**不再**对它散列一次（双重散列会与 CONTRACTS.md A.3 的 graph_id 定义不符）。
     pub fn graph_id_hex(&self) -> String {
         let bytes = self.encode();
         let body_end = bytes.len() - TRAILER_BYTES;
-        crate::sha256::sha256_hex(&bytes[body_end + 4..body_end + 36])
+        crate::sha256::hex_lower(&bytes[body_end + 4..body_end + 36])
     }
 }
 

@@ -102,7 +102,22 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 
 /// 十六进制小写摘要。
 pub fn sha256_hex(data: &[u8]) -> String {
-    sha256(data).iter().map(|b| format!("{b:02x}")).collect()
+    hex_lower(&sha256(data))
+}
+
+/// 把任意字节串编码成小写十六进制。
+///
+/// 与 [`sha256_hex`] 分开：方案文件的 trailer 里已经存着 graph_id 的 32 字节摘要，
+/// 对外要给的是**这 32 字节**的十六进制，而不是对它们再算一次摘要（那会变成双重散列，
+/// 与 CONTRACTS.md 的 `graph_id = sha256("khaen-plan/v3" || body)` 不符）。
+pub fn hex_lower(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(DIGITS[(byte >> 4) as usize] as char);
+        out.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 #[cfg(test)]

@@ -211,6 +211,32 @@ fn graph_id_is_content_addressed() {
 }
 
 #[test]
+fn graph_id_hex_is_trailer_digest_not_a_hash_of_it() {
+    // CONTRACTS.md A.3：graph_id = sha256("khaen-plan/v3" || body)，trailer 直接存这 32 字节。
+    // 对外十六进制 = 这 32 字节的编码；如果把它再散列一次（双重散列），外部按契约重算必然 mismatch。
+    let plan = sample_plan();
+    let bytes = plan.encode();
+    let body_end = bytes.len() - 36;
+    let trailer_digest = &bytes[body_end + 4..body_end + 36];
+
+    let mut graph_input = Vec::new();
+    graph_input.extend_from_slice(b"khaen-plan/v3");
+    graph_input.extend_from_slice(&bytes[..body_end]);
+    let expected = khaen_core::sha256::sha256(&graph_input);
+
+    assert_eq!(trailer_digest, expected.as_slice());
+    assert_eq!(
+        plan.graph_id_hex(),
+        khaen_core::sha256::hex_lower(&expected)
+    );
+    // 双重散列值必须**不**等于对外 graph_id（回归锁）。
+    assert_ne!(
+        plan.graph_id_hex(),
+        khaen_core::sha256::sha256_hex(&expected)
+    );
+}
+
+#[test]
 fn graph_id_ignores_section_insertion_order_in_memory() {
     let mut plan = sample_plan();
     let expected = plan.graph_id_hex();
