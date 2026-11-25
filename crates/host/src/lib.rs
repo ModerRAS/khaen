@@ -7,6 +7,7 @@ pub mod admission;
 pub mod backend;
 pub mod control;
 pub mod engine;
+pub mod graph;
 pub mod owner;
 pub mod ring;
 pub mod safety;
@@ -18,6 +19,7 @@ pub use engine::{
     BlockEngine, EngineConfig, EngineError, EngineStats, MuteReceipt, Passthrough, Processor,
     Silent, DEFAULT_BLOCK_FRAMES, MAX_BLOCK_FRAMES,
 };
+pub use graph::{CompileError, PlanGraph};
 pub use owner::{DeviceGuard, DeviceId, OwnerError};
 pub use ring::{channel, Consumer, Producer};
 pub use safety::{
