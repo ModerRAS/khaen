@@ -122,6 +122,10 @@ sha256sum baseline.wav > baseline.wav.sha256
 合理、与频带中心数量一致，再进入 4.5。预测器现在会同时计入保护段 PEQ/增益与 crossover FIR
 幅度（只按幅度，不含群延迟）。
 
+尺寸边界（离线已验证，默认 mimo 抽头 2048）：2 lane × 2048 taps → 准入预算
+卷积抽头 4100、估算延迟 1023 样本（48 kHz），host 准入与图编译接受，图内 FIR 按因果延迟输出；
+不要超过 ABI 的单 lane 抽头上限（1 048 576）与准入预算（见 `crates/host/src/admission.rs`）。
+
 整链离线演练：`crates/cal-tools/tests/offline_chain.rs` 用合成场景把六个工具按现场顺序串起来
 （场景 → FIR CSV → 方案 → 预测电平 → 两段 WAV → 实测电平 → 四文件证据包），断言中间产物
 可复现、两次运行逐字节相同。它是 SIMULATED 验收，不代替真机；真机步骤仍是 NOT_RUN。

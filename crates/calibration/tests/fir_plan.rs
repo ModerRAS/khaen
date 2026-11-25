@@ -6,7 +6,7 @@ use khaen_calibration::fir_plan::{
 use khaen_calibration::plan_levels::predicted_levels;
 use khaen_host::admission::{admit, AdmissionLimits};
 use khaen_host::graph::PlanGraph;
-use khaen_host::EngineConfig;
+use khaen_host::{EngineConfig, Processor};
 
 const SAMPLE_RATE: u32 = 48_000;
 const BLOCK_SIZE: u32 = 128;
@@ -99,6 +99,64 @@ fn partial_lane_coverage_keeps_other_lanes_identity() {
     assert!((levels.points[1].bands[0].level_db.unwrap() - 6.0206).abs() <= 1e-4);
 }
 
+#[test]
+fn realistic_2048_tap_fir_is_admitted_and_executable() {
+    // 与 mimo 默认抽头数同量级：2 lanes x 2048 taps。lane 0 是纯延迟 1024 的冲激，
+    // lane 1 全零（静音）；用来验证准入预算、图编译延迟估算与图内 FIR 的实际输出。
+    let taps_len = 2048usize;
+    let mut delayed = vec![0.0f64; taps_len];
+    delayed[taps_len / 2] = 1.0;
+    let silent = vec![0.0f64; taps_len];
+    let lanes = vec![
+        LaneFir {
+            lane: 0,
+            taps: delayed,
+        },
+        LaneFir {
+            lane: 1,
+            taps: silent,
+        },
+    ];
+    let compiled = compile_fir_plan(&lanes, &config(2)).expect("compile");
+    let admission = admit(compiled.plan(), &AdmissionLimits::default());
+    assert!(admission.accepted, "{admission:?}");
+    // crossover 2048 x 2 = 4096 抽头，加上恒等矩阵 2x2x1 = 4 个系数。
+    assert_eq!(admission.budget.convolution_taps, 4100);
+    assert_eq!(admission.budget.coefficients, 4100);
+
+    // 准入预算里的延迟含 crossover（(2048-1)/2 = 1023）；图执行器的
+    // estimated_latency_samples() 只估算 matrix 段，恒等矩阵下为 0，不要混用。
+    assert_eq!(admission.budget.latency_samples, 1023);
+    let mut graph = PlanGraph::compile(
+        compiled.plan(),
+        &host_config(2),
+        &AdmissionLimits::default(),
+    )
+    .expect("graph compiles");
+    assert_eq!(graph.estimated_latency_samples(), 0);
+
+    let block_frames = 128usize;
+    let channels = 2usize;
+    let mut output_global: Vec<f32> = Vec::new();
+    for block_index in 0..12 {
+        let mut input = vec![0.0f32; block_frames * channels];
+        if block_index == 0 {
+            input[0] = 1.0;
+        }
+        let mut output = vec![0.0f32; block_frames * channels];
+        graph.process(&input, &mut output);
+        output_global.extend_from_slice(&output);
+    }
+    // 冲激在第 0 帧，纯延迟 1024 → 第 1024 帧输出 1.0；lane 1 静音。
+    assert!((output_global[1024 * channels] - 1.0).abs() <= 1e-6);
+    for frame in 0..1536usize {
+        let channel1 = output_global[frame * channels + 1];
+        assert!(
+            channel1.abs() <= 1e-12,
+            "lane 1 should stay silent at {frame}"
+        );
+    }
+}
 #[test]
 fn invalid_lane_firs_are_input_errors() {
     // 空 FIR 列表。
