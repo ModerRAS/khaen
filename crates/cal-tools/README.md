@@ -146,3 +146,29 @@ JSON，可直接喂给 `khaen-closed-loop --predicted`。
   1e-2 dB（远小于 2 dB 判定容差，测试里用 0.05 dB 锁住该边界）。
 - 输出 JSON 与 `khaen-closed-loop` 的输入同一规范：固定键序、10 位有效数字、末尾换行，
   同输入两次逐字节相同。
+
+---
+
+# khaen-band-levels（实测相对电平，离线）
+
+把两段 WAV（**施加方案后的录音** 与 **无方案基线录音**）按 1/3 oct 带逐带相除，
+产出闭环复测的 **observed 侧**（`khaen-closed-loop-levels/v1`，一个测点），可直接喂给
+`khaen-closed-loop --observed`。
+
+    khaen-band-levels --measured applied.wav --reference baseline.wav --out levels.json \
+        [--point P01] [--centers 25,31.5,40,...] [--window 4096]
+
+| 退出码 | 含义 |
+| --- | --- |
+| 0 | 成功 |
+| 2 | 输入/用法错误（E_USAGE / E_IO / E_INPUT / E_BAND_LEVELS_INPUT / E_BAND_LEVELS_CONFIG / E_BAND_LEVELS_ALIGNMENT） |
+| 1 | 写输出失败（E_WRITE） |
+
+- 算法：Hann 窗 Welch 平均频谱（默认窗长 4096、步长一半），1/3 oct 带内功率求和，
+  相对电平 = `10*log10(实测带功率 / 参考带功率)`；任一侧该带无能量记 `null`（缺数据，
+  闭环判定算 missing，绝不算通过）。
+- WAV 支持：RIFF/WAVE，PCM 16/24/32 bit 或 IEEE float 32 bit；1..=8 声道按算术平均
+  混成单声道；两段录音采样率必须一致。
+- ⚠ 诚实边界：只做**相对**电平（消除麦克风灵敏度/声压级校准问题），不做绝对声压级；
+  录音质量（信噪比、削波、时长）由采集环节保证，本工具只如实报缺数据。
+- 输出 JSON 与闭环工具同一规范：固定键序、10 位有效数字、末尾换行，同输入两次逐字节相同。

@@ -40,6 +40,7 @@
     clippy::unnecessary_map_or
 )]
 
+pub mod band_levels;
 pub mod closed_loop;
 pub mod deconvolve;
 pub mod ir_distance;
@@ -61,6 +62,11 @@ pub mod sweep;
 #[path = "capture_consts.rs"]
 pub mod capture;
 
+pub use band_levels::{
+    band_powers, relative_band_levels, BandLevelsConfig, BandLevelsError,
+    ALIGNMENT as BAND_LEVELS_ALIGNMENT, BAD_INPUT as BAND_LEVELS_BAD_INPUT,
+    CONFIG as BAND_LEVELS_CONFIG, DEFAULT_WINDOW_LEN,
+};
 pub use closed_loop::{
     compare, levels_bytes, levels_sha256, report_bytes, report_sha256, BandComparison, BandLevel,
     ClosedLoopConfig, ClosedLoopError, ClosedLoopReport, LevelSet, PointComparison, PointLevels,
