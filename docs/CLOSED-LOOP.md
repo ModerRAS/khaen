@@ -112,6 +112,10 @@ sha256sum baseline.wav > baseline.wav.sha256
 合理、与频带中心数量一致，再进入 4.5。预测器现在会同时计入保护段 PEQ/增益与 crossover FIR
 幅度（只按幅度，不含群延迟）。
 
+整链离线演练：`crates/cal-tools/tests/offline_chain.rs` 用合成场景把六个工具按现场顺序串起来
+（场景 → FIR CSV → 方案 → 预测电平 → 两段 WAV → 实测电平 → 四文件证据包），断言中间产物
+可复现、两次运行逐字节相同。它是 SIMULATED 验收，不代替真机；真机步骤仍是 NOT_RUN。
+
 ### 4.5 下发校准方案（状态：NOT_RUN）
 
 两条合法路径，二选一：
