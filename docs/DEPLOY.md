@@ -104,6 +104,8 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 - **systemd 形态**：发布包内含 `deploy/khaen-rt-host.service` 与 `deploy/rt-host.env.example`；`install.sh` 只安装 unit、**不 enable、不启动**（数据面独占 ALSA 设备，出声需要窗口与许可），配置文件复制到 `/etc/khaen/rt-host.env` 且不覆盖已有文件。
 - unit 里用 `Conflicts=tspi-rt-host.service tspi-motu-48k-keeper.service` 保证与 v1/keeper 互斥：设备被占时宁可起不来，也不和旧链路抢设备。
 - **实时调度尚未认证**：unit 目前只给 `Nice=-10`，没有 `SCHED_FIFO`/RLIMIT_RTPRIO；真机 RT 调度与 xrun 长稳属于后续实测项，标记 **NOT_RUN**。
+- **静音**：`Runtime::request_mute(bool)` 是块边界生效的用户静音；它与安全静音相互独立——用户解除静音不会清除安全故障，锁存期间 `run_block` 仍整块清零（fail-closed）。daemon/rt-host 的跨进程静音命令属于 T70f 后续（当前 rt-host 没有 socket，无运行期静音入口）。
+- **无人值守取证**：设置 `KHAEN_STATUS_FILE=/var/lib/khaen/rt-status.json` 后每统计周期原子写一行 JSON（schema `khaen-rt-status/v1`：blocks/state/muted/safe/plan_rate/device_rate/rate_asserted/input/output/receiver/graph_id/last_error），soak 结束直接拷文件即可，不需要人盯控制台。
 
 ## 5. 验证状态（如实标注）
 

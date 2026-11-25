@@ -429,6 +429,68 @@ fn underrun_outputs_silence_and_advances_play_cursor() {
     assert_eq!(status.blocks, 3);
 }
 
+#[test]
+fn user_mute_takes_effect_at_block_boundary() {
+    const SIGNAL: [i32; 16] = [
+        1_000_000, -1_000_000, 500_000, -500_000, 42, -42, 7, -7, 0, 0, 100, -100, 3, -3, 9, -9,
+    ];
+    let (mut runtime, handle) = runtime_for(2, 8);
+
+    // 第一块：未静音，输出等于输入编码。
+    handle.send(packet(0, 0, &SIGNAL));
+    wait_for_packets(&runtime, 1);
+    runtime.run_block().expect("first block");
+    assert!(!runtime.muted());
+    let expected = {
+        let mut bytes = vec![0u8; SIGNAL.len() * BYTES_PER_SAMPLE];
+        encode_s24_3le_block(&decoded_all(&SIGNAL), &mut bytes).expect("encode");
+        bytes
+    };
+    let captured = runtime
+        .backend()
+        .output()
+        .expect("fake pcm")
+        .captured
+        .clone();
+    assert_eq!(captured, expected);
+
+    // 请求静音：块边界生效（回执 mute=true，但统计要等下一块）。
+    let receipt = runtime.request_mute(true);
+    assert!(receipt.mute);
+    assert!(!runtime.muted(), "mute applies at the next block boundary");
+    handle.send(packet(1, 8, &SIGNAL));
+    wait_for_packets(&runtime, 2);
+    runtime.run_block().expect("muted block");
+    assert!(runtime.muted());
+    assert!(runtime.status().muted);
+    let captured = runtime
+        .backend()
+        .output()
+        .expect("fake pcm")
+        .captured
+        .clone();
+    assert!(
+        captured.iter().all(|&byte| byte == 0),
+        "muted block must write silent S24_3LE bytes"
+    );
+
+    // 解除静音：同样在下一块边界恢复。
+    runtime.request_mute(false);
+    handle.send(packet(2, 16, &SIGNAL));
+    wait_for_packets(&runtime, 3);
+    runtime.run_block().expect("unmuted block");
+    assert!(!runtime.muted());
+    let captured = runtime
+        .backend()
+        .output()
+        .expect("fake pcm")
+        .captured
+        .clone();
+    assert_eq!(captured, expected);
+    assert_eq!(runtime.status().blocks, 3);
+    assert_eq!(runtime.status().output.blocks_written, 3);
+}
+
 // ===========================================================================
 // c) 端到端：RTP 帧 → identity 方案 → S24_3LE 逐字节
 // ===========================================================================

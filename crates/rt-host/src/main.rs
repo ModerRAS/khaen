@@ -25,6 +25,7 @@
 //! | `KHAEN_UNLOADED` | `silence` | 未加载方案时的策略：`silence`（fail-closed）或 `passthrough` |
 //! | `KHAEN_RUN_SECONDS` | `0` | 运行秒数；0 = 一直跑（Ctrl-C 结束） |
 //! | `KHAEN_STATS_EVERY_BLOCKS` | `4000` | 每 N 块打印一次统计并轮询设备监督器（0 = 不打印） |
+//! | `KHAEN_STATUS_FILE` | 未设置 | 状态 JSON 落盘路径（每统计周期原子替换一次；soak 无人值守时用来取证） |
 //!
 //! # 退出码
 //!
@@ -36,10 +37,16 @@
 //! 每 `KHAEN_STATS_EVERY_BLOCKS` 块会打印统计并轮询设备监督器（sysfs/命令 = IO）。
 //! 这是为了在没有控制线程的今天先把真机链路跑通；**生产形态必须把监控移到独立线程/进程**，
 //! 这一点在 `docs/DESIGN.md` 的线程模型里明确写着，不在这里假装满足 RT 认证。
+//!
+//! # 平台说明
+//!
+//! 除 `AlsaPcm` 外，本文件的配置解析/状态文件/块循环都在 `app` 模块里、与平台无关地编译，
+//! 这样 Windows 上 `cargo clippy`/测试期就能检查这些逻辑的**类型正确性**（运行期仍需要
+//! Linux + ALSA 才能出声；Windows 只打一条说明并退出 2）。
 
 #[cfg(target_os = "linux")]
 fn main() -> std::process::ExitCode {
-    linux::run()
+    app::run::<khaen_host::alsa_backend::AlsaPcm>()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -51,25 +58,30 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(2)
 }
 
-#[cfg(target_os = "linux")]
-mod linux {
+// Windows 上 main 不实例化 app（没有 ALSA），但模块仍参与编译以检查逻辑类型；
+// 因此非 Linux 目标允许这些“只被 Linux 调用者使用”的项为 dead_code。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod app {
     use std::net::Ipv4Addr;
+    use std::path::{Path, PathBuf};
     use std::process::ExitCode;
-    use std::time::Duration;
 
     use khaen_host::aes67_input::Aes67InputConfig;
+    use khaen_host::alsa_backend::PcmOutput;
     use khaen_host::runtime::{
-        LinuxRuntime, ReceiverConfig, RuntimeConfig, RuntimeStatus, SupervisorOptions,
-        UnloadedPolicy,
+        ReceiverConfig, Runtime, RuntimeConfig, RuntimeStatus, SupervisorOptions, UnloadedPolicy,
     };
     use khaen_host::{AdmissionLimits, DeviceConfig, DeviceId, EngineConfig, SafetyPolicy};
 
     /// 环境变量读取失败：退出码 2，信息点名变量。
-    struct ConfigError(String);
+    pub struct ConfigError(String);
 
     impl ConfigError {
         fn new(message: impl Into<String>) -> Self {
             Self(message.into())
+        }
+        pub fn message(&self) -> &str {
+            &self.0
         }
     }
 
@@ -118,7 +130,23 @@ mod linux {
         Ok(map)
     }
 
-    fn build_config() -> Result<(RuntimeConfig, String, u64, u64), ConfigError> {
+    fn split_argv(command: String) -> Vec<String> {
+        command
+            .split_whitespace()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    pub struct Settings {
+        pub config: RuntimeConfig,
+        pub alsa_device: String,
+        pub plan_path: Option<PathBuf>,
+        pub status_file: Option<PathBuf>,
+        pub run_seconds: u64,
+        pub stats_every: u64,
+    }
+
+    pub fn build_settings() -> Result<Settings, ConfigError> {
         let alsa_device = env_string("KHAEN_ALSA_DEVICE", "default")?;
         let sample_rate: u32 = env_parse("KHAEN_SAMPLE_RATE", 48_000)?;
         let block_frames: usize = env_parse("KHAEN_BLOCK_FRAMES", 128)?;
@@ -140,6 +168,8 @@ mod linux {
         let jitter_frames: usize = env_parse("KHAEN_JITTER_FRAMES", 192)?;
         let run_seconds: u64 = env_parse("KHAEN_RUN_SECONDS", 0)?;
         let stats_every: u64 = env_parse("KHAEN_STATS_EVERY_BLOCKS", 4000)?;
+        let status_file = env_optional("KHAEN_STATUS_FILE").map(PathBuf::from);
+        let plan_path = env_optional("KHAEN_PLAN").map(PathBuf::from);
         let unloaded = match env_string("KHAEN_UNLOADED", "silence")?.as_str() {
             "silence" => UnloadedPolicy::Silence,
             "passthrough" => UnloadedPolicy::Passthrough,
@@ -195,17 +225,72 @@ mod linux {
             },
             unloaded_policy: unloaded,
         };
-        Ok((config, alsa_device, run_seconds, stats_every))
+        Ok(Settings {
+            config,
+            alsa_device,
+            plan_path,
+            status_file,
+            run_seconds,
+            stats_every,
+        })
     }
 
-    fn split_argv(command: String) -> Vec<String> {
-        command
-            .split_whitespace()
-            .map(ToString::to_string)
-            .collect()
+    /// 把运行状态写成单行 JSON 文件（先写 .tmp 再 rename，读方不会看到半截）。
+    ///
+    /// 字段级契约见 docs/DEPLOY.md 4.3；只在控制/统计周期调用，不在 run_block 路径上。
+    pub fn write_status_file(path: &Path, status: &RuntimeStatus) -> std::io::Result<()> {
+        let graph_id = match status.graph.graph_id.as_deref() {
+            Some(id) => format!("\"{id}\""),
+            None => "null".to_string(),
+        };
+        let device_rate = match status.device_rate {
+            Some(rate) => rate.to_string(),
+            None => "null".to_string(),
+        };
+        let last_error = match status.last_error {
+            Some(code) => format!("\"{code}\""),
+            None => "null".to_string(),
+        };
+        let ssrc = match status.input.ssrc {
+            Some(ssrc) => ssrc.to_string(),
+            None => "null".to_string(),
+        };
+        let json = format!(
+            concat!(
+                "{{\"schema\":\"khaen-rt-status/v1\",\"blocks\":{},",
+                "\"state\":\"{}\",\"muted\":{},\"safe\":{},",
+                "\"plan_rate\":{},\"device_rate\":{},\"rate_asserted\":{},",
+                "\"input\":{{\"packets\":{},\"underruns\":{},\"jitter_fill\":{},\"ssrc\":{}}},",
+                "\"output\":{{\"xruns\":{},\"blocks_written\":{},\"bytes_written\":{}}},",
+                "\"receiver\":{{\"packets_received\":{},\"queue_full_drops\":{},\"recv_errors\":{}}},",
+                "\"graph_id\":{},\"last_error\":{}}}\n"
+            ),
+            status.blocks,
+            status.state.as_str(),
+            status.muted,
+            status.state.requires_mute(),
+            status.plan_rate,
+            device_rate,
+            status.rate_asserted,
+            status.input.packets,
+            status.input.underruns,
+            status.input.jitter_fill,
+            ssrc,
+            status.output.xruns,
+            status.output.blocks_written,
+            status.output.bytes_written,
+            status.receiver.packets_received,
+            status.receiver.queue_full_drops,
+            status.receiver.recv_errors,
+            graph_id,
+            last_error
+        );
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, json.as_bytes())?;
+        std::fs::rename(&temporary, path)
     }
 
-    fn print_status(runtime: &LinuxRuntime, status: &RuntimeStatus) {
+    pub fn print_status(status: &RuntimeStatus) {
         let device = &status.device;
         println!(
             "blocks={} recv_pkts={} fill={} underruns={} xruns={} out_errors={} \
@@ -225,30 +310,29 @@ mod linux {
             status.graph.graph_id,
             status.last_error
         );
-        let _ = runtime;
     }
 
-    pub fn run() -> ExitCode {
-        let (config, alsa_device, run_seconds, stats_every) = match build_config() {
+    /// 数据面主循环（平台无关；`P` 为 PCM 设备类型，真机是 AlsaPcm，Windows 不实例化）。
+    pub fn run<P: PcmOutput + 'static>() -> ExitCode {
+        let settings = match build_settings() {
             Ok(value) => value,
             Err(err) => {
-                eprintln!("khaen-rt-host config error: {}", err.0);
+                eprintln!("khaen-rt-host config error: {}", err.message());
                 return ExitCode::from(2);
             }
         };
-        let plan_path = env_optional("KHAEN_PLAN");
         println!(
             "khaen-rt-host: device={} rate={} block={} channels={} aes67={}:{} plan={:?}",
-            alsa_device,
-            config.engine.sample_rate,
-            config.engine.block_frames,
-            config.engine.channels,
-            config.input.multicast_addr,
-            config.input.port,
-            plan_path
+            settings.alsa_device,
+            settings.config.engine.sample_rate,
+            settings.config.engine.block_frames,
+            settings.config.engine.channels,
+            settings.config.input.multicast_addr,
+            settings.config.input.port,
+            settings.plan_path
         );
 
-        let mut runtime: LinuxRuntime = match LinuxRuntime::new(config.clone()) {
+        let mut runtime: Runtime<P> = match Runtime::new(settings.config.clone()) {
             Ok(runtime) => runtime,
             Err(err) => {
                 eprintln!(
@@ -259,11 +343,11 @@ mod linux {
             }
         };
 
-        if let Some(path) = plan_path.as_deref() {
+        if let Some(path) = settings.plan_path.as_deref() {
             let bytes = match std::fs::read(path) {
                 Ok(bytes) => bytes,
                 Err(err) => {
-                    eprintln!("khaen-rt-host: cannot read plan {path}: {err}");
+                    eprintln!("khaen-rt-host: cannot read plan {}: {err}", path.display());
                     return ExitCode::from(2);
                 }
             };
@@ -276,12 +360,12 @@ mod linux {
             }
         }
 
-        let block_frames = config.engine.block_frames as u64;
-        let sample_rate = u64::from(config.engine.sample_rate);
-        let target_blocks = if run_seconds == 0 {
+        let block_frames = settings.config.engine.block_frames as u64;
+        let sample_rate = u64::from(settings.config.engine.sample_rate);
+        let target_blocks = if settings.run_seconds == 0 {
             0
         } else {
-            (run_seconds * sample_rate).div_ceil(block_frames)
+            (settings.run_seconds * sample_rate).div_ceil(block_frames)
         };
         let mut blocks: u64 = 0;
         loop {
@@ -296,19 +380,35 @@ mod linux {
                 return ExitCode::from(1);
             }
             blocks += 1;
-            if stats_every != 0 && blocks.is_multiple_of(stats_every) {
+            if settings.stats_every != 0 && blocks.is_multiple_of(settings.stats_every) {
                 // 验证工具的让步点：状态打印与 supervise 轮询都在块线程上（见模块文档）。
                 runtime.poll_device();
                 let status = runtime.status();
-                print_status(&runtime, &status);
+                print_status(&status);
                 if status.state.requires_mute() {
                     eprintln!("khaen-rt-host: safety requires mute; continuing (fail-closed blocks are silent)");
+                }
+                if let Some(path) = settings.status_file.as_deref() {
+                    if let Err(err) = write_status_file(path, &status) {
+                        eprintln!(
+                            "khaen-rt-host: cannot write status file {}: {err}",
+                            path.display()
+                        );
+                    }
                 }
             }
         }
 
         let status = runtime.status();
-        print_status(&runtime, &status);
+        print_status(&status);
+        if let Some(path) = settings.status_file.as_deref() {
+            if let Err(err) = write_status_file(path, &status) {
+                eprintln!(
+                    "khaen-rt-host: cannot write final status file {}: {err}",
+                    path.display()
+                );
+            }
+        }
         println!(
             "khaen-rt-host: finished {blocks} blocks ({} s), exiting",
             (blocks * block_frames) as f64 / sample_rate as f64
@@ -321,7 +421,6 @@ mod linux {
             );
             return ExitCode::from(1);
         }
-        std::thread::sleep(Duration::from_millis(0));
         ExitCode::SUCCESS
     }
 }

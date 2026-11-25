@@ -68,7 +68,7 @@ use crate::aes67_input::{
 use crate::alsa_backend::{AlsaOutputBackend, AlsaStats, PcmOutput};
 use crate::backend::{AudioBackend, BackendError, DeviceConfig};
 use crate::engine::{
-    EngineConfig, EngineError, GraphInfo, Passthrough, Processor, Silent, SlotEngine,
+    EngineConfig, EngineError, GraphInfo, MuteReceipt, Passthrough, Processor, Silent, SlotEngine,
 };
 use crate::graph::{CompileError, PlanGraph};
 use crate::ring::{self, Consumer, Producer};
@@ -898,6 +898,8 @@ pub struct RuntimeStatus {
     pub graph: GraphInfo,
     /// 是否有已 stage、尚未在块边界生效的图切换。
     pub switch_pending: bool,
+    /// 引擎实际静音状态（块边界后的值；用户请求与安全静音任一为真即为 true）。
+    pub muted: bool,
     /// 最近一次错误码：优先数据面（块路径）错误，否则设备监督器最近失败码；没有则 None。
     ///
     /// 数据面错误码见 codes；设备错误码见 SupervisorErrorCode::as_str
@@ -1162,6 +1164,21 @@ impl<P: PcmOutput> Runtime<P> {
         self.driver.request_retry();
     }
 
+    /// 用户静音请求：块边界生效（回执里的 applied_block 是生效块号）。
+    ///
+    /// 与安全静音相互独立：用户解除静音不会清除安全故障，锁存期间 run_block 仍然整块清零
+    /// （fail-closed）。这里同时把请求写进安全监督器的 user_mute，状态与引擎保持一致。
+    pub fn request_mute(&mut self, mute: bool) -> MuteReceipt {
+        let receipt = self.engine.request_mute(mute);
+        self.safety.set_user_mute(mute);
+        receipt
+    }
+
+    /// 引擎当前实际静音状态（块边界后的值，来自块引擎统计）。
+    pub fn muted(&self) -> bool {
+        self.engine.stats().mute
+    }
+
     /// 状态快照（非实时路径；会克隆设备监督器的错误文本）。
     pub fn status(&self) -> RuntimeStatus {
         let device = self.driver.status();
@@ -1179,6 +1196,7 @@ impl<P: PcmOutput> Runtime<P> {
             output_started: self.backend.is_started(),
             graph: self.engine.graph_info(),
             switch_pending: self.engine.switch_pending(),
+            muted: self.engine.stats().mute,
             last_error: self.last_error.or(device_error),
             device,
         }
