@@ -590,3 +590,59 @@ impl Drop for TempPlan {
         let _ = std::fs::remove_file(&self.path);
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn plan_inspect_is_read_only_and_reports_ready_plan() {
+    let (server, _state) = spawn().await;
+    let plan = identity_plan();
+    let file = TempPlan::new("inspect", &plan.encode());
+    let payload = format!(
+        r#"{{"plan_path":{},"plan_sha256":{}}}"#,
+        serde_json::to_string(&file.path()).expect("path json"),
+        serde_json::to_string(&file.sha256).expect("sha json")
+    );
+    let (status, body) = request(
+        "POST",
+        &format!("{}/api/plan/inspect", server.base),
+        Some(&payload),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(body["ok"], Value::Bool(true));
+    assert_eq!(body["staged"], Value::Bool(false));
+    assert_eq!(body["sha256"], Value::String(file.sha256.clone()));
+    assert_eq!(body["graph_id"], Value::String(plan.graph_id_hex()));
+    assert_eq!(body["admission"]["accepted"], Value::Bool(true));
+    assert_eq!(body["compile"]["compiled"], Value::Bool(true));
+
+    // 只读：没有草稿，commit 仍然 409。
+    let (status, body) = request(
+        "POST",
+        &format!("{}/api/commit", server.base),
+        Some(r#"{"engine_token":"00000000000000000000000000000000"}"#),
+    )
+    .await;
+    assert_eq!(status, 409);
+    assert_eq!(body["error"], Value::String("engine_token_invalid".into()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn plan_inspect_bad_payloads_are_400() {
+    let (server, _state) = spawn().await;
+    let url = format!("{}/api/plan/inspect", server.base);
+    let (status, body) = request("POST", &url, Some("{}")).await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], Value::String("bad_request".into()));
+
+    let (status, _body) = request("POST", &url, Some(r#"{"plan_path":42}"#)).await;
+    assert_eq!(status, 400);
+
+    let (status, body) = request(
+        "POST",
+        &url,
+        Some(r#"{"plan_path":"Z:/definitely/not/here.plan"}"#),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], Value::String("bad_request".into()));
+}

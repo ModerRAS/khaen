@@ -95,6 +95,7 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/api/commit", post(commit))
         .route("/api/abort", post(abort))
         .route("/api/coeff", get(coeff))
+        .route("/api/plan/inspect", post(inspect))
         .route("/api/surface", post(surface))
         .route("/api/device", get(device_status))
         .route("/api/device/retry", post(device_retry))
@@ -203,6 +204,30 @@ async fn surface(
 
 async fn coeff(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(state.control().coeff_json()))
+}
+
+/// 只读试运行：读方案文件 → 解码 → 准入 → 图编译，不产生草稿、不改变正在跑的图。
+async fn inspect(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let plan_path = match payload.get("plan_path") {
+        Some(Value::String(path)) => path.clone(),
+        Some(_) => return bad_request("field plan_path must be a string"),
+        None => return bad_request("missing field: plan_path"),
+    };
+    let plan_sha256 = match payload.get("plan_sha256") {
+        Some(Value::String(sha)) => Some(sha.clone()),
+        Some(_) => return bad_request("field plan_sha256 must be a string"),
+        None => None,
+    };
+    match state
+        .control()
+        .inspect_json(&plan_path, plan_sha256.as_deref())
+    {
+        Ok(body) => (StatusCode::OK, Json(body)),
+        Err(err) => error_response(err),
+    }
 }
 
 /// 控制面错误码 → HTTP 状态码（映射表见模块文档）。

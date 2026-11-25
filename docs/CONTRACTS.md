@@ -96,6 +96,7 @@
 | commit | engine_token | 块边界生效：applied_block、version、all_ack |
 | abort | engine_token | 丢弃草稿，无副作用 |
 | coeff | — | 当前系数版本与 last-good |
+| inspect | plan_path、可选 plan_sha256 | 只读试运行：读文件→校验 sha→解码→准入→图编译；返回 sha256/graph_id/plan 摘要/admission（accepted+rejections+budget）/compile（compiled+latency 或 error_code）；`staged` 恒 false，不产生草稿、不改变正在跑的图 |
 | surface | surface、data | 语义界面两阶段：准备补丁草稿（engine_token、planned_version、graph_id、admission）；生效仍走 commit |
 
 ### B.1.1 字段形状

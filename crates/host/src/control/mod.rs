@@ -35,7 +35,7 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 /// 已实现的 op。
 pub const WIRED_OPS: &[&str] = &[
-    "status", "mute", "prepare", "commit", "abort", "coeff", "surface",
+    "status", "mute", "prepare", "commit", "abort", "coeff", "surface", "inspect",
 ];
 
 /// 已接通的语义界面（"surface" op 的 surface 字段可接受值）。
@@ -467,6 +467,15 @@ impl ControlState {
                 self.abort_json(engine_token)
             }
             "coeff" => Ok(self.coeff_json()),
+            "inspect" => {
+                let plan_path = string_field(object, "plan_path")?;
+                let plan_sha256 = match object.get("plan_sha256") {
+                    Some(Value::String(sha)) => Some(sha.as_str()),
+                    Some(_) => return Err(bad_request("field plan_sha256 must be a string")),
+                    None => None,
+                };
+                self.inspect_json(plan_path, plan_sha256)
+            }
             "surface" => {
                 let surface = string_field(object, "surface")?;
                 let data = object.get("data").cloned().unwrap_or_else(|| json!({}));
@@ -569,6 +578,81 @@ impl ControlState {
         Ok(response)
     }
 
+    /// 诊断/试运行（inspect）：读方案文件 → 校验（可选 sha）→ 解码 → 准入 → 图编译，
+    /// 返回结果但**不产生草稿、不改变正在跑的图**。
+    ///
+    /// 这是给"先把产物验一遍再决定要不要 prepare"的调用方（例如校准 CLI 产物）用的：
+    /// - 读不到文件 / sha 不符 / 解不出方案 → `bad_request`（4xx）；
+    /// - 文件可读但方案不可准入 / 图编译失败 → 仍然是 `ok:true`，在 `admission.accepted=false`
+    ///   或 `compile.compiled=false` 里如实报告，便于一次看到多个问题；
+    /// - `staged` 恒为 false：调用方可以放心把它当只读操作。
+    pub fn inspect_json(
+        &self,
+        plan_path: &str,
+        plan_sha256: Option<&str>,
+    ) -> Result<Value, ControlError> {
+        let bytes = std::fs::read(plan_path)
+            .map_err(|err| bad_request(format!("cannot read plan file {plan_path}: {err}")))?;
+        let actual_sha = sha256_hex(&bytes);
+        if let Some(expected) = plan_sha256 {
+            if !actual_sha.eq_ignore_ascii_case(expected.trim()) {
+                return Err(bad_request(format!(
+                    "plan sha256 mismatch: request {expected}, file {plan_path} is {actual_sha}"
+                )));
+            }
+        }
+        let plan = Plan::decode(&bytes)
+            .map_err(|err| bad_request(format!("cannot decode plan {plan_path}: {err}")))?;
+        let admission = admit(&plan, &self.limits);
+        let rejections: Vec<Value> = admission
+            .rejections
+            .iter()
+            .map(|rejection| json!({ "code": rejection.code, "detail": rejection.detail }))
+            .collect();
+        let budget = budget_json(&admission.budget);
+        let compile = if admission.accepted {
+            let config = self.engine.config().clone();
+            match PlanGraph::compile(&plan, &config, &self.limits) {
+                Ok(graph) => json!({
+                    "compiled": true,
+                    "latency_samples": graph.estimated_latency_samples(),
+                }),
+                Err(err) => {
+                    let mapped = compile_error_to_control(err);
+                    json!({
+                        "compiled": false,
+                        "error_code": mapped.code,
+                        "message": mapped.message,
+                    })
+                }
+            }
+        } else {
+            json!({
+                "compiled": false,
+                "error_code": error::ADMISSION_REJECTED,
+                "message": admission.summary(),
+            })
+        };
+        Ok(json!({
+            "ok": true,
+            "staged": false,
+            "sha256": actual_sha,
+            "graph_id": plan.graph_id_hex(),
+            "plan": {
+                "block_size": plan.block_size,
+                "sample_rate": plan.sample_rate,
+                "in_channels": plan.content.as_ref().map(|content| content.in_channels),
+                "lanes": plan.content.as_ref().map(|content| content.out_lanes),
+                "dac_channels": plan.routing.as_ref().map(|routing| routing.dac_channels),
+            },
+            "admission": {
+                "accepted": admission.accepted,
+                "rejections": rejections,
+                "budget": budget,
+            },
+            "compile": compile,
+        }))
+    }
     /// 提交草稿：把图排入执行器的下一块边界，返回它将被应用的块号。
     ///
     /// `applied_block` 是"下一块"的块号：commit 本身不打断正在算的块，换图发生在下一次

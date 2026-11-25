@@ -71,6 +71,16 @@ out/
 
 整包摘要公式：`sha256(按路径排序的 "path\tsha256\n" 拼接)`；同输入两次运行逐字节相同。
 
+## 与 daemon 联调（可选）
+
+产物里的 `single-point/plan.bin`（来自 `plan_compile` 的确定性字节）可以先交给 daemon 的只读试运行接口验一遍，再决定要不要准备/提交：
+
+    curl -s -X POST http://127.0.0.1:8730/api/plan/inspect \
+      -H 'content-type: application/json' \
+      -d "{\"plan_path\": \"/var/lib/khaen/out/single-point/plan.bin\", \"plan_sha256\": \"<sha256>\"}"
+
+返回 `admission.accepted`、`admission.rejections`、`compile.compiled` 与 `latency_samples`，且 `staged:false`（不产生草稿、不改变正在跑的图）。本工具本身不联网、不访问 daemon。
+
 ## 诚实边界
 
 输入是**合成场景**（SIMULATED / UNPROVEN），产物里 `measured/applied` 恒 false；本工具不把 predicted
