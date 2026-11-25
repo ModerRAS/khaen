@@ -85,3 +85,38 @@ out/
 
 输入是**合成场景**（SIMULATED / UNPROVEN），产物里 `measured/applied` 恒 false；本工具不把 predicted
 写成 measured，也不做真实采集/下发设备/闭环复测（那需要出声窗口，标 NOT_RUN）。
+
+---
+
+# khaen-closed-loop（闭环复测判定，离线）
+
+把「预测电平」与「实测电平」按 1/3 octave 带逐点对账，输出确定性报告与三态退出码。只做对账：
+不测量、不碰设备；真实实测电平来自 T42 设备侧流程（NOT_RUN，需要出声窗口）。
+
+    khaen-closed-loop --predicted predicted.json --observed observed.json --out out/ [--tolerance 2.0] [--min-bands 3]
+
+| 退出码 | 含义 |
+| --- | --- |
+| 0 | PASS：所有可比较带 `|实测-预测|` <= 容差，且可比较带数 >= min-bands |
+| 3 | FAIL：至少一个可比较带超容差 |
+| 4 | INCOMPLETE：可比较带不足（数据不够；缺数据永远不算通过） |
+| 2 | 输入/用法错误（E_USAGE / E_INPUT / E_ALIGNMENT / E_CONFIG） |
+| 1 | 写报告失败（E_WRITE） |
+
+输入 schema `khaen-closed-loop-levels/v1`（示例，缩进为代码）：
+
+    {
+      "schema": "khaen-closed-loop-levels/v1",
+      "sample_rate_hz": 48000.0,
+      "points": [
+        {"name": "P01", "bands": [
+          {"center_hz": 40.0, "level_db": 60.0},
+          {"center_hz": 50.0, "level_db": null}
+        ]}
+      ]
+    }
+
+- 两份输入必须采样率一致、测点集合与频带中心完全一致；任一侧 `level_db` 为 null 记 missing。
+- 输出目录必须为空或不存在，防止把旧报告混进来。
+- `out/report.json` 键序固定、浮点 10 位有效数字、末尾换行；同输入两次逐字节相同（sha256 可复现）。
+- 判定容差默认 2.0 dB（与目标 ④ 一致），`--min-bands` 默认 3（不足判 INCOMPLETE，不硬判 PASS）。
