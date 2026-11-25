@@ -6,6 +6,7 @@ pub mod plan;
 pub mod rt;
 pub mod sha256;
 
+pub use kernels::resample::{RationalResampler, ResamplerError};
 pub use plan::{
     ContentSection, CrossoverFilter, CrossoverSection, Fold, MatrixSection, PeqSection, Plan,
     PlanError, ProtectionEntry, ProtectionSection, RoutingSection, SectionKind, ABI_VERSION, MAGIC,

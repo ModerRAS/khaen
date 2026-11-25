@@ -5,8 +5,10 @@
 //!
 //! 1. **content**：容器通道到 lane 的静态映射与折叠增益；运行期不做动态混音。
 //! 2. **crossover**：每 lane 一条全采样率 FIR，复用 `khaen_core::kernels::direct` 内核。
-//! 3. **matrix**：跨 lane 满矩阵；T21 只支持 `decimation == interpolation == 1`（全速率直接
-//!    卷积），非 1 的率在编译期返回 `CompileError::UnsupportedRates`。
+//! 3. **matrix**：跨 lane 满矩阵。`decimation == interpolation == 1` 时走全速率直接卷积（identity
+//!    判据下逐位直通）；`decimation == interpolation == F > 1` 时走低速率域：每列抽取到
+//!    `fs / F`、在低速率域做满矩阵 FIR、每行插值回全速率（T22；见 `matrix` 模块）。
+//!    变比（抽取 ≠ 插值，即 ASRC）在编译期返回 `CompileError::UnsupportedRates`。
 //! 4. **protection**：每 lane 延迟 / 极性 / 电平 / PEQ（Direct Form I biquad 级联）。
 //! 5. **routing**：lane 到 DAC 通道的静态路由；未映射的 DAC 通道逐样本输出 +0.0。
 //!
@@ -29,10 +31,16 @@
 //! PEQ `b0 == 1.0` 其余 0）；routing `lane i -> dac i` 且 `dac_channels == lanes`。这些判据在
 //! 编译期被折成直通段 / 恒等段，因此逐位相等不依赖浮点舍入。
 //!
+//! # 延迟上报
+//!
+//! [`PlanGraph::estimated_latency_samples`] 上报 matrix 段自身的估算延迟（全采样率样本）：
+//! 重采样滤波器群延迟 + 低速率域矩阵 FIR 群延迟。crossover / protection 的延迟不在内。
+//!
 //! # T22 边界
 //!
-//! 未实现（留给 T22）：矩阵 3 kHz 低速率域（抽取 / 插值重采样）、系数在块边界的原子切换、
-//! 延迟实测上报、分区卷积（`khaen_core::kernels::partitioned`）。本模块只做全速率直接卷积。
+//! 已实现（T22）：矩阵 3 kHz 低速率域（每列抽取 / 每行插值的有理数重采样）与 matrix 段延迟估算。
+//! 未实现（留给后续）：变比重采样（ASRC）、系数在块边界的原子切换、低速率域分区卷积
+//! （`khaen_core::kernels::partitioned`）。本模块的低速率域只接受整倍因子。
 
 use khaen_core::kernels::direct::DIRECT_MAX_BLOCK;
 use khaen_core::plan::Plan;
@@ -93,7 +101,9 @@ pub enum CompileError {
         /// 该段声明的 lane 数。
         actual: usize,
     },
-    /// 矩阵抽取 / 插值不为 1：3 kHz 低速率域与重采样留给 T22。
+    /// 矩阵抽取 / 插值因子不受支持：固定速率图只接受 `decimation == interpolation`（含 1），
+    /// 变比（抽取 ≠ 插值，即 ASRC）无法在同等输入 / 输出帧数下表示；超过因子上限的组合同样拒绝。
+    /// 0 因子另行按非法区段拒绝（准入先于本段编译）。
     UnsupportedRates {
         /// 方案声明的抽取因子。
         decimation: u8,
@@ -146,7 +156,7 @@ impl core::fmt::Display for CompileError {
                 interpolation,
             } => write!(
                 f,
-                "matrix decimation {decimation} / interpolation {interpolation} unsupported (3 kHz domain is T22)"
+                "matrix decimation {decimation} / interpolation {interpolation} unsupported (fixed-rate graph needs decimation == interpolation; ASRC is not implemented)"
             ),
             CompileError::TapsTooLong { stage, taps, limit } => {
                 write!(f, "{stage} taps {taps} exceed direct kernel limit {limit}")
@@ -291,14 +301,16 @@ impl PlanGraph {
             });
         }
 
+        // 每块最多处理的帧数；低速率域的每块样本数由它除以抽取因子得到（编译期确定）。
+        let chunk_frames = config.block_frames.min(DIRECT_MAX_BLOCK);
         let content =
             ContentStage::compile(plan.content.as_ref(), in_channels, lanes_after_content)?;
         let crossover = CrossoverStage::compile(plan.crossover.as_ref(), lanes_after_crossover)?;
-        let matrix = MatrixStage::compile(matrix_section, lanes_after_crossover, rows)?;
+        let matrix =
+            MatrixStage::compile(matrix_section, lanes_after_crossover, rows, chunk_frames)?;
         let protection = ProtectionStage::compile(plan.protection.as_ref(), rows)?;
         let routing = RoutingStage::compile(plan.routing.as_ref(), rows, out_channels)?;
 
-        let chunk_frames = config.block_frames.min(DIRECT_MAX_BLOCK);
         let planes_in = vec![0.0f32; in_channels * chunk_frames];
         let planes_a = vec![0.0f32; lanes_after_content * chunk_frames];
         let planes_b = vec![0.0f32; lanes_after_crossover * chunk_frames];
@@ -316,6 +328,17 @@ impl PlanGraph {
             protection,
             routing,
         })
+    }
+
+    /// 估算的 matrix 段延迟（全采样率样本）。
+    ///
+    /// - 全速率形态（`decimation == interpolation == 1`）：`(taps - 1) / 2`（假设系数线性相位）；
+    /// - 低速率形态（因子 `F > 1`）：列抽取器群延迟 + 低速率域矩阵 FIR 群延迟（乘 `F` 换算回
+    ///   全速率）+ 行插值器群延迟。公式见 `matrix` 模块与 `khaen_core::kernels::resample`。
+    ///
+    /// 本方法**只**算 matrix 段；crossover / protection 的延迟不在内。
+    pub fn estimated_latency_samples(&self) -> u64 {
+        self.matrix.estimated_latency_samples()
     }
 }
 

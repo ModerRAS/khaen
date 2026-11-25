@@ -1,10 +1,13 @@
-//! 实时卷积内核：全采样率 direct 卷积与共享 FFT 分区卷积。
+//! 实时卷积内核：全采样率 direct 卷积、共享 FFT 分区卷积与有理数多相重采样。
 //!
 //! RT-MODULE: [`direct::direct_block_f32`] 与 [`partitioned::partitioned_block_f32`] 是 RT 路径
 //! 生产入口：只读写调用方预分配的切片，不分配、不加锁、不做 IO、无显式 `panic!`/`unwrap`
 //! 分支（越界由各入口的 `validate_call` 在写入任何缓冲之前排除）。状态与 plan 的容量/构建
 //! 全部在 NONRT：调用方按 `DirectLayout::state_samples()` / `PartitionedLayout::state_samples()`
 //! 预分配并清零，plan 用 `PartitionedLayout::plan_samples()` / `build_scratch_samples()` 预分配。
+//!
+//! [`resample::RationalResampler`] 同样是 RT 入口：构造期（NONRT）算好系数与环形历史，
+//! `process` 零分配、无锁、无 IO、无 panic；矩阵段的 3 kHz 低速率域用它做抽取 / 插值。
 //!
 //! 本模块从 legacy/pre-rewrite 分支（`rt-stack/crates/core/src/`）迁移，对应关系：
 //! [`direct`] ← 旧 `direct.rs`（WBS T07）；[`partitioned`] ← 旧 `partitioned.rs`（WBS T08）；
@@ -24,6 +27,7 @@
 
 pub mod direct;
 pub mod partitioned;
+pub mod resample;
 
 // ---------------------------------------------------------------------------
 // 旧 rt.rs 的最小错误码子集（内核可达的码）
