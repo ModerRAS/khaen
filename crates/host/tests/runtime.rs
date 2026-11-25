@@ -974,6 +974,36 @@ fn receiver_stop_joins_thread_and_is_idempotent() {
 // ===========================================================================
 
 #[test]
+fn recovered_underrun_fault_is_cleared_only_explicitly() {
+    let (mut runtime, handle) = runtime_for(1, 4);
+    // 没有包：连续欠载触发安全故障（默认阈值 3）。
+    for _ in 0..3 {
+        let _ = runtime.run_block().expect("block");
+    }
+    // 欠载故障先作为待上报故障，控制路径 poll 一次才落到安全监督器（与 rt-host 一致）。
+    runtime.poll_device();
+    assert_eq!(runtime.status().state, RuntimeState::Faulted);
+
+    // 恢复输入：喂够一个块，欠载计数清零；故障仍锁存（不自动恢复）。
+    for index in 0..4u16 {
+        handle.send(packet(index, u32::from(index) * 4, &[100, 200, 300, 400]));
+    }
+    wait_for_packets(&runtime, 4);
+    for _ in 0..3 {
+        let _ = runtime.run_block().expect("filled block");
+    }
+    assert_eq!(runtime.status().state, RuntimeState::Faulted);
+
+    // 显式清除后才能恢复 Running；再次调用返回 false。
+    assert!(
+        runtime.clear_recovered_underrun_fault(),
+        "{:?}",
+        runtime.status()
+    );
+    assert_eq!(runtime.status().state, RuntimeState::Running);
+    assert!(!runtime.clear_recovered_underrun_fault());
+}
+#[test]
 fn udp_source_reports_stable_socket_error_codes() {
     // bind 失败：先占住一个端口，再让 UdpPacketSource 绑同一个端口。
     let blocker = UdpSocket::bind("0.0.0.0:0").expect("bind blocker");

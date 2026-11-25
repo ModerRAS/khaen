@@ -94,6 +94,10 @@ export KHAEN_STATS_EVERY_BLOCKS=4000
 /opt/khaen/current/bin/khaen-rt-host > /var/lib/khaen/rt-host-30min.log 2>&1
 ```
 
+启动瞬间 RTP 包还没到时会出现短暂输入欠载，可能触发安全静音；`khaen-rt-host` 在输入恢复后
+会自动清掉**仅限输入欠载**这一类安全故障并打印 `cleared recovered input-underrun fault`。
+处理器/后端/换图故障不会自动清除，仍要求人工确认（fail-closed）。
+
 启动时注意采样率：`khaen-rt-host` 会打印 `device rate before open`，打开 PCM 后再回读
 `/proc/asound/.../hw_params` 并打印 `device rate after open`；若回读速率与方案速率不一致
 （典型：MOTU 被外部设备改到 192 kHz），进程以退出码 1 结束并报 `device_rate_mismatch`。

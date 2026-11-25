@@ -622,9 +622,25 @@ mod app {
                 return ExitCode::from(1);
             }
             blocks += 1;
+            // 故障待上报时立刻走控制路径落地；若只是启动瞬间的输入欠载、且输入已恢复，
+            // 就清掉这一类安全故障（其他故障仍锁存等人工确认）。
+            if runtime.has_pending_fault() {
+                runtime.poll_device();
+                if runtime.clear_recovered_underrun_fault() {
+                    println!(
+                        "khaen-rt-host: cleared recovered input-underrun fault at block {blocks}; resuming"
+                    );
+                }
+            }
             if settings.stats_every != 0 && blocks.is_multiple_of(settings.stats_every) {
                 // 验证工具的让步点：状态打印与 supervise 轮询都在块线程上（见模块文档）。
                 runtime.poll_device();
+                // 启动瞬间 RTP 包还没到时会有短暂欠载；恢复后清掉这一类安全故障（只清欠载）。
+                if runtime.clear_recovered_underrun_fault() {
+                    println!(
+                        "khaen-rt-host: cleared recovered input-underrun fault at block {blocks}; resuming"
+                    );
+                }
                 let status = runtime.status();
                 print_status(&status);
                 if status.state.requires_mute() {

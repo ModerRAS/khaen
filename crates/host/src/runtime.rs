@@ -941,6 +941,8 @@ pub struct Runtime<P: PcmOutput> {
     consecutive_overruns: u32,
     /// 待上报给安全监督器的故障（RT 路径只写这个 Copy 枚举，不构造 String）。
     pending_fault: Option<FaultReason>,
+    /// 最近一次故障原因（留到控制路径清除，供"已恢复的欠载"判定；只写 Copy 枚举）。
+    last_fault_reason: Option<FaultReason>,
     last_error: Option<&'static str>,
 }
 
@@ -1027,6 +1029,7 @@ impl<P: PcmOutput> Runtime<P> {
             consecutive_underruns: 0,
             consecutive_overruns: 0,
             pending_fault: None,
+            last_fault_reason: None,
             last_error: None,
         })
     }
@@ -1164,6 +1167,32 @@ impl<P: PcmOutput> Runtime<P> {
         self.driver.request_retry();
     }
 
+    /// 是否有待上报给安全监督器的故障（RT 路径只置位，控制路径 poll）。
+    pub fn has_pending_fault(&self) -> bool {
+        self.pending_fault.is_some()
+    }
+
+    /// 控制路径：清掉「输入欠载已恢复」的安全故障。
+    ///
+    /// 只处理 `FaultReason::Underrun` 且当前已无连续欠载的情况（典型：启动瞬间 RTP 包还没到）；
+    /// 处理器/后端/换图故障不会自动清除，仍要求人工确认（fail-closed）。
+    /// 返回是否真的从 Faulted 恢复。
+    pub fn clear_recovered_underrun_fault(&mut self) -> bool {
+        if self.safety.state() != RuntimeState::Faulted {
+            return false;
+        }
+        if self.last_fault_reason != Some(FaultReason::Underrun) || self.consecutive_underruns != 0
+        {
+            return false;
+        }
+        if self.safety.clear_fault().is_ok() {
+            self.last_fault_reason = None;
+            true
+        } else {
+            false
+        }
+    }
+
     /// 用户静音请求：块边界生效（回执里的 applied_block 是生效块号）。
     ///
     /// 与安全静音相互独立：用户解除静音不会清除安全故障，锁存期间 run_block 仍然整块清零
@@ -1267,6 +1296,9 @@ impl<P: PcmOutput> Runtime<P> {
     fn note_fault(&mut self, reason: FaultReason) {
         if self.pending_fault.is_none() {
             self.pending_fault = Some(reason);
+        }
+        if self.last_fault_reason.is_none() {
+            self.last_fault_reason = Some(reason);
         }
         if self.last_error.is_none() {
             let code = match reason {
