@@ -1,6 +1,7 @@
 //! khaen 核心：方案文件格式、实时类型与卷积内核。
 
 pub mod crc32c;
+pub mod kernels;
 pub mod plan;
 pub mod rt;
 pub mod sha256;
