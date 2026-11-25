@@ -8,3 +8,7 @@ license.workspace = true
 [dependencies]
 khaen-core = { path = "../core" }
 khaen-host = { path = "../host" }
+
+[dev-dependencies]
+# 仅测试用：验证状态文件确实是合法 JSON（生产路径不用 serde，避免给数据面加依赖）。
+serde_json = "1"

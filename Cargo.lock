@@ -322,6 +322,7 @@ version = "0.1.0"
 dependencies = [
  "khaen-core",
  "khaen-host",
+ "serde_json",
 ]
 
 [[package]]

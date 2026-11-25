@@ -137,6 +137,7 @@ mod app {
             .collect()
     }
 
+    #[derive(Debug)]
     pub struct Settings {
         pub config: RuntimeConfig,
         pub alsa_device: String,
@@ -422,5 +423,83 @@ mod app {
             return ExitCode::from(1);
         }
         ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app;
+    use khaen_host::alsa_backend::AlsaStats;
+    use khaen_host::runtime::{ReceiverStats, RuntimeStatus};
+    use khaen_host::safety::RuntimeState;
+    use khaen_host::supervisor::{LifecycleState, SupervisorStatus};
+
+    fn status() -> RuntimeStatus {
+        RuntimeStatus {
+            state: RuntimeState::Running,
+            blocks: 12,
+            input: khaen_host::aes67_input::Aes67InputStats {
+                packets: 34,
+                underruns: 2,
+                jitter_fill: 192,
+                ..Default::default()
+            },
+            output: AlsaStats::default(),
+            receiver: ReceiverStats::default(),
+            device: SupervisorStatus {
+                state: LifecycleState::Absent,
+                plan_rate: 48_000,
+                device_rate: None,
+                rate_asserted: false,
+                last_error: None,
+                attempts: 0,
+                since_ms: 0,
+            },
+            device_rate: None,
+            plan_rate: 48_000,
+            rate_asserted: false,
+            output_errors: 0,
+            output_started: true,
+            graph: Default::default(),
+            switch_pending: false,
+            muted: false,
+            last_error: None,
+        }
+    }
+
+    #[test]
+    fn status_file_is_valid_single_line_json() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("khaen-rt-host-status-{}.json", std::process::id()));
+        app::write_status_file(&path, &status()).expect("write status file");
+        let text = std::fs::read_to_string(&path).expect("read status file");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(text.matches('\n').count(), 1, "must be a single line");
+        assert!(text.ends_with('\n'));
+        let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert_eq!(doc["schema"], serde_json::json!("khaen-rt-status/v1"));
+        assert_eq!(doc["blocks"], serde_json::json!(12));
+        assert_eq!(doc["state"], serde_json::json!("running"));
+        assert_eq!(doc["muted"], serde_json::json!(false));
+        assert_eq!(doc["plan_rate"], serde_json::json!(48_000));
+        assert_eq!(doc["device_rate"], serde_json::Value::Null);
+        assert_eq!(doc["input"]["packets"], serde_json::json!(34));
+        assert_eq!(doc["input"]["ssrc"], serde_json::Value::Null);
+        assert_eq!(doc["graph_id"], serde_json::Value::Null);
+        assert_eq!(doc["last_error"], serde_json::Value::Null);
+        // 原子替换：临时文件不残留。
+        assert!(!path.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn invalid_unloaded_value_is_rejected() {
+        std::env::set_var("KHAEN_UNLOADED", "loud");
+        let err = app::build_settings().expect_err("loud must be rejected");
+        assert!(
+            err.message().contains("KHAEN_UNLOADED"),
+            "{}",
+            err.message()
+        );
+        std::env::remove_var("KHAEN_UNLOADED");
     }
 }
