@@ -1,0 +1,921 @@
+{
+  "schema": "tspi-reference-verify-report/v1",
+  "generator": "tools/verify_reference.py",
+  "reference_root": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+  "fixtures": [
+    {
+      "id": "C01_identity_d0_1x1",
+      "tags": [
+        "identity",
+        "baseline"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C02_identity_delay_d3",
+      "tags": [
+        "identity",
+        "D",
+        "tail"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C03_offdiag_2x2",
+      "tags": [
+        "offdiag"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C04_tail_conv_1x1",
+      "tags": [
+        "tail"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C05_d_in_support",
+      "tags": [
+        "D",
+        "tail"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C06_row_col_asymmetry",
+      "tags": [
+        "offdiag",
+        "row_column"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C07_factorized_fused",
+      "tags": [
+        "offdiag",
+        "tail",
+        "D"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C08_stereo_strict_scatter",
+      "tags": [
+        "strict",
+        "scatter",
+        "polarity",
+        "zerofill"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C09_4_1_2_5x5_embed",
+      "tags": [
+        "offdiag",
+        "tail",
+        "D",
+        "five_by_five",
+        "embed",
+        "scatter",
+        "multichannel"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C10_streaming_128",
+      "tags": [
+        "streaming",
+        "offdiag",
+        "tail",
+        "D"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C11_tolerance_f64",
+      "tags": [
+        "tolerance",
+        "offdiag",
+        "D"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C12_dense_5x5_D3_exact",
+      "tags": [
+        "dense",
+        "offdiag",
+        "tail",
+        "D",
+        "random_exact"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C13_identity_graph_4_1_2_d2",
+      "tags": [
+        "identity",
+        "D",
+        "scatter",
+        "multichannel"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    },
+    {
+      "id": "C14_input_column_fir",
+      "tags": [
+        "column_fir",
+        "offdiag",
+        "input_delay",
+        "polarity"
+      ],
+      "ok": true,
+      "exact": true,
+      "tags_ok": true,
+      "f64": true,
+      "streaming": true,
+      "traps": true
+    }
+  ],
+  "tag_union": [
+    "D",
+    "baseline",
+    "column_fir",
+    "dense",
+    "embed",
+    "five_by_five",
+    "identity",
+    "input_delay",
+    "multichannel",
+    "offdiag",
+    "polarity",
+    "random_exact",
+    "row_column",
+    "scatter",
+    "streaming",
+    "strict",
+    "tail",
+    "tolerance",
+    "zerofill"
+  ],
+  "hand": {
+    "cases": [
+      "C01_identity_d0_1x1",
+      "C02_identity_delay_d3",
+      "C03_offdiag_2x2",
+      "C04_tail_conv_1x1",
+      "C05_d_in_support",
+      "C06_row_col_asymmetry",
+      "C07_factorized_fused",
+      "C08_stereo_strict_scatter",
+      "C09_4_1_2_5x5_embed",
+      "C13_identity_graph_4_1_2_d2",
+      "C14_input_column_fir"
+    ],
+    "tags": [
+      "D",
+      "baseline",
+      "column_fir",
+      "embed",
+      "five_by_five",
+      "identity",
+      "input_delay",
+      "multichannel",
+      "offdiag",
+      "polarity",
+      "row_column",
+      "scatter",
+      "strict",
+      "tail",
+      "zerofill"
+    ],
+    "counts": {
+      "handcalc": 11,
+      "handcheck": 1,
+      "handtrap": 3
+    }
+  },
+  "checks": [
+    {
+      "id": "T03-INDEX-SCHEMA",
+      "description": "fixtures/index.json schema",
+      "result": "PASS",
+      "detail": "got 'tspi-reference-fixtures-index/v1'"
+    },
+    {
+      "id": "T03-INDEX-LIST",
+      "description": "index cases is a non-empty list",
+      "result": "PASS",
+      "detail": "14"
+    },
+    {
+      "id": "T03-HASH-C01_identity_d0_1x1",
+      "description": "fixture C01_identity_d0_1x1 sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C02_identity_delay_d3",
+      "description": "fixture C02_identity_delay_d3 sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C03_offdiag_2x2",
+      "description": "fixture C03_offdiag_2x2 sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C04_tail_conv_1x1",
+      "description": "fixture C04_tail_conv_1x1 sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C05_d_in_support",
+      "description": "fixture C05_d_in_support sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C06_row_col_asymmetry",
+      "description": "fixture C06_row_col_asymmetry sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C07_factorized_fused",
+      "description": "fixture C07_factorized_fused sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C08_stereo_strict_scatter",
+      "description": "fixture C08_stereo_strict_scatter sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C09_4_1_2_5x5_embed",
+      "description": "fixture C09_4_1_2_5x5_embed sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C10_streaming_128",
+      "description": "fixture C10_streaming_128 sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C11_tolerance_f64",
+      "description": "fixture C11_tolerance_f64 sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C13_identity_graph_4_1_2_d2",
+      "description": "fixture C13_identity_graph_4_1_2_d2 sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C14_input_column_fir",
+      "description": "fixture C14_input_column_fir sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-HASH-C12_dense_5x5_D3_exact",
+      "description": "fixture C12_dense_5x5_D3_exact sha256/bytes match index",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-INVENTORY",
+      "description": "fixtures/cases inventory matches index",
+      "result": "PASS",
+      "detail": "disk=14 index=14"
+    },
+    {
+      "id": "T03-SCHEMA-C01_identity_d0_1x1",
+      "description": "fixture C01_identity_d0_1x1 schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=5"
+    },
+    {
+      "id": "T03-EXACT-C01_identity_d0_1x1",
+      "description": "fixture C01_identity_d0_1x1 expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C01_identity_d0_1x1",
+      "description": "fixture C01_identity_d0_1x1 tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C01_identity_d0_1x1",
+      "description": "fixture C01_identity_d0_1x1 binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C01_identity_d0_1x1",
+      "description": "fixture C01_identity_d0_1x1 streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C02_identity_delay_d3",
+      "description": "fixture C02_identity_delay_d3 schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=6"
+    },
+    {
+      "id": "T03-EXACT-C02_identity_delay_d3",
+      "description": "fixture C02_identity_delay_d3 expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C02_identity_delay_d3",
+      "description": "fixture C02_identity_delay_d3 tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C02_identity_delay_d3",
+      "description": "fixture C02_identity_delay_d3 binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C02_identity_delay_d3",
+      "description": "fixture C02_identity_delay_d3 streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C03_offdiag_2x2",
+      "description": "fixture C03_offdiag_2x2 schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=3"
+    },
+    {
+      "id": "T03-EXACT-C03_offdiag_2x2",
+      "description": "fixture C03_offdiag_2x2 expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C03_offdiag_2x2",
+      "description": "fixture C03_offdiag_2x2 tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C03_offdiag_2x2",
+      "description": "fixture C03_offdiag_2x2 binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C03_offdiag_2x2",
+      "description": "fixture C03_offdiag_2x2 streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C04_tail_conv_1x1",
+      "description": "fixture C04_tail_conv_1x1 schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=5"
+    },
+    {
+      "id": "T03-EXACT-C04_tail_conv_1x1",
+      "description": "fixture C04_tail_conv_1x1 expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C04_tail_conv_1x1",
+      "description": "fixture C04_tail_conv_1x1 tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C04_tail_conv_1x1",
+      "description": "fixture C04_tail_conv_1x1 binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C04_tail_conv_1x1",
+      "description": "fixture C04_tail_conv_1x1 streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-TRAP-C04_tail_conv_1x1",
+      "description": "fixture C04_tail_conv_1x1 trap wrong-output differs from linear result",
+      "result": "PASS",
+      "detail": "1 trap(s)"
+    },
+    {
+      "id": "T03-SCHEMA-C05_d_in_support",
+      "description": "fixture C05_d_in_support schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=5"
+    },
+    {
+      "id": "T03-EXACT-C05_d_in_support",
+      "description": "fixture C05_d_in_support expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C05_d_in_support",
+      "description": "fixture C05_d_in_support tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C05_d_in_support",
+      "description": "fixture C05_d_in_support binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C05_d_in_support",
+      "description": "fixture C05_d_in_support streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C06_row_col_asymmetry",
+      "description": "fixture C06_row_col_asymmetry schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=1"
+    },
+    {
+      "id": "T03-EXACT-C06_row_col_asymmetry",
+      "description": "fixture C06_row_col_asymmetry expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C06_row_col_asymmetry",
+      "description": "fixture C06_row_col_asymmetry tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C06_row_col_asymmetry",
+      "description": "fixture C06_row_col_asymmetry binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C06_row_col_asymmetry",
+      "description": "fixture C06_row_col_asymmetry streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-TRAP-C06_row_col_asymmetry",
+      "description": "fixture C06_row_col_asymmetry trap wrong-output differs from linear result",
+      "result": "PASS",
+      "detail": "1 trap(s)"
+    },
+    {
+      "id": "T03-SCHEMA-C07_factorized_fused",
+      "description": "fixture C07_factorized_fused schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=4"
+    },
+    {
+      "id": "T03-EXACT-C07_factorized_fused",
+      "description": "fixture C07_factorized_fused expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C07_factorized_fused",
+      "description": "fixture C07_factorized_fused tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C07_factorized_fused",
+      "description": "fixture C07_factorized_fused binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C07_factorized_fused",
+      "description": "fixture C07_factorized_fused streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=3:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C08_stereo_strict_scatter",
+      "description": "fixture C08_stereo_strict_scatter schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=3"
+    },
+    {
+      "id": "T03-EXACT-C08_stereo_strict_scatter",
+      "description": "fixture C08_stereo_strict_scatter expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C08_stereo_strict_scatter",
+      "description": "fixture C08_stereo_strict_scatter tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C08_stereo_strict_scatter",
+      "description": "fixture C08_stereo_strict_scatter binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C08_stereo_strict_scatter",
+      "description": "fixture C08_stereo_strict_scatter streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C09_4_1_2_5x5_embed",
+      "description": "fixture C09_4_1_2_5x5_embed schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=20"
+    },
+    {
+      "id": "T03-EXACT-C09_4_1_2_5x5_embed",
+      "description": "fixture C09_4_1_2_5x5_embed expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C09_4_1_2_5x5_embed",
+      "description": "fixture C09_4_1_2_5x5_embed tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C09_4_1_2_5x5_embed",
+      "description": "fixture C09_4_1_2_5x5_embed binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C09_4_1_2_5x5_embed",
+      "description": "fixture C09_4_1_2_5x5_embed streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C10_streaming_128",
+      "description": "fixture C10_streaming_128 schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=130"
+    },
+    {
+      "id": "T03-EXACT-C10_streaming_128",
+      "description": "fixture C10_streaming_128 expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C10_streaming_128",
+      "description": "fixture C10_streaming_128 tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C10_streaming_128",
+      "description": "fixture C10_streaming_128 binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C10_streaming_128",
+      "description": "fixture C10_streaming_128 streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=3:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C11_tolerance_f64",
+      "description": "fixture C11_tolerance_f64 schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=18"
+    },
+    {
+      "id": "T03-EXACT-C11_tolerance_f64",
+      "description": "fixture C11_tolerance_f64 expected == rounded-exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C11_tolerance_f64",
+      "description": "fixture C11_tolerance_f64 tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C11_tolerance_f64",
+      "description": "fixture C11_tolerance_f64 binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=2.220e-16 tol=1.744e-12"
+    },
+    {
+      "id": "T03-STREAM-C11_tolerance_f64",
+      "description": "fixture C11_tolerance_f64 streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C12_dense_5x5_D3_exact",
+      "description": "fixture C12_dense_5x5_D3_exact schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=37"
+    },
+    {
+      "id": "T03-EXACT-C12_dense_5x5_D3_exact",
+      "description": "fixture C12_dense_5x5_D3_exact expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C12_dense_5x5_D3_exact",
+      "description": "fixture C12_dense_5x5_D3_exact tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C12_dense_5x5_D3_exact",
+      "description": "fixture C12_dense_5x5_D3_exact binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C12_dense_5x5_D3_exact",
+      "description": "fixture C12_dense_5x5_D3_exact streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=3:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C13_identity_graph_4_1_2_d2",
+      "description": "fixture C13_identity_graph_4_1_2_d2 schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=8"
+    },
+    {
+      "id": "T03-EXACT-C13_identity_graph_4_1_2_d2",
+      "description": "fixture C13_identity_graph_4_1_2_d2 expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C13_identity_graph_4_1_2_d2",
+      "description": "fixture C13_identity_graph_4_1_2_d2 tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C13_identity_graph_4_1_2_d2",
+      "description": "fixture C13_identity_graph_4_1_2_d2 binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C13_identity_graph_4_1_2_d2",
+      "description": "fixture C13_identity_graph_4_1_2_d2 streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-SCHEMA-C14_input_column_fir",
+      "description": "fixture C14_input_column_fir schema/consistency",
+      "result": "PASS",
+      "detail": "l_out=3"
+    },
+    {
+      "id": "T03-EXACT-C14_input_column_fir",
+      "description": "fixture C14_input_column_fir expected == exact rational convolution",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-TAGS-C14_input_column_fir",
+      "description": "fixture C14_input_column_fir tag semantics",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "T03-F64-C14_input_column_fir",
+      "description": "fixture C14_input_column_fir binary64 offline within declaration",
+      "result": "PASS",
+      "detail": "max_abs_err=0.000e+00 tol=0.000e+00"
+    },
+    {
+      "id": "T03-STREAM-C14_input_column_fir",
+      "description": "fixture C14_input_column_fir streaming == offline for block sizes",
+      "result": "PASS",
+      "detail": "B=1:ok B=2:ok B=64:ok B=128:ok"
+    },
+    {
+      "id": "T03-TRAP-C14_input_column_fir",
+      "description": "fixture C14_input_column_fir trap wrong-output differs from linear result",
+      "result": "PASS",
+      "detail": "1 trap(s)"
+    },
+    {
+      "id": "T03-COVERAGE",
+      "description": "required fixture tags are covered",
+      "result": "PASS",
+      "detail": "19 tags"
+    },
+    {
+      "id": "T03-HAND-30",
+      "description": "HAND-CALC block handcalc at line 30",
+      "result": "PASS",
+      "detail": "line 30: case 'C01_identity_d0_1x1' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-49",
+      "description": "HAND-CALC block handcalc at line 49",
+      "result": "PASS",
+      "detail": "line 49: case 'C02_identity_delay_d3' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-76",
+      "description": "HAND-CALC block handcalc at line 76",
+      "result": "PASS",
+      "detail": "line 76: case 'C03_offdiag_2x2' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-108",
+      "description": "HAND-CALC block handcalc at line 108",
+      "result": "PASS",
+      "detail": "line 108: case 'C04_tail_conv_1x1' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-134",
+      "description": "HAND-CALC block handcalc at line 134",
+      "result": "PASS",
+      "detail": "line 134: case 'C05_d_in_support' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-153",
+      "description": "HAND-CALC block handcalc at line 153",
+      "result": "PASS",
+      "detail": "line 153: case 'C06_row_col_asymmetry' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-162",
+      "description": "HAND-CALC block handtrap at line 162",
+      "result": "PASS",
+      "detail": "line 162: case 'C06_row_col_asymmetry' (trap 'output_matrix_instead_of_diagonal')"
+    },
+    {
+      "id": "T03-HAND-189",
+      "description": "HAND-CALC block handcalc at line 189",
+      "result": "PASS",
+      "detail": "line 189: case 'C07_factorized_fused' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-210",
+      "description": "HAND-CALC block handcalc at line 210",
+      "result": "PASS",
+      "detail": "line 210: case 'C08_stereo_strict_scatter' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-232",
+      "description": "HAND-CALC block handcalc at line 232",
+      "result": "PASS",
+      "detail": "line 232: case 'C04_tail_conv_1x1' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-270",
+      "description": "HAND-CALC block handcheck at line 270",
+      "result": "PASS",
+      "detail": "line 270: case 'C09_4_1_2_5x5_embed' (17 samples match)"
+    },
+    {
+      "id": "T03-HAND-310",
+      "description": "HAND-CALC block handtrap at line 310",
+      "result": "PASS",
+      "detail": "line 310: case 'C04_tail_conv_1x1' (trap 'circular_convolution_len4')"
+    },
+    {
+      "id": "T03-HAND-331",
+      "description": "HAND-CALC block handcalc at line 331",
+      "result": "PASS",
+      "detail": "line 331: case 'C14_input_column_fir' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-340",
+      "description": "HAND-CALC block handtrap at line 340",
+      "result": "PASS",
+      "detail": "line 340: case 'C14_input_column_fir' (trap 'output_side_input_fir')"
+    },
+    {
+      "id": "T03-HAND-359",
+      "description": "HAND-CALC block handcalc at line 359",
+      "result": "PASS",
+      "detail": "line 359: case 'C13_identity_graph_4_1_2_d2' (handcalc expected == fixture expected)"
+    },
+    {
+      "id": "T03-HAND-COUNT",
+      "description": "at least 10 hand blocks and 8 distinct hand-covered cases",
+      "result": "PASS",
+      "detail": "blocks={'handcalc': 11, 'handcheck': 1, 'handtrap': 3}, cases=11"
+    },
+    {
+      "id": "T03-HAND-TAGS",
+      "description": "hand vectors cover offdiag + tail + D",
+      "result": "PASS",
+      "detail": "offdiag/tail/D covered"
+    }
+  ],
+  "summary": {
+    "total_checks": 108,
+    "failures": 0,
+    "fixtures": 14,
+    "passed": true
+  },
+  "passed": true
+}

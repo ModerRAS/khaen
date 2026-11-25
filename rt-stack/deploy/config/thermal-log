@@ -1,0 +1,34 @@
+#!/bin/bash
+# thermal-log — 每分钟记录温度/负载/频率/RT 状态，给"下次挂死"留下历史曲线
+set -u
+LOG=/var/log/tspi/thermal.log
+mkdir -p /var/log/tspi 2>/dev/null || true
+ts=$(date -Is 2>/dev/null || echo -)
+temp=""
+for z in /sys/class/thermal/thermal_zone*; do
+  [ -d "$z" ] || continue
+  t=$(cat "$z/type" 2>/dev/null); v=$(cat "$z/temp" 2>/dev/null)
+  [ -n "$v" ] && temp="$temp $t=$v"
+done
+load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
+freq=""
+for c in /sys/devices/system/cpu/cpu[0-7]; do
+  [ -f "$c/cpufreq/scaling_cur_freq" ] || continue
+  freq="$freq $(basename "$c")=$(cat "$c/cpufreq/scaling_cur_freq" 2>/dev/null)"
+done
+rt=$(awk '/^rt /{print $2}' /proc/stat 2>/dev/null)
+alsa=""
+for f in /proc/asound/card*/pcm0p/sub0/status /proc/asound/card*/pcm0c/sub0/status; do
+  [ -f "$f" ] || continue
+  st=$(awk '/^state:/{print $2}' "$f" 2>/dev/null)
+  [ -n "$st" ] || continue
+  d2=$(dirname "$(dirname "$f")")
+  alsa="$alsa $(basename "$(dirname "$d2")")/$(basename "$d2")=$st"
+done
+xr=$(dmesg 2>/dev/null | grep -icE 'xrun|underrun|overrun' || true)
+printf '%s load=[%s] rt_runtime_us=%s xrun_msgs=%s alsa=[%s]%s%s\n' "$ts" "$load" "$(cat /proc/sys/kernel/sched_rt_runtime_us 2>/dev/null)" "${xr:-0}" "${alsa# }" "$temp" "$freq" >> "$LOG" 2>/dev/null || true
+# 只保留最近 20000 行（约 14 天）
+if [ -f "$LOG" ] && [ "$(wc -l < "$LOG" 2>/dev/null || echo 0)" -gt 20000 ]; then
+  tail -n 20000 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
+exit 0

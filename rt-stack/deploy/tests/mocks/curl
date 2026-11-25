@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -u
+printf "curl %s\n" "$*" >> "${MOCK_LOG:-/dev/null}"
+echo "${MOCK_HEALTH_CODE:-000}"
+exit "${MOCK_HEALTH_EXIT:-0}"

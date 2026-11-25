@@ -1,0 +1,134 @@
+#!/bin/bash
+# tspi-motu-48k-keeper v3 — 保护 MOTU UltraLite-mk5 不落到 176.4/192 kHz；允许 44.1/48 kHz（44.1 优先跟随 44.1 光纤源）
+# 2026-11-21 修：v2 无条件用 48k 静音把设备拉回 48k，导致 44.1 kHz 光纤源（如芝杜）与设备 48k 不匹配 ->
+#   S/PDIF 收端失锁，听感为严重高频爆音。v3：先读设备速率，已在 ALLOWED_RATES 内则不动；只在越界时才纠偏。
+# 为什么要有它：MOTU 的采样率是设备自身状态。空闲或 USB 重枚举后它会回落到面板/上次速率
+# （历史实测 2026-11-15 20:40 CueMix 快照 kSampleRate=192000）。192k 下 TOSLink 带不动 PCM，
+# 光纤输入（MOTU Optical In -> USB capture ch12/13）必然锁不上 -> 表现为"光纤进没有声音"。
+#
+# 两阶段：
+#   A. ALSA 空闲（没有正在播/录的流）时灌 1s 48k 静音，把设备速率拉回 48k；
+#   B. 通过 CueMix WS 只读设备自己的 kSampleRate（rt-host 持有设备时也能读）；
+#      != 48000 就记 WARN；只有 /etc/tspi/motu-rate-guard.env 里 WRITE_BACK=1 才尝试写回。
+#      （CueMix 写 kSampleRate 是否被设备接受 = NOT_YET_PROVEN，须在白天窗口验证后才开。）
+# 日志：journal + /var/log/tspi/motu-48k-keeper.log（06-verify 靠它判新鲜度）。
+set -u
+
+LOG_DIR=/var/log/tspi
+LOG="$LOG_DIR/motu-48k-keeper.log"
+ENVF=/etc/tspi/motu-rate-guard.env
+CLIENT=""
+for c in /usr/local/lib/tspi/cuemix_client.py /var/tmp/tspi-bw/cuemix_client.py; do
+  [ -f "$c" ] && { CLIENT="$c"; break; }
+done
+STATE=/var/tmp/tspi-bw/keeper-state.json
+WS_HOST=169.254.111.126
+WS_PORT=1280
+WRITE_BACK=0
+RATE_MODE="follow"   # follow: device rate tracks digital source (bit-perfect, no resampling); fixed: fallback rate-locking
+ALLOWED_RATES="44100,48000,88200,96000"
+PREFERRED_RATE=48000
+
+say() {
+  local line="$1"
+  logger -t tspi-motu-48k-keeper -- "$line" || true
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  printf '%s %s\n' "$(date -Is 2>/dev/null || echo -)" "$line" >> "$LOG" 2>/dev/null || true
+}
+
+read_rate() {
+  timeout 10 python3 - "$1" <<'PY' 2>/dev/null || true
+import json, sys
+def walk(o):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k == 'kSampleRate':
+                yield v
+            else:
+                yield from walk(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from walk(v)
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit(0)
+for v in walk(d):
+    if isinstance(v, list) and v:
+        v = v[0]
+    if isinstance(v, (int, float)):
+        print(int(v)); break
+PY
+}
+
+mkdir -p /run/lock 2>/dev/null || true
+exec 9>/run/lock/tspi-motu-48k-keeper.lock || true
+if command -v flock >/dev/null 2>&1; then
+  flock -n 9 || { say "already running, skip"; exit 0; }
+fi
+
+[ -f "$ENVF" ] && . "$ENVF"
+say "start write_back=$WRITE_BACK ws=$WS_HOST:$WS_PORT"
+
+# ---- Stage A: ALSA 空闲时用 48k 静音流兜底 -----------------------------------
+card=""
+for i in $(seq 1 20); do
+  card=$(awk '/UltraLite|Ultralite/{gsub(/[^0-9]/,"",$1); print $1; exit}' /proc/asound/cards 2>/dev/null || true)
+  [ -n "$card" ] && break
+  sleep 0.5
+done
+# 先读设备速率（CueMix 只读）；已在允许集合内就不动，避免把 44.1 源强拉成 48k
+cur_rate=""
+if [ -f "$CLIENT" ] && command -v python3 >/dev/null 2>&1; then
+  mkdir -p "$(dirname "$STATE")" 2>/dev/null || true
+  timeout 12 python3 "$CLIENT" --transport ws --host "$WS_HOST" --port "$WS_PORT" --read 4 --idle-stop 2 --json "$STATE" >/dev/null 2>&1 || true
+  cur_rate=$(read_rate "$STATE")
+fi
+rate_ok=0
+if [ -n "$cur_rate" ]; then
+  for r in $(printf '%s' "$ALLOWED_RATES" | tr ',' ' '); do [ "$cur_rate" = "$r" ] && rate_ok=1; done
+fi
+if [ -n "$card" ]; then
+  pb=$(cat /proc/asound/card$card/pcm0p/sub0/hw_params 2>/dev/null || echo closed)
+  cap=$(cat /proc/asound/card$card/pcm0c/sub0/hw_params 2>/dev/null || echo closed)
+  if [ "$rate_ok" = "1" ] && { [ "$RATE_MODE" = "follow" ] || [ "$cur_rate" = "$PREFERRED_RATE" ]; }; then
+    say "stageA device_rate=${cur_rate:-unknown} ok for mode=$RATE_MODE (ALLOWED_RATES=$ALLOWED_RATES) -> skip aplay"
+  elif [ "$pb" = "closed" ] && [ "$cap" = "closed" ]; then
+    out=$(timeout 5 aplay -D hw:$card,0 -f S24_3LE -c 22 -r "$PREFERRED_RATE" -d 1 -t raw /dev/zero 2>&1)
+    rc=$?
+    alsarate=$(awk '/rate:/{print $2}' /proc/asound/card$card/pcm0p/sub0/hw_params 2>/dev/null | cut -d' ' -f1)
+    say "stageA card=$card aplay${PREFERRED_RATE} rc=$rc alsarate=${alsarate:-?} out=$(printf '%s' "$out" | head -c 160)"
+  else
+    say "stageA card=$card busy (pb=$(printf '%s' "$pb" | head -c 40) cap=$(printf '%s' "$cap" | head -c 40)), skip aplay"
+  fi
+else
+  say "stageA MOTU not present, skip aplay"
+fi
+
+# ---- Stage B: CueMix 只读设备速率（与 ALSA 是否被占用无关）-------------------
+devrate=""
+if [ -f "$CLIENT" ] && command -v python3 >/dev/null 2>&1; then
+  mkdir -p "$(dirname "$STATE")" 2>/dev/null || true
+  timeout 12 python3 "$CLIENT" --transport ws --host "$WS_HOST" --port "$WS_PORT" --read 4 --idle-stop 2 --json "$STATE" >/dev/null 2>&1
+  crc=$?
+  devrate=$(read_rate "$STATE")
+  say "stageB cuemix rc=$crc device_rate=${devrate:-unknown}"
+  dev_ok=0
+  if [ -n "$devrate" ]; then for r in $(printf '%s' "$ALLOWED_RATES" | tr ',' ' '); do [ "$devrate" = "$r" ] && dev_ok=1; done; fi
+  if [ -n "$devrate" ] && [ "$dev_ok" != "1" ]; then
+    if [ "${WRITE_BACK:-0}" = "1" ]; then
+      timeout 12 python3 "$CLIENT" --transport ws --host "$WS_HOST" --port "$WS_PORT" --set kSampleRate=0=$PREFERRED_RATE --yes >/dev/null 2>&1
+      wrc=$?
+      timeout 12 python3 "$CLIENT" --transport ws --host "$WS_HOST" --port "$WS_PORT" --read 4 --idle-stop 2 --json "$STATE" >/dev/null 2>&1 || true
+      after=$(read_rate "$STATE")
+      say "stageB WRITE_BACK attempted rc=$wrc rate ${devrate} -> ${after:-unknown} (设备是否接受该写 = 待白天窗口验证)"
+    else
+      say "stageB WARN device_rate=$devrate not allowed (mode=$RATE_MODE ALLOWED_RATES=$ALLOWED_RATES) 且 WRITE_BACK=0（未纠正）"
+    fi
+  fi
+else
+  say "stageB cuemix client missing ($CLIENT) or no python3 -> device rate 未检查"
+fi
+
+say "done device_rate=${devrate:-unknown}"
+exit 0

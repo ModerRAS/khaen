@@ -1,0 +1,22 @@
+$ python.exe tools/verify_reference.py --negative-validation --report evidence/T03/verify-negative-report.json
+[cwd] C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack\reference
+[exit_code] 0
+--- stdout ---
+report: evidence\T03\verify-negative-report.json
+fixtures: 14, checks: 120, failures: 0
+  PASS C01_identity_d0_1x1 exact=True tags_ok=True f64=True streaming=True
+  PASS C02_identity_delay_d3 exact=True tags_ok=True f64=True streaming=True
+  PASS C03_offdiag_2x2 exact=True tags_ok=True f64=True streaming=True
+  PASS C04_tail_conv_1x1 exact=True tags_ok=True f64=True streaming=True
+  PASS C05_d_in_support exact=True tags_ok=True f64=True streaming=True
+  PASS C06_row_col_asymmetry exact=True tags_ok=True f64=True streaming=True
+  PASS C07_factorized_fused exact=True tags_ok=True f64=True streaming=True
+  PASS C08_stereo_strict_scatter exact=True tags_ok=True f64=True streaming=True
+  PASS C09_4_1_2_5x5_embed exact=True tags_ok=True f64=True streaming=True
+  PASS C10_streaming_128 exact=True tags_ok=True f64=True streaming=True
+  PASS C11_tolerance_f64 exact=True tags_ok=True f64=True streaming=True
+  PASS C12_dense_5x5_D3_exact exact=True tags_ok=True f64=True streaming=True
+  PASS C13_identity_graph_4_1_2_d2 exact=True tags_ok=True f64=True streaming=True
+  PASS C14_input_column_fir exact=True tags_ok=True f64=True streaming=True
+RESULT: PASS
+--- stderr ---

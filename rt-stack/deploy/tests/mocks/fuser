@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -u
+printf "fuser %s\n" "$*" >> "${MOCK_LOG:-/dev/null}"
+if [ -s "${MOCK_SND_BUSY:-/dev/null}" ]; then cat "${MOCK_SND_BUSY}"; exit 1; fi
+exit 0

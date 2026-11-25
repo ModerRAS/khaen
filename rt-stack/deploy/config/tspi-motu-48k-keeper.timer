@@ -1,0 +1,10 @@
+[Unit]
+Description=tspi MOTU 48k keeper periodic guard
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

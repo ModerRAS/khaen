@@ -1,0 +1,7 @@
+$ python.exe tools/ref_f64.py --case fixtures/cases/C04_tail_conv_1x1.json --mode offline --summary
+[cwd] C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack\reference
+[exit_code] 0
+--- stdout ---
+case=C04_tail_conv_1x1 mode=offline expected_len=5 channels=1
+  ch00 peak=4 nonzero=5
+--- stderr ---

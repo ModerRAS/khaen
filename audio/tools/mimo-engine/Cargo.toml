@@ -1,0 +1,17 @@
+[package]
+name = "tspi-mimo-fir"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+realfft = "3"
+rustfft = "6"
+
+[[bin]]
+name = "tspi-mimo-fir"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

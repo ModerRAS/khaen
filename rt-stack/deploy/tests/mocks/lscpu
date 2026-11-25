@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+echo "CPU CORE SOCKET ONLINE MAXMHZ MINMHZ"
+echo "0 0 0 yes 1800 408"
+exit 0

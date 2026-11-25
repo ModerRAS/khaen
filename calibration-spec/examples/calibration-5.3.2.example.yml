@@ -1,0 +1,76 @@
+# tspi-calibration/v1 示例：5.3.2（10 路；MOTU 0..9）
+# D3（2026-11-17）：中置 C 按设计与主箱相同为全频；当前无中置 → C 的 HP80/低频重定向/C:SUB pair/C 测试 deferred（NEEDS_HW）。
+# D7（2026-11-17）：允许 ≤ +3 dB boost（本文件 SUB1 的 +3.0 dB 恰在上限）；预测峰值须 ≤ -6 dBFS、实测 ≤ -1 dBFS。
+schema: tspi-calibration/v1
+sample_rate: 48000
+reference_index: 0
+layout: "5.3.2"
+created_unix: 1794725000
+tool: {name: tspi-calibrate, version: "0.1.0"}
+note: "示例数据，仅演示格式；真实值由测量生成"
+measurement:
+  mode: direct
+  sweep: {start_hz: 20, end_hz: 20000, seconds: 5.0, level_db: -30.0, fade_ms: 10}
+  playback: {device: "hw:motu,0", channels: 22}
+  capture: {device: "hw:UMIK1,0", channels: 1}
+  pre_seconds: 1.0
+  post_seconds: 1.0
+  repeats: 3
+channels:
+  - name: FL
+    index: 0
+    delay_samples: 0
+    polarity: normal
+    gain_db: 0.0
+    filters:
+      - {freq: 45.0, q: 1.2, gain_db: -4.5}
+      - {freq: 120.0, q: 2.0, gain_db: 2.0}
+    measured: {peak_db: -18.2, snr_db: 44.0, confidence: 0.98, delay_raw_samples: 512, polarity_raw: normal}
+  - name: FR
+    index: 1
+    delay_samples: 2
+    polarity: normal
+    filters:
+      - {freq: 45.0, q: 1.2, gain_db: -4.0}
+  - name: C
+    index: 2
+    delay_samples: 1
+    polarity: normal
+    filters:
+      - {freq: 80.0, q: 1.0, gain_db: -2.0}
+  - name: SL
+    index: 3
+    delay_samples: 4
+    polarity: normal
+    filters: []
+  - name: SR
+    index: 4
+    delay_samples: 5
+    polarity: invert
+    filters: []
+  - name: SUB1
+    index: 5
+    delay_samples: 12
+    polarity: normal
+    filters:
+      - {freq: 30.0, q: 2.0, gain_db: 3.0}   # D7 单段 boost 上限 +3.0 dB
+  - name: SUB2
+    index: 6
+    delay_samples: 14
+    polarity: normal
+    filters: []
+  - name: SUB3
+    index: 7
+    delay_samples: 10
+    polarity: normal
+    filters: []
+  - name: HFL
+    index: 8
+    delay_samples: 3
+    polarity: normal
+    filters: []
+  - name: HFR
+    index: 9
+    delay_samples: 3
+    polarity: normal
+    filters: []

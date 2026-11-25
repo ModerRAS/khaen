@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>泰山派音频管理 · tspi-audio-web</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- 登录页 -->
+  <div id="login-view" class="login-shell">
+    <div class="login-card">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <h1>泰山派音频管理</h1>
+      <p class="muted">泰山派3M（RK3576）· Debian 12 · 音频 DSP 设备</p>
+      <form id="login-form" autocomplete="off">
+        <label for="login-password">管理密码</label>
+        <input id="login-password" name="password" type="password" placeholder="输入管理密码" autocomplete="current-password">
+        <button id="login-submit" class="btn primary block" type="submit">登录</button>
+        <p id="login-error" class="error-text" role="alert"></p>
+      </form>
+      <details class="login-help">
+        <summary>忘记密码 / 使用 token（恢复兜底）</summary>
+        <p>token 保留为恢复/CLI 兜底，填在下面可直接登录（不需要密码）。默认在设备 <code>/etc/tspi-audio-web/config.toml</code>；查看：</p>
+        <pre>sudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token
+sudo journalctl -u tspi-audio-web -b | grep -i "token"</pre>
+        <input id="login-token" name="token" type="password" placeholder="可选：访问 token" autocomplete="off">
+        <p>mock 模式 token 为 <code>mock-token</code>。管理密码需在首次打开时设置；已设置后不能重复 setup。</p>
+      </details>
+      <p class="footnote">仅限局域网管理；所有 API 除 /healthz 外均需认证，写操作带 CSRF 防护。</p>
+    </div>
+  </div>
+
+  <!-- 首次设置管理密码 -->
+  <div id="setup-view" class="login-shell" hidden>
+    <div class="login-card">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <h1>首次设置管理密码</h1>
+      <p class="muted">首次打开 Web：设置管理密码后立即登录。token 仍保留为恢复/CLI 兜底。</p>
+      <form id="setup-form" autocomplete="off">
+        <label for="setup-password">管理密码（至少 8 位，推荐 10 位以上）</label>
+        <input id="setup-password" name="password" type="password" placeholder="设置管理密码" autocomplete="new-password" required>
+        <label for="setup-confirm" style="margin-top:8px">确认密码</label>
+        <input id="setup-confirm" name="confirm" type="password" placeholder="再次输入" autocomplete="new-password" required>
+        <p id="setup-strength" class="muted" style="font-size:12.5px;margin:6px 0 0"></p>
+        <button id="setup-submit" class="btn primary block" type="submit" style="margin-top:10px">设置并进入</button>
+        <p id="setup-error" class="error-text" role="alert"></p>
+      </form>
+      <p class="footnote">首设无认证是局域网便利与安全的折中：请仅在可信网络完成设置；设置后写 /etc/tspi-audio-web/auth.json（0600，Argon2id）。</p>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="app-view" class="app-shell" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark small" aria-hidden="true"></span>
+        <div class="brand-text">
+          <strong>泰山派音频管理</strong>
+          <span id="app-subtitle" class="muted">tspi-audio-web <span id="app-version"></span></span>
+        </div>
+        <span id="mock-badge" class="badge warn" hidden>MOCK</span>
+      </div>
+      <div class="topbar-right">
+        <span id="conn-status" class="conn ok" title="与设备的连接状态">已连接</span>
+        <button id="logout-btn" class="btn ghost small" type="button">退出</button>
+      </div>
+    </header>
+
+    <nav id="nav" class="tabs" aria-label="页面导航">
+      <button class="tab active" type="button" data-page="overview">总览</button>
+      <button class="tab" type="button" data-page="mode">运行模式</button>
+      <button class="tab" type="button" data-page="camilladsp">CamillaDSP</button>
+      <button class="tab" type="button" data-page="ptp">PTP</button>
+      <button class="tab" type="button" data-page="aes67">AES67</button>
+      <button class="tab" type="button" data-page="inferno">Inferno</button>
+      <button class="tab" type="button" data-page="channelmap">声道分配 / 校准</button>
+      <button class="tab" type="button" data-page="alsa">ALSA / MOTU</button>
+      <button class="tab" type="button" data-page="motu">MOTU / CueMix</button>
+      <button class="tab" type="button" data-page="system">系统</button>
+    </nav>
+
+    <main id="main">
+      <section id="page-overview" class="page active"></section>
+      <section id="page-mode" class="page"></section>
+      <section id="page-camilladsp" class="page"></section>
+      <section id="page-ptp" class="page"></section>
+      <section id="page-aes67" class="page"></section>
+      <section id="page-inferno" class="page"></section>
+      <section id="page-channelmap" class="page"></section>
+      <section id="page-alsa" class="page"></section>
+      <section id="page-motu" class="page"></section>
+      <section id="page-system" class="page"></section>
+    </main>
+
+    <footer class="footer">
+      <span>tspi-audio-web <span id="footer-version"></span> · 泰山派3M 音频 DSP 设备管理</span>
+      <span class="muted">端口 80（默认，无需记端口）/ 局域网管理 / 非 HTTPS 时请仅在可信网络使用</span>
+    </footer>
+  </div>
+
+  <noscript><p class="noscript">此页面需要启用 JavaScript 才能显示设备状态。</p></noscript>
+
+  <!-- 确认弹窗 -->
+  <div id="modal" class="modal-mask" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h3 id="modal-title">确认操作</h3>
+      <p id="modal-message" class="modal-message"></p>
+      <div id="modal-input-wrap" hidden>
+        <label for="modal-input" id="modal-input-label"></label>
+        <input id="modal-input" type="text" autocomplete="off">
+      </div>
+      <p id="modal-error" class="error-text" role="alert"></p>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn ghost" type="button">取消</button>
+        <button id="modal-ok" class="btn danger" type="button">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

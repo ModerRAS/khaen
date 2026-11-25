@@ -1,0 +1,16 @@
+# mimo-opt CLI（calib-chain-20261121 / mimo-opt-20261122）：仿真夹具 → 低频 MIMO 优化 → 报告。
+# 纯离线工具，零外部依赖；不接触音频设备。
+[package]
+name = "tspi-mimo-opt"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Offline CLI: RoomForge MIMO fixtures -> B0/B1/B2/B3 FIR design -> metrics report"
+
+[dependencies]
+tspi-room-sim = { workspace = true }
+tspi-mimo-design = { workspace = true }
+
+[[bin]]
+name = "mimo-opt"
+path = "src/main.rs"

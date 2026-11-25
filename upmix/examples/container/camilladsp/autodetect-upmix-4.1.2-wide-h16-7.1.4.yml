@@ -1,0 +1,358 @@
+# tspi-upmix 生成：autodetect upmix-4.1.2-wide
+# 输入容器 h16-7.1.4（12ch）-> 输出 4.1.2（8ch）；采样率 48000 Hz
+# 双路径：Aux1=上混(0..N-1)，Aux2=直通(N..2N-1)；由 tspi-upmix autodetect 用 SetFaderVolume 切换（-120=静音）
+# 用途：独立 CamillaDSP（ALSA）
+title: tspi-upmix autodetect upmix-4.1.2-wide（h16-7.1.4 -> 4.1.2）
+description: 输入内容检测双路径：Aux1=2.0 上混路径，Aux2=多声道直通路径；daemon 按 GetCaptureSignalRms 判定切换（-120 dB=静音）。
+devices:
+  samplerate: 48000
+  chunksize: 512
+  target_level: 1024
+  adjust_period: 10
+  enable_rate_adjust: true
+  queuelimit: 4
+  resampler:
+    type: AsyncSinc
+    profile: Balanced
+  capture:
+    type: Alsa
+    channels: 12
+    device: hw:ravenna,0
+    format: S32_LE
+  playback:
+    type: Alsa
+    channels: 22
+    device: hw:motu,0
+    format: S24_3_LE
+filters:
+  fl_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 80.0
+      order: 4
+  fr_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 80.0
+      order: 4
+  sl_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 100.0
+      order: 4
+  sl_lp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 7000.0
+      order: 4
+  sl_gain:
+    type: Gain
+    parameters:
+      gain: -4.0
+  sl_delay:
+    type: Delay
+    parameters:
+      delay: 14.0
+      unit: ms
+  sr_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 100.0
+      order: 4
+  sr_lp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 7000.0
+      order: 4
+  sr_gain:
+    type: Gain
+    parameters:
+      gain: -4.0
+  sr_delay:
+    type: Delay
+    parameters:
+      delay: 17.0
+      unit: ms
+  hfl_gain:
+    type: Gain
+    parameters:
+      gain: -7.0
+  hfr_gain:
+    type: Gain
+    parameters:
+      gain: -7.0
+  sub1_lp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 80.0
+      order: 4
+  aux_stereo:
+    type: Volume
+    parameters:
+      fader: Aux1
+      ramp_time: 200
+  aux_pass:
+    type: Volume
+    parameters:
+      fader: Aux2
+      ramp_time: 200
+mixers:
+  paths:
+    description: 'autodetect: stereo 上混路径(0..N-1) + 多声道直通路径(N..2N-1)'
+    channels:
+      in: 12
+      out: 16
+    mapping:
+    - dest: 0
+      sources:
+      - channel: 0
+    - dest: 1
+      sources:
+      - channel: 1
+    - dest: 2
+      sources:
+      - channel: 0
+        gain: -3.377
+      - channel: 1
+        gain: -9.837
+        inverted: true
+    - dest: 3
+      sources:
+      - channel: 0
+        gain: -9.837
+        inverted: true
+      - channel: 1
+        gain: -3.377
+    - dest: 4
+      sources:
+      - channel: 0
+        gain: -8.519
+      - channel: 1
+        gain: -18.061
+    - dest: 5
+      sources:
+      - channel: 0
+        gain: -18.061
+      - channel: 1
+        gain: -8.519
+    - dest: 7
+      sources:
+      - channel: 0
+        gain: -6.02
+      - channel: 1
+        gain: -6.02
+    - dest: 8
+      sources:
+      - channel: 0
+      - channel: 2
+        gain: -3.01
+    - dest: 9
+      sources:
+      - channel: 1
+      - channel: 2
+        gain: -3.01
+    - dest: 10
+      sources:
+      - channel: 4
+      - channel: 6
+        gain: -6.02
+    - dest: 11
+      sources:
+      - channel: 5
+      - channel: 7
+        gain: -6.02
+    - dest: 12
+      sources:
+      - channel: 8
+      - channel: 10
+        gain: -6.02
+    - dest: 13
+      sources:
+      - channel: 9
+      - channel: 11
+        gain: -6.02
+    - dest: 15
+      sources:
+      - channel: 3
+  sum:
+    description: 两路径求和 -> 输出
+    channels:
+      in: 16
+      out: 22
+    mapping:
+    - dest: 0
+      sources:
+      - channel: 0
+      - channel: 8
+    - dest: 1
+      sources:
+      - channel: 1
+      - channel: 9
+    - dest: 2
+      sources:
+      - channel: 2
+      - channel: 10
+    - dest: 3
+      sources:
+      - channel: 3
+      - channel: 11
+    - dest: 4
+      sources:
+      - channel: 4
+      - channel: 12
+    - dest: 5
+      sources:
+      - channel: 5
+      - channel: 13
+    - dest: 6
+      sources:
+      - channel: 6
+      - channel: 14
+    - dest: 7
+      sources:
+      - channel: 7
+      - channel: 15
+    - dest: 8
+      sources: []
+    - dest: 9
+      sources: []
+    - dest: 10
+      sources: []
+    - dest: 11
+      sources: []
+    - dest: 12
+      sources: []
+    - dest: 13
+      sources: []
+    - dest: 14
+      sources: []
+    - dest: 15
+      sources: []
+    - dest: 16
+      sources: []
+    - dest: 17
+      sources: []
+    - dest: 18
+      sources: []
+    - dest: 19
+      sources: []
+    - dest: 20
+      sources: []
+    - dest: 21
+      sources: []
+pipeline:
+- type: Mixer
+  name: paths
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 0
+  names:
+  - fl_hp
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 1
+  names:
+  - fr_hp
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 2
+  names:
+  - sl_hp
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 3
+  names:
+  - sr_hp
+- type: Filter
+  description: per-role lowpass
+  channels:
+  - 2
+  names:
+  - sl_lp
+- type: Filter
+  description: per-role lowpass
+  channels:
+  - 3
+  names:
+  - sr_lp
+- type: Filter
+  description: per-role lowpass
+  channels:
+  - 7
+  names:
+  - sub1_lp
+- type: Filter
+  description: per-role gain
+  channels:
+  - 2
+  names:
+  - sl_gain
+- type: Filter
+  description: per-role gain
+  channels:
+  - 3
+  names:
+  - sr_gain
+- type: Filter
+  description: per-role gain
+  channels:
+  - 4
+  names:
+  - hfl_gain
+- type: Filter
+  description: per-role gain
+  channels:
+  - 5
+  names:
+  - hfr_gain
+- type: Filter
+  description: per-role delay
+  channels:
+  - 2
+  names:
+  - sl_delay
+- type: Filter
+  description: per-role delay
+  channels:
+  - 3
+  names:
+  - sr_delay
+- type: Filter
+  description: stereo 路径音量（Aux1；-150=静音）
+  channels:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  names:
+  - aux_stereo
+- type: Filter
+  description: 直通路径音量（Aux2；-150=静音）
+  channels:
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  names:
+  - aux_pass
+- type: Mixer
+  name: sum

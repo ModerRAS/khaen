@@ -1,0 +1,60 @@
+# TSPI RT-first DSP stack — 唯一 Cargo workspace 根（WBS T06，integrator 独占写域）
+#
+# 写域纪律（WBS §1/§7）：
+# - 本文件、Cargo.lock、crates/*/Cargo.toml、公共 lib.rs/模块注册、README、ci/ 只由 integrator 在 T06/T26/T32 写。
+# - leaf 任务只写自己的模块文件、crates/<crate>/tests/<Txx>/、rt-stack/evidence/<Txx>/。
+# - 禁止另建第二个 Cargo 根；需要新依赖/新模块/新公共 API/测试注册时，先回 integrator 串行合入。
+#
+# 这只是 T06 scaffold：所有 crate 仅空接口/stub，未实现任何 leaf，无板端/RT 实测。
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/designer",
+    "crates/rt-host",
+    # task-235：自研用户态 AES67 接收端原型（纯 std、无外部依赖）
+    "crates/aoip-aes67",
+    "crates/compat",
+    "crates/control",
+    "crates/modal-design",
+    "crates/calibration",
+    "crates/cal-dsp",
+    "crates/file-runner",
+    "crates/bench",
+    "crates/rt-check",
+    # calib-chain-20261121 / aes67-rx-20261121：dsp-host AES67 接收端运行二进制（ALSA S24_3LE 22ch）
+    "tools/aes67-rx",
+    # calib-chain-20261121 / mimo-opt-20261122：RoomForge 仿真夹具 + 低频 MIMO 优化（离线、零外部依赖）
+    "crates/room-sim",
+    "crates/mimo-design",
+    "tools/mimo-opt",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "khaen real-time audio DSP engine"
+
+[workspace.dependencies]
+tspi-dsp-core = { path = "crates/core" }
+tspi-fir-designer = { path = "crates/designer" }
+tspi-rt-host = { path = "crates/rt-host" }
+# task-235：AES67 用户态接收端（SDP/RTP L24/抖动缓冲/媒体时钟/capture 固定块）
+tspi-aoip-aes67 = { path = "crates/aoip-aes67" }
+tspi-dsp-compat = { path = "crates/compat" }
+tspi-control = { path = "crates/control" }
+tspi-modal-design = { path = "crates/modal-design" }
+tspi-calibration = { path = "crates/calibration" }
+tspi-cal-dsp = { path = "crates/cal-dsp" }
+tspi-file-runner = { path = "crates/file-runner" }
+tspi-bench = { path = "crates/bench" }
+# calib-chain-20261121 / mimo-opt-20261122：RoomForge 鞋盒 ISM 仿真移植 + 低频 MIMO 设计（纯 std，无外部依赖）
+tspi-room-sim = { path = "crates/room-sim" }
+tspi-mimo-design = { path = "crates/mimo-design" }
+
+# Linux 真实 ALSA 后端依赖（WBS T90；Lead 2026-11-17 批准，target-specific 只在 Linux target 编译）。
+# 版本 = crates.io 最新稳定（2026-11-17 查询 max_stable=0.12.1）；Cargo.lock 锁定精确版本。
+# Windows/macOS 开发与 CI 不编译、不链接 libasound；继续使用 rt-host 的 T17 fake backend。
+alsa = "0.12"

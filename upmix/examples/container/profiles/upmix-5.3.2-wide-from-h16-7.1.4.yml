@@ -1,0 +1,221 @@
+# tspi-upmix 生成：upmix-5.3.2-wide
+# 环绕/高度左右延迟差 3ms；中置 -4.5dB；适合现场/氛围类素材（H16 容器输入）
+# 输入 h16-7.1.4（12ch）-> 输出 5.3.2（10ch）；schema tspi-channelmap/v2；tspi-upmix 1.2.0
+# 参数：中置 = mid=(L+R)/2 每源 -6.02 dB，角色增益 -4.5 dB；环绕 = (L-R)/2 差信号（每源 -6.02 dB，L/R 反相）总增益 -4.0 dB + 延迟 14.0 ms，左右延迟差 3.0 ms；高度 = mid=(L+R)/2 + 全频（不做高通/低通）（无人工去相关延迟）（width=0.50 混入左右直达）；低音管理（简化：仅 FL/FR mid 进 SUB，非完整矩阵 BM）：FL/FR 高通 80 Hz LR4；SUB1/SUB2/SUB3 = 低通 80 Hz LR4（源 -6.02 dB）；C/SL/SR 低频不汇总（redirect_from 仅校验不生效，真矩阵 BM 待做）；注意：环绕含 sources[].inverted——当前 tspi-channelmap 渲染器会丢弃（已知缺陷）；旧镜像应走独立 CamillaDSP 配置（tspi-upmix apply）或先打 patches/ 补丁；*-safe 只去掉源反相，不能绕过 bug A（Filter step 配对错误）；去相关：左右延迟差（环绕 3.0 ms / 高度 0.0 ms）
+schema: tspi-channelmap/v2
+version: 2
+profile:
+  name: upmix-5.3.2-wide-h16
+  description: 环绕/高度左右延迟差 3ms；中置 -4.5dB；适合现场/氛围类素材（H16 容器输入）
+input:
+  layout: h16-7.1.4
+  channels: 12
+  presets: {}
+  probe_order: null
+output:
+  device: auto
+  channels: 10
+  layout: 5.3.2
+  roles:
+  - id: FL
+    label: Front L
+    enabled: true
+    outputs:
+    - 0
+    sources:
+    - source: FL
+      gain_db: 0.0
+    gain_db: 0.0
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+    highpass:
+      freq: 80.0
+      order: 4
+      type: LinkwitzRiley
+  - id: FR
+    label: Front R
+    enabled: true
+    outputs:
+    - 1
+    sources:
+    - source: FR
+      gain_db: 0.0
+    gain_db: 0.0
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+    highpass:
+      freq: 80.0
+      order: 4
+      type: LinkwitzRiley
+  - id: C
+    label: Center
+    enabled: true
+    outputs:
+    - 2
+    sources:
+    - source: FL
+      gain_db: -6.02
+    - source: FR
+      gain_db: -6.02
+    gain_db: -4.5
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+    highpass:
+      freq: 200.0
+      order: 4
+      type: LinkwitzRiley
+    lowpass:
+      freq: 12000.0
+      order: 4
+      type: LinkwitzRiley
+  - id: SL
+    label: Surround L
+    enabled: true
+    outputs:
+    - 3
+    sources:
+    - source: FL
+      gain_db: -3.377
+    - source: FR
+      gain_db: -9.837
+      inverted: true
+    gain_db: -4.0
+    delay_ms: 14.0
+    polarity: normal
+    peq: []
+    highpass:
+      freq: 100.0
+      order: 4
+      type: LinkwitzRiley
+    lowpass:
+      freq: 7000.0
+      order: 4
+      type: LinkwitzRiley
+  - id: SR
+    label: Surround R
+    enabled: true
+    outputs:
+    - 4
+    sources:
+    - source: FL
+      gain_db: -9.837
+      inverted: true
+    - source: FR
+      gain_db: -3.377
+    gain_db: -4.0
+    delay_ms: 17.0
+    polarity: normal
+    peq: []
+    highpass:
+      freq: 100.0
+      order: 4
+      type: LinkwitzRiley
+    lowpass:
+      freq: 7000.0
+      order: 4
+      type: LinkwitzRiley
+  - id: SUB1
+    label: Subwoofer 1
+    enabled: true
+    outputs:
+    - 5
+    sources:
+    - source: FL
+      gain_db: -6.02
+    - source: FR
+      gain_db: -6.02
+    gain_db: 0.0
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+    lowpass:
+      freq: 80.0
+      order: 4
+      type: LinkwitzRiley
+  - id: SUB2
+    label: Subwoofer 2
+    enabled: true
+    outputs:
+    - 6
+    sources:
+    - source: FL
+      gain_db: -6.02
+    - source: FR
+      gain_db: -6.02
+    gain_db: 0.0
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+    lowpass:
+      freq: 80.0
+      order: 4
+      type: LinkwitzRiley
+  - id: SUB3
+    label: Subwoofer 3
+    enabled: true
+    outputs:
+    - 7
+    sources:
+    - source: FL
+      gain_db: -6.02
+    - source: FR
+      gain_db: -6.02
+    gain_db: 0.0
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+    lowpass:
+      freq: 80.0
+      order: 4
+      type: LinkwitzRiley
+  - id: HFL
+    label: Height L
+    enabled: true
+    outputs:
+    - 8
+    sources:
+    - source: FL
+      gain_db: -8.519
+    - source: FR
+      gain_db: -18.061
+    gain_db: -7.0
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+  - id: HFR
+    label: Height R
+    enabled: true
+    outputs:
+    - 9
+    sources:
+    - source: FL
+      gain_db: -18.061
+    - source: FR
+      gain_db: -8.519
+    gain_db: -7.0
+    delay_ms: 0.0
+    polarity: normal
+    peq: []
+remap:
+  preset: null
+  routes: []
+  drop_unused: true
+  silence_unmapped: true
+bass_management:
+  enabled: false
+  lfe_role: ''
+  lfe_to: []
+  lfe_gain_db: 0.0
+  redirect:
+    enabled: true
+    sources: []
+    targets: []
+    gain_db: -6.02
+  mains_highpass_hz: 80.0
+  mains_highpass_order: 4
+  sub_lowpass_hz: 80.0
+  sub_lowpass_order: 4
+  sub_gain_db: 0.0

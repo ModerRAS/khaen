@@ -1,0 +1,137 @@
+--- a/rt-stack/evidence/mimo-pilot-3mic/prep/ops-0830/run_0830.py
++++ b/rt-stack/evidence/mimo-pilot-3mic/prep/ops-0830/run_0830.py
+@@ -35,8 +35,13 @@
+ PROJECT = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
+ EVIDENCE = os.path.dirname(HERE)
+ DRYRUN = os.path.join(EVIDENCE, "dryrun")
+ TOOLS = os.path.join(PROJECT, "rt-stack", "tools", "mimo-prep")
++# [task-252] fail-closed provenance guard for G design / plan issuance
++KIT = os.path.join(TOOLS, "mimo_kit")
++if KIT not in sys.path:
++    sys.path.insert(0, KIT)
++import provenance as mimo_provenance  # noqa: E402
+ PACK_BIN = os.path.join(PROJECT, "rt-stack", "target", "debug", "mimo_t66_pack.exe")
+ HOST_BIN = os.path.join(PROJECT, "rt-stack", "target", "debug", "tspi-rt-host.exe")
+ ANALYZE_PAIR = os.path.join(HERE, "steps", "analyze_pair.py")
+ ACTIVE_PLAY_PROBE_TOML = os.path.join(DRYRUN, "out", "t66", "rt-host.shortfile.toml")
+@@ -432,44 +437,84 @@
+                 json.dump(marker, fh, ensure_ascii=False, indent=2)
+                 fh.write("\n")
+ 
+     # -- local steps -------------------------------------------------------
+-    def _run_local(self, cmd, timeout=600):
++    def _run_local(self, cmd, timeout=600, env=None):
+         p = subprocess.run(cmd, cwd=PROJECT, capture_output=True, text=True,
+-                           encoding="utf-8", errors="replace", timeout=timeout)
++                           encoding="utf-8", errors="replace", timeout=timeout, env=env)
+         return p.returncode, (p.stdout or ""), (p.stderr or "")
+ 
+     def step_design(self):
+-        """G design from the SAME identity-arm measurement (same playback path as after)."""
++        """G design from real H; LIVE uses the provenance-guarded maintained chain [task-252]."""
+         params = self._params(synthetic=self.dry)
+         # [live-fix 2026-11-19] live design H comes from the separate 3-mic measure-multi
+         # session (the same-path host arms are UMIK-only: rt-host owns the MOTU capture).
++        # [task-252] LIVE: mimo_kit.design_chain --design-only (H guard + G guard, refuses
++        # invalid H such as the MA1/ARC byte-mapping artifact and synthetic output).
++        # Dry-run keeps the synthetic harness on purpose (clearly labelled in the summary).
+         session = os.path.join(DRYRUN, "out", "session") if self.dry else os.path.join(self.local_ev, "design3mic")
+         out = os.path.join(self.local_ev, "design")
+-        cmd = [sys.executable, os.path.join(HERE, "steps", "design_from_identity.py"),
+-               "--session", session, "--out", out,
+-               "--sweep-seconds", str(params["sweep_seconds"]), "--pre", str(params["pre"]),
+-               "--repeat-gap", str(params["repeat_gap"]), "--slot-gap", str(params["slot_gap"]),
+-               "--spl", str(self.cfg["level"]["target_spl_db"])]
+-        rc, stdout, stderr = self._run_local(cmd, timeout=600)
++        env = None
++        if self.dry:
++            cmd = [sys.executable, os.path.join(HERE, "steps", "design_from_identity.py"),
++                   "--session", session, "--out", out,
++                   "--sweep-seconds", str(params["sweep_seconds"]), "--pre", str(params["pre"]),
++                   "--repeat-gap", str(params["repeat_gap"]), "--slot-gap", str(params["slot_gap"]),
++                   "--spl", str(self.cfg["level"]["target_spl_db"])]
++        else:
++            level_db = float((self.summary.get("level") or {}).get(
++                "level_db", self.cfg["level"]["seed_level_db"]))
++            cmd = [sys.executable, "-m", "mimo_kit.design_chain", "--arm", session, "--out", out,
++                   "--design-only", "--sweep-seconds", str(params["sweep_seconds"]),
++                   "--level-db", "%.2f" % level_db]
++            env = dict(os.environ)
++            env["PYTHONPATH"] = TOOLS + os.pathsep + env.get("PYTHONPATH", "")
++        rc, stdout, stderr = self._run_local(cmd, timeout=600, env=env)
+         rep_path = os.path.join(out, "design", "design-report.json")
+         ok = rc == 0 and os.path.isfile(rep_path) and os.path.isfile(os.path.join(out, "g_design.npz"))
+         rep = {}
+         if os.path.isfile(rep_path):
+             with open(rep_path, "r", encoding="utf-8") as fh:
+                 rep = json.load(fh)
++        guard = {}
++        if ok:
++            guard = mimo_provenance.g_guard(out, live=not self.dry)
++            if not self.dry and not guard["ok"]:
++                self.log("design provenance REFUSED: %s" % ",".join(guard["codes"]))
++                ok = False
+         self.record("design", "PASS" if ok else "FAIL",
+-                    "same-path identity H -> reference G design (pilot_3mic): max_path_ok=%s per_dac_ok=%s"
+-                    % (rep.get("max_path_gain_ok"), rep.get("per_dac_gain_ok")))
++                    "identity H -> reference G design (pilot_3mic): max_path_ok=%s per_dac_ok=%s guard=%s"
++                    % (rep.get("max_path_gain_ok"), rep.get("per_dac_gain_ok"),
++                       guard.get("codes") or ("PASS" if guard else "not-run")))
+         self.summary["design"] = {"source": out, "max_path_gain_ok": rep.get("max_path_gain_ok"),
+                                   "per_dac_gain_ok": rep.get("per_dac_gain_ok"),
+-                                  "h_estimate": os.path.join(out, "h_estimate.npz")}
++                                  "h_estimate": os.path.join(out, "h_estimate.npz"),
++                                  "provenance_guard": {"live": not self.dry,
++                                                       "ok": guard.get("ok"),
++                                                       "codes": guard.get("codes")}}
+         return ok
+ 
+     def step_t66_compile(self):
+-        design = (self.summary.get("design") or {}).get("source")
+-        if not design:
+-            design = os.path.join(DRYRUN, "out", "design")
++        # [task-252] fail-closed design source: a LIVE step must have a guarded real design;
++        # never silently fall back to prep/dryrun/out/design (synthetic G).  The old code
++        # did "if not design: design = DRYRUN/out/design", which made a resume/partial run
++        # (e.g. --from t66_compile) pack a synthetic design into a REAL plan.
++        try:
++            design = mimo_provenance.resolve_design_source(
++                self.summary, live=not self.dry,
++                dryrun_design_dir=os.path.join(DRYRUN, "out", "design"))
++        except mimo_provenance.ProvenanceRefusal as exc:
++            self.record("t66_compile", "FAIL",
++                        "provenance refusal (no silent dry-run fallback): %s" % ",".join(exc.codes))
++            return False
++        guard = mimo_provenance.g_guard(design, live=not self.dry)
++        if not self.dry and not guard["ok"]:
++            self.record("t66_compile", "FAIL",
++                        "G provenance refusal: %s" % ",".join(guard["codes"]))
++            return False
++        self.summary.setdefault("provenance", {})["design_guard"] = {
++            "design": design, "live": not self.dry,
++            "ok": guard.get("ok"), "codes": guard.get("codes")}
+         t66_out = os.path.join(self.local_ev if self.local_ev else DRYRUN, "t66")
+         os.makedirs(t66_out, exist_ok=True)
+         if not os.path.isfile(PACK_BIN):
+             self.record("t66_compile", "FAIL", "missing real T66 packer binary %s (build tools/mimo-prep/t66_pack)" % PACK_BIN)
+@@ -489,8 +534,20 @@
+         rc, out, err = self._run_local([sys.executable, os.path.join(DRYRUN, "verify_t66_plan.py"),
+                                         "--plan-dir", t66_out, "--host", HOST_BIN,
+                                         "--out", os.path.join(t66_out, "verify")])
+         ok = rc == 0
++        if ok and not self.dry:
++            # [task-252] the packed plan must not be a registered synthetic fixture, and
++            # its design must still pass the provenance guard.
++            plan_guard = mimo_provenance.g_guard_plan(
++                os.path.join(t66_out, "plan.bin"), design=design, live=True)
++            self.summary.setdefault("provenance", {})["plan_guard"] = {
++                "ok": plan_guard.get("ok"), "codes": plan_guard.get("codes"),
++                "plan_sha256": plan_guard.get("metrics", {}).get("plan_sha256")}
++            if not plan_guard["ok"]:
++                self.record("t66_compile", "FAIL",
++                            "plan provenance refusal: %s" % ",".join(plan_guard["codes"]))
++                return False
+         vpath = os.path.join(t66_out, "verify", "verify.json")
+         verify = json.load(open(vpath, "r", encoding="utf-8")) if os.path.isfile(vpath) else {}
+         self.record("t66_compile", "PASS" if ok else "FAIL",
+                     "REAL T66 compiler invoked; plan=%s paths=%s offdiag_peak=%.4f host_all_ack=%s"

@@ -1,0 +1,1983 @@
+//! T54 private integration tests 鈥?妯℃�佹瘡 path artifact锛圵AV/manifest/hash/role/stale锛夆�斺�?//! crate tspi-modal-design锛圵BS T54锛泃ask-150锛沷wner rt-artifact2锛夈�?//!
+//! 杩愯锛堝湪 rt-stack/ 涓嬶級锛歝argo test -p tspi-modal-design artifact
+//! 鏂囦欢浣嶇疆锛歝rates/modal-design/tests/T54/main.rs锛坙eaf 绉佹湁娴嬭瘯锛涗笉鍐?public_registration.rs锛夈�?//!
+//! 瑕嗙洊锛圵BS T54 DoD锛夛細
+//! - 姣?path WAV锛氬崟澹伴亾 IEEE float32銆乫s=璁捐 fs銆侀暱搴?taps銆佷笉褰掍竴鍖栥�侀�愬瓧鑺傚彲澶嶇幇锛?//!   WAV 瑙ｇ爜鐨?f32 绯绘暟涓?T51/T52 瑙ｇ殑 coeffs_f32 閫愪綅涓�鑷达紙f64 璁捐 -> f32 钀界洏閲忓寲璇樊澶嶇畻璁板綍锛夛紱
+//! - manifest锛歴chema/version/hash 绠楁硶銆乻tatus + INCOMPLETE/FAIL 鐮併�乼ool銆乮dentity hash 閾?//!   锛坱arget/baseline/P/plant/solution/holdout/provenance锛夈�?x5 participants dense->DAC銆?//!   stereo mask銆乷verlay DAC 缁戝畾锛堟簮 sha256 + ch6 绌?+ unused outputs锛夈�乺ole_hash銆丳 缁戝畾銆?//!   fs 绮惧害銆丏銆乨ecay/T20 鐩爣銆乼one/curve 鍗曟搴旂敤銆乭eight scope銆侀�?path sha256锛?//! - 纭畾鎬э細鍚岃緭鍏ヤ袱娆℃瀯寤烘枃浠堕�愬瓧鑺備竴鑷达紱created_unix 鍙繘 manifest銆佷笉鍙備笌 artifact hash锛?//! - stale锛歠s/layout/participants/role_hash/overlay/P/profile/target/solution/prior/taps/D/holdout
+//!   浠讳竴鍙樺寲 -> 鍥哄畾椤哄簭 stale 鍘熷洜锛?//! - INCOMPLETE/FAIL锛氱己瑙?涓嶅彲浜や粯/P 缂哄け/holdout 缂哄け/INCOMPLETE/NOT_RUN/FAIL/provenance 缂哄け
+//!   鍧囧瀹炶褰曪紙鐪熷疄鏁版嵁缂哄け涓嶄吉閫?READY锛夛紱
+//! - 璐熷悜锛歨oldout 缁戝畾閿?瑙?hash 绡℃敼/WAV 绡℃敼/manifest 绡℃敼/缂烘枃浠?overlay 鏄犲皠閿?fs/taps/D 涓嶇锛?//! - stereo strict 鐙珛 2x2 profile锛歴tereo_strict=true銆乵ask 鎭?FL/FR锛堜笉娣峰叆 5x5锛夛紱
+//! - 闈欐�佸畧鍗細鏃?unsafe/绾跨▼/杩涚▼/鐜/缃戠粶/绗笁鏂瑰簭鍒楀寲锛屾棤 unwrap/expect/panic锛圢ONRT 绾唴瀛樻瀯寤猴級銆?//!
+//! 璇存槑锛氬す鍏锋槸**鍚堟垚宸ョ▼澶瑰叿**锛堥潪瀹炴祴锛夛紱鏈枃浠朵笉鍐欎粨搴撴枃浠讹紙浠?write_to_dir 鐢ㄧ郴缁熶复鏃剁洰褰曞苟娓呯悊锛夛紝
+//! 涓嶇鏉跨/ALSA/CueMix/RT锛屼笉璇荤湡瀹?session锛屼笉鎵ц git銆?
+use std::fs;
+
+use tspi_modal_design::artifact::{
+    build_artifact, decode_wav_f32_mono, encode_wav_f32_mono, ArtifactBundle, ArtifactCurrent,
+    ArtifactErrorKind, ArtifactInput, ArtifactProvenance, ArtifactSolution, ArtifactStaleReason,
+    ArtifactStatus, ArtifactTool, OverlayDacBinding, OverlayRole, ARTIFACT_CLAIM,
+    ARTIFACT_HASH_ALGO, ARTIFACT_MANIFEST_FILE, ARTIFACT_SCHEMA, ARTIFACT_VERSION,
+    ARTIFACT_WAV_FORMAT, F_HOLDOUT_PREDICTED_FAIL, R_CALIBRATION_PROVENANCE_MISSING,
+    R_HOLDOUT_INCOMPLETE, R_HOLDOUT_MISSING, R_MEASUREMENT_PROVENANCE_MISSING,
+    R_POST_BASELINE_MISSING, R_SOLUTION_MISSING, R_SOLUTION_NOT_DELIVERABLE, STATUS_FAIL,
+    STATUS_INCOMPLETE, STATUS_READY, W_ART_DESIGN_ONLY,
+};
+use tspi_modal_design::ingest::{sha256_hex, PositionRole};
+use tspi_modal_design::regularize::{
+    regularize_from_target_plant, HeadroomSpec, RegularizeOptions, WhitelistKind,
+    CORRECTION_GAIN_CAP_MAX_DB,
+};
+use tspi_modal_design::solve::{solve_from_target_plant, SolveOptions, SolveStatus};
+use tspi_modal_design::target::{
+    build_stereo_strict_target, build_target_matrix, BandDecay, CurveBinding, DecayTarget,
+    EffectivePlant, FittedPostBaseline, FrozenPostBaseline, ModalParticipants, PostBaselineInput,
+    PostRoleFit, RawPlant, RawPosition, RawResponse, TargetMatrix, TargetSpec, ToneApplicationProof,
+    ToneBinding, HEIGHT_ROLE_IDS, MODAL_CORRECTION_BAND_HZ, P1_LAYOUT_4_1_2,
+    STEREO_STRICT_OUTPUT_ROLE_IDS,
+};
+use tspi_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
+use tspi_modal_design::validate::{
+    validate_holdout, BandIr, HoldoutReport, HoldoutRequest, HoldoutVerdict, IrOrigin, IrState,
+    NoiseRepeats, RoleRepeats, TuningDeclaration,
+};
+
+// ===========================================================================
+// 澶瑰叿甯搁噺锛堝悎鎴愶紱闈炲疄娴嬶級
+// ===========================================================================
+
+const FS: u32 = 48_000;
+const D0_SAMPLES: i64 = 120;
+const TUNING_INPUTS_SHA256: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
+const SECONDS_IR: f64 = 1.5;
+const HOLDOUT_LABELS: [&str; 3] = ["H01", "H02", "H03"];
+
+/// 6 涓?design position 鐨?H 琛岋紙姣忚鍜?= 4.0锛宱nes 鍚戦噺鍦?H 鍒楃┖闂?-> 鐩爣绮剧‘鍙揪锛夈�?const DESIGN_ROWS: [[f64; 5]; 6] = [
+    [1.0, 0.9, 0.8, 0.7, 0.6],
+    [0.6, 0.7, 0.8, 0.9, 1.0],
+    [0.8, 1.0, 0.6, 1.0, 0.6],
+    [0.7, 0.7, 0.9, 0.9, 0.8],
+    [0.9, 0.8, 0.7, 0.8, 0.8],
+    [1.0, 0.8, 0.8, 0.8, 0.6],
+];
+
+/// 3 涓嫭绔?holdout 娴嬬偣锛堜笌閮ㄥ垎 design 琛屽悓鍊硷紱鍚堟垚澶瑰叿锛岄潪瀹炴祴锛夈�?const HOLDOUT_ROWS: [[f64; 5]; 3] = [
+    [1.0, 0.9, 0.8, 0.7, 0.6],
+    [0.6, 0.7, 0.8, 0.9, 1.0],
+    [0.8, 1.0, 0.6, 1.0, 0.6],
+];
+
+/// stereo strict 2x2 design 琛岋紙琛屽拰 = 1.0 -> 鐩爣绮剧‘鍙揪锛夈�?const STEREO_ROWS: [[f64; 2]; 3] = [[0.6, 0.4], [0.5, 0.5], [0.7, 0.3]];
+
+// ===========================================================================
+// 澶瑰叿锛圱50/T51/T52/T53 + overlay/tool/provenance锛?// ===========================================================================
+
+fn octave_grid(lo: f64, hi: f64, divisions: i32) -> Vec<f64> {
+    let mut freqs = Vec::new();
+    let mut index = 0i32;
+    loop {
+        let freq = lo * 2f64.powf(index as f64 / divisions as f64);
+        if freq > hi * (1.0 + 1.0e-12) {
+            break;
+        }
+        freqs.push(freq);
+        index += 1;
+    }
+    if let Some(last) = freqs.last() {
+        if (*last - hi).abs() > 1.0e-9 * hi.max(1.0) {
+            freqs.push(hi);
+        }
+    }
+    freqs
+}
+
+fn bass_grid() -> Vec<f64> {
+    octave_grid(20.0, 300.0, 24)
+}
+
+fn polarity(sign: i8) -> ResolvedPolarity {
+    ResolvedPolarity::resolve(sign as i32, PolaritySource::Analysis).unwrap()
+}
+
+fn post_role(
+    role_id: &str,
+    out_index: u32,
+    grid: &[f64],
+    gain_db: f64,
+    delay_samples: u32,
+    sign: i8,
+) -> PostRoleFit {
+    PostRoleFit::analytic(
+        role_id,
+        out_index,
+        FS,
+        grid,
+        None,
+        delay_samples,
+        sign,
+        gain_db,
+    )
+    .unwrap()
+}
+
+fn make_baseline(
+    grid: &[f64],
+    participants: ModalParticipants,
+    baseline_id: &str,
+) -> FrozenPostBaseline {
+    let mut roles = Vec::new();
+    for participant in participants.participants() {
+        roles.push(post_role(
+            &participant.role_id,
+            participant.out_index,
+            grid,
+            0.0,
+            0,
+            1,
+        ));
+    }
+    if participants.is_p1_explicit() {
+        roles.push(post_role("HFL", 4, grid, 0.0, 0, 1));
+        roles.push(post_role("HFR", 5, grid, 0.0, 0, 1));
+    }
+    let tone = ToneBinding::flat();
+    let curve = CurveBinding::baseline_only(tone.curve_id()).unwrap();
+    let input = PostBaselineInput {
+        baseline_id: baseline_id.to_string(),
+        sample_rate_hz: FS,
+        participants,
+        tone,
+        curve,
+        tone_applications: ToneApplicationProof::baseline_only(),
+        fit_inputs_sha256: sha256_hex(b"t54-fit-inputs-v1"),
+        common_d0: CommonD0::new(D0_SAMPLES).unwrap(),
+        grid_hz: grid.to_vec(),
+        roles,
+        created_unix: None,
+    };
+    FittedPostBaseline::new(input).unwrap().freeze().unwrap()
+}
+
+fn normalized_response(role_id: &str, out_index: u32, points: Vec<ComplexPoint>) -> RawResponse {
+    RawResponse::new(role_id, out_index, points)
+        .unwrap()
+        .normalize_polarity(polarity(1))
+        .unwrap()
+}
+
+fn flat_points(grid: &[f64], magnitude: f64) -> Vec<ComplexPoint> {
+    grid.iter()
+        .map(|freq| ComplexPoint {
+            freq_hz: *freq,
+            re: magnitude,
+            im: 0.0,
+        })
+        .collect()
+}
+
+fn raw_position_row(
+    label: &str,
+    role: PositionRole,
+    participants: &ModalParticipants,
+    grid: &[f64],
+    row: &[f64],
+) -> RawPosition {
+    let mut responses = Vec::new();
+    for participant in participants.participants() {
+        responses.push(normalized_response(
+            &participant.role_id,
+            participant.out_index,
+            flat_points(grid, row[participant.dense_index as usize]),
+        ));
+    }
+    RawPosition::new(label, role, 1.0, responses).unwrap()
+}
+
+fn make_plant(
+    baseline: &FrozenPostBaseline,
+    participants: &ModalParticipants,
+    grid: &[f64],
+    positions: Vec<RawPosition>,
+) -> EffectivePlant {
+    let raw = RawPlant::new(
+        P1_LAYOUT_4_1_2,
+        FS,
+        participants.clone(),
+        grid.to_vec(),
+        positions,
+    )
+    .unwrap();
+    EffectivePlant::build(baseline, &raw).unwrap()
+}
+
+fn make_design_plant(
+    baseline: &FrozenPostBaseline,
+    participants: &ModalParticipants,
+    grid: &[f64],
+) -> EffectivePlant {
+    let positions = DESIGN_ROWS
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            raw_position_row(
+                &format!("P{:02}", index + 1),
+                PositionRole::Design,
+                participants,
+                grid,
+                row,
+            )
+        })
+        .collect();
+    make_plant(baseline, participants, grid, positions)
+}
+
+fn make_holdout_plant(
+    baseline: &FrozenPostBaseline,
+    participants: &ModalParticipants,
+    grid: &[f64],
+) -> EffectivePlant {
+    let mut positions = vec![raw_position_row(
+        "PH00",
+        PositionRole::Design,
+        participants,
+        grid,
+        &[1.0, 0.9, 0.8, 0.7, 0.6],
+    )];
+    for (index, row) in HOLDOUT_ROWS.iter().enumerate() {
+        positions.push(raw_position_row(
+            &format!("H{:02}", index + 1),
+            PositionRole::Validation,
+            participants,
+            grid,
+            row,
+        ));
+    }
+    make_plant(baseline, participants, grid, positions)
+}
+
+fn measured_decay_bands() -> Vec<BandDecay> {
+    vec![
+        BandDecay {
+            band_hz: 63.0,
+            baseline_t60_s: 0.40,
+        },
+        BandDecay {
+            band_hz: 125.0,
+            baseline_t60_s: 0.35,
+        },
+    ]
+}
+
+fn reduced_decay(ratio: f64) -> DecayTarget {
+    DecayTarget::reduced(ratio, measured_decay_bands()).unwrap()
+}
+
+fn build_target(baseline: &FrozenPostBaseline, plant: &EffectivePlant) -> TargetMatrix {
+    let spec = TargetSpec::for_baseline(baseline, reduced_decay(0.85)).unwrap();
+    build_target_matrix(baseline, plant, &spec).unwrap()
+}
+
+fn solve_outcome(target: &TargetMatrix, plant: &EffectivePlant) -> tspi_modal_design::solve::SolveOutcome {
+    let mut options = SolveOptions::default();
+    options.taps = 1;
+    options.delay_samples = 0;
+    options.fit_band_hz = (20.0, 300.0);
+    options.max_iterations = 64;
+    options.rel_tolerance = 1.0e-8;
+    solve_from_target_plant(target, plant, &options).unwrap()
+}
+
+fn regularize_options() -> RegularizeOptions {
+    let mut options = RegularizeOptions::default();
+    options.base.taps = 1;
+    options.base.delay_samples = 0;
+    options.base.fit_band_hz = (20.0, 300.0);
+    options.base.max_iterations = 64;
+    options.base.rel_tolerance = 1.0e-8;
+    options.lambda_grid = vec![0.0, 1.0e-4, 1.0e-2, 1.0];
+    options.whitelists = vec![WhitelistKind::DiagOnly, WhitelistKind::Full];
+    options.cv_folds = 0;
+    options.headroom = HeadroomSpec {
+        correction_cap_db: CORRECTION_GAIN_CAP_MAX_DB,
+        diagonal_cap_db: 6.0,
+        tolerance_db: 2.0,
+    };
+    options
+}
+
+fn make_declaration(design_plant: &EffectivePlant, sealed_before_design: bool) -> TuningDeclaration {
+    let design_labels: Vec<String> = design_plant
+        .design_positions()
+        .map(|position| position.label.clone())
+        .collect();
+    TuningDeclaration::new(
+        design_labels.clone(),
+        HOLDOUT_LABELS.iter().map(|label| (*label).to_string()).collect(),
+    )
+    .with_tuning(design_labels, TUNING_INPUTS_SHA256)
+    .with_seal(sealed_before_design)
+}
+
+fn make_repeats(participants: &ModalParticipants, grid: &[f64], delta: f64) -> Vec<NoiseRepeats> {
+    HOLDOUT_LABELS
+        .iter()
+        .map(|label| NoiseRepeats {
+            position_label: (*label).to_string(),
+            roles: participants
+                .participants()
+                .iter()
+                .map(|participant| RoleRepeats {
+                    role_id: participant.role_id.clone(),
+                    series: vec![flat_points(grid, 1.0), flat_points(grid, 1.0 + delta)],
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn exponential_decay(t60_s: f64, seconds: f64) -> Vec<f64> {
+    let sample_count = (FS as f64 * seconds).round() as usize;
+    let alpha = std::f64::consts::LN_10 * 3.0 / t60_s;
+    (0..sample_count)
+        .map(|index| (-alpha * index as f64 / FS as f64).exp())
+        .collect()
+}
+
+fn make_band_ir(off_t60_s: f64, on_t60_s: f64) -> Vec<BandIr> {
+    let off = exponential_decay(off_t60_s, SECONDS_IR);
+    let on = exponential_decay(on_t60_s, SECONDS_IR);
+    let mut irs = Vec::new();
+    for label in HOLDOUT_LABELS {
+        for band_hz in [63.0, 125.0] {
+            for (state, samples) in [(IrState::Off, &off), (IrState::On, &on)] {
+                irs.push(BandIr {
+                    position_label: label.to_string(),
+                    band_hz,
+                    state,
+                    samples: samples.clone(),
+                    snr_db: 40.0,
+                    clipped: false,
+                    xrun: false,
+                    deadline_miss: false,
+                    lost_lock: false,
+                    dropped_blocks: 0,
+                });
+            }
+        }
+    }
+    irs
+}
+
+fn holdout_report(
+    target: &TargetMatrix,
+    design_plant: &EffectivePlant,
+    holdout_plant: &EffectivePlant,
+    solution: &tspi_modal_design::target::ModalMatrix,
+    participants: &ModalParticipants,
+    grid: &[f64],
+) -> HoldoutReport {
+    let request = HoldoutRequest::new(make_declaration(design_plant, true))
+        .with_repeats(make_repeats(participants, grid, 1.0e-3))
+        .with_ir(make_band_ir(0.40, 0.32), IrOrigin::PredictedModel);
+    validate_holdout(target, design_plant, holdout_plant, solution, &request).unwrap()
+}
+
+/// 宸茶В鏋?overlay 缁戝畾锛堝悎鎴愶細妯℃嫙 T57 瀵规澘绔?overlay 鐨勮В鏋愮粨鏋滐紱source hash 涓哄す鍏峰０鏄庯級銆?fn overlay_binding() -> OverlayDacBinding {
+    let roles = vec![
+        OverlayRole::new("FL", vec![0]).unwrap(),
+        OverlayRole::new("FR", vec![1]).unwrap(),
+        OverlayRole::new("SL", vec![2]).unwrap(),
+        OverlayRole::new("SR", vec![3]).unwrap(),
+        OverlayRole::new("HFL", vec![4]).unwrap(),
+        OverlayRole::new("HFR", vec![5]).unwrap(),
+        OverlayRole::new("SUB1", vec![7]).unwrap(),
+    ];
+    OverlayDacBinding::new(
+        P1_LAYOUT_4_1_2,
+        sha256_hex(b"t54-overlay-layout-presets-fixture-v1"),
+        8,
+        roles,
+    )
+    .unwrap()
+}
+
+fn tool() -> ArtifactTool {
+    ArtifactTool::new("tspi-modal-design", "t54-tests").unwrap()
+}
+
+fn provenance() -> ArtifactProvenance {
+    ArtifactProvenance::new(
+        sha256_hex(b"t54-profile-binding"),
+        Some(sha256_hex(b"t54-measurement-session")),
+        Some(sha256_hex(b"t54-calibration-ir")),
+    )
+    .with_tuning_inputs(TUNING_INPUTS_SHA256)
+}
+
+struct Fixture {
+    grid: Vec<f64>,
+    participants: ModalParticipants,
+    baseline: FrozenPostBaseline,
+    design_plant: EffectivePlant,
+    holdout_plant: EffectivePlant,
+    target: TargetMatrix,
+    solve: tspi_modal_design::solve::SolveOutcome,
+    regularize: tspi_modal_design::regularize::RegularizeOutcome,
+    holdout: HoldoutReport,
+    overlay: OverlayDacBinding,
+    tool: ArtifactTool,
+    provenance: ArtifactProvenance,
+}
+
+fn fixture() -> Fixture {
+    let grid = bass_grid();
+    let participants = ModalParticipants::p1_4_1_2();
+    let baseline = make_baseline(&grid, participants.clone(), "t54-baseline");
+    let design_plant = make_design_plant(&baseline, &participants, &grid);
+    let target = build_target(&baseline, &design_plant);
+    let solve = solve_outcome(&target, &design_plant);
+    let regularize = regularize_from_target_plant(&target, &design_plant, &regularize_options()).unwrap();
+    let holdout_plant = make_holdout_plant(&baseline, &participants, &grid);
+    let solution = solve
+        .solution
+        .as_ref()
+        .expect("solve fixture must return a solution");
+    let holdout = holdout_report(
+        &target,
+        &design_plant,
+        &holdout_plant,
+        &solution.modal,
+        &participants,
+        &grid,
+    );
+    Fixture {
+        grid,
+        participants,
+        baseline,
+        design_plant,
+        holdout_plant,
+        target,
+        solve,
+        regularize,
+        holdout,
+        overlay: overlay_binding(),
+        tool: tool(),
+        provenance: provenance(),
+    }
+}
+
+fn regularized_artifact(fx: &Fixture) -> ArtifactBundle {
+    let input = ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout);
+    build_artifact(&input).expect("regularized artifact must build")
+}
+
+fn solved_artifact(fx: &Fixture) -> ArtifactBundle {
+    let input = ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout);
+    build_artifact(&input).expect("solve artifact must build")
+}
+
+fn input_without_post_holdout(fx: &Fixture) -> ArtifactInput<'_> {
+    ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+}
+
+// ===========================================================================
+// 鏈�灏?JSON 璇硶鏍￠獙鍣紙璇佹嵁 JSON 蹇呴』鍙鐙珛 checker 瑙ｆ瀽锛涗笉寮曞叆绗笁鏂逛緷璧栵級
+// ===========================================================================
+
+struct JsonSyntax<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+
+impl<'a> JsonSyntax<'a> {
+    fn validate(text: &'a str) -> Result<(), String> {
+        let mut parser = JsonSyntax {
+            bytes: text.as_bytes(),
+            position: 0,
+        };
+        parser.skip_whitespace();
+        parser.value()?;
+        parser.skip_whitespace();
+        if parser.position != parser.bytes.len() {
+            return Err(format!("trailing characters at byte {}", parser.position));
+        }
+        Ok(())
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.position).copied()
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(byte) = self.peek() {
+            if matches!(byte, b' ' | b'\t' | b'\n' | b'\r') {
+                self.position += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn expect(&mut self, byte: u8) -> Result<(), String> {
+        self.skip_whitespace();
+        if self.peek() == Some(byte) {
+            self.position += 1;
+            Ok(())
+        } else {
+            Err(format!(
+                "expected {:?} at byte {}",
+                byte as char,
+                self.position
+            ))
+        }
+    }
+
+    fn value(&mut self) -> Result<(), String> {
+        self.skip_whitespace();
+        match self.peek() {
+            Some(b'{') => self.object(),
+            Some(b'[') => self.array(),
+            Some(b'"') => self.string(),
+            Some(b't') => self.literal(b"true"),
+            Some(b'f') => self.literal(b"false"),
+            Some(b'n') => self.literal(b"null"),
+            Some(byte) if byte == b'-' || byte.is_ascii_digit() => self.number(),
+            Some(byte) => Err(format!(
+                "unexpected byte {:?} at {}",
+                byte as char, self.position
+            )),
+            None => Err("unexpected end of JSON".to_string()),
+        }
+    }
+
+    fn literal(&mut self, expected: &[u8]) -> Result<(), String> {
+        if self.bytes[self.position..].starts_with(expected) {
+            self.position += expected.len();
+            Ok(())
+        } else {
+            Err(format!("invalid literal at byte {}", self.position))
+        }
+    }
+
+    fn object(&mut self) -> Result<(), String> {
+        self.expect(b'{')?;
+        self.skip_whitespace();
+        if self.peek() == Some(b'}') {
+            self.position += 1;
+            return Ok(());
+        }
+        loop {
+            self.skip_whitespace();
+            self.string()?;
+            self.expect(b':')?;
+            self.value()?;
+            self.skip_whitespace();
+            match self.peek() {
+                Some(b',') => {
+                    self.position += 1;
+                }
+                Some(b'}') => {
+                    self.position += 1;
+                    return Ok(());
+                }
+                _ => return Err(format!("expected , or }} at byte {}", self.position)),
+            }
+        }
+    }
+
+    fn array(&mut self) -> Result<(), String> {
+        self.expect(b'[')?;
+        self.skip_whitespace();
+        if self.peek() == Some(b']') {
+            self.position += 1;
+            return Ok(());
+        }
+        loop {
+            self.value()?;
+            self.skip_whitespace();
+            match self.peek() {
+                Some(b',') => {
+                    self.position += 1;
+                }
+                Some(b']') => {
+                    self.position += 1;
+                    return Ok(());
+                }
+                _ => return Err(format!("expected , or ] at byte {}", self.position)),
+            }
+        }
+    }
+
+    fn string(&mut self) -> Result<(), String> {
+        self.expect(b'"')?;
+        loop {
+            match self.peek() {
+                None => return Err("unterminated string".to_string()),
+                Some(b'"') => {
+                    self.position += 1;
+                    return Ok(());
+                }
+                Some(b'\\') => {
+                    self.position += 1;
+                    match self.peek() {
+                        Some(b'"') | Some(b'\\') | Some(b'/') | Some(b'b') | Some(b'f')
+                        | Some(b'n') | Some(b'r') | Some(b't') => {
+                            self.position += 1;
+                        }
+                        Some(b'u') => {
+                            self.position += 1;
+                            for _ in 0..4 {
+                                match self.peek() {
+                                    Some(byte) if byte.is_ascii_hexdigit() => {
+                                        self.position += 1;
+                                    }
+                                    _ => return Err("invalid \\u escape".to_string()),
+                                }
+                            }
+                        }
+                        _ => return Err("invalid escape".to_string()),
+                    }
+                }
+                Some(byte) if byte < 0x20 => {
+                    return Err(format!("control character at byte {}", self.position));
+                }
+                Some(_) => {
+                    self.position += 1;
+                }
+            }
+        }
+    }
+
+    fn number(&mut self) -> Result<(), String> {
+        if self.peek() == Some(b'-') {
+            self.position += 1;
+        }
+        let mut digits = 0usize;
+        while let Some(byte) = self.peek() {
+            if byte.is_ascii_digit() {
+                digits += 1;
+                self.position += 1;
+            } else {
+                break;
+            }
+        }
+        if digits == 0 {
+            return Err(format!("invalid number at byte {}", self.position));
+        }
+        if self.peek() == Some(b'.') {
+            self.position += 1;
+            let mut fraction = 0usize;
+            while let Some(byte) = self.peek() {
+                if byte.is_ascii_digit() {
+                    fraction += 1;
+                    self.position += 1;
+                } else {
+                    break;
+                }
+            }
+            if fraction == 0 {
+                return Err(format!("invalid fraction at byte {}", self.position));
+            }
+        }
+        if matches!(self.peek(), Some(b'e') | Some(b'E')) {
+            self.position += 1;
+            if matches!(self.peek(), Some(b'+') | Some(b'-')) {
+                self.position += 1;
+            }
+            let mut exponent = 0usize;
+            while let Some(byte) = self.peek() {
+                if byte.is_ascii_digit() {
+                    exponent += 1;
+                    self.position += 1;
+                } else {
+                    break;
+                }
+            }
+            if exponent == 0 {
+                return Err(format!("invalid exponent at byte {}", self.position));
+            }
+        }
+        Ok(())
+    }
+}
+
+// ===========================================================================
+// 1. 澶瑰叿 smoke + READY manifest锛圱54 涓昏矾寰勶級
+// ===========================================================================
+
+#[test]
+fn t54_artifact_fixture_smoke() {
+    let fx = fixture();
+    assert_eq!(fx.target.m(), 5);
+    assert_eq!(fx.target.sample_rate_hz(), FS);
+    assert_eq!(fx.target.target_delay_samples(), 0);
+    let solution = fx.solve.solution.as_ref().expect("solve solution");
+    assert_eq!(solution.modal.m(), 5);
+    assert_eq!(solution.coeffs_f64.len(), 5 * 5 * 1);
+    assert_eq!(fx.holdout.verdict, HoldoutVerdict::PredictedPass);
+    assert!(fx.regularize.solution.is_some(), "regularize must return a solution");
+    // 5x5 浣庡甫 participants 鏄惧紡 DAC 鏄犲皠 0/1/2/3/7锛岄珮搴?HFL/HFR 涓嶅湪鐭╅樀鍐呫�?    assert_eq!(fx.target.participants().dense_to_out_index(), vec![0, 1, 2, 3, 7]);
+    for height in HEIGHT_ROLE_IDS {
+        assert!(!fx.target.participants().contains_role(height));
+    }
+}
+
+#[test]
+fn t54_artifact_ready_manifest_contract() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    assert_eq!(bundle.schema, ARTIFACT_SCHEMA);
+    assert_eq!(bundle.artifact_version, ARTIFACT_VERSION);
+    assert_eq!(bundle.hash_algo, ARTIFACT_HASH_ALGO);
+    assert_eq!(
+        bundle.status,
+        ArtifactStatus::Ready,
+        "regularized fixture must be READY (design-side); codes={:?}",
+        bundle.status_codes
+    );
+    assert!(bundle.status_codes.is_empty());
+    assert_eq!(bundle.status.as_str(), STATUS_READY);
+    assert_eq!(bundle.artifact_hash.len(), 64);
+    assert_eq!(bundle.manifest_sha256.len(), 64);
+    // 璇氬疄瀛楁锛歊EADY 浠嶉潪 applied/measured/compiled锛屽繀椤昏姹傚簲鐢ㄥ悗澶嶆祴銆?    assert!(!bundle.honesty.applied);
+    assert!(!bundle.honesty.measured);
+    assert!(!bundle.honesty.compiled);
+    assert_eq!(bundle.honesty.post_apply_measurement, "not_run");
+    assert!(!bundle.honesty.holdout_used_for_tuning);
+    assert!(!bundle.honesty.can_substitute_real_remeasurement);
+    assert!(bundle.honesty.requires_post_apply_remeasurement);
+    assert_eq!(bundle.honesty.claims, ARTIFACT_CLAIM);
+    assert!(bundle.warnings.contains(&W_ART_DESIGN_ONLY));
+    // 5x5 participants / dense->DAC / overlay / stereo mask锛?.1.2 闈?stereo strict锛夈�?    assert_eq!(bundle.scope.m, 5);
+    assert_eq!(bundle.scope.fs, FS);
+    assert_eq!(bundle.scope.dense_to_dac, vec![0, 1, 2, 3, 7]);
+    assert_eq!(bundle.scope.layout_id, P1_LAYOUT_4_1_2);
+    assert_eq!(bundle.scope.container_channels, 8);
+    assert!(!bundle.scope.stereo_strict);
+    assert!(bundle.scope.stereo_mask.is_empty());
+    assert_eq!(bundle.scope.overlay.unused_outputs, vec![6], "4.1.2 ch6 must be empty");
+    assert_eq!(bundle.scope.role_hash.len(), 64);
+    // files = manifest + 25 path WAV銆?    assert_eq!(bundle.files.len(), 1 + 25);
+    assert_eq!(bundle.files[0].rel_path, ARTIFACT_MANIFEST_FILE);
+    assert_eq!(bundle.paths.len(), 25);
+    // manifest JSON 璇硶 + 鏃?NaN/Inf 鏂囨湰銆?    let manifest = bundle.to_manifest_json();
+    JsonSyntax::validate(&manifest).expect("manifest must be valid JSON");
+    assert!(!manifest.contains("NaN"), "manifest must not contain NaN");
+    assert!(!manifest.contains("inf"), "manifest must not contain inf");
+    assert!(manifest.contains("\"status\":\"READY\""));
+    assert!(manifest.contains("\"schema\":\"tspi-modal-artifact/v1\""));
+    bundle.verify().expect("READY artifact must self-verify");
+}
+
+// ===========================================================================
+// 2. 姣?path WAV锛氭牸寮?闀垮害/fs/涓嶅綊涓�鍖?閫愪綅 f32
+// ===========================================================================
+
+#[test]
+fn t54_artifact_wav_per_path_roundtrip() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    let solution = fx
+        .regularize
+        .solution
+        .as_ref()
+        .expect("regularized solution");
+    let m = fx.target.m();
+    let taps = bundle.design.taps as usize;
+    assert_eq!(bundle.design.taps, 1);
+    assert_eq!(bundle.design.delay_samples, 0);
+    for out_dense in 0..m {
+        for in_dense in 0..m {
+            let path = bundle
+                .paths
+                .iter()
+                .find(|path| path.out_dense == out_dense as u16 && path.in_dense == in_dense as u16)
+                .expect("path record must exist");
+            assert_eq!(path.format, ARTIFACT_WAV_FORMAT);
+            assert_eq!(path.fs, FS);
+            assert_eq!(path.taps, taps as u32);
+            assert_eq!(path.band_hz, MODAL_CORRECTION_BAND_HZ);
+            let expected_name = format!(
+                "coeff/p_{}__{}.wav",
+                path.in_role, path.out_role
+            );
+            assert_eq!(path.file, expected_name);
+            let file = bundle.file(&path.file).expect("WAV file must exist");
+            let wav = decode_wav_f32_mono(&file.bytes).expect("canonical WAV must decode");
+            assert_eq!(wav.sample_rate_hz, FS);
+            assert_eq!(wav.samples.len(), taps);
+            assert_eq!(wav.samples.len() as u64 * 4 + 44, file.bytes.len() as u64);
+            assert_eq!(file.bytes.len() as u64, path.bytes);
+            assert_eq!(sha256_hex(&file.bytes), path.sha256);
+            // WAV f32 蹇呴』閫愪綅绛変簬 T52 瑙ｇ殑 coeffs_f32锛坉esign -> f32 钀界洏鍞竴鏄犲皠锛夈�?            let offset = (out_dense * m + in_dense) * taps;
+            for (index, sample) in wav.samples.iter().enumerate() {
+                assert_eq!(
+                    sample.to_bits(),
+                    solution.coeffs_f32[offset + index].to_bits(),
+                    "path ({out_dense},{in_dense}) sample {index} f32 bits differ"
+                );
+            }
+            // 瀵硅鍚?delta_D baseline 澹版槑锛圖 鐢?manifest/kernel 鍔狅級锛岄潪瀵硅鏃?baseline銆?            let diag = out_dense == in_dense;
+            assert_eq!(path.diag_baseline, diag);
+            assert_eq!(path.delay_samples, if diag { bundle.design.delay_samples } else { 0 });
+            assert_eq!(path.delay_q16, 0);
+            // 涓嶅仛浠讳綍褰掍竴鍖栵細璁板綍宄板�?= 瀹為檯绯绘暟宄板�笺�?            let mut peak = 0.0f64;
+            for sample in &wav.samples {
+                peak = peak.max(f64::from(sample.abs()));
+            }
+            assert_eq!(peak, path.peak_abs);
+        }
+    }
+}
+
+// ===========================================================================
+// 3. fs 绮惧害涓?f32 閲忓寲澶嶇畻锛圵BS T54 "fs 绮惧害"锛?// ===========================================================================
+
+#[test]
+fn t54_artifact_fs_precision_and_quantization() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    let solution = fx.regularize.solution.as_ref().expect("solution");
+    assert_eq!(bundle.quantization.sample_format, ARTIFACT_WAV_FORMAT);
+    assert_eq!(bundle.quantization.bits_per_sample, 32);
+    assert_eq!(
+        bundle.quantization.coeffs_f64_sha256,
+        solution.coeffs_sha256
+    );
+    assert_eq!(bundle.quantization.coeffs_f32_sha256.len(), 64);
+    assert_eq!(bundle.quantization.wav_aggregate_sha256.len(), 64);
+    assert!(bundle.quantization.max_abs_f32_error.is_finite());
+    assert!(bundle.quantization.max_abs_f32_error >= 0.0);
+    assert!(
+        bundle.quantization.max_abs_f32_error < 1.0e-6,
+        "f32 quantization error {} unexpectedly large for this fixture",
+        bundle.quantization.max_abs_f32_error
+    );
+    // 鐢?WAV 瑙ｇ爜澶嶇畻 f32 鑱氬悎 hash锛堢嫭绔嬩簬鍐呴儴瀹炵幇璺緞锛夈�?    let mut all: Vec<f32> = Vec::new();
+    for path in &bundle.paths {
+        let file = bundle.file(&path.file).expect("WAV");
+        let wav = decode_wav_f32_mono(&file.bytes).expect("decode");
+        all.extend_from_slice(&wav.samples);
+    }
+    let mut text = String::new();
+    for sample in &all {
+        text.push_str(&format!("{:08x}\n", sample.to_bits()));
+    }
+    assert_eq!(sha256_hex(text.as_bytes()), bundle.quantization.coeffs_f32_sha256);
+    // 鍚岃緭鍏ュ悓杈撳嚭锛歴olve 鍙樹綋鍚屾牱鍙绠椼�?    let solved = solved_artifact(&fx);
+    let solve_solution = fx.solve.solution.as_ref().expect("solve solution");
+    assert_eq!(
+        solved.quantization.coeffs_f64_sha256,
+        solve_solution.coeffs_sha256
+    );
+    assert_eq!(solved.quantization.bits_per_sample, 32);
+}
+
+// ===========================================================================
+// 4. role hash / overlay DAC / stereo mask锛坢ultichannel锛?// ===========================================================================
+
+#[test]
+fn t54_artifact_role_hash_and_overlay_dac() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    assert_eq!(bundle.scope.participants.len(), 5);
+    let expected_roles = ["FL", "FR", "SL", "SR", "SUB1"];
+    let expected_dac = [0u32, 1, 2, 3, 7];
+    for (index, participant) in bundle.scope.participants.iter().enumerate() {
+        assert_eq!(participant.dense as usize, index);
+        assert_eq!(participant.role_id, expected_roles[index]);
+        assert_eq!(participant.dac, expected_dac[index]);
+    }
+    // overlay 缁戝畾 hash 蹇呴』鏉ヨ嚜瑙ｆ瀽缁撴灉锛堟簮 sha256 + role outputs锛夛紝涓嶅彲纭紪鐮佸揩鐓с�?    assert_eq!(bundle.scope.overlay.source_sha256, fx.overlay.source_sha256());
+    assert_eq!(bundle.scope.overlay.binding_hash, fx.overlay.binding_hash());
+    assert_eq!(bundle.scope.overlay.roles.len(), 7);
+    assert_eq!(bundle.scope.overlay.unused_outputs, vec![6]);
+    // height 瑙掕壊涓嶈繘 5x5 鐭╅樀锛況ole_hash 瑕嗙洊 participants+stereo mask+overlay銆?    for height in HEIGHT_ROLE_IDS {
+        assert!(!bundle
+            .scope
+            .participants
+            .iter()
+            .any(|participant| participant.role_id == height));
+    }
+    assert_eq!(bundle.scope.role_hash.len(), 64);
+    // 鏀瑰彉 overlay 婧?hash -> role_hash 蹇呴』鍙樺寲锛坰tale 璇箟鍙垽锛夈�?    let roles = fx.overlay.roles().to_vec();
+    let mutated_overlay = OverlayDacBinding::new(
+        P1_LAYOUT_4_1_2,
+        sha256_hex(b"t54-overlay-layout-presets-fixture-v2"),
+        8,
+        roles,
+    )
+    .unwrap();
+    let input = ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &mutated_overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout);
+    let mutated = build_artifact(&input).expect("mutated overlay artifact");
+    assert_ne!(mutated.scope.role_hash, bundle.scope.role_hash);
+    assert_ne!(
+        mutated.scope.overlay.binding_hash,
+        bundle.scope.overlay.binding_hash
+    );
+}
+
+// ===========================================================================
+// 5. manifest 蹇呭～缁戝畾锛圱50 搂9 娓呭崟 + P/decay/tone/curve/height/D锛?// ===========================================================================
+
+#[test]
+fn t54_artifact_manifest_required_bindings() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    let solution = fx.regularize.solution.as_ref().expect("solution");
+    assert_eq!(bundle.identity.target_schema, fx.target.schema());
+    assert_eq!(bundle.identity.target_id, fx.target.target_id());
+    assert_eq!(bundle.identity.target_sha256, fx.target.target_sha256());
+    assert_eq!(bundle.identity.baseline_hash, fx.target.baseline_hash());
+    assert_eq!(
+        bundle.identity.design_plant_hash,
+        fx.target.design_plant_hash()
+    );
+    assert_eq!(bundle.identity.plant_hash, fx.target.plant_hash());
+    assert_eq!(
+        bundle.identity.solution_hash.as_deref(),
+        Some(solution.hash.as_str())
+    );
+    assert_eq!(bundle.identity.solution_kind, "regularized");
+    assert_eq!(
+        bundle.identity.holdout_report_hash.as_deref(),
+        Some(fx.holdout.report_hash.as_str())
+    );
+    // P 缁戝畾锛歜aseline hash 涓�鑷淬�乺ole 鍏冩暟鎹畬鏁达紙participants + HFL/HFR锛夈�?    assert!(bundle.post.present);
+    assert_eq!(bundle.post.baseline_hash, fx.target.baseline_hash());
+    assert_eq!(bundle.post.sample_rate_hz, FS);
+    assert_eq!(bundle.post.roles.len(), 7);
+    for role in &bundle.post.roles {
+        assert_eq!(role.delay_samples, 0);
+        assert_eq!(role.polarity, 1);
+        assert_eq!(role.gain_db, 0.0);
+        assert!(!role.modal_peq);
+        assert_eq!(role.artificial_delay_ms, 0.0);
+    }
+    // decay 鐩爣锛坮atio .85 -> T60 0.34/0.2975锛夛紝涓嶆槸瀹炴祴銆?    assert_eq!(bundle.design.decay.mode, "reduced");
+    assert_eq!(bundle.design.decay.ratio, 0.85);
+    assert!(bundle.design.decay.meets_t20_gate);
+    assert_eq!(bundle.design.decay.bands.len(), 2);
+    let band63 = bundle
+        .design
+        .decay
+        .bands
+        .iter()
+        .find(|band| band.band_hz == 63.0)
+        .expect("63 Hz band");
+    assert!((band63.baseline_t60_s - 0.40).abs() < 1.0e-12);
+    assert!((band63.target_t60_s - 0.34).abs() < 1.0e-9);
+    // tone 鍙簲鐢ㄤ竴娆★紙post baseline 1 / low-band residual 0 / target 0锛夛紝curve 涓嶅弻涔樸�?    assert_eq!(bundle.design.tone.post_baseline_applications, 1);
+    assert_eq!(bundle.design.tone.low_band_residual_applications, 0);
+    assert_eq!(bundle.design.tone.target_applications, 0);
+    assert_eq!(bundle.design.curve.applications, 0);
+    assert!(bundle.design.curve.single_application);
+    // height scope锛欻FL/HFR 鍏ㄩ銆佹棤 HP/LP銆佹棤浜哄伐 delay銆佷笉鍦ㄤ綆甯︾煩闃点�?    assert!(bundle.design.height_scope.present);
+    assert!(bundle.design.height_scope.excluded_from_low_band_matrix);
+    assert_eq!(bundle.design.height_scope.roles.len(), 2);
+    for role in &bundle.design.height_scope.roles {
+        assert!(HEIGHT_ROLE_IDS.contains(&role.role_id.as_str()));
+        assert_eq!(role.band_limit, "none");
+        assert_eq!(role.artificial_delay_ms, 0.0);
+        assert!(!role.in_low_band_matrix);
+        assert!(role.dac == 4 || role.dac == 5);
+    }
+    // D / fs / grid / target delay 鏄惧紡璁板綍銆?    assert_eq!(bundle.design.delay_samples, fx.target.target_delay_samples());
+    assert_eq!(bundle.design.delay_q16, 0);
+    assert_eq!(bundle.design.fs, FS);
+    assert_eq!(bundle.design.grid_points, fx.target.grid_hz().len());
+    assert_eq!(bundle.design.common_d0_samples, D0_SAMPLES);
+    // output scope 鍚綆甯︾煩闃垫潯鐩�?    let low_band = bundle
+        .design
+        .output_scope
+        .iter()
+        .filter(|entry| entry.kind == "low_band_matrix")
+        .count();
+    assert_eq!(low_band, 5);
+}
+
+// ===========================================================================
+// 6. 纭畾鎬э細鍚岃緭鍏ヤ袱娆℃瀯寤洪�愬瓧鑺備竴鑷?// ===========================================================================
+
+#[test]
+fn t54_artifact_deterministic_bytes() {
+    let fx = fixture();
+    let first = regularized_artifact(&fx);
+    let second = regularized_artifact(&fx);
+    assert_eq!(first.artifact_hash, second.artifact_hash);
+    assert_eq!(first.manifest_sha256, second.manifest_sha256);
+    assert_eq!(first.files.len(), second.files.len());
+    for (left, right) in first.files.iter().zip(second.files.iter()) {
+        assert_eq!(left.rel_path, right.rel_path);
+        assert_eq!(left.bytes, right.bytes, "file {} not deterministic", left.rel_path);
+    }
+    assert_eq!(first.canonical(), second.canonical());
+    assert_eq!(first.to_manifest_json(), second.to_manifest_json());
+    // solve 鍙樹綋鍚屾牱纭畾銆?    let solved_first = solved_artifact(&fx);
+    let solved_second = solved_artifact(&fx);
+    assert_eq!(solved_first.artifact_hash, solved_second.artifact_hash);
+    assert_eq!(solved_first.files, solved_second.files);
+}
+
+// ===========================================================================
+// 7. created_unix 鍙繘 manifest銆佷笉鍙備笌 artifact hash
+// ===========================================================================
+
+#[test]
+fn t54_artifact_created_unix_not_hashed() {
+    let fx = fixture();
+    let base = ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout);
+    let plain = build_artifact(&base).expect("plain artifact");
+    let stamped_input = ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout)
+    .with_created_unix(1_700_000_000);
+    let stamped = build_artifact(&stamped_input).expect("stamped artifact");
+    assert_eq!(plain.created_unix, None);
+    assert_eq!(stamped.created_unix, Some(1_700_000_000));
+    assert_eq!(
+        plain.artifact_hash, stamped.artifact_hash,
+        "created_unix must not participate in artifact hash"
+    );
+    assert_eq!(plain.canonical(), stamped.canonical());
+    assert_ne!(
+        plain.manifest_sha256, stamped.manifest_sha256,
+        "created_unix changes manifest bytes"
+    );
+    assert!(stamped.to_manifest_json().contains("\"created_unix\":1700000000"));
+    plain.verify().expect("plain verify");
+    stamped.verify().expect("stamped verify");
+}
+
+// ===========================================================================
+// 8. solve / regularized 涓や釜涓婃父鍙樹綋
+// ===========================================================================
+
+#[test]
+fn t54_artifact_solve_and_regularized_variants() {
+    let fx = fixture();
+    let solved = solved_artifact(&fx);
+    let solve_solution = fx.solve.solution.as_ref().expect("solve solution");
+    assert_eq!(solved.solution.kind, "solve");
+    assert_eq!(
+        solved.solution.hash.as_deref(),
+        Some(solve_solution.hash.as_str())
+    );
+    assert!(solved.solution.selection.is_none());
+    assert!(solved.solution.headroom.is_none());
+    assert_eq!(solved.identity.solution_kind, "solve");
+    assert_eq!(solved.status, ArtifactStatus::Ready);
+    let regularized = regularized_artifact(&fx);
+    let reg_solution = fx.regularize.solution.as_ref().expect("regularized solution");
+    assert_eq!(regularized.solution.kind, "regularized");
+    assert_eq!(
+        regularized.solution.hash.as_deref(),
+        Some(reg_solution.hash.as_str())
+    );
+    assert_eq!(
+        regularized.solution.base_solve_hash.as_deref(),
+        reg_solution.base_solve_hash.as_deref()
+    );
+    assert_eq!(
+        regularized.solution.prior_hash.as_deref(),
+        Some(reg_solution.prior_hash.as_str())
+    );
+    let selection = regularized.solution.selection.as_ref().expect("selection");
+    assert!(selection.cv_valid, "P>M fixture must have valid CV");
+    assert_eq!(selection.selected_whitelist, "full");
+    let headroom = regularized.solution.headroom.as_ref().expect("headroom");
+    assert!(headroom.passed, "relaxed headroom fixture must pass");
+    assert!(headroom.violated_paths.is_empty());
+}
+
+// ===========================================================================
+// 9. INCOMPLETE锛氱己 P 鍩虹嚎 / 缂?holdout
+// ===========================================================================
+
+#[test]
+fn t54_artifact_incomplete_missing_post_and_holdout() {
+    let fx = fixture();
+    let input = input_without_post_holdout(&fx);
+    let bundle = build_artifact(&input).expect("incomplete artifact must still build");
+    assert_eq!(bundle.status, ArtifactStatus::Incomplete);
+    assert_eq!(bundle.status.as_str(), STATUS_INCOMPLETE);
+    assert!(bundle.status_codes.contains(&R_POST_BASELINE_MISSING));
+    assert!(bundle.status_codes.contains(&R_HOLDOUT_MISSING));
+    assert!(!bundle.post.present);
+    assert!(!bundle.holdout.present);
+    assert_eq!(bundle.paths.len(), 25, "solution coefficients are still recorded");
+    bundle.verify().expect("INCOMPLETE artifact must self-verify");
+}
+
+// ===========================================================================
+// 10. INCOMPLETE锛氭棤瑙?/ 瑙ｄ笉鍙氦浠?// ===========================================================================
+
+#[test]
+fn t54_artifact_incomplete_missing_solution() {
+    let mut fx = fixture();
+    fx.solve.solution = None;
+    let bundle = solved_artifact(&fx);
+    assert_eq!(bundle.status, ArtifactStatus::Incomplete);
+    assert!(bundle.status_codes.contains(&R_SOLUTION_MISSING));
+    assert!(bundle.status_codes.contains(&R_SOLUTION_NOT_DELIVERABLE));
+    assert!(!bundle.solution.present);
+    assert!(bundle.paths.is_empty());
+    assert_eq!(bundle.files.len(), 1);
+    bundle.verify().expect("no-solution artifact must self-verify");
+}
+
+#[test]
+fn t54_artifact_incomplete_not_deliverable() {
+    let mut fx = fixture();
+    fx.solve.report.status = SolveStatus::NonConverged;
+    let bundle = solved_artifact(&fx);
+    assert_eq!(bundle.status, ArtifactStatus::Incomplete);
+    assert!(bundle.status_codes.contains(&R_SOLUTION_NOT_DELIVERABLE));
+    assert!(!bundle.solution.deliverable);
+    bundle.verify().expect("best-effort artifact must self-verify");
+}
+
+// ===========================================================================
+// 11. INCOMPLETE锛歱rovenance锛坢easurement/calibration锛夌己澶?// ===========================================================================
+
+#[test]
+fn t54_artifact_incomplete_missing_provenance() {
+    let fx = fixture();
+    let bare = ArtifactProvenance::new(
+        sha256_hex(b"t54-profile-binding"),
+        None,
+        None,
+    );
+    let input = ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        bare,
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout);
+    let bundle = build_artifact(&input).expect("incomplete provenance artifact");
+    assert_eq!(bundle.status, ArtifactStatus::Incomplete);
+    assert!(bundle
+        .status_codes
+        .contains(&R_MEASUREMENT_PROVENANCE_MISSING));
+    assert!(bundle
+        .status_codes
+        .contains(&R_CALIBRATION_PROVENANCE_MISSING));
+    assert!(bundle.identity.measurement_sha256.is_none());
+    assert!(bundle.identity.calibration_sha256.is_none());
+    bundle.verify().expect("provenance-incomplete artifact must self-verify");
+}
+
+// ===========================================================================
+// 12. holdout verdict -> FAIL / INCOMPLETE 鐮侊紙鍘熸牱璁板綍锛屼笉浼�?PASS锛?// ===========================================================================
+
+fn regularized_input<'a>(
+    fx: &'a Fixture,
+    holdout: &'a HoldoutReport,
+) -> ArtifactInput<'a> {
+    ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(holdout)
+}
+
+#[test]
+fn t54_artifact_holdout_verdict_codes() {
+    let fx = fixture();
+    let mut failed = fx.holdout.clone();
+    failed.verdict = HoldoutVerdict::PredictedFail;
+    let failed_bundle = build_artifact(&regularized_input(&fx, &failed)).expect("fail bundle");
+    assert_eq!(failed_bundle.status, ArtifactStatus::Fail);
+    assert_eq!(failed_bundle.status.as_str(), STATUS_FAIL);
+    assert!(failed_bundle
+        .status_codes
+        .contains(&F_HOLDOUT_PREDICTED_FAIL));
+    assert_eq!(failed_bundle.holdout.verdict, "PREDICTED_FAIL");
+    failed_bundle.verify().expect("FAIL artifact must self-verify");
+
+    let mut incomplete = fx.holdout.clone();
+    incomplete.verdict = HoldoutVerdict::Incomplete;
+    let incomplete_bundle =
+        build_artifact(&regularized_input(&fx, &incomplete)).expect("incomplete bundle");
+    assert_eq!(incomplete_bundle.status, ArtifactStatus::Incomplete);
+    assert!(incomplete_bundle
+        .status_codes
+        .contains(&R_HOLDOUT_INCOMPLETE));
+
+    let mut not_run = fx.holdout.clone();
+    not_run.verdict = HoldoutVerdict::NotRun;
+    let not_run_bundle = build_artifact(&regularized_input(&fx, &not_run)).expect("not-run bundle");
+    assert_eq!(not_run_bundle.status, ArtifactStatus::Incomplete);
+    assert!(not_run_bundle.status_codes.contains(&R_HOLDOUT_INCOMPLETE)
+        || not_run_bundle.status_codes.contains(&"R_HOLDOUT_NOT_RUN"));
+}
+
+// ===========================================================================
+// 13. holdout 缁戝畾涓嶄竴鑷?/ 濂戠害杩濊 -> 閿欒锛堜笉闈欓粯鎺ュ彈閿欐姤鍛婏級
+// ===========================================================================
+
+#[test]
+fn t54_artifact_holdout_binding_mismatch_rejected() {
+    let fx = fixture();
+    let mut wrong_target = fx.holdout.clone();
+    wrong_target.identity.target_sha256 = "0".repeat(64);
+    let error = build_artifact(&regularized_input(&fx, &wrong_target)).expect_err("wrong target must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Holdout);
+    assert_eq!(error.code(), "E_ART_HOLDOUT");
+
+    let mut wrong_solution = fx.holdout.clone();
+    wrong_solution.identity.solution_hash = Some("1".repeat(64));
+    let error = build_artifact(&regularized_input(&fx, &wrong_solution))
+        .expect_err("wrong solution hash must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Holdout);
+
+    let mut contaminated = fx.holdout.clone();
+    contaminated.applied = true;
+    let error = build_artifact(&regularized_input(&fx, &contaminated))
+        .expect_err("applied holdout report must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Status);
+
+    let mut unsealed = fx.holdout.clone();
+    unsealed.holdout_used_for_tuning = true;
+    let error = build_artifact(&regularized_input(&fx, &unsealed))
+        .expect_err("holdout-used-for-tuning report must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Holdout);
+}
+
+// ===========================================================================
+// 14. 瑙?/ report 绡℃敼 -> 閿欒锛坔ash 閾句笉鍙潤榛橀�氳繃锛?// ===========================================================================
+
+#[test]
+fn t54_artifact_solution_tamper_rejected() {
+    // f32 涓嶆槸 f64 鐨勮鑼?cast -> hash 閿欒銆?    let mut fx = fixture();
+    fx.solve
+        .solution
+        .as_mut()
+        .expect("solution")
+        .coeffs_f32[0] += 1.0;
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    ))
+    .expect_err("tampered f32 coefficient must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Hash);
+
+    // 绯绘暟 canonical sha 绡℃敼銆?    let mut fx = fixture();
+    fx.solve.solution.as_mut().expect("solution").coeffs_sha256 = "2".repeat(64);
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    ))
+    .expect_err("tampered coeffs sha must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Hash);
+
+    // D 涓?target delay 涓嶄竴鑷?/ D+1 > taps銆?    let mut fx = fixture();
+    fx.solve.report.delay_samples = 3;
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    ))
+    .expect_err("D mismatch must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Delay);
+
+    // taps 涓庣郴鏁伴暱搴︿笉涓�鑷淬�?    let mut fx = fixture();
+    fx.solve.report.taps = 2;
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    ))
+    .expect_err("taps mismatch must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Taps);
+
+    // fs 闈?P1 璁捐鐜囥�?    let mut fx = fixture();
+    fx.solve.report.sample_rate_hz = 44_100;
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    ))
+    .expect_err("unsupported fs must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Fs);
+
+    // 瑙?hash 褰㈢姸闈炴硶銆?    let mut fx = fixture();
+    fx.solve.solution.as_mut().expect("solution").hash = "not-a-hash".to_string();
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    ))
+    .expect_err("bad solution hash must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Hash);
+}
+
+// ===========================================================================
+// 15. overlay 鏄犲皠閿欒 -> 鎷掔粷锛堜笉寰楃‖缂栫爜/闈欓粯鏀规槧灏勶級
+// ===========================================================================
+
+fn input_with_overlay<'a>(
+    fx: &'a Fixture,
+    overlay: &'a OverlayDacBinding,
+) -> ArtifactInput<'a> {
+    ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout)
+}
+
+#[test]
+fn t54_artifact_overlay_mismatch_rejected() {
+    let fx = fixture();
+
+    // 缂?SUB1銆?    let missing = OverlayDacBinding::new(
+        P1_LAYOUT_4_1_2,
+        sha256_hex(b"t54-overlay-missing"),
+        8,
+        vec![
+            OverlayRole::new("FL", vec![0]).unwrap(),
+            OverlayRole::new("FR", vec![1]).unwrap(),
+            OverlayRole::new("SL", vec![2]).unwrap(),
+            OverlayRole::new("SR", vec![3]).unwrap(),
+            OverlayRole::new("HFL", vec![4]).unwrap(),
+            OverlayRole::new("HFR", vec![5]).unwrap(),
+        ],
+    )
+    .unwrap();
+    let error = build_artifact(&input_with_overlay(&fx, &missing)).expect_err("missing SUB1 must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Overlay);
+
+    // overlay 棣栨Ы浣嶄笌 participants DAC 涓嶇锛團L 澹版槑涓?2锛夈�?    let swapped = OverlayDacBinding::new(
+        P1_LAYOUT_4_1_2,
+        sha256_hex(b"t54-overlay-swapped"),
+        8,
+        vec![
+            OverlayRole::new("FL", vec![2]).unwrap(),
+            OverlayRole::new("FR", vec![1]).unwrap(),
+            OverlayRole::new("SL", vec![0]).unwrap(),
+            OverlayRole::new("SR", vec![3]).unwrap(),
+            OverlayRole::new("HFL", vec![4]).unwrap(),
+            OverlayRole::new("HFR", vec![5]).unwrap(),
+            OverlayRole::new("SUB1", vec![7]).unwrap(),
+        ],
+    )
+    .unwrap();
+    let error = build_artifact(&input_with_overlay(&fx, &swapped)).expect_err("swapped DAC must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Overlay);
+
+    // ch6 闈炵┖锛堥澶?AUX 鍗?6锛?> 4.1.2 蹇呴』鎷掔粷锛屼笉闈欓粯鎹㈡槧灏勩�?    let ch6_used = OverlayDacBinding::new(
+        P1_LAYOUT_4_1_2,
+        sha256_hex(b"t54-overlay-ch6"),
+        8,
+        vec![
+            OverlayRole::new("FL", vec![0]).unwrap(),
+            OverlayRole::new("FR", vec![1]).unwrap(),
+            OverlayRole::new("SL", vec![2]).unwrap(),
+            OverlayRole::new("SR", vec![3]).unwrap(),
+            OverlayRole::new("HFL", vec![4]).unwrap(),
+            OverlayRole::new("HFR", vec![5]).unwrap(),
+            OverlayRole::new("SUB1", vec![7]).unwrap(),
+            OverlayRole::new("AUX", vec![6]).unwrap(),
+        ],
+    )
+    .unwrap();
+    let error = build_artifact(&input_with_overlay(&fx, &ch6_used)).expect_err("ch6 used must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Overlay);
+
+    // layout 涓嶄竴鑷淬�?    let wrong_layout = OverlayDacBinding::new(
+        "5.3.2",
+        sha256_hex(b"t54-overlay-layout"),
+        8,
+        vec![
+            OverlayRole::new("FL", vec![0]).unwrap(),
+            OverlayRole::new("FR", vec![1]).unwrap(),
+            OverlayRole::new("SL", vec![2]).unwrap(),
+            OverlayRole::new("SR", vec![3]).unwrap(),
+            OverlayRole::new("HFL", vec![4]).unwrap(),
+            OverlayRole::new("HFR", vec![5]).unwrap(),
+            OverlayRole::new("SUB1", vec![7]).unwrap(),
+        ],
+    )
+    .unwrap();
+    let error = build_artifact(&input_with_overlay(&fx, &wrong_layout)).expect_err("layout mismatch must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Layout);
+
+    // overlay source sha256 闈炴硶锛堟瀯閫犳湡鎷掔粷锛夈�?    let bad = OverlayDacBinding::new(
+        P1_LAYOUT_4_1_2,
+        "not-a-sha256",
+        8,
+        vec![OverlayRole::new("FL", vec![0]).unwrap()],
+    )
+    .expect_err("invalid overlay sha must be rejected");
+    assert_eq!(bad.kind(), ArtifactErrorKind::Overlay);
+}
+
+// ===========================================================================
+// 16. provenance 闈炴硶 -> 鎷掔粷
+// ===========================================================================
+
+#[test]
+fn t54_artifact_provenance_invalid_rejected() {
+    let fx = fixture();
+    let bad_profile = ArtifactProvenance::new("bad", None, None);
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        bad_profile,
+    ))
+    .expect_err("bad profile hash must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Provenance);
+
+    let bad_measurement = ArtifactProvenance::new(
+        sha256_hex(b"t54-profile"),
+        Some("XYZ".to_string()),
+        None,
+    );
+    let error = build_artifact(&ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Regularized(&fx.regularize),
+        &fx.overlay,
+        fx.tool.clone(),
+        bad_measurement,
+    ))
+    .expect_err("bad measurement hash must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Provenance);
+}
+
+// ===========================================================================
+// 17. stale锛氶�愰」鍘熷洜 + 鍥哄畾椤哄簭
+// ===========================================================================
+
+#[test]
+fn t54_artifact_stale_reasons() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    let current = bundle.current_binding();
+    assert!(bundle.stale_reasons(&current).is_empty());
+    assert!(!bundle.is_stale(&current));
+
+    fn expect_single(
+        bundle: &ArtifactBundle,
+        current: &ArtifactCurrent,
+        mutate: impl FnOnce(&mut ArtifactCurrent),
+        expected: ArtifactStaleReason,
+    ) {
+        let mut changed = current.clone();
+        mutate(&mut changed);
+        assert_eq!(
+            bundle.stale_reasons(&changed),
+            vec![expected],
+            "expected {:?}",
+            expected
+        );
+        assert!(bundle.is_stale(&changed));
+    }
+
+    expect_single(&bundle, &current, |value| value.sample_rate_hz = 96_000, ArtifactStaleReason::Fs);
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.layout_id = "5.3.2".to_string(),
+        ArtifactStaleReason::Layout,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.participants_binding_hash = "0".repeat(64),
+        ArtifactStaleReason::Participants,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.role_hash = "1".repeat(64),
+        ArtifactStaleReason::Roles,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.overlay_source_sha256 = "2".repeat(64),
+        ArtifactStaleReason::Overlay,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.post_baseline_hash = "3".repeat(64),
+        ArtifactStaleReason::PostBaseline,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.profile_sha256 = "4".repeat(64),
+        ArtifactStaleReason::Profile,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.target_sha256 = "5".repeat(64),
+        ArtifactStaleReason::Target,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.solution_hash = "6".repeat(64),
+        ArtifactStaleReason::Solution,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.prior_hash = Some("7".repeat(64)),
+        ArtifactStaleReason::Prior,
+    );
+    expect_single(&bundle, &current, |value| value.taps += 1, ArtifactStaleReason::Taps);
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.delay_samples += 1,
+        ArtifactStaleReason::Delay,
+    );
+    expect_single(
+        &bundle,
+        &current,
+        |value| value.holdout_report_hash = Some("8".repeat(64)),
+        ArtifactStaleReason::Holdout,
+    );
+
+    // 澶氶」鍙樺寲鎸夊浐瀹氶『搴忥紙Fs/Layout/.../Target锛夈�?    let mut changed = current.clone();
+    changed.sample_rate_hz = 96_000;
+    changed.target_sha256 = "9".repeat(64);
+    changed.taps += 1;
+    assert_eq!(
+        bundle.stale_reasons(&changed),
+        vec![
+            ArtifactStaleReason::Fs,
+            ArtifactStaleReason::Target,
+            ArtifactStaleReason::Taps
+        ]
+    );
+    assert_eq!(ArtifactStaleReason::ALL.len(), 13);
+}
+
+// ===========================================================================
+// 18. 钀界洏锛歸rite_to_dir锛堜复鏃剁洰褰曪紱鍥炶鏍￠獙锛涙竻鐞嗭級
+// ===========================================================================
+
+#[test]
+fn t54_artifact_write_to_dir() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    let dir = std::env::temp_dir().join(format!("tspi-t54-artifact-{}", std::process::id()));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).expect("clean temp dir");
+    }
+    let written = bundle.write_to_dir(&dir).expect("write artifact");
+    assert_eq!(written.files.len(), bundle.files.len());
+    assert_eq!(written.manifest_path, dir.join(ARTIFACT_MANIFEST_FILE));
+    assert_eq!(
+        written.total_bytes,
+        bundle.files.iter().map(|file| file.bytes.len() as u64).sum::<u64>()
+    );
+    for file in &bundle.files {
+        let path = dir.join(&file.rel_path);
+        let from_disk = fs::read(&path).expect("written file must exist");
+        assert_eq!(from_disk, file.bytes, "disk bytes differ for {}", file.rel_path);
+    }
+    assert!(written.manifest_path.exists());
+    // 浜屾鍐欏叆涓嶅悓鐩綍閫愬瓧鑺備竴鑷淬�?    let second = dir.join("second");
+    let written_second = bundle.write_to_dir(&second).expect("second write");
+    assert_eq!(written_second.total_bytes, written.total_bytes);
+    for file in &bundle.files {
+        let first_bytes = fs::read(dir.join(&file.rel_path)).expect("first");
+        let second_bytes = fs::read(second.join(&file.rel_path)).expect("second");
+        assert_eq!(first_bytes, second_bytes);
+    }
+    fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
+
+// ===========================================================================
+// 19. verify 璐熷悜瀵圭収锛氱鏀瑰繀椤昏妫�鍑?// ===========================================================================
+
+#[test]
+fn t54_artifact_verify_negative_controls() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    bundle.verify().expect("baseline verify");
+
+    let mut tampered_wav = bundle.clone();
+    tampered_wav.files[1].bytes[100] ^= 0xff;
+    let error = tampered_wav.verify().expect_err("tampered WAV must fail verify");
+    assert_eq!(error.kind(), ArtifactErrorKind::Hash);
+
+    let mut tampered_manifest = bundle.clone();
+    tampered_manifest.files[0].bytes.push(b' ');
+    let error = tampered_manifest
+        .verify()
+        .expect_err("tampered manifest must fail verify");
+    assert_eq!(error.kind(), ArtifactErrorKind::Hash);
+
+    let mut missing_file = bundle.clone();
+    missing_file.files.pop();
+    let error = missing_file
+        .verify()
+        .expect_err("missing coefficient file must fail verify");
+    assert_eq!(error.kind(), ArtifactErrorKind::Hash);
+
+    let mut dirty_hash = bundle.clone();
+    dirty_hash.artifact_hash = "f".repeat(64);
+    let error = dirty_hash
+        .verify()
+        .expect_err("tampered artifact hash must fail verify");
+    assert_eq!(error.kind(), ArtifactErrorKind::Hash);
+
+    let mut dishonest = bundle.clone();
+    dishonest.honesty.applied = true;
+    let error = dishonest
+        .verify()
+        .expect_err("applied honesty must fail verify");
+    assert_eq!(error.kind(), ArtifactErrorKind::Status);
+}
+
+// ===========================================================================
+// 20. WAV 缂栬В鐮佸绾︼紙f32 mono / 44B header / 涓ユ牸鎷掔粷锛?// ===========================================================================
+
+#[test]
+fn t54_wav_codec_contract() {
+    let samples = vec![1.0f32, -0.5, 0.0, 0.25];
+    let bytes = encode_wav_f32_mono(48_000, &samples).expect("encode");
+    assert_eq!(bytes.len(), 44 + 16);
+    assert_eq!(&bytes[0..4], b"RIFF");
+    assert_eq!(&bytes[8..12], b"WAVE");
+    assert_eq!(&bytes[12..16], b"fmt ");
+    assert_eq!(&bytes[36..40], b"data");
+    let decoded = decode_wav_f32_mono(&bytes).expect("decode");
+    assert_eq!(decoded.sample_rate_hz, 48_000);
+    assert_eq!(decoded.samples.len(), samples.len());
+    for (left, right) in decoded.samples.iter().zip(samples.iter()) {
+        assert_eq!(left.to_bits(), right.to_bits());
+    }
+    // 纭畾鎬х紪鐮併�?    assert_eq!(bytes, encode_wav_f32_mono(48_000, &samples).expect("encode again"));
+    // NaN/Inf 鎷掔粷銆?    let error = encode_wav_f32_mono(48_000, &[f32::NAN]).expect_err("NaN must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Wav);
+    let error = encode_wav_f32_mono(48_000, &[]).expect_err("empty must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Wav);
+    // 闈炶鑼冩牸寮忥紙PCM int16锛夋嫆缁濄�?    let mut pcm = bytes.clone();
+    pcm[20] = 1;
+    pcm[21] = 0;
+    let error = decode_wav_f32_mono(&pcm).expect_err("PCM int must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Wav);
+    // 鎴柇/闀垮害涓嶄竴鑷存嫆缁濄�?    let error = decode_wav_f32_mono(&bytes[..40]).expect_err("truncated must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Wav);
+    let mut short_data = bytes.clone();
+    short_data[40] -= 4;
+    let error = decode_wav_f32_mono(&short_data).expect_err("data size mismatch must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Wav);
+    // 闈炴湁闄愭牱鏈В鐮佹嫆缁濄�?    let mut nan_bytes = encode_wav_f32_mono(48_000, &[0.0]).expect("encode");
+    nan_bytes[44..48].copy_from_slice(&f32::NAN.to_le_bytes());
+    let error = decode_wav_f32_mono(&nan_bytes).expect_err("NaN sample must be rejected");
+    assert_eq!(error.kind(), ArtifactErrorKind::Wav);
+}
+
+// ===========================================================================
+// 21. stereo strict 鐙珛 2x2 profile锛歴tereo mask 鎭?FL/FR
+// ===========================================================================
+
+struct StereoFixture {
+    grid: Vec<f64>,
+    participants: ModalParticipants,
+    baseline: FrozenPostBaseline,
+    plant: EffectivePlant,
+    target: TargetMatrix,
+    solve: tspi_modal_design::solve::SolveOutcome,
+    holdout: HoldoutReport,
+    overlay: OverlayDacBinding,
+    tool: ArtifactTool,
+    provenance: ArtifactProvenance,
+}
+
+fn stereo_fixture() -> StereoFixture {
+    let grid = bass_grid();
+    let participants = ModalParticipants::stereo_strict();
+    let baseline = make_baseline(&grid, participants.clone(), "t54-stereo-baseline");
+    let design_positions: Vec<RawPosition> = STEREO_ROWS
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            raw_position_row(
+                &format!("S{:02}", index + 1),
+                PositionRole::Design,
+                &participants,
+                &grid,
+                &row[..],
+            )
+        })
+        .collect();
+    let plant = make_plant(&baseline, &participants, &grid, design_positions);
+    let spec = TargetSpec::stereo_strict(&baseline, reduced_decay(0.85)).unwrap();
+    let target = build_stereo_strict_target(&baseline, &plant, &spec).unwrap();
+    let solve = solve_outcome(&target, &plant);
+    let mut holdout_positions = vec![raw_position_row(
+        "SPH00",
+        PositionRole::Design,
+        &participants,
+        &grid,
+        &[0.6, 0.4],
+    )];
+    let holdout_rows: [[f64; 2]; 3] = [[0.5, 0.5], [0.7, 0.3], [0.6, 0.4]];
+    for (index, row) in holdout_rows.iter().enumerate() {
+        holdout_positions.push(raw_position_row(
+            &format!("SH{:02}", index + 1),
+            PositionRole::Validation,
+            &participants,
+            &grid,
+            &row[..],
+        ));
+    }
+    let holdout_plant = make_plant(&baseline, &participants, &grid, holdout_positions);
+    let solution = solve.solution.as_ref().expect("stereo solve solution");
+    let declaration_labels: Vec<String> = plant
+        .design_positions()
+        .map(|position| position.label.clone())
+        .collect();
+    let request = HoldoutRequest::new(
+        TuningDeclaration::new(
+            declaration_labels.clone(),
+            HOLDOUT_LABELS.iter().map(|label| (*label).to_string()).collect(),
+        )
+        .with_tuning(declaration_labels, TUNING_INPUTS_SHA256)
+        .with_seal(true),
+    )
+    .with_repeats(make_repeats(&participants, &grid, 1.0e-3))
+    .with_ir(make_band_ir(0.40, 0.32), IrOrigin::PredictedModel);
+    let holdout = validate_holdout(&target, &plant, &holdout_plant, &solution.modal, &request).unwrap();
+    StereoFixture {
+        grid,
+        participants,
+        baseline,
+        plant,
+        target,
+        solve,
+        holdout,
+        overlay: overlay_binding(),
+        tool: tool(),
+        provenance: provenance(),
+    }
+}
+
+#[test]
+fn t54_artifact_stereo_strict_mask() {
+    let fx = stereo_fixture();
+    assert_eq!(fx.target.m(), 2);
+    assert!(fx.participants.is_stereo_strict());
+    let input = ArtifactInput::new(
+        &fx.target,
+        ArtifactSolution::Solve(&fx.solve),
+        &fx.overlay,
+        fx.tool.clone(),
+        fx.provenance.clone(),
+    )
+    .with_post(&fx.baseline)
+    .with_holdout(&fx.holdout);
+    let bundle = build_artifact(&input).expect("stereo strict artifact must build");
+    assert_eq!(
+        bundle.scope.stereo_mask,
+        STEREO_STRICT_OUTPUT_ROLE_IDS
+            .iter()
+            .map(|role| (*role).to_string())
+            .collect::<Vec<String>>()
+    );
+    assert!(bundle.scope.stereo_strict);
+    assert_eq!(bundle.scope.m, 2);
+    assert_eq!(bundle.scope.dense_to_dac, vec![0, 1]);
+    assert_eq!(bundle.paths.len(), 4);
+    assert_eq!(bundle.scope.participants.len(), 2);
+    for participant in &bundle.scope.participants {
+        assert!(STEREO_STRICT_OUTPUT_ROLE_IDS.contains(&participant.role_id.as_str()));
+    }
+    assert!(!bundle.design.height_scope.present);
+    assert_eq!(bundle.identity.solution_kind, "solve");
+    bundle.verify().expect("stereo strict artifact must self-verify");
+    // 5x5 涓?fixture 鐨?stereo mask 涓虹┖锛堜袱绉?profile 涓嶆贩鐢級銆?    let fx5 = fixture();
+    let bundle5 = regularized_artifact(&fx5);
+    assert!(!bundle5.scope.stereo_strict);
+    assert!(bundle5.scope.stereo_mask.is_empty());
+}
+
+// ===========================================================================
+// 22. 闈欐�佸畧鍗紙NONRT 绾唴瀛樻瀯寤猴紱鏃?I/O 瓒婄晫/绾跨▼/杩涚▼/鐜/缃戠粶/unsafe锛?// ===========================================================================
+
+#[test]
+fn t54_artifact_static_guards() {
+    let source = include_str!("../../src/artifact.rs");
+    for required in [
+        "pub fn build_artifact",
+        "pub fn encode_wav_f32_mono",
+        "pub fn decode_wav_f32_mono",
+        "pub fn to_manifest_json",
+        "pub fn verify",
+        "pub fn write_to_dir",
+        "role_hash",
+        "stale_reasons",
+        "INCOMPLETE",
+        "PREDICTED_FAIL",
+        "holdout_used_for_tuning",
+        "wav_f32_mono",
+        "stereo_mask",
+        "overlay",
+        "ARTIFACT_SCHEMA",
+    ] {
+        assert!(
+            source.contains(required),
+            "artifact.rs missing required semantic probe {required}"
+        );
+    }
+    for forbidden in [
+        "unsafe {",
+        "std::thread",
+        "std::process",
+        "std::net",
+        "std::env",
+        "std::time",
+        "serde",
+        "rand::",
+        "panic!",
+        "unwrap()",
+        ".expect(",
+        "println!",
+        "dbg!",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "artifact.rs must not contain forbidden probe {forbidden}"
+        );
+    }
+    // 绾唴瀛樻瀯寤猴細fs/io 鍙厑璁稿嚭鐜板湪 write_to_dir 鐨勬枃浠惰惤鐩樿矾寰勶紙NONRT锛夈�?    assert!(source.contains("pub fn write_to_dir"));
+    assert!(source.contains("std::fs"));
+}
+
+// ===========================================================================
+// 23. 宸茬煡澶瑰叿 dump锛坋vidence 鐙珛澶嶇畻/瀹¤鐢紱--nocapture 鏌ョ湅锛?// ===========================================================================
+
+#[test]
+fn t54_artifact_known_fixture_dump() {
+    let fx = fixture();
+    let bundle = regularized_artifact(&fx);
+    let solved = solved_artifact(&fx);
+    let manifest = bundle.to_manifest_json();
+    JsonSyntax::validate(&manifest).expect("dump manifest JSON");
+    println!("T54_ARTIFACT_FIXTURE_BEGIN");
+    println!(
+        "SUMMARY status={} codes={:?} artifact_hash={} manifest_sha256={} paths={} files={} wav_bytes={}",
+        bundle.status.as_str(),
+        bundle.status_codes,
+        bundle.artifact_hash,
+        bundle.manifest_sha256,
+        bundle.paths.len(),
+        bundle.files.len(),
+        bundle.quantization.wav_aggregate_sha256
+    );
+    println!(
+        "INPUTS target_sha256={} baseline_hash={} solution_hash={} holdout_report_hash={} role_hash={} overlay_source_sha256={}",
+        bundle.identity.target_sha256,
+        bundle.identity.baseline_hash,
+        bundle.identity.solution_hash.as_deref().unwrap_or("none"),
+        bundle.identity.holdout_report_hash.as_deref().unwrap_or("none"),
+        bundle.scope.role_hash,
+        bundle.scope.overlay.source_sha256
+    );
+    println!(
+        "PARTICIPANTS dense_to_dac={:?} fs={} taps={} D={} stereo_strict={} stereo_mask={:?}",
+        bundle.scope.dense_to_dac,
+        bundle.design.fs,
+        bundle.design.taps,
+        bundle.design.delay_samples,
+        bundle.scope.stereo_strict,
+        bundle.scope.stereo_mask
+    );
+    for path in &bundle.paths {
+        println!(
+            "PATH out={} in={} {} sha256={} bytes={} diag={} delay={} zero={} peak={}",
+            path.out_dense,
+            path.in_dense,
+            path.file,
+            path.sha256,
+            path.bytes,
+            path.diag_baseline,
+            path.delay_samples,
+            path.zero,
+            path.peak_abs
+        );
+    }
+    println!("SOLVE_ARTIFACT_HASH {}", solved.artifact_hash);
+    println!("T54_ARTIFACT_FIXTURE_END");
+}

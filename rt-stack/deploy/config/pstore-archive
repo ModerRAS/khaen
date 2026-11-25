@@ -1,0 +1,41 @@
+#!/bin/bash
+# pstore-archive — 开机第一件事把上次（崩溃/挂死/断电前）的 pstore 内容存下来
+# 为什么：ramoops 在 DRAM（0x40110000），**冷断电会把它一起抹掉**，而它又只能在启动后读。
+# 所以只要板子还能起来，必须先归档；空的也要记一笔（"空"本身就是"没有 panic"的证据）。
+set -u
+OUT=/var/log/tspi/pstore
+mkdir -p "$OUT" 2>/dev/null || true
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | cut -c1-8)
+DEST="$OUT/$STAMP-$BOOT"
+SRC=/sys/fs/pstore
+say() { logger -t tspi-pstore-archive -- "$*"; }
+
+files=$(ls -A "$SRC" 2>/dev/null | tr '\n' ' ')
+say "scan src=$SRC files=[${files:-none}] boot_id=$BOOT"
+
+mkdir -p "$DEST" 2>/dev/null || true
+{
+  echo "captured_at_utc=$STAMP"
+  echo "boot_id=$BOOT"
+  echo "src=$SRC"
+  echo "files=[${files:-none}]"
+  echo "uptime=$(cat /proc/uptime 2>/dev/null)"
+  echo "kernel=$(uname -r 2>/dev/null)"
+} > "$DEST/INDEX.txt" 2>/dev/null
+
+if [ -n "${files:-}" ]; then
+  for f in $files; do
+    [ -f "$SRC/$f" ] || continue
+    cp -- "$SRC/$f" "$DEST/$f" 2>/dev/null && say "archived $f ($(stat -c %s "$DEST/$f" 2>/dev/null) B)"
+  done
+  # 归档成功后清空 pstore，避免下次被覆盖/混淆（内容已落盘）
+  if [ -s "$DEST/INDEX.txt" ] && ls "$DEST" | grep -qv '^INDEX.txt$'; then
+    ( command -v systemd-cat >/dev/null && echo "pstore archived" | systemd-cat -t tspi-pstore-archive ) 2>/dev/null || true
+    rm -f "$SRC"/* 2>/dev/null || true
+    say "pstore cleared after archive"
+  fi
+else
+  say "pstore empty (no panic/oops recorded for previous boot)"
+fi
+exit 0

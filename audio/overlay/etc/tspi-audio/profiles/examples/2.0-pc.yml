@@ -1,0 +1,13 @@
+# tspi-audio channelmap v2 示例 profile（不激活；WebUI 可一键套用/复制后改）
+schema: tspi-channelmap/v2
+version: 2
+profile:
+  name: "2.0-pc"
+  description: "PC 2ch -> 2.0"
+input:
+  layout: "pc-2ch"
+  channels: 2   # 实测/用户选择；auto 时 apply 需 probe 或 WebUI 选
+output:
+  device: auto
+  channels: 2  # 以 ALSA 实测为准；这里给 fallback
+  layout: "2.0"

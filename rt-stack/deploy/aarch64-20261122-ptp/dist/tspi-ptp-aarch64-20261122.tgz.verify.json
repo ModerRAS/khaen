@@ -1,0 +1,55 @@
+{
+ "ok": true,
+ "schema": "tspi-rt-stack/deploy-tar-verify/v1",
+ "archive": "/home/builder/ptp-repo/rt-stack/deploy/aarch64-20261122-ptp/dist/tspi-ptp-aarch64-20261122.tgz",
+ "size": 433905,
+ "sha256": "a7de9f511d28aba9cc69b5e42b23d813a57cd6c7496fffe0b6ea5f971a2a44d3",
+ "members": 18,
+ "required_exec": [
+  {
+   "pattern": "bin/*",
+   "matches": [
+    {
+     "path": "bin/phc2sys",
+     "mode": "0o755"
+    },
+    {
+     "path": "bin/phc_ctl",
+     "mode": "0o755"
+    },
+    {
+     "path": "bin/pmc",
+     "mode": "0o755"
+    },
+    {
+     "path": "bin/ptp4l",
+     "mode": "0o755"
+    }
+   ]
+  },
+  {
+   "pattern": "lib/ptp-master-start",
+   "matches": [
+    {
+     "path": "lib/ptp-master-start",
+     "mode": "0o755"
+    }
+   ]
+  },
+  {
+   "pattern": "lib/ptp-phc2sys-start",
+   "matches": [
+    {
+     "path": "lib/ptp-phc2sys-start",
+     "mode": "0o755"
+    }
+   ]
+  }
+ ],
+ "sums_checked": 16,
+ "extras": [
+  "SHA256SUMS",
+  "dist/tspi-ptp-aarch64-20261122.tgz.partial"
+ ],
+ "failures": []
+}

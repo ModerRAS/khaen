@@ -1,0 +1,489 @@
+{
+  "schema": "tspi-reference-evidence/v1",
+  "task": {
+    "wbs": "T03",
+    "team_task": "task-23",
+    "role": "rt-reference",
+    "title": "P0 独立 f64 参考规范 / 手算 impulse 向量与夹具（含 offdiag/尾/D）",
+    "write_scope": [
+      "projects/tspi-audio-dsp/rt-stack/reference"
+    ],
+    "status": "COMPLETE_PENDING_REVIEW"
+  },
+  "generated_at_utc": "2026-11-16T17:06:11+00:00",
+  "environment": {
+    "python": "3.14.6 | packaged by Anaconda, Inc. | (main, Jun 18 2026, 21:18:42) [MSC v.1942 64 bit (AMD64)]",
+    "python_executable": "C:\\ProgramData\\miniconda3\\python.exe",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "system": "Windows",
+    "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+    "reference_root": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+    "generated_at_utc": "2026-11-16T17:06:11+00:00"
+  },
+  "inputs_external": [
+    {
+      "path": "scratch/lead/planner/TSPI-RT-STACK-WBS.md",
+      "role": "authority: WBS task table T03 row + write-scope/DoD discipline",
+      "bytes": 35728,
+      "sha256": "ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9"
+    },
+    {
+      "path": "scratch/lead/planner/DSP-HOST-DECISION.md",
+      "role": "authority: unified model / FIR / calibration / RT spec",
+      "bytes": 27951,
+      "sha256": "ab1056477d8e1c01dbe61df6f2d15c4bb0cca6b05f9177ef51559df3e2d25ded"
+    },
+    {
+      "path": "scratch/lead/planner/DSP-HOST-CPU-BUDGET.md",
+      "role": "authority: F_ji = P_j*G_ji*A_i and fused-length arithmetic",
+      "bytes": 18859,
+      "sha256": "5954bfa2c64210e1dd4c75268aa674976c3f67fa35c2000363cc6dc5e25a2aa1"
+    },
+    {
+      "path": "calibration-spec/CONTRACT.md",
+      "role": "context: tspi-calibration/v1 delay/polarity/PEQ semantics",
+      "bytes": 22329,
+      "sha256": "1664028e34823a08500c46416941aae584ba8ac8edc2cf0dbf99e205bd02726b"
+    },
+    {
+      "path": "audio/overlay/etc/tspi-audio/layout-presets.yml",
+      "role": "context: 4.1.2 role->DAC mapping (line 219)",
+      "bytes": 11228,
+      "sha256": "4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da"
+    },
+    {
+      "path": "upmix/examples/profiles/upmix-4.1.2-movie.yml",
+      "role": "context: existing channelmap v2 4.1.2 profile/roles",
+      "bytes": 3836,
+      "sha256": "99a2c2d9fdb85ea870ea47696b50c50bb440e5855efaf22dcd22efaf9d7528d4"
+    },
+    {
+      "path": "web/docs/API.md",
+      "role": "context: existing REST/channelmap surface (compat boundary)",
+      "bytes": 26056,
+      "sha256": "ffcd0898f98ba317ab836918d7fc61fcf15f8a540ae639382c0e97b842ac6f08"
+    },
+    {
+      "path": "docs/E2E-ACCEPTANCE.md",
+      "role": "context: G=I / pre-declared D and f32-vs-f64 engineering defaults",
+      "bytes": 15257,
+      "sha256": "697387fa8507aa5eef628cd7c1e00c2739f6a9964664ecdf74a77a78f1612bc6"
+    },
+    {
+      "path": "docs/MIMO-COEFF-PLAN.md",
+      "role": "context: G=e_i+g correction-matrix background and low-band scope",
+      "bytes": 45259,
+      "sha256": "fc832832487e73182787ad19e4fb3639edb3355584a33a5f9a4d707f539c3f30"
+    },
+    {
+      "path": "docs/MIMO-ROADMAP.md",
+      "role": "context: MIMO stage boundaries / role participation",
+      "bytes": 50960,
+      "sha256": "c856119328a26275df56f31dc93e2cc77139061030ba89bf8e8a388ac49813e2"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "evidence\\T03\\env.txt",
+      "role": "output",
+      "bytes": 488,
+      "sha256": "cee558f454aa4d7ef5f3763a032ee29dcef83bb43f6677ffafe338eb36fa4377"
+    },
+    {
+      "path": "evidence\\T03\\F64-OFFLINE.txt",
+      "role": "output",
+      "bytes": 297,
+      "sha256": "cf2d7291e4002677b8c033cd619b40e1580eff60e6b4ee78ee5f09089c333a8c"
+    },
+    {
+      "path": "evidence\\T03\\F64-STREAM.txt",
+      "role": "output",
+      "bytes": 344,
+      "sha256": "0150d3890fd2ca2cab41208b6bd3808902daa6fffbf7aed3f63d4392e7e07194"
+    },
+    {
+      "path": "evidence\\T03\\GEN-CHECK.txt",
+      "role": "output",
+      "bytes": 218,
+      "sha256": "350a2cd9c294343daf44ca9847078a95c910714d2cda4b47af3fe99bdd0c53fb"
+    },
+    {
+      "path": "evidence\\T03\\NEG-VALID.txt",
+      "role": "output",
+      "bytes": 1383,
+      "sha256": "befb4f7729ca3f8c7b24ffacc18d61686eac864659e5a2a0322b68b7ec760b71"
+    },
+    {
+      "path": "evidence\\T03\\verify-negative-report.json",
+      "role": "output",
+      "bytes": 28559,
+      "sha256": "9128317dffbc1a9dcb455cc262be2f4d39268827da387ac79e23e0ff3947134a"
+    },
+    {
+      "path": "evidence\\T03\\verify-report.json",
+      "role": "output",
+      "bytes": 26319,
+      "sha256": "63f3994599aec3973df25b9265f7a376e4bca1fd77c15925ccaa5937b9140f7c"
+    },
+    {
+      "path": "evidence\\T03\\VERIFY.txt",
+      "role": "output",
+      "bytes": 1343,
+      "sha256": "baa60a538e0b8965770de360a0e13063dfa6776445157c0b0a7483b41c1b7402"
+    },
+    {
+      "path": "fixtures\\cases\\C01_identity_d0_1x1.json",
+      "role": "output",
+      "bytes": 1217,
+      "sha256": "d790f0ac00253936e4c18917d2cbcbd9a84dc19c85fa4680f3f4d3ee83868b9c"
+    },
+    {
+      "path": "fixtures\\cases\\C02_identity_delay_d3.json",
+      "role": "output",
+      "bytes": 1226,
+      "sha256": "b71722f35a15122721e9b47d0f1976b9b2e4935d4e0ee0b53f506d09169cce9e"
+    },
+    {
+      "path": "fixtures\\cases\\C03_offdiag_2x2.json",
+      "role": "output",
+      "bytes": 1455,
+      "sha256": "75c341b46673e45b14fcfe23c77f3a7656e24944aa65510173a4180af69fbb01"
+    },
+    {
+      "path": "fixtures\\cases\\C04_tail_conv_1x1.json",
+      "role": "output",
+      "bytes": 1646,
+      "sha256": "974bda5d1b75cca57c2ee3a0a2c140c4d70841673c163cce4f3d91ef9376642b"
+    },
+    {
+      "path": "fixtures\\cases\\C05_d_in_support.json",
+      "role": "output",
+      "bytes": 1260,
+      "sha256": "e78e1e6cd6dc7e968b0e18cf8c7f314d6a9e2f80bcbbff121a0766e4650f9a14"
+    },
+    {
+      "path": "fixtures\\cases\\C06_row_col_asymmetry.json",
+      "role": "output",
+      "bytes": 1715,
+      "sha256": "28e33ce073f9917c28e0ebf3d46c517bf431130f043cefe0a6e3567887f78526"
+    },
+    {
+      "path": "fixtures\\cases\\C07_factorized_fused.json",
+      "role": "output",
+      "bytes": 1542,
+      "sha256": "28a98beccf41b71b9e7c864d5804258444dc6733a1a3be269f3c30d51614a1de"
+    },
+    {
+      "path": "fixtures\\cases\\C08_stereo_strict_scatter.json",
+      "role": "output",
+      "bytes": 2571,
+      "sha256": "ab60a9497adaa3cc1cb3e3b8b3f30510e8c150b95b2120a621fdf525ec06a570"
+    },
+    {
+      "path": "fixtures\\cases\\C09_4_1_2_5x5_embed.json",
+      "role": "output",
+      "bytes": 5479,
+      "sha256": "fb350e39a9fb2c2d282ee6505d85b4cbda4e973e8b70e0cf6c0ecf9681f84cd6"
+    },
+    {
+      "path": "fixtures\\cases\\C10_streaming_128.json",
+      "role": "output",
+      "bytes": 7247,
+      "sha256": "ccfaf9451dad98677f00cc81f34fcc316a51d71bdb08ed422f05b7d6469d7d5a"
+    },
+    {
+      "path": "fixtures\\cases\\C11_tolerance_f64.json",
+      "role": "output",
+      "bytes": 2616,
+      "sha256": "60d2ddb27fcaa718bff508f27ecb4d9c4601678c021647b824f0cc27709e6d87"
+    },
+    {
+      "path": "fixtures\\cases\\C12_dense_5x5_D3_exact.json",
+      "role": "output",
+      "bytes": 7098,
+      "sha256": "dcab7018765390ae2d67bb031d91181856908b1fc744bbf69af4cd73325d93ae"
+    },
+    {
+      "path": "fixtures\\cases\\C13_identity_graph_4_1_2_d2.json",
+      "role": "output",
+      "bytes": 3720,
+      "sha256": "8f73ef5ecc960c5bc1b2af4b41a26ce203ee1c62ccdae5f612b7fba5b26bf4e5"
+    },
+    {
+      "path": "fixtures\\cases\\C14_input_column_fir.json",
+      "role": "output",
+      "bytes": 1969,
+      "sha256": "2935bb4ba2773234dbe5e40f4ace3b37931a9d8ba5526a261c9ccff95267dc35"
+    },
+    {
+      "path": "fixtures\\index.json",
+      "role": "output",
+      "bytes": 4499,
+      "sha256": "6d1a585034e925286c503e20dd3587948527d367aa4e2f300293e334b895272f"
+    },
+    {
+      "path": "HAND-CALC.md",
+      "role": "output",
+      "bytes": 14921,
+      "sha256": "36ca46eb597f462a16ba0d43fb2b8d8477e8fe7c5b31e5293f00e684f0403ce0"
+    },
+    {
+      "path": "README.md",
+      "role": "output",
+      "bytes": 6738,
+      "sha256": "f7eb9b1717d35afd61ee251343ca49740353beb96c8cd09e69a8458bfa4deb68"
+    },
+    {
+      "path": "REVIEW-CHECKLIST.md",
+      "role": "output",
+      "bytes": 7605,
+      "sha256": "2d4d17ebfb18893f9a88165438e3e4f0f7331ecd70afa9a90e04f886d5e4cc16"
+    },
+    {
+      "path": "SPEC.md",
+      "role": "output",
+      "bytes": 22843,
+      "sha256": "f7f1a5337216138b1cffbf10f4a8652bb173f49108256d62790e0050e1b6962f"
+    },
+    {
+      "path": "tools\\gen_fixtures.py",
+      "role": "output",
+      "bytes": 24695,
+      "sha256": "14d88e95c39b746b9ce7c541d50beb78be26228299f597534de693e25b5737e3"
+    },
+    {
+      "path": "tools\\make_evidence.py",
+      "role": "output",
+      "bytes": 13566,
+      "sha256": "624bebf4d490c59b2a6d3546973dd6cd06b554e410625a8d96718940d503a8ac"
+    },
+    {
+      "path": "tools\\ref_f64.py",
+      "role": "output",
+      "bytes": 10296,
+      "sha256": "640333a68587652a0095e3546ffd77875b65f04af2d2aa4a47ec61c9b590d507"
+    },
+    {
+      "path": "tools\\verify_reference.py",
+      "role": "output",
+      "bytes": 42949,
+      "sha256": "b5f4fad99d33135dced85fbf4f4fef05699f88ebd303ca3f09535b92a1ac30af"
+    }
+  ],
+  "commands": [
+    {
+      "id": "GEN-CHECK",
+      "command": "C:\\ProgramData\\miniconda3\\python.exe tools/gen_fixtures.py --check",
+      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "exit_code": 0,
+      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\GEN-CHECK.txt",
+      "note": "deterministic fixtures on disk are byte-identical to generated content"
+    },
+    {
+      "id": "VERIFY",
+      "command": "C:\\ProgramData\\miniconda3\\python.exe tools/verify_reference.py --report evidence/T03/verify-report.json",
+      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "exit_code": 0,
+      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\VERIFY.txt",
+      "note": "independent exact-rational + binary64 + streaming + hand-block verification (108 checks)"
+    },
+    {
+      "id": "NEG-VALID",
+      "command": "C:\\ProgramData\\miniconda3\\python.exe tools/verify_reference.py --negative-validation --report evidence/T03/verify-negative-report.json",
+      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "exit_code": 0,
+      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\NEG-VALID.txt",
+      "note": "invalid-fixture rejection + trap formula rebuild + handcheck-vs-ref_f64 (12 extra checks)"
+    },
+    {
+      "id": "F64-OFFLINE",
+      "command": "C:\\ProgramData\\miniconda3\\python.exe tools/ref_f64.py --case fixtures/cases/C04_tail_conv_1x1.json --mode offline --summary",
+      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "exit_code": 0,
+      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\F64-OFFLINE.txt",
+      "note": "standalone binary64 offline evaluator smoke test"
+    },
+    {
+      "id": "F64-STREAM",
+      "command": "C:\\ProgramData\\miniconda3\\python.exe tools/ref_f64.py --case fixtures/cases/C10_streaming_128.json --mode streaming --block 64 --summary",
+      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "exit_code": 0,
+      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\F64-STREAM.txt",
+      "note": "standalone binary64 streaming evaluator smoke test"
+    }
+  ],
+  "verify_summary": {
+    "schema": "tspi-reference-verify-report/v1",
+    "total_checks": 108,
+    "failures": 0,
+    "fixtures": 14,
+    "passed": true,
+    "tag_union": [
+      "D",
+      "baseline",
+      "column_fir",
+      "dense",
+      "embed",
+      "five_by_five",
+      "identity",
+      "input_delay",
+      "multichannel",
+      "offdiag",
+      "polarity",
+      "random_exact",
+      "row_column",
+      "scatter",
+      "streaming",
+      "strict",
+      "tail",
+      "tolerance",
+      "zerofill"
+    ],
+    "hand": {
+      "cases": [
+        "C01_identity_d0_1x1",
+        "C02_identity_delay_d3",
+        "C03_offdiag_2x2",
+        "C04_tail_conv_1x1",
+        "C05_d_in_support",
+        "C06_row_col_asymmetry",
+        "C07_factorized_fused",
+        "C08_stereo_strict_scatter",
+        "C09_4_1_2_5x5_embed",
+        "C13_identity_graph_4_1_2_d2",
+        "C14_input_column_fir"
+      ],
+      "tags": [
+        "D",
+        "baseline",
+        "column_fir",
+        "embed",
+        "five_by_five",
+        "identity",
+        "input_delay",
+        "multichannel",
+        "offdiag",
+        "polarity",
+        "row_column",
+        "scatter",
+        "strict",
+        "tail",
+        "zerofill"
+      ],
+      "counts": {
+        "handcalc": 11,
+        "handcheck": 1,
+        "handtrap": 3
+      }
+    }
+  },
+  "negative_validation_summary": {
+    "total_checks": 120,
+    "failures": 0,
+    "passed": true,
+    "extra": [
+      "T03-NEG-01..08",
+      "T03-TRAPFORM-C04/C06/C14",
+      "T03-HANDCHK-F64"
+    ]
+  },
+  "dod_checks": [
+    {
+      "id": "T03-DOD-1",
+      "text": "P0 独立 f64 参考规范（offdiag/尾/D 语义、长度/比较规则）",
+      "method": "SPEC.md §1-§9 评审；fixture schema 未引用任何 T06/rt-check 产物",
+      "evidence": [
+        "SPEC.md",
+        "fixtures/index.json"
+      ],
+      "result": "PASS"
+    },
+    {
+      "id": "T03-DOD-2",
+      "text": "手算 impulse 向量与夹具数据（含 offdiag/尾/D）",
+      "method": "HAND-CALC.md 的 handcalc/handcheck/handtrap 块由验证器解析并与 fixture 逐值比对；14 个 fixture 覆盖 offdiag/tail/D",
+      "evidence": [
+        "HAND-CALC.md",
+        "fixtures/cases/",
+        "evidence/T03/verify-report.json"
+      ],
+      "result": "PASS"
+    },
+    {
+      "id": "T03-DOD-3",
+      "text": "不依赖 T06 或未来 rt-check（当时不存在）",
+      "method": "仅 Python 3 标准库；无 Cargo.toml/Cargo.lock；无网络/无板端；verify/gen/ref 三个脚本独立可跑",
+      "evidence": [
+        "tools/gen_fixtures.py",
+        "tools/verify_reference.py",
+        "tools/ref_f64.py"
+      ],
+      "result": "PASS"
+    },
+    {
+      "id": "T03-DOD-4",
+      "text": "文档解析卷积手算向量（机器可解析）",
+      "method": "verify_reference.py 解析 HAND-CALC.md 的 fenced json 块并逐样本/全量比对",
+      "evidence": [
+        "HAND-CALC.md",
+        "evidence/T03/verify.txt"
+      ],
+      "result": "PASS"
+    },
+    {
+      "id": "T03-DOD-5",
+      "text": "输入 hash 绑定与证据 manifest（输入/命令/exit code/未测项/假设）",
+      "method": "manifest.json 记录 authority/context 输入与所有产物的 sha256/bytes；fixture index 哈希由验证器逐字节核对",
+      "evidence": [
+        "evidence/T03/manifest.json",
+        "fixtures/index.json"
+      ],
+      "result": "PASS"
+    },
+    {
+      "id": "T03-DOD-6",
+      "text": "实际执行非零测试，禁止只编译/0 测试就 PASS",
+      "method": "验证器实际执行 fixture 计数（14）、检查数（108）、手算块数（15）、每例 f64/streaming 断言；另 --negative-validation 执行 12 项非法夹具/公式/handcheck 检查；exit code 记录在 manifest",
+      "evidence": [
+        "evidence/T03/verify-report.json",
+        "evidence/T03/verify.txt"
+      ],
+      "result": "PASS"
+    }
+  ],
+  "manual_review": {
+    "checklist": "REVIEW-CHECKLIST.md",
+    "author_self_check": "PASS",
+    "independent_reviewer": "Lead (pending)"
+  },
+  "untested": [
+    "T07/T08/T12/T14/T15 等 Rust 消费者尚未实现，fixtures 尚未被 Rust 测试实际消费（本任务只交付 P0 oracle）。",
+    "真实板端/ALSA/CueMix/96k/多速率/ASRC 未测（不在 T03 范围，且不碰板）。",
+    "f32 runtime 与 f64 参考的比较门未实测（仅给 informative 指引）。",
+    "5.3.2 / 7.1.4 / 22ch 等布局未单独做 fixture；图模型布局无关，当前覆盖 4.1.2 与合成 2x2/5x5。",
+    "C09 5x5 全量 expected 由精确复算验证，手算只点检 17 个代表样本；完整 25 路手算未逐项展开。",
+    "IIR PEQ / limiter 动态 / volume ramp / 保护 fallback 图不在 core 参考范围。",
+    "真实测量数据/H_raw/房间模态效果未涉及（P0 仅数学参考）。"
+  ],
+  "assumptions": [
+    "以 2026-11-16 版 TSPI-RT-STACK-WBS.md（sha256 见 inputs_external）与 DSP-HOST-DECISION.md 为准。",
+    "4.1.2 角色顺序按 audio/overlay layout-presets 第 219 行：0-based FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7，ch6 未用（8 容器/7 角色）。",
+    "D 计入 G 支撑：L_G = max(D+1, 1+max_g_tap)，L_F = L_A+L_G+L_P-2，L_out = L_in+L_F-1。",
+    "流式契约：尾部补 L_F-1 个零并按 B 分块，拼接截断到 L_out，与离线逐样本一致。",
+    "exact 夹具的系数/输入全部为整数或有界二进制分式，保证任何求和顺序下 binary64 精确；tolerance 夹具 expected 为精确值的单次正确舍入。",
+    "本机 Python 的 float 为 IEEE-754 binary64（CPython 标准保证）。",
+    "fixture expected 是 oracle 数据，只能通过 gen_fixtures.py 重新生成并由验证器复核。",
+    "context 输入（CONTRACT/API/E2E/MIMO-*/upmix profile）是生成时点快照；authority 输入 WBS/DECISION/CPU-BUDGET 语义为准；context 文档后续被其他工作流更新属预期，重跑本脚本会刷新 inputs_external hash。"
+  ],
+  "not_claimed": [
+    "不是生产实现、不是 RT/性能/延迟证据、不是测量或声学效果结论。",
+    "不代表 T02 core API、T04 FIR 设计器、T05 兼容矩阵、T13 calibration adapter 已完成。",
+    "没有修改板端/服务/CamillaDSP/S1 运行状态，没有 git commit。"
+  ],
+  "prohibited_actions_not_performed": [
+    "未碰板端（board.py 未使用）、未开 ALSA/声卡、未改 CamillaDSP/S1 运行状态、未 git commit。",
+    "未创建 rt-stack Cargo 根（属 T06 integrator）；未写 reference/ 之外任何文件。"
+  ],
+  "result": "PASS"
+}

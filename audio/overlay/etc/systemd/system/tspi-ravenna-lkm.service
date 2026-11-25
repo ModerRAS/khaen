@@ -1,0 +1,19 @@
+[Unit]
+Description=tspi-audio: load MergingRavennaALSA kernel module (AES67 mode only)
+Documentation=file:///etc/modprobe.d/tspi-audio.conf
+ConditionPathExists=/run/tspi/active-aes67
+Before=tspi-aes67-daemon.service
+PartOf=tspi-audio.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/modprobe MergingRavennaALSA
+ExecStop=/sbin/rmmod MergingRavennaALSA
+# modprobe 需要 CAP_SYS_MODULE；内核模块本身在 netfilter 注册钩子（只允许模式 B 加载）
+CapabilityBoundingSet=CAP_SYS_MODULE
+ProtectKernelModules=no
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+schema: tspi-calibration/v1
+sample_rate: 48000
+reference_index: 1
+layout: synthetic-2
+created_unix: 1794736597
+tool: tspi-calibrate
+version: 0.1.0
+note: merged multi-channel calibration
+channels:
+- index: 0
+  name: FL
+  delay_samples: 0
+  polarity: normal
+  filters: []
+- index: 1
+  name: FR
+  delay_samples: 0
+  polarity: invert
+  filters: []

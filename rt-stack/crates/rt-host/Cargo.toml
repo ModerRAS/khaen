@@ -1,0 +1,27 @@
+# TSPI RT host：SPSC / admission / clock / swap / format / fault scaffold（T06；leaf T16-T22/T43/T45/T26）
+# WBS T06 scaffold；本 manifest 只由 integrator 写。
+[package]
+name = "tspi-rt-host"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "TSPI RT host：SPSC / admission / clock / swap / format / fault scaffold（T06；leaf T16-T22/T43/T45/T26）"
+
+[dependencies]
+tspi-dsp-core = { workspace = true }
+tspi-mimo-design = { workspace = true }
+tspi-cal-dsp = { workspace = true }
+# task-235：自研用户态 AES67 接收端（Rust，纯 std）→ host capture 最小接线。
+tspi-aoip-aes67 = { workspace = true }
+# task-210（Cursor v1.1 N-10 分层硬约束）：中置下混内容适配改由 rt-host 自持
+# （`src/content_map.rs`，纯 std、无新增外部依赖），**不再依赖/调用** compat S1 兼容层
+# （task-203 曾临时追加 tspi-dsp-compat 依赖，本任务移除）；compat::channel_map 保留为旧
+# S1/兼容层参考实现。证据：evidence/cursor-fix-v1-hostmap/。
+
+# Linux 真实 ALSA 后端依赖（WBS T90；Lead 2026-11-17 批准）。
+# target-specific：Windows/macOS 开发与 CI 不编译、不链接 libasound；Windows 继续使用
+# src/alsa.rs 的 T17 fake backend（无硬件打开路径）。真实 backend 接线归 T17-follow-up/T26。
+# 版本以 crates.io 最新稳定为准：0.12.1（2026-11-17 查询 max_stable）；Cargo.lock 锁定精确版本。
+# Linux 构建前置：pkg-config + libasound2-dev（见 README §4 与 ci/README.md）。
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = { workspace = true }

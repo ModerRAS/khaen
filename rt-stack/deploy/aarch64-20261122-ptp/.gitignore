@@ -1,0 +1,3 @@
+# repo-hygiene（rt-stack/docs/REPO-HYGIENE-PLAN.md）：PTP add-on bundle 的二进制与 tgz 不入库；
+# 本目录只提交 manifest/SHA256SUMS/units/etc/lib/docs（bin/ 与 dist/*.tgz 由本机磁盘交付）。
+bin/

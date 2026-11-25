@@ -1,0 +1,67 @@
+#!/bin/sh
+# tspi-ptp-master-start -- ExecStart wrapper for tspi-ptp-master.service.
+# Resolves the interface, chooses hardware (PHC) or software timestamping per TSPI_PTP_HW_TS,
+# then exec()s the bundled ptp4l. No shell wrapper state remains after exec.
+set -eu
+
+LIB=/usr/local/lib/tspi/ptp-lib.sh
+if [ ! -r "$LIB" ]; then
+    echo "tspi-ptp: ERROR: $LIB missing (bundle lib/ not installed)" >&2
+    exit 78
+fi
+# shellcheck source=ptp-lib.sh
+. "$LIB"
+
+TSPI_PTP_CONF=${TSPI_PTP_CONF:-/etc/tspi-ptp/ptp4l-master.conf}
+IFACE=$(resolve_ptp_iface) || exit 78
+if [ ! -r "$TSPI_PTP_CONF" ]; then
+    ptp_log "ERROR: config not readable: $TSPI_PTP_CONF"
+    exit 78
+fi
+
+MODE=${TSPI_PTP_HW_TS:-auto}
+case "$MODE" in
+    auto)
+        if PHC=$(detect_ptp_phc "$IFACE"); then
+            TSFLAG=-H
+            ptp_log "iface=$IFACE timestamping=hardware phc=$PHC conf=$TSPI_PTP_CONF"
+        else
+            TSFLAG=-S
+            ptp_log "WARN: no PHC/hardware timestamping on $IFACE -> software timestamp fallback (TSPI_PTP_HW_TS=auto)"
+        fi
+        ;;
+    on)
+        if ! PHC=$(detect_ptp_phc "$IFACE"); then
+            ptp_log "ERROR: TSPI_PTP_HW_TS=on but $IFACE has no hardware timestamping/PHC"
+            exit 78
+        fi
+        TSFLAG=-H
+        ptp_log "iface=$IFACE timestamping=hardware phc=$PHC conf=$TSPI_PTP_CONF"
+        ;;
+    off)
+        TSFLAG=-S
+        ptp_log "WARN: iface=$IFACE timestamping=software forced by TSPI_PTP_HW_TS=off (diagnostics only)"
+        ;;
+    *)
+        ptp_log "ERROR: invalid TSPI_PTP_HW_TS=$MODE (allowed: auto|on|off)"
+        exit 64
+        ;;
+esac
+
+if [ ! -d /run/tspi-ptp ]; then
+    mkdir -p /run/tspi-ptp || { ptp_log "ERROR: cannot create /run/tspi-ptp"; exit 73; }
+fi
+PTP4L=/opt/tspi-rt-stack/ptp/current/bin/ptp4l
+if [ ! -x "$PTP4L" ]; then
+    ptp_log "ERROR: $PTP4L missing or not executable (bundle bin/ not installed)"
+    exit 78
+fi
+
+set -- "$PTP4L" -f "$TSPI_PTP_CONF" -i "$IFACE" "$TSFLAG" -m
+if [ -n "${TSPI_PTP_EXTRA_ARGS:-}" ]; then
+    # Word splitting is intentional: extra ptp4l CLI flags come from the env file.
+    # shellcheck disable=SC2086
+    set -- "$@" $TSPI_PTP_EXTRA_ARGS
+fi
+ptp_log "exec: $*"
+exec "$@"

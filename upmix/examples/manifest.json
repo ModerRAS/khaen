@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-11-17T00:20:05.138819+08:00",
+  "tool": "tspi-upmix 1.2.0",
+  "presets_file": "C:\\work\\projects\\tspi-audio-dsp\\upmix\\presets\\upmix-presets.yml",
+  "files": [
+    {
+      "path": "profiles\\upmix-4.1.2-movie.yml",
+      "sha256": "99a2c2d9fdb85ea870ea47696b50c50bb440e5855efaf22dcd22efaf9d7528d4",
+      "size": 3836
+    },
+    {
+      "path": "profiles\\upmix-4.1.2-movie-safe.yml",
+      "sha256": "ccbbe147dacb5f116b1b94c838403f17d30212694ce1d13c1269de34c702c888",
+      "size": 4284
+    },
+    {
+      "path": "camilladsp\\upmix-4.1.2-movie.yml",
+      "sha256": "ac9fde243816b4d9e1b191f8398ff2ee908dadd93f5ce00e5285d329d66519ab",
+      "size": 3874
+    },
+    {
+      "path": "profiles\\upmix-4.1.2-music.yml",
+      "sha256": "49136c32177eee626839bf6e79231a3f528e8cf855b7d647d585f9cdb1bfd3c2",
+      "size": 3823
+    },
+    {
+      "path": "profiles\\upmix-4.1.2-music-safe.yml",
+      "sha256": "a1162f97b54769ca86d37b06bffe41879605c6e6cd98b7fb5e9f9acf2aee714e",
+      "size": 4273
+    },
+    {
+      "path": "camilladsp\\upmix-4.1.2-music.yml",
+      "sha256": "e19371559a51cd34a3e156f2263409c41b54a3ea318dbf5937bdec20160a7a34",
+      "size": 3896
+    },
+    {
+      "path": "profiles\\upmix-4.1.2-wide.yml",
+      "sha256": "d7c82fec3565690688a7479e53fdc2e522d709c72e6158ba73eeac55180a42f0",
+      "size": 3831
+    },
+    {
+      "path": "profiles\\upmix-4.1.2-wide-safe.yml",
+      "sha256": "95e2b7090cfca43bf245eaff52e1a628f743e80f05f6ea0f888b700bc108d152",
+      "size": 4281
+    },
+    {
+      "path": "camilladsp\\upmix-4.1.2-wide.yml",
+      "sha256": "ab8504cbe411397e5b1ab94df7a3cf533ab2a5ee7a082224a3a5255d9077fdf4",
+      "size": 3882
+    },
+    {
+      "path": "profiles\\upmix-5.3.2-movie.yml",
+      "sha256": "3ff9ce6869e1af3b5420c0964ff44a111feecabd3bbad72ea7b7f05fdc3e7c20",
+      "size": 4831
+    },
+    {
+      "path": "profiles\\upmix-5.3.2-movie-safe.yml",
+      "sha256": "93c55a2360d4d6b040fe45c74a0aea4d1b67789f3de569ef583dc6b6f1b14a11",
+      "size": 5279
+    },
+    {
+      "path": "camilladsp\\upmix-5.3.2-movie.yml",
+      "sha256": "3d3ec233592231447f54c17fd8de036c3557a8122426efc23048f4d24c6985d1",
+      "size": 5146
+    },
+    {
+      "path": "profiles\\upmix-5.3.2-music.yml",
+      "sha256": "14c00f949ad8c2952d42bc473edb13476370ce57af5356e5e1924e59de77d973",
+      "size": 4842
+    },
+    {
+      "path": "profiles\\upmix-5.3.2-music-safe.yml",
+      "sha256": "d6af9f1b09f83b92fd3e649246dd94d5d7efc41623eb3e85188bcf59be3f699e",
+      "size": 5292
+    },
+    {
+      "path": "camilladsp\\upmix-5.3.2-music.yml",
+      "sha256": "098af74ad3445ddcb6453d32309ca741274c51d47c9739a1a6fedf1154e6b38d",
+      "size": 5192
+    },
+    {
+      "path": "profiles\\upmix-5.3.2-wide.yml",
+      "sha256": "476d41f33258500c60b6362cdc6bb5a3e65707433ed3459b189623f1a3f59da8",
+      "size": 4830
+    },
+    {
+      "path": "profiles\\upmix-5.3.2-wide-safe.yml",
+      "sha256": "d0feff3cb33c14afedd99930f810be05c80f2a4b7a71340d7720a5fa48594343",
+      "size": 5280
+    },
+    {
+      "path": "camilladsp\\upmix-5.3.2-wide.yml",
+      "sha256": "436ba0e78ae56291fd9107870bcb517025d75df5970921f8fb901e078327b7ac",
+      "size": 5158
+    }
+  ]
+}

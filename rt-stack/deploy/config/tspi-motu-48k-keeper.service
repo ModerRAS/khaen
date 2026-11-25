@@ -1,0 +1,14 @@
+[Unit]
+Description=tspi MOTU 48k keeper (silent 1s, forbids 192k idle)
+After=sound.target
+Before=tspi-rt-host.service
+ConditionPathExists=/proc/asound/cards
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/tspi/motu-48k-keeper
+TimeoutStartSec=20
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

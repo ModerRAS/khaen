@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "end0 UP 192.0.2.215/24"
+exit 0

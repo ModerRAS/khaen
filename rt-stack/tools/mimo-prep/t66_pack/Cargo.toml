@@ -1,0 +1,15 @@
+[package]
+name = "tspi-mimo-t66-pack"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "mimo_t66_pack"
+path = "src/main.rs"
+
+[dependencies]
+tspi-calibration = { path = "../../../crates/calibration" }
+tspi-fir-designer = { path = "../../../crates/designer" }
+
+[workspace]

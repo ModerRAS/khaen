@@ -1,0 +1,21 @@
+# BREN7P lab PTPv2 slave (inferno-dev VM, host-only enp0s9; software timestamps; measurement only).
+# clock_servo nullf + huge step thresholds: never step/steer the VM clock; offsets are read via pmc
+# CURRENT_DATA_SET by rt-stack/ptp/tests/measure-slave-offset.sh.
+# For the TAI-semantics replay set utc_offset 37 (and align the GM clock with tai-align-gm.py).
+[global]
+clientOnly                  1
+serverOnly                  0
+domainNumber                0
+network_transport           UDPv4
+delay_mechanism             E2E
+time_stamping               software
+clock_servo                 nullf
+step_threshold              1000
+first_step_threshold        1000
+logAnnounceInterval         0
+logSyncInterval             -3
+announceReceiptTimeout      3
+tx_timestamp_timeout        10
+#utc_offset                 37
+uds_address                 /tmp/ptp-slave/slave.uds
+uds_file_mode               0666

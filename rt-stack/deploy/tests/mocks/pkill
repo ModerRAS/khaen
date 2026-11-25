@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# T28 mock pkill：从 MOCK_PROCS 删除匹配行（模拟 TERM/KILL 生效）；不向真实进程发信号。
+set -u
+P="${MOCK_PROCS:?MOCK_PROCS 未设置}"
+pat=""
+for a in "$@"; do case "$a" in -*) : ;; *) pat="${pat:+$pat }$a" ;; esac; done
+[ -f "$P" ] || exit 1
+tmp="$P.tmp.$$"
+changed=1
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  if printf "%s\n" "$line" | grep -Eq "$pat"; then changed=0; else printf "%s\n" "$line" >> "$tmp"; fi
+done < "$P"
+mv -f "$tmp" "$P" 2>/dev/null || true
+[ -n "${MOCK_LOG:-}" ] && printf "pkill %s\n" "$*" >> "$MOCK_LOG"
+exit "$changed"

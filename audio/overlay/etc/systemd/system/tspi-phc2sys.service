@@ -1,0 +1,32 @@
+[Unit]
+Description=tspi-audio: phc2sys (system clock <-> NIC PHC; AES67 B2/B3 only)
+Documentation=man:phc2sys(8)
+After=tspi-ptp4l-master.service
+ConditionPathExists=/run/tspi/active-aes67-master
+# 与 daemon/LKM/statime 互斥（见 tspi-ptp4l-master.service 同款注释）
+Conflicts=tspi-statime-inferno.service tspi-aes67-daemon.service tspi-ravenna-lkm.service
+PartOf=tspi-audio.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/tspi-audio
+# GM 模式：系统时钟（可由 NTP 驯服）驱动网卡 PHC；不需要 NTP 时可将 -s CLOCK_REALTIME 改成 -s CLOCK_MONOTONIC
+# -O 37: PHC 跑 TAI（IEEE1588 PTP timescale），= UTC + 当前闰秒差(37 s)。GM 必须广播 TAI，
+#        否则 slave 会按 utc_offset 换算，看到 ~37 s 的假偏移（2026-11-17 VM 实测）。
+#        闰秒差变化时只需改这里的数字；纯媒体时钟场景不关心绝对时刻，但标准设备(Dante/AES67)按 TAI 解码。
+ExecStart=/usr/sbin/phc2sys -s CLOCK_REALTIME -c ${TSPI_IFACE} -O 37 -m
+Restart=on-failure
+RestartSec=2
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+CapabilityBoundingSet=CAP_SYS_TIME CAP_SYS_NICE CAP_IPC_LOCK
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectClock=no
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

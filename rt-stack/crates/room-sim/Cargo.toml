@@ -1,0 +1,10 @@
+# RoomForge 鞋盒镜像源法（ISM）仿真移植（calib-chain-20261121 / mimo-opt-20261122）。
+# 纯离线、零外部依赖：只用于仿真夹具的加载/校验/重渲染与频带指标，不参与实时路径。
+[package]
+name = "tspi-room-sim"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "RoomForge shoebox image-source simulation port for offline MIMO fixtures (synthetic only)"
+
+[dependencies]

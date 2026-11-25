@@ -1,0 +1,11 @@
+schema: tspi-target-curve/v1
+default: flat
+curves:
+  # D4（2026-11-17）：内置只保留 flat + tilt10；旧 tilt(-3dB@16k) 已删除/superseded。
+  # 其它曲线仅通过 --target @file.yml#id 导入扩展，不设默认、不进交付验收。
+  flat:
+    points: [[20, 0], [1000, 0], [20000, 0]]
+  tilt10:
+    # 20 Hz 0 dB -> 20 kHz -10 dB，log-f 常数斜率（约 -1.0034 dB/oct）；
+    # 1 kHz 理论值 = -10*ln(50)/ln(1000) ≈ -5.663 dB。
+    points: [[20, 0], [1000, -5.663], [20000, -10]]

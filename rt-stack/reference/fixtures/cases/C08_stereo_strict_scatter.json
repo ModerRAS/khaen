@@ -1,0 +1,208 @@
+{
+  "schema": "tspi-reference-fixture/v1",
+  "id": "C08_stereo_strict_scatter",
+  "title": "stereo_strict A_map (FL/FR only) over 4.1.2 roles, scatter to 8ch container",
+  "tags": [
+    "strict",
+    "scatter",
+    "polarity",
+    "zerofill"
+  ],
+  "fs_hz": 48000,
+  "generated_by": "tools/gen_fixtures.py",
+  "graph": {
+    "n_src": 2,
+    "n_out": 7,
+    "container_channels": 8,
+    "d_samples": 0,
+    "a_map": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "a_fir": [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "participants": [
+      0,
+      1,
+      2,
+      3,
+      6
+    ],
+    "g": [
+      [
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      [
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      [
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      [
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      [
+        [],
+        [],
+        [],
+        [],
+        []
+      ]
+    ],
+    "p": [
+      [
+        0,
+        1
+      ],
+      [
+        -1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "scatter": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ]
+  },
+  "supports": {
+    "l_a": 1,
+    "l_g": 1,
+    "l_p": 2,
+    "l_f": 2,
+    "l_out": 3
+  },
+  "input": [
+    [
+      0.5,
+      -0.5
+    ],
+    [
+      0.25,
+      0.25
+    ]
+  ],
+  "expected": [
+    [
+      0,
+      0.5,
+      -0.5
+    ],
+    [
+      -0.25,
+      -0.25,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ]
+  ],
+  "expected_len": 3,
+  "comparison": {
+    "mode": "exact"
+  },
+  "streaming": {
+    "block_sizes": [
+      1,
+      2,
+      64,
+      128
+    ],
+    "flush_zeros": 1,
+    "contract": "pad input with flush_zeros zeros, process in blocks of B, concatenate and truncate to expected_len"
+  },
+  "notes": "stereo_strict：仅 FL/FR 有输入，SL/SR/HFL/HFR/SUB1 输出必须逐样本 0；FL 的 P=[0,1] 是输出侧 1 样本延迟（第 2 个 tap），FR 的 P=[-1] 是输出极性反转；ch6 恒 0。"
+}

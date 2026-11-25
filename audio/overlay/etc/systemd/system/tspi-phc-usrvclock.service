@@ -1,0 +1,29 @@
+[Unit]
+Description=tspi-audio: PHC -> usrvclock bridge (B2 板端 GM 的 Inferno 媒体时钟)
+Documentation=file:///usr/local/lib/tspi/phc-usrvclock
+After=tspi-phc2sys.service
+ConditionPathExists=/run/tspi/active-aes67-master
+# statime（Dante/PTPv1）与 B2 GM 时钟链互斥：两者都占用 /tmp/ptp-usrvclock
+Conflicts=tspi-statime-inferno.service
+PartOf=tspi-audio.target
+
+[Service]
+Type=simple
+# TSPI_IFACE / TSPI_PHC_DEV 来自镜像默认值；socket 路径固定给 Inferno 的 INFERNO_CLOCK_PATH
+EnvironmentFile=-/etc/default/tspi-audio
+Environment=TSPI_USRVCLOCK_SOCKET=/tmp/ptp-usrvclock
+ExecStart=/usr/local/lib/tspi/phc-usrvclock
+Restart=on-failure
+RestartSec=2
+# socket 必须与 tspi-camilladsp 共享（Inferno CLOCK_PATH=/tmp/ptp-usrvclock），不能 PrivateTmp
+PrivateTmp=no
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/tmp
+ProtectClock=no
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

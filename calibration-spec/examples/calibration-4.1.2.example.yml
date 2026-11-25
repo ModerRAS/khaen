@@ -1,0 +1,27 @@
+# tspi-calibration/v1 示例：4.1.2（MOTU 映射：FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7；ch6 空）
+# 映射唯一表（K1 + D8 2026-11-17 终局）：SUB1=index 7 / Line Out 8 是唯一物理口；槽 6 空。
+# Line Out 10（ch9）仅为当时 Line Out 8 不出声的历史临时测试接法，不是设计候选——不得改 index=9。
+# pair 口径（C-15 + D3）：4.1.2 只有 FL:SUB1:80、FR:SUB1:80 是真分频对；高度全频（K2）、环绕/中置低频不汇总 SUB。
+schema: tspi-calibration/v1
+sample_rate: 48000
+reference_index: 0
+layout: "4.1.2"
+created_unix: 1794725000
+tool: {name: tspi-calibrate, version: "0.1.0"}
+note: "示例数据，仅演示格式"
+measurement:
+  mode: direct
+  sweep: {start_hz: 20, end_hz: 20000, seconds: 5.0, level_db: -30.0, fade_ms: 10}
+  playback: {device: "hw:motu,0", channels: 22}
+  capture: {device: "hw:UMIK1,0", channels: 1}
+  pre_seconds: 1.0
+  post_seconds: 1.0
+  repeats: 3
+channels:
+  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: [{freq: 45.0, q: 1.2, gain_db: -4.0}]}
+  - {name: FR, index: 1, delay_samples: 2, polarity: normal, filters: [{freq: 45.0, q: 1.2, gain_db: -3.5}]}
+  - {name: SL, index: 2, delay_samples: 4, polarity: normal, filters: []}
+  - {name: SR, index: 3, delay_samples: 5, polarity: normal, filters: []}
+  - {name: HFL, index: 4, delay_samples: 3, polarity: normal, filters: []}
+  - {name: HFR, index: 5, delay_samples: 3, polarity: normal, filters: []}
+  - {name: SUB1, index: 7, delay_samples: 12, polarity: normal, filters: [{freq: 30.0, q: 2.0, gain_db: 2.0}]}

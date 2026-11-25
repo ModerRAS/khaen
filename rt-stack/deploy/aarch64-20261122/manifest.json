@@ -1,0 +1,110 @@
+{
+ "schema": "tspi-rt-stack/release/v1",
+ "release_id": "aarch64-20261122",
+ "built_at": "2026-11-22T04:42:22+08:00",
+ "target": "aarch64-unknown-linux-gnu",
+ "files": [
+  {
+   "path": "bin/tspi-rt-host",
+   "size": 1451984,
+   "sha256": "40f158669da28ee94c95a6fbeb78de06004c4d60e8a43c3fb76ef24584fa8f9b",
+   "kind": "binary"
+  },
+  {
+   "path": "bin/tspi-rt-daemon",
+   "size": 3171080,
+   "sha256": "6db828d15d9ffcb07ad602d4b42642fc8ce0dc6318548939c620e0a73eeaf6fe",
+   "kind": "binary"
+  },
+  {
+   "path": "bin/tspi-cal",
+   "size": 2608352,
+   "sha256": "7cc598d2616df6ea1c81e8522b5eebba247de3226971803a791c9251ad0c047b",
+   "kind": "binary"
+  },
+  {
+   "path": "units/90-safe-mute.conf.example",
+   "size": 1513,
+   "sha256": "7b1ae91920a678d1953dbfc5e1a7f29a803469e4eea04ddc1833c61d114aa55e",
+   "kind": "unit"
+  },
+  {
+   "path": "units/90-safe-mute.env.example",
+   "size": 460,
+   "sha256": "49933cddea20e6fccb5e1ca27f914968e31d749eb847458b942aedbf764afef0",
+   "kind": "unit"
+  },
+  {
+   "path": "units/tspi-irq-affinity.service",
+   "size": 2525,
+   "sha256": "1d658fd2ed012479bac7f9956ed12c470fc0f8d5332aba6475999abb649eadb2",
+   "kind": "unit"
+  },
+  {
+   "path": "units/tspi-rt-daemon.service",
+   "size": 2522,
+   "sha256": "7d3028ab244fe86c2fcf54bd43fbede882a51c1e3cd0c6ea2d766dcebdde9182",
+   "kind": "unit"
+  },
+  {
+   "path": "units/tspi-rt-host.service",
+   "size": 3594,
+   "sha256": "1ddda0fb07e2b60e326b0a430336238f8ca65b7d58373b448923ccb8464be708",
+   "kind": "unit"
+  },
+  {
+   "path": "units/tspi-rt-stack.target",
+   "size": 1055,
+   "sha256": "8948ef98470619ab6f491c03276d6a8cf740ca35219968d964fe578551fd9ca0",
+   "kind": "unit"
+  },
+  {
+   "path": "etc/irq-affinity.env.example",
+   "size": 1554,
+   "sha256": "eb2f8913d3451e12abeb9214ba4c6e9ad865b011edd877db7d0b1ddd368ea363",
+   "kind": "config"
+  },
+  {
+   "path": "etc/rt-daemon.env.example",
+   "size": 469,
+   "sha256": "087827a733fa2943ada1e61d8b7b46096a4ff1c8f9980f7d5c4dd851f7bd1c2e",
+   "kind": "config"
+  },
+  {
+   "path": "etc/rt-daemon.toml.example",
+   "size": 552,
+   "sha256": "47308b35fc45b065a22970a7271c458fe1801ebe9ec86c4d62a3b34411839034",
+   "kind": "config"
+  },
+  {
+   "path": "etc/rt-host-nsp7.env.example",
+   "size": 729,
+   "sha256": "60e60a40523ebbc4b8d9eb848b9c308e336000d1db8208ec0f4e6d48e7ea4503",
+   "kind": "config"
+  },
+  {
+   "path": "etc/rt-host-nsp7.toml.example",
+   "size": 2266,
+   "sha256": "b96ee4f4c26a104456aefde00345bda63e633dfc26f5eae6d1efd6a233ffcccd",
+   "kind": "config"
+  },
+  {
+   "path": "etc/rt-host.env.example",
+   "size": 1450,
+   "sha256": "519e5853a145cfca5c286cd80c60d2bfde12bbc3ee7f37ecfa765a6158397603",
+   "kind": "config"
+  },
+  {
+   "path": "etc/rt-host.toml.example",
+   "size": 2059,
+   "sha256": "eb1767992e759bf5c8cf61399be8e409a689ba784c2e3bf5d7e2a8c909ee6fe9",
+   "kind": "config"
+  },
+  {
+   "path": "README.deploy.md",
+   "size": 714,
+   "sha256": "4fb9bfe107093f4e35ed501aba1fa530299309f0feaedd39362ff93af80e24e1",
+   "kind": "doc"
+  }
+ ]
+}

@@ -1,0 +1,2609 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""tspi-upmix —— 2.0 立体声上混配置生成器（目标布局 4.1.2 / 5.3.2）。
+
+生成两类产物（同一套参数、同一套 DSP 计划）：
+  1) channelmap v2 profile（/etc/tspi-audio/profiles/upmix-*.yml）
+     可直接被 WebUI 现有「profile 加载 + 应用」使用；不新增 schema 字段。
+  2) 独立 CamillaDSP 配置（ALSA 模板 / File 测试后端）
+     不依赖 channelmap 渲染器，SSH 热部署可直接 apply。
+
+依赖：python3 + PyYAML（与 tspi-channelmap 相同；板端已有 python3-yaml）。
+
+子命令：
+  list                         列出预设
+  show <preset>                显示解析后的矩阵/滤波/延迟（--json 机器可读）
+  profile <preset> -o FILE     生成 channelmap v2 profile（--safe 生成渲染器安全变体）
+  camilla <preset> -o FILE     生成独立 CamillaDSP ALSA 配置
+  file-config <preset> -o FILE --input in.wav [--out-wav out.wav]
+                               生成 CamillaDSP 文件后端配置（离线测试）
+  all -o DIR                   生成全部 profile/配置/清单（2.0 -> 目标布局）
+  container -o DIR             生成 H16 容器输入的上混/直通 profile + autodetect 配置
+  autodetect-config <preset>   生成双路径 autodetect CamillaDSP 配置
+                               （--content-mode auto|stereo|multichannel）
+  detect --wav FILE            输入内容检测（离线容器 WAV；--json 输出运行态同字段）
+  input-mode get|set           读/写输入模式覆盖（auto|stereo|multichannel）
+  autodetect                   内容检测 daemon（CamillaDSP websocket RMS -> Aux1/Aux2）
+  check <preset|--profile F>   自检 +（有 tspi-channelmap 时）真实 CLI 校验
+  params <preset>              WebUI 参数视图 JSON
+  apply <preset>               热应用独立 CamillaDSP 配置（备份+校验+可选重启）
+  rollback                     回滚最近一次 apply
+
+输入内容检测（task-19）：H16 容器可能是 7.1.4 但节目只有 2.0。auto 模式按每通道
+RMS 判定：仅 FL/FR 有能量 → 上混；C/LFE/SL/SR/height 有能量 → 多声道直通（避免与 H16
+内部上混叠加）。覆盖文件 /etc/tspi-audio/input-mode.json；运行态 /run/tspi/input-content.json。
+
+所有生成/应用都不主动启动音频服务；apply 仅在模式非 off 且未传 --no-restart 时重启
+tspi-camilladsp.service，失败自动恢复备份。
+"""
+import argparse
+import array
+import base64
+import datetime
+import hashlib
+import io
+import json
+import math
+import os
+import random
+import re
+import shutil
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    sys.stderr.write("tspi-upmix: 需要 PyYAML（Debian 包 python3-yaml）\n")
+    sys.exit(2)
+
+SCHEMA = "tspi-upmix/v1"
+PROFILE_SCHEMA = "tspi-channelmap/v2"
+TOOL_VERSION = "1.2.1"
+
+# 采样率白名单（用户硬约束 2026-11-17：禁 192k；生产只用 48/96k，默认 48k）。
+# F-01 修复：本开发副本与板端唯一安装源 audio/overlay/usr/local/bin/tspi-upmix 统一拒绝路径；
+# 176400/192000 一律 die（稳定错误码 E_UP_FS_192K_DISABLED），不再进入 build_plan。
+SUPPORTED_SAMPLE_RATES = (44100, 48000, 88200, 96000)
+FORBIDDEN_SAMPLE_RATES = (176400, 192000)
+ERR_FS_192K = "E_UP_FS_192K_DISABLED"
+ERR_FS_UNSUPPORTED = "E_UP_FS_UNSUPPORTED"
+ERR_FS_INVALID = "E_UP_FS_INVALID"
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_PRESET_CANDIDATES = [
+    os.path.join(HERE, "presets", "upmix-presets.yml"),
+    os.path.join(HERE, "..", "presets", "upmix-presets.yml"),
+    "/etc/tspi-audio/upmix/presets.yml",
+]
+DEFAULT_LAYOUT_PRESETS = "/etc/tspi-audio/layout-presets.yml"
+DEFAULT_FIR_DIR = ""  # 已废弃：allpass 改用 Biquad，无需 FIR 文件；保留形参兼容
+RUN_DIR = os.environ.get("TSPI_RUN_DIR", "/run/tspi")
+DEFAULT_CONFIG_TARGET = os.path.join(RUN_DIR, "camilladsp.yml")
+DEFAULT_VAR_DIR = os.environ.get("TSPI_UPUP_VAR_DIR", "/var/lib/tspi/upmix")
+UNIT = "tspi-camilladsp.service"
+
+# 内置布局仅作兜底/自检对照；**唯一真相是板端 layout-presets.yml**。
+# 4.1.2 板端映射（2026-11-16 确认）：FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7，ch6 空；
+# MOTU Line Out 1-6,8（SUB=Line Out 8）。旧内置 SUB1=4/HFL5/HFR6 会错位，已修正。
+BUILTIN_OUTPUT_LAYOUTS = {
+    "4.1.2": [
+        ("FL", 0), ("FR", 1), ("SL", 2), ("SR", 3),
+        ("HFL", 4), ("HFR", 5), ("SUB1", 7),
+    ],
+    "5.3.2": [
+        ("FL", 0), ("FR", 1), ("C", 2), ("SL", 3), ("SR", 4),
+        ("SUB1", 5), ("SUB2", 6), ("SUB3", 7), ("HFL", 8), ("HFR", 9),
+    ],
+}
+BUILTIN_INPUT_LAYOUTS = {"pc-2ch": [("FL", 0), ("FR", 1)]}
+SUPPORTED_LAYOUTS = ("4.1.2", "5.3.2")
+MAINS_ORDER = ("FL", "FR", "C", "SL", "SR")
+SUB_PREFIX = "SUB"
+HEIGHT_ROLES = ("HFL", "HFR")
+
+ROLE_LABELS = {
+    "FL": "Front L", "FR": "Front R", "C": "Center", "SL": "Surround L", "SR": "Surround R",
+    "SUB1": "Subwoofer 1", "SUB2": "Subwoofer 2", "SUB3": "Subwoofer 3",
+    "HFL": "Height L", "HFR": "Height R",
+}
+
+
+# ---------------------------------------------------------------------------
+# 基础工具
+# ---------------------------------------------------------------------------
+def die(msg, code=2):
+    sys.stderr.write("tspi-upmix: %s\n" % msg)
+    sys.exit(code)
+
+
+def _rates_text():
+    return "/".join(str(int(x)) for x in SUPPORTED_SAMPLE_RATES)
+
+
+def check_fs(fs):
+    """采样率白名单（禁 192k）：返回 int；违规 die（退出码 2 + 稳定错误码）。
+
+    与板端 overlay 副本同一语义（F-01）：176400/192000 明确禁用，其他非白名单值
+    报 E_UP_FS_UNSUPPORTED，非数值报 E_UP_FS_INVALID。
+    """
+    try:
+        fs = int(fs)
+    except (TypeError, ValueError):
+        die("采样率非法：%r（仅支持 %s）[%s]" % (fs, _rates_text(), ERR_FS_INVALID))
+    if fs in FORBIDDEN_SAMPLE_RATES:
+        die("采样率 %d 已禁用：禁止 192k（176400/192000），仅支持 %s [%s]"
+            % (fs, _rates_text(), ERR_FS_192K))
+    if fs not in SUPPORTED_SAMPLE_RATES:
+        die("采样率不支持：%r（仅支持 %s）[%s]"
+            % (fs, _rates_text(), ERR_FS_UNSUPPORTED))
+    return fs
+
+
+def db_to_lin(db):
+    return 10.0 ** (float(db) / 20.0)
+
+
+def lin_to_db(x):
+    x = abs(float(x))
+    return -120.0 if x <= 0.0 else 20.0 * math.log10(x)
+
+
+def is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def load_yaml(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def dump_yaml(obj):
+    return yaml.safe_dump(obj, sort_keys=False, allow_unicode=True,
+                          default_flow_style=False, width=120)
+
+
+def write_text(path, text):
+    d = os.path.dirname(os.path.abspath(path))
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp.%d" % os.getpid()
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _find_default_presets(explicit=None):
+    if explicit:
+        if not os.path.isfile(explicit):
+            die("预设文件不存在：%s" % explicit)
+        return explicit
+    for cand in DEFAULT_PRESET_CANDIDATES:
+        if os.path.isfile(cand):
+            return cand
+    die("找不到 upmix 预设文件（可用 --presets 指定）：%s" % DEFAULT_PRESET_CANDIDATES)
+
+
+def load_presets(path=None):
+    path = _find_default_presets(path)
+    doc = load_yaml(path)
+    if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
+        die("预设必须是 %s：%s" % (SCHEMA, path))
+    presets = doc.get("presets") or {}
+    if not isinstance(presets, dict) or not presets:
+        die("预设为空：%s" % path)
+    return {"path": path, "defaults": doc.get("defaults") or {}, "presets": presets}
+
+
+# ---------------------------------------------------------------------------
+# 布局解析
+# ---------------------------------------------------------------------------
+def _layout_roles_from_presets(presets_path, layout_id, kind):
+    if not presets_path or not os.path.isfile(presets_path):
+        return None
+    try:
+        doc = load_yaml(presets_path)
+    except Exception:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    if kind == "output":
+        lay = (doc.get("output_layouts") or {}).get(layout_id)
+        if not isinstance(lay, dict):
+            return None
+        out = []
+        for r in lay.get("roles") or []:
+            if not isinstance(r, dict) or not r.get("id"):
+                continue
+            ov = r.get("outputs")
+            if isinstance(ov, int):
+                ov = [ov]
+            if not isinstance(ov, list):
+                ov = []
+            out.append((str(r["id"]), [int(x) for x in ov if is_num(x)]))
+        return out or None
+    lay = (doc.get("input_layouts") or {}).get(layout_id)
+    if not isinstance(lay, dict):
+        return None
+    streams = lay.get("streams") or []
+    offsets, acc = [], 0
+    for s in streams:
+        offsets.append(acc)
+        if is_num(s):
+            acc += int(s)
+    out = []
+    for r in lay.get("roles") or []:
+        if not isinstance(r, dict) or not r.get("id"):
+            continue
+        st = int(r.get("stream", 0) or 0)
+        ch = int(r.get("channel", 0) or 0)
+        idx = (offsets[st] + ch) if 0 <= st < len(offsets) else ch
+        out.append((str(r["id"]), idx))
+    return out or None
+
+
+def resolve_output_roles(layout_id, layout_presets):
+    if layout_id not in SUPPORTED_LAYOUTS:
+        die("本工具只支持输出布局 %s（当前 %r）；不做 16ch/跨布局扩展"
+            % ("/".join(SUPPORTED_LAYOUTS), layout_id))
+    roles = _layout_roles_from_presets(layout_presets, layout_id, "output")
+    if roles:
+        return roles, "layout-presets:" + str(layout_presets)
+    sys.stderr.write("tspi-upmix: 警告：未读到 layout-presets 中 %s 布局，用内置定义\n" % layout_id)
+    # 内置表是 (role, 单通道) 形式；统一成与 presets 相同的 (role, [channels])
+    return [(rid, [int(ch)]) for rid, ch in BUILTIN_OUTPUT_LAYOUTS[layout_id]], "builtin"
+
+
+def resolve_input_layout(layout_id, layout_presets):
+    """返回 {id, roles:{角色:全局通道}, channels, source}；支持多 flow（streams）布局。"""
+    layout_id = layout_id or "pc-2ch"
+    roles = _layout_roles_from_presets(layout_presets, layout_id, "input")
+    source = "layout-presets:" + str(layout_presets)
+    if not roles:
+        if layout_id not in BUILTIN_INPUT_LAYOUTS:
+            die("未知输入布局 %r（layout-presets 里没有；内置仅 pc-2ch）" % layout_id)
+        sys.stderr.write("tspi-upmix: 警告：未读到 layout-presets 中 %s 布局，用内置定义\n" % layout_id)
+        roles = BUILTIN_INPUT_LAYOUTS[layout_id]
+        source = "builtin"
+    channels = None
+    if layout_presets and os.path.isfile(layout_presets):
+        try:
+            doc = load_yaml(layout_presets)
+            lay = (doc.get("input_layouts") or {}).get(layout_id) or {}
+            v = lay.get("channels")
+            if is_num(v) and int(v) > 0:
+                channels = int(v)
+            sv = lay.get("streams")
+            if channels is None and isinstance(sv, list) and sv and all(is_num(x) and int(x) > 0 for x in sv):
+                channels = sum(int(x) for x in sv)
+        except Exception:
+            pass
+    if channels is None:
+        channels = max([c for _, c in roles] or [0]) + 1
+    return {"id": layout_id, "roles": dict(roles), "channels": int(channels), "source": source}
+
+
+def _xo(cfg, name, default_freq, default_order=4):
+    if cfg is None:
+        return None
+    if not isinstance(cfg, dict):
+        die("%s 必须是 {freq, order, type}" % name)
+    freq = cfg.get("freq", default_freq)
+    order = cfg.get("order", default_order)
+    if not is_num(freq) or freq < 20 or freq >= 24000:
+        die("%s.freq 必须在 [20, 24000)（48k 校验口径）：%r" % (name, freq))
+    if order not in (2, 4, 6, 8):
+        die("%s.order 必须是 2/4/6/8：%r" % (name, order))
+    return {"freq": float(freq), "order": int(order), "type": "LinkwitzRiley"}
+
+
+def _merge(base, override):
+    out = dict(base or {})
+    for k, v in (override or {}).items():
+        out[k] = v
+    return out
+
+
+def _preset_params(presets, preset_id):
+    doc = presets["presets"]
+    if preset_id not in doc:
+        die("未知预设 %r；可选：%s" % (preset_id, ", ".join(sorted(doc))))
+    raw = doc[preset_id] or {}
+    defaults = presets["defaults"] or {}
+    return {
+        "id": preset_id,
+        "label": raw.get("label", preset_id),
+        "description": raw.get("description", ""),
+        "layout": raw.get("layout"),
+        "front": _merge({"gain_db": 0.0}, raw.get("front")),
+        "center": _merge({
+            "enabled": True, "gain_db": -6.0, "extract_gain_db": -6.02, "delay_ms": 0.0,
+            "highpass": {"freq": 200, "order": 4}, "lowpass": {"freq": 12000, "order": 4},
+        }, raw.get("center")),
+        "surround": _merge({
+            "mode": "difference", "gain_db": -6.0, "extract_gain_db": -6.02,
+            "ambience_gain_db": None, "delay_ms": 15.0, "delay_spread_ms": 0.0,
+            "highpass": {"freq": 100, "order": 4}, "lowpass": {"freq": 7000, "order": 4},
+        }, raw.get("surround")),
+        "height": _merge({
+            # 用户裁决 2026-11-16：天空声道默认按普通全频声道处理（无带限、无人工去相关延迟）；
+            # 需要带限时由预设显式写 mode: bandlimited + highpass/lowpass。
+            "mode": "broadband", "source": "mid", "gain_db": -9.0,
+            "extract_gain_db": -6.02, "width": 0.0, "delay_ms": 0.0,
+            "delay_spread_ms": 0.0,
+        }, raw.get("height")),
+        "bass": _merge({
+            "enabled": True, "mode": "matrix", "redirect_from": "auto",
+            "extract_gain_db": -6.02,
+            "mains_highpass": {"freq": 80, "order": 4},
+            "sub_lowpass": {"freq": 80, "order": 4},
+            "sub_gain_db": 0.0, "sub_trims": [],
+        }, raw.get("bass")),
+        "decor": _merge({"mode": "delay", "allpass_stages": 4, "allpass_seed": 101},
+                        raw.get("decor")),
+        "samplerate": raw.get("samplerate", defaults.get("samplerate", 48000)),
+        "chunksize": raw.get("chunksize", defaults.get("chunksize", 512)),
+        "target_level": raw.get("target_level", defaults.get("target_level", 1024)),
+        "adjust_period": raw.get("adjust_period", defaults.get("adjust_period", 10)),
+        "layout_presets": raw.get(
+            "layout_presets",
+            defaults.get("layout_presets", DEFAULT_LAYOUT_PRESETS)),
+    }
+
+
+def _check_param_ranges(p):
+    def chk(cond, msg):
+        if not cond:
+            die("预设 %s 参数越界：%s" % (p["id"], msg))
+
+    chk(-60.0 <= p["front"]["gain_db"] <= 12.0, "front.gain_db")
+    c = p["center"]
+    chk(-60.0 <= c["gain_db"] <= 12.0, "center.gain_db")
+    chk(-60.0 <= c["extract_gain_db"] <= 12.0, "center.extract_gain_db")
+    chk(0.0 <= c["delay_ms"] <= 200.0, "center.delay_ms")
+    s = p["surround"]
+    chk(s["mode"] in ("difference", "mid"), "surround.mode 必须是 difference|mid")
+    chk(-60.0 <= s["gain_db"] <= 12.0, "surround.gain_db")
+    chk(-60.0 <= s["extract_gain_db"] <= 12.0, "surround.extract_gain_db")
+    if s.get("ambience_gain_db") is not None:
+        chk(-60.0 <= s["ambience_gain_db"] <= 12.0, "surround.ambience_gain_db")
+    chk(0.0 <= s["delay_ms"] <= 199.0 and 0.0 <= s["delay_spread_ms"] <= 50.0
+        and s["delay_ms"] + s["delay_spread_ms"] <= 200.0,
+        "surround.delay_ms/delay_spread_ms（合计 ≤200ms）")
+    h = p["height"]
+    chk(h["mode"] in ("bandlimited", "broadband"), "height.mode 必须是 bandlimited|broadband")
+    chk(h["source"] in ("mid", "side"), "height.source 必须是 mid|side")
+    chk(-60.0 <= h["gain_db"] <= 12.0, "height.gain_db")
+    chk(-60.0 <= h["extract_gain_db"] <= 12.0, "height.extract_gain_db")
+    chk(0.0 <= h["width"] <= 1.0, "height.width")
+    chk(0.0 <= h["delay_ms"] <= 199.0 and 0.0 <= h["delay_spread_ms"] <= 50.0
+        and h["delay_ms"] + h["delay_spread_ms"] <= 200.0,
+        "height.delay_ms/delay_spread_ms（合计 ≤200ms）")
+    b = p["bass"]
+    chk(b.get("mode", "matrix") in ("matrix", "redirect"), "bass.mode 必须是 matrix|redirect")
+    chk(-60.0 <= b["extract_gain_db"] <= 12.0, "bass.extract_gain_db")
+    chk(-60.0 <= b["sub_gain_db"] <= 12.0, "bass.sub_gain_db")
+    for tr in b.get("sub_trims") or []:
+        chk(isinstance(tr, dict), "bass.sub_trims 项必须是 mapping")
+        g = tr.get("gain_db", 0.0)
+        d = tr.get("delay_ms", 0.0)
+        chk(is_num(g) and -60.0 <= g <= 12.0, "bass.sub_trims[].gain_db")
+        chk(is_num(d) and 0.0 <= d <= 200.0, "bass.sub_trims[].delay_ms")
+    d = p["decor"]
+    chk(d["mode"] in ("delay", "allpass"), "decor.mode 必须是 delay|allpass")
+    chk(isinstance(d["allpass_stages"], int) and 2 <= d["allpass_stages"] <= 8, "decor.allpass_stages")
+    chk(isinstance(d["allpass_seed"], int), "decor.allpass_seed")
+
+
+# ---------------------------------------------------------------------------
+# DSP 计划
+# ---------------------------------------------------------------------------
+ALLPASS_BASE = [(180.0, 0.5), (720.0, 1.1), (2600.0, 0.7), (6800.0, 0.9)]
+
+
+def _allpass_specs(preset_id, stages, seed):
+    """每去相关角色一组 allpass Biquad（真实全通，相位扩散；不同角色不同频点）。"""
+    specs = {}
+    roles = ("SL", "SR", "HFL", "HFR")
+    for idx, rid in enumerate(roles):
+        cur = []
+        for i in range(stages):
+            f, q = ALLPASS_BASE[i % len(ALLPASS_BASE)]
+            mult = 1.0 + 0.15 * (((seed + idx * 7 + i * 13) % 5) - 2) / 2.0
+            qf = 0.9 + 0.1 * ((seed + idx + i) % 3)
+            cur.append((round(f * mult, 1), round(q * qf, 3)))
+        specs[rid] = cur
+    return specs
+
+
+def _coeff_sources(coeffs):
+    out = []
+    for src in ("FL", "FR"):
+        if src not in coeffs:
+            continue
+        c = float(coeffs[src])
+        if abs(c) < 1e-9:
+            continue
+        gain = round(lin_to_db(c), 3)
+        if gain < -60.0:
+            die("上混系数过小（%s %.2f dB），请调整 extract_gain_db/gain_db" % (src, gain))
+        out.append({"src": src, "gain_db": gain, "inverted": c < 0.0, "mute": False})
+    if not out:
+        die("角色没有有效输入源（检查 extract_gain_db 是否低于 -60 dB）")
+    return out
+
+
+def _role(rid, outputs, sources=None, gain_db=0.0, delay_ms=0.0, polarity="normal",
+          highpass=None, lowpass=None, fir=None, enabled=True):
+    return {
+        "id": rid, "outputs": list(outputs), "sources": sources or [],
+        "gain_db": float(gain_db), "delay_ms": float(delay_ms), "polarity": polarity,
+        "highpass": highpass, "lowpass": lowpass, "peq": [], "fir": fir,
+        "enabled": bool(enabled),
+    }
+
+
+def _passthrough_roles(target_role_ids, outputs, in_roles, front_gain_db=0.0):
+    """输入容器 -> 目标布局 的多声道直通/下混矩阵（按角色名映射；缺的声部留空）。"""
+    def has(r):
+        return r in in_roles
+
+    def s(r, g):
+        return {"src": r, "gain_db": float(g), "inverted": False, "mute": False}
+
+    roles = []
+    for rid in target_role_ids:
+        ov = outputs.get(rid) or []
+        srcs = []
+        if rid == "FL":
+            if has("FL"):
+                srcs.append(s("FL", front_gain_db))
+            if has("C"):
+                srcs.append(s("C", -3.01))
+        elif rid == "FR":
+            if has("FR"):
+                srcs.append(s("FR", front_gain_db))
+            if has("C"):
+                srcs.append(s("C", -3.01))
+        elif rid == "C":
+            if has("C"):
+                srcs.append(s("C", 0.0))
+        elif rid in ("SL", "SR"):
+            prim = "SL" if rid == "SL" else "SR"
+            fold = "BL" if rid == "SL" else "BR"
+            if has(prim):
+                srcs.append(s(prim, 0.0))
+                if has(fold):
+                    srcs.append(s(fold, -6.02))
+            elif has(fold):
+                srcs.append(s(fold, 0.0))
+        elif rid.startswith(SUB_PREFIX):
+            if has("LFE"):
+                srcs.append(s("LFE", 0.0))
+        elif rid in ("HFL", "HFR"):
+            prim = "TFL" if rid == "HFL" else "TFR"
+            alt = "HFL" if rid == "HFL" else "HFR"
+            fold = "TRL" if rid == "HFL" else "TRR"
+            p = prim if has(prim) else (alt if has(alt) else None)
+            if p:
+                srcs.append(s(p, 0.0))
+            if has(fold):
+                srcs.append(s(fold, -6.02))
+        roles.append(_role(rid, ov, srcs, gain_db=0.0, highpass=None, lowpass=None))
+    return roles
+
+
+_LAYOUT_PRESETS_OVERRIDE = None
+_INPUT_LAYOUT_OVERRIDE = None
+_PATH_OVERRIDE = "stereo"
+
+
+def build_plan(preset_id, presets, fs=None, fir_dir=None, layout_presets=None, compat="full",
+               input_layout=None, path=None):
+    input_layout = input_layout or _INPUT_LAYOUT_OVERRIDE
+    path = path or _PATH_OVERRIDE
+    p = _preset_params(presets, preset_id)
+    if layout_presets:
+        p["layout_presets"] = layout_presets
+    elif _LAYOUT_PRESETS_OVERRIDE:
+        p["layout_presets"] = _LAYOUT_PRESETS_OVERRIDE
+    # F-01：与 overlay 副本统一走 check_fs（禁 176400/192000）。
+    fs = check_fs(fs or p["samplerate"])
+    _check_param_ranges(p)
+    layout = p["layout"]
+    out_roles, out_src = resolve_output_roles(layout, p["layout_presets"])
+    in_info = resolve_input_layout(input_layout, p["layout_presets"])
+    in_roles = in_info["roles"]
+    role_ids = [rid for rid, _ in out_roles]
+    outputs = {rid: ov for rid, ov in out_roles}
+    if "FL" not in in_roles or "FR" not in in_roles:
+        die("输入布局 %s 缺少 FL/FR 角色" % in_info["id"])
+    for need in ("FL", "FR"):
+        if need not in role_ids:
+            die("输出布局 %s 缺少 %s 角色" % (layout, need))
+    has_center = "C" in role_ids
+    sub_roles = [rid for rid in role_ids if rid.startswith(SUB_PREFIX)]
+    height_roles = [rid for rid in role_ids if rid in HEIGHT_ROLES]
+    if layout == "4.1.2" and len(sub_roles) != 1:
+        die("4.1.2 应有 1 个 SUB，实际 %s" % sub_roles)
+    if layout == "5.3.2" and len(sub_roles) != 3:
+        die("5.3.2 应有 3 个 SUB，实际 %s" % sub_roles)
+    if len(height_roles) != 2:
+        die("布局 %s 应有 HFL/HFR" % layout)
+    nout = max([max(ov) for ov in outputs.values() if ov] or [0]) + 1
+
+    # 多声道直通路径（输入容器 -> 目标布局；不走 2.0 上混）
+    if path == "passthrough":
+        roles = _passthrough_roles(role_ids, outputs, in_roles, p["front"]["gain_db"])
+        bm_off = {"enabled": False, "lfe_role": "", "lfe_to": [], "lfe_gain_db": 0.0,
+                  "redirect": {"enabled": True, "sources": [], "targets": [], "gain_db": 0.0},
+                  "mains_highpass_hz": 80.0, "mains_highpass_order": 4,
+                  "sub_lowpass_hz": 80.0, "sub_lowpass_order": 4, "sub_gain_db": 0.0}
+        plan = {
+            "id": preset_id, "label": p["label"], "description": p["description"],
+            "layout": layout, "fs": fs, "input_layout": in_info["id"],
+            "input_channels": in_info["channels"], "input_roles": in_roles,
+            "output_channels": nout, "output_roles": role_ids, "roles": roles,
+            "bass_management": bm_off, "sub_roles": sub_roles, "decor": p["decor"],
+            "allpass_specs": {}, "chunksize": int(p["chunksize"]),
+            "target_level": int(p["target_level"]), "adjust_period": int(p["adjust_period"]),
+            "layout_source": out_src, "notes": [], "bass_mode": "off", "path": "passthrough",
+        }
+        plan["id"] = "passthrough-%s-to-%s" % (in_info["id"], layout)
+        plan["label"] = "多声道直通/跨布局下混：%s -> %s" % (in_info["id"], layout)
+        plan["description"] = ("跨布局下混（C 折入 FL/FR -3.01 dB；BL/BR/TRL/TRR 折入对应声道 -6.02 dB）；"
+                                "不是同布局直通，也不含低音管理（与上混路径低频行为不同）")
+        plan["notes"].append("跨布局下混路径：输入容器（%s，%dch）按角色映射到 %s；"
+                             "C 折入 FL/FR（-3.01 dB），BL/BR/TRL/TRR 折入对应声道（-6.02 dB）；"
+                             "无低音管理（FL/FR 全频、SUB 只收 LFE），与上混路径低频行为不同"
+                             % (in_info["id"], in_info["channels"], layout))
+        if compat == "safe":
+            plan["id"] = plan["id"] + "-safe"
+        return plan
+
+    # 低音管理
+    b = p["bass"]
+    bm_enabled = bool(b.get("enabled"))
+    bass_mode = b.get("mode", "matrix")
+    mains_hp = _xo(b.get("mains_highpass"), "bass.mains_highpass", 80) if bm_enabled else None
+    sub_lp = _xo(b.get("sub_lowpass"), "bass.sub_lowpass", 80) if bm_enabled else None
+    bm_renderer = bm_enabled and bass_mode == "redirect"
+
+    # 去相关：allpass 级联规格（真实全通 Biquad，仅独立 CamillaDSP 配置支持）
+    decor = p["decor"]
+    allpass_specs = {}
+    if decor["mode"] == "allpass":
+        allpass_specs = _allpass_specs(preset_id, int(decor.get("allpass_stages", 4)),
+                                       int(decor.get("allpass_seed", 101)))
+
+    roles = []
+
+    # FL / FR（bass 启用时加高通；否则纯直通）
+    for rid, srcname in (("FL", "FL"), ("FR", "FR")):
+        roles.append(_role(rid, outputs.get(rid),
+                           [{"src": srcname, "gain_db": 0.0, "inverted": False, "mute": False}],
+                           gain_db=p["front"]["gain_db"], highpass=mains_hp))
+
+    # C
+    if has_center:
+        c = p["center"]
+        g = db_to_lin(c["extract_gain_db"])
+        roles.append(_role(
+            "C", outputs["C"], _coeff_sources({"FL": g, "FR": g}),
+            gain_db=c["gain_db"], delay_ms=c["delay_ms"],
+            highpass=_xo(c.get("highpass"), "center.highpass", 200),
+            lowpass=_xo(c.get("lowpass"), "center.lowpass", 12000),
+            enabled=bool(c.get("enabled", True))))
+
+    # 环绕
+    s = p["surround"]
+    g = db_to_lin(s["extract_gain_db"])
+    amb = s.get("ambience_gain_db")
+    amb_lin = db_to_lin(amb) if amb is not None else 0.0
+    if s["mode"] == "difference":
+        sl = {"FL": g + amb_lin, "FR": -g + amb_lin}
+        sr = {"FR": g + amb_lin, "FL": -g + amb_lin}
+    else:
+        sl = sr = {"FL": g + amb_lin, "FR": g + amb_lin}
+    hp_n = _xo(s.get("highpass"), "surround.highpass", 100)
+    lp_n = _xo(s.get("lowpass"), "surround.lowpass", 7000)
+    roles.append(_role("SL", outputs["SL"], _coeff_sources(sl), gain_db=s["gain_db"],
+                       delay_ms=s["delay_ms"], highpass=hp_n, lowpass=lp_n))
+    roles.append(_role("SR", outputs["SR"], _coeff_sources(sr), gain_db=s["gain_db"],
+                       delay_ms=s["delay_ms"] + s.get("delay_spread_ms", 0.0),
+                       highpass=hp_n, lowpass=lp_n))
+
+    # 高度
+    h = p["height"]
+    hg = db_to_lin(h["extract_gain_db"])
+    if h["source"] == "mid":
+        base = {"FL": hg * 0.5, "FR": hg * 0.5}
+    else:
+        base = {"FL": hg, "FR": -hg}
+    w = float(h["width"])
+    if h["source"] == "mid" and w > 0.0:
+        hfl = {"FL": hg * ((1.0 - w) * 0.5 + w), "FR": hg * (1.0 - w) * 0.5}
+        hfr = {"FR": hg * ((1.0 - w) * 0.5 + w), "FL": hg * (1.0 - w) * 0.5}
+    else:
+        hfl, hfr = dict(base), dict(base)
+    bandlimited = h["mode"] == "bandlimited"
+    hp_h = _xo(h.get("highpass"), "height.highpass", 1800) if bandlimited else None
+    lp_h = _xo(h.get("lowpass"), "height.lowpass", 10000) if bandlimited else None
+    hfl_id = [rid for rid in height_roles if rid.endswith("L")][0]
+    hfr_id = [rid for rid in height_roles if rid.endswith("R")][0]
+    roles.append(_role(hfl_id, outputs[hfl_id], _coeff_sources(hfl), gain_db=h["gain_db"],
+                       delay_ms=h["delay_ms"], highpass=hp_h, lowpass=lp_h))
+    roles.append(_role(hfr_id, outputs[hfr_id], _coeff_sources(hfr), gain_db=h["gain_db"],
+                       delay_ms=h["delay_ms"] + h.get("delay_spread_ms", 0.0),
+                       highpass=hp_h, lowpass=lp_h))
+
+    # SUB
+    redirect_from = b.get("redirect_from") or "auto"
+    if redirect_from == "auto":
+        redirect_from = [rid for rid in role_ids if rid in MAINS_ORDER]
+    if not isinstance(redirect_from, list):
+        die("bass.redirect_from 必须是 auto 或角色数组")
+    for rid in redirect_from:
+        if rid not in role_ids:
+            die("bass.redirect_from 含未知输出角色 %r" % rid)
+    trims = b.get("sub_trims") or []
+    if len(trims) > len(sub_roles):
+        die("bass.sub_trims 数量超过 SUB 数（%d > %d）" % (len(trims), len(sub_roles)))
+    sub_g = db_to_lin(b.get("extract_gain_db", -6.02))
+    for i, rid in enumerate(sub_roles):
+        tr = trims[i] if i < len(trims) else {}
+        if bm_enabled and bass_mode == "matrix":
+            sub_sources = _coeff_sources({"FL": sub_g, "FR": sub_g})
+            sub_lp_role = dict(sub_lp) if sub_lp else None
+        else:
+            sub_sources = []
+            sub_lp_role = None
+        roles.append(_role(
+            rid, outputs[rid], sub_sources,
+            gain_db=float(b.get("sub_gain_db", 0.0)) + float(tr.get("gain_db", 0.0)),
+            delay_ms=float(tr.get("delay_ms", 0.0)),
+            lowpass=sub_lp_role, enabled=bm_enabled))
+
+    order = {rid: i for i, rid in enumerate(role_ids)}
+    roles.sort(key=lambda r: order.get(r["id"], 99))
+
+    bm = {
+        "enabled": bm_renderer, "lfe_role": "", "lfe_to": [], "lfe_gain_db": 0.0,
+        "redirect": {"enabled": True,
+                     "sources": list(redirect_from) if bm_renderer else [],
+                     "targets": list(sub_roles) if bm_renderer else [],
+                     "gain_db": float(b.get("extract_gain_db", -6.02))},
+        "mains_highpass_hz": float(_xo(b.get("mains_highpass"), "bass.mains_highpass", 80)["freq"]),
+        "mains_highpass_order": int(_xo(b.get("mains_highpass"), "bass.mains_highpass", 80)["order"]),
+        "sub_lowpass_hz": float(_xo(b.get("sub_lowpass"), "bass.sub_lowpass", 80)["freq"]),
+        "sub_lowpass_order": int(_xo(b.get("sub_lowpass"), "bass.sub_lowpass", 80)["order"]),
+        "sub_gain_db": 0.0,
+    }
+
+    plan = {
+        "id": preset_id, "label": p["label"], "description": p["description"],
+        "layout": layout, "fs": fs, "input_layout": in_info["id"],
+        "input_channels": in_info["channels"], "input_roles": in_roles,
+        "output_channels": nout, "output_roles": role_ids, "roles": roles,
+        "bass_management": bm, "sub_roles": sub_roles, "decor": decor,
+        "allpass_specs": allpass_specs,
+        "chunksize": int(p["chunksize"]), "target_level": int(p["target_level"]),
+        "adjust_period": int(p["adjust_period"]), "layout_source": out_src,
+        "notes": [], "bass_mode": bass_mode, "path": "stereo",
+    }
+    _plan_notes(plan, p)
+    if compat == "safe":
+        _make_compat_safe(plan, p)
+    elif compat != "full":
+        die("compat 必须是 full|safe")
+    return plan
+
+
+def _make_compat_safe(plan, p):
+    """safe 变体：只去掉 sources[].inverted（源反相）。环绕/高度改 mid；不能绕过渲染器 bug A。"""
+    s, h = p["surround"], p["height"]
+    g = db_to_lin(s["extract_gain_db"])
+    amb = s.get("ambience_gain_db")
+    amb_lin = db_to_lin(amb) if amb is not None else 0.0
+    mid = _coeff_sources({"FL": g + amb_lin, "FR": g + amb_lin})
+    for role in plan["roles"]:
+        if role["id"] in ("SL", "SR"):
+            role["sources"] = [dict(x) for x in mid]
+    if h["source"] == "side":
+        hg = db_to_lin(h["extract_gain_db"])
+        hm = _coeff_sources({"FL": hg * 0.5, "FR": hg * 0.5})
+        for role in plan["roles"]:
+            if role["id"] in ("HFL", "HFR"):
+                role["sources"] = [dict(x) for x in hm]
+    plan["id"] = plan["id"] + "-safe"
+    plan["label"] = plan["label"] + "（渲染器安全版）"
+    plan["description"] = plan["description"] + "；safe：环绕/高度全用 mid 合成（无源反相）"
+    plan["notes"].append("safe 变体：只去掉 sources[].inverted（源反相）依赖；**不能绕过旧渲染器 bug A**"
+                         "（Filter step 的 channels/names 配对错，所有 per-role 滤波都会互相叠加）。"
+                         "旧镜像（<OEM v5）唯一可用路径=独立 CamillaDSP 配置（tspi-upmix apply）或先打 patches/ 补丁；"
+                         "safe 只用于“不想用源反相”的听感取舍。")
+
+
+def _plan_notes(plan, p):
+    notes = []
+    s, h, c, b = p["surround"], p["height"], p["center"], p["bass"]
+    if plan["layout"] == "4.1.2":
+        notes.append("4.1.2 无中置：对白/中心内容保留在 FL/FR（虚拟中置）")
+    if plan["layout"] == "5.3.2" and c.get("enabled", True):
+        notes.append("中置 = mid=(L+R)/2 每源 %.2f dB，角色增益 %.1f dB" % (c["extract_gain_db"], c["gain_db"]))
+    if s["mode"] == "difference":
+        notes.append("环绕 = (L-R)/2 差信号（每源 %.2f dB，L/R 反相）总增益 %.1f dB + 延迟 %.1f ms%s"
+                     % (s["extract_gain_db"], s["gain_db"], s["delay_ms"],
+                        "，左右延迟差 %.1f ms" % s["delay_spread_ms"] if s.get("delay_spread_ms") else ""))
+    else:
+        notes.append("环绕 = mid 合成（每源 %.2f dB）总增益 %.1f dB + 延迟 %.1f ms"
+                     % (s["extract_gain_db"], s["gain_db"], s["delay_ms"]))
+    if h["mode"] == "bandlimited" and h.get("highpass") and h.get("lowpass"):
+        height_kind = "带限 %.0f-%.0f Hz LR%d" % (h["highpass"]["freq"], h["lowpass"]["freq"],
+                                                  h["highpass"]["order"])
+    else:
+        height_kind = "全频（不做高通/低通）"
+    height_delay = (" + 延迟 %.1f ms" % h["delay_ms"]) if abs(h["delay_ms"]) > 1e-9 \
+        else "（无人工去相关延迟）"
+    notes.append("高度 = %s + %s%s%s" % (
+        "mid=(L+R)/2" if h["source"] == "mid" else "side=(L-R)/2",
+        height_kind, height_delay,
+        "（width=%.2f 混入左右直达）" % h["width"] if h.get("width") else ""))
+    if b.get("enabled"):
+        if b.get("mode", "matrix") == "matrix":
+            notes.append("低音管理（简化：仅 FL/FR mid 进 SUB，非完整矩阵 BM）：FL/FR 高通 %.0f Hz LR%d；"
+                         "%s = 低通 %.0f Hz LR%d（源 %.2f dB）；C/SL/SR 低频不汇总"
+                         "（redirect_from 仅校验不生效，真矩阵 BM 待做）"
+                         % (b["mains_highpass"]["freq"], b["mains_highpass"]["order"],
+                            "/".join(plan["sub_roles"]), b["sub_lowpass"]["freq"],
+                            b["sub_lowpass"]["order"], b["extract_gain_db"]))
+        else:
+            notes.append("低音管理（渲染器 BM）：需要 tspi-channelmap BM 渲染修复后才能用此模式")
+    if s["mode"] == "difference":
+        notes.append("注意：环绕含 sources[].inverted——当前 tspi-channelmap 渲染器会丢弃（已知缺陷）；"
+                     "旧镜像应走独立 CamillaDSP 配置（tspi-upmix apply）或先打 patches/ 补丁；"
+                     "*-safe 只去掉源反相，不能绕过 bug A（Filter step 配对错误）")
+    if plan["decor"]["mode"] == "allpass":
+        notes.append("去相关：级联 allpass Biquad（真实全通、幅度不变；仅独立 CamillaDSP 配置支持，"
+                     "channelmap profile 退化为固定延迟）")
+    elif any([s.get("delay_spread_ms"), h.get("delay_spread_ms")]):
+        notes.append("去相关：左右延迟差（环绕 %.1f ms / 高度 %.1f ms）"
+                     % (s.get("delay_spread_ms", 0.0), h.get("delay_spread_ms", 0.0)))
+    else:
+        notes.append("去相关：仅固定延迟（左右对称）；需要扩散感用 wide 预设或 decor.mode=allpass")
+    plan["notes"] = notes
+
+
+# ---------------------------------------------------------------------------
+# channelmap v2 profile
+# ---------------------------------------------------------------------------
+def _profile_role(role):
+    out = {
+        "id": role["id"], "label": ROLE_LABELS.get(role["id"], role["id"]),
+        "enabled": bool(role["enabled"]), "outputs": list(role["outputs"]),
+        "sources": [dict({"source": s["src"], "gain_db": float(s["gain_db"])},
+                         **({"inverted": True} if s.get("inverted") else {}))
+                    for s in role["sources"]],
+        "gain_db": float(role["gain_db"]), "delay_ms": float(role["delay_ms"]),
+        "polarity": role["polarity"], "peq": list(role.get("peq") or []),
+    }
+    for key in ("highpass", "lowpass", "fir"):
+        if role.get(key):
+            out[key] = dict(role[key])
+    return out
+
+
+def render_profile(plan):
+    return {
+        "schema": PROFILE_SCHEMA, "version": 2,
+        "profile": {"name": plan.get("profile_name", plan["id"]), "description": plan["description"]},
+        "input": {"layout": plan.get("input_layout", "pc-2ch"), "channels": plan["input_channels"],
+                  "presets": {}, "probe_order": None},
+        "output": {"device": "auto", "channels": plan["output_channels"],
+                   "layout": plan["layout"],
+                   "roles": [_profile_role(r) for r in plan["roles"]]},
+        "remap": {"preset": None, "routes": [], "drop_unused": True, "silence_unmapped": True},
+        "bass_management": plan["bass_management"],
+    }
+
+
+def profile_text(plan):
+    header = (
+        "# tspi-upmix 生成：%s\n# %s\n"
+        "# 输入 %s（%dch）-> 输出 %s（%dch）；schema %s；tspi-upmix %s\n# 参数：%s\n"
+        % (plan["id"], plan["description"], plan.get("input_layout", "pc-2ch"),
+           plan["input_channels"], plan["layout"], plan["output_channels"],
+           PROFILE_SCHEMA, TOOL_VERSION, "；".join(plan["notes"])))
+    return header + dump_yaml(render_profile(plan))
+
+
+# ---------------------------------------------------------------------------
+# 独立 CamillaDSP 配置
+# ---------------------------------------------------------------------------
+def _rl(rid):
+    return re.sub(r"[^a-z0-9]+", "_", rid.lower())
+
+
+def _camilla_core(plan, out_channels=None):
+    """out_channels = 播放设备通道数（MOTU 22）；pipeline 必须输出同样多通道。"""
+    filters, mixers, pipeline = {}, {}, {}
+    roles = plan["roles"]
+    nout = int(out_channels or plan["output_channels"])
+    bm = plan["bass_management"]
+    sub_roles = plan["sub_roles"]
+    in_ch = plan["input_roles"]
+
+    def addf(name, typ, params):
+        filters[name] = {"type": typ, "parameters": params}
+
+    mx = {"description": "upmix：2.0 -> %s（%dch）" % (plan["layout"], nout),
+          "channels": {"in": plan["input_channels"], "out": nout}, "mapping": []}
+    for role in roles:
+        for o in role["outputs"]:
+            srcs = []
+            for s in role["sources"]:
+                d = {"channel": int(in_ch[s["src"]])}
+                if abs(float(s["gain_db"])) > 1e-9:
+                    d["gain"] = float(s["gain_db"])
+                if s.get("inverted"):
+                    d["inverted"] = True
+                srcs.append(d)
+            mx["mapping"].append({"dest": int(o), "sources": srcs})
+    mixers["upmix"] = mx
+
+    active = [r for r in roles if r["enabled"] and r["outputs"]]
+    owner = {}
+    for r in active:
+        for o in r["outputs"]:
+            owner[int(o)] = r
+
+    if bm.get("enabled") and sub_roles:
+        rd = bm.get("redirect") or {}
+        n = len(sub_roles)
+        mx_ext = {"description": "bass extract：主声道复制到临时通道",
+                  "channels": {"in": nout, "out": nout + n}, "mapping": []}
+        for o in range(nout):
+            mx_ext["mapping"].append({"dest": o, "sources": [{"channel": o}]})
+        for i, rid in enumerate(sub_roles):
+            srcs = []
+            for srid in rd.get("sources") or []:
+                role = next((r for r in roles if r["id"] == srid), None)
+                if role is None or not role["enabled"]:
+                    continue
+                for o in role["outputs"]:
+                    srcs.append({"channel": int(o),
+                                 "gain": float(rd.get("gain_db") or 0.0)})
+            mx_ext["mapping"].append({"dest": nout + i, "sources": srcs})
+        mixers["bass_extract"] = mx_ext
+        lp_pairs = []
+        for i, rid in enumerate(sub_roles):
+            role = next((r for r in roles if r["id"] == rid), None)
+            lpx = (role or {}).get("lowpass") or {
+                "freq": bm["sub_lowpass_hz"], "order": bm["sub_lowpass_order"]}
+            name = _rl(rid) + "_lp"
+            addf(name, "BiquadCombo", {"type": "LinkwitzRileyLowpass",
+                                       "freq": float(lpx["freq"]), "order": int(lpx["order"])})
+            lp_pairs.append((nout + i, name))
+        mx2 = {"description": "bass sum", "channels": {"in": nout + n, "out": nout},
+               "mapping": []}
+        for o in range(nout):
+            own = owner.get(o)
+            sub_idx = sub_roles.index(own["id"]) if own and own["id"] in sub_roles else None
+            if sub_idx is not None:
+                srcs = [{"channel": nout + sub_idx}]
+                if own.get("polarity") == "invert":
+                    srcs[0]["inverted"] = True
+                item = {"dest": o, "sources": srcs}
+                if own.get("mute"):
+                    item["mute"] = True
+                mx2["mapping"].append(item)
+            else:
+                mx2["mapping"].append({"dest": o, "sources": [{"channel": o}]})
+        mixers["to_outputs"] = mx2
+        pipeline = [{"type": "Mixer", "name": "upmix"},
+                    {"type": "Mixer", "description": "bass extract", "name": "bass_extract"}]
+        for ch, name in lp_pairs:
+            pipeline.append({"type": "Filter", "description": "SUB lowpass（extract 后）",
+                             "channels": [ch], "names": [name]})
+        pipeline.append({"type": "Mixer", "description": "bass sum -> 输出",
+                         "name": "to_outputs"})
+    else:
+        mixers["to_outputs"] = mx
+        pipeline = [{"type": "Mixer", "name": "to_outputs"}]
+
+    def role_filters(role):
+        rl = _rl(role["id"])
+        hp = lp = firn = gainn = delayn = None
+        hp_xo = role.get("highpass")
+        if bm.get("enabled") and role["id"] in (bm["redirect"].get("sources") or []) and hp_xo is None:
+            hp_xo = {"freq": bm["mains_highpass_hz"], "order": bm["mains_highpass_order"]}
+        if hp_xo:
+            hp = rl + "_hp"
+            addf(hp, "BiquadCombo", {"type": "LinkwitzRileyHighpass",
+                                     "freq": float(hp_xo["freq"]), "order": int(hp_xo["order"])})
+        lp_xo = role.get("lowpass")
+        if bm.get("enabled") and role["id"] in sub_roles:
+            lp_xo = None
+        if lp_xo:
+            lp = rl + "_lp"
+            addf(lp, "BiquadCombo", {"type": "LinkwitzRileyLowpass",
+                                     "freq": float(lp_xo["freq"]), "order": int(lp_xo["order"])})
+        if role.get("fir"):
+            firn = rl + "_fir"
+            prm = {"type": "Wav", "filename": role["fir"]["path"]}
+            if role["fir"].get("samplerate"):
+                prm["samplerate"] = int(role["fir"]["samplerate"])
+            addf(firn, "Conv", prm)
+        if abs(float(role["gain_db"])) > 1e-9:
+            gainn = rl + "_gain"
+            addf(gainn, "Gain", {"gain": float(role["gain_db"])})
+        if abs(float(role["delay_ms"])) > 1e-9:
+            delayn = rl + "_delay"
+            addf(delayn, "Delay", {"delay": float(role["delay_ms"]), "unit": "ms"})
+        return hp, lp, firn, gainn, delayn
+
+    steps = {"ap": [], "hp": [], "lp": [], "fir": [], "gain": [], "delay": []}
+    # 级联 allpass 去相关（真实全通；仅独立配置）
+    ap_specs = plan.get("allpass_specs") or {}
+    for role in active:
+        if role["id"] not in ap_specs:
+            continue
+        rl = _rl(role["id"])
+        for i, (freq, q) in enumerate(ap_specs[role["id"]]):
+            name = "%s_ap%d" % (rl, i)
+            addf(name, "Biquad", {"type": "Allpass", "freq": float(freq), "q": float(q)})
+            for o in role["outputs"]:
+                steps["ap"].append((int(o), name))
+    for role in active:
+        hp, lp, firn, gainn, delayn = role_filters(role)
+        outs = [int(o) for o in role["outputs"]]
+        for key, val in (("hp", hp), ("lp", lp), ("fir", firn), ("gain", gainn), ("delay", delayn)):
+            if val:
+                steps[key] += [(o, val) for o in outs]
+
+    # 关键：CamillaDSP 的 Filter step 会把 names 全部串到 channels 每个通道 → 每 filter 一步
+    for key, desc in (("ap", "per-role allpass decorrelation"), ("hp", "per-role highpass"),
+                      ("lp", "per-role lowpass"),
+                      ("fir", "per-role FIR/decorrelation"), ("gain", "per-role gain"),
+                      ("delay", "per-role delay")):
+        by_name = {}
+        for ch, name in steps[key]:
+            by_name.setdefault(name, []).append(ch)
+        for name, chans in by_name.items():
+            pipeline.append({"type": "Filter", "description": desc,
+                             "channels": chans, "names": [name]})
+    return filters, mixers, pipeline
+
+
+def _devices_alsa(plan, chunksize, target_level, adjust_period, capture_device,
+                  capture_format, playback_device, playback_format, playback_channels,
+                  fs, enable_rate_adjust=True, capture_channels=None):
+    return {
+        "samplerate": int(fs), "chunksize": int(chunksize),
+        "target_level": int(target_level), "adjust_period": int(adjust_period),
+        "enable_rate_adjust": bool(enable_rate_adjust), "queuelimit": 4,
+        "resampler": {"type": "AsyncSinc", "profile": "Balanced"},
+        "capture": {"type": "Alsa", "channels": int(capture_channels or plan["input_channels"]),
+                    "device": capture_device, "format": capture_format},
+        "playback": {"type": "Alsa", "channels": int(playback_channels),
+                     "device": playback_device, "format": playback_format},
+    }
+
+
+def _devices_file(plan, chunksize, fs, input_wav, output_wav):
+    return {
+        "samplerate": int(fs), "chunksize": int(chunksize),
+        "capture": {"type": "WavFile", "filename": str(input_wav).replace("\\", "/")},
+        "playback": {"type": "File", "channels": plan["output_channels"],
+                     "filename": str(output_wav).replace("\\", "/"),
+                     "format": "F32_LE", "wav_header": True},
+    }
+
+
+def render_camilladsp(plan, devices, title=None, description=None):
+    out_ch = int((devices.get("playback") or {}).get("channels") or plan["output_channels"])
+    filters, mixers, pipeline = _camilla_core(plan, out_ch)
+    return {
+        "title": title or ("tspi-upmix %s（2.0 -> %s）" % (plan["id"], plan["layout"])),
+        "description": description or plan["description"],
+        "devices": devices, "filters": filters, "mixers": mixers, "pipeline": pipeline,
+    }
+
+
+def camilla_text(plan, cfg):
+    header = (
+        "# tspi-upmix 生成：%s\n# 输入 2.0（2ch）-> 输出 %s（%dch）；采样率 %d Hz\n"
+        "# %s\n# 用途：%s\n"
+        % (plan["id"], plan["layout"], plan["output_channels"], plan["fs"],
+           plan["description"],
+           "独立 CamillaDSP（ALSA）" if cfg["devices"]["capture"]["type"] == "Alsa"
+           else "CamillaDSP 文件后端（离线测试）"))
+    return header + dump_yaml(cfg)
+
+
+# ---------------------------------------------------------------------------
+# 去相关 FIR（随机相位全通）
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 打印 / 自检
+# ---------------------------------------------------------------------------
+def plan_summary(plan):
+    lines = ["预设: %s（%s）" % (plan["id"], plan["label"]),
+             "布局: %s | 输入 %s（%dch）| 输出 %dch | fs=%d"
+             % (plan["layout"], plan.get("input_layout", "pc-2ch"),
+                plan["input_channels"], plan["output_channels"], plan["fs"]), "",
+             "%-5s %-8s %-30s %-24s %-11s %6s %4s"
+             % ("role", "outputs", "sources", "filters", "delay(ms)", "gain", "en")]
+    for r in plan["roles"]:
+        srcs = ["%s%+.2f%s" % (s["src"], s["gain_db"], "inv" if s.get("inverted") else "")
+                for s in r["sources"]]
+        f = []
+        if r.get("highpass"):
+            f.append("HP%d@%g" % (r["highpass"]["order"], r["highpass"]["freq"]))
+        if r.get("lowpass"):
+            f.append("LP%d@%g" % (r["lowpass"]["order"], r["lowpass"]["freq"]))
+        if r.get("fir"):
+            f.append("FIR")
+        lines.append("%-5s %-8s %-30s %-24s %-11s %+6.2f %4s" % (
+            r["id"], ",".join(str(o) for o in r["outputs"]),
+            ",".join(srcs) if srcs else "-", ",".join(f) if f else "-",
+            ("%.1f" % r["delay_ms"]) if r["delay_ms"] else "-",
+            r["gain_db"], "Y" if r["enabled"] else "n"))
+    bm = plan["bass_management"]
+    lines.append("")
+    if plan.get("bass_mode") == "matrix" and bm.get("enabled") is False:
+        lines.append("低音管理：简化版（FL/FR 高通 + SUB=LP(FL mid+FR mid)，仅 FL/FR 低频进 SUB，非完整矩阵 BM）")
+    elif bm.get("enabled"):
+        lines.append("bass_management：%s -> %s | HP %g Hz | SUB LP %g Hz"
+                     % ("/".join(bm["redirect"]["sources"]),
+                        "/".join(bm["redirect"]["targets"]),
+                        bm["mains_highpass_hz"], bm["sub_lowpass_hz"]))
+    if plan.get("allpass_specs"):
+        lines.append("allpass 去相关（独立配置）：")
+        for rid, specs in sorted(plan["allpass_specs"].items()):
+            lines.append("  %-4s " % rid + " ".join("AP %gHz Q%g" % (f, q) for f, q in specs))
+    for n in plan["notes"]:
+        lines.append("· " + n)
+    lines.append("")
+    lines.append("说明：FL/FR sources=0dB 且无高通时逐采样直通；SUB 为 FL/FR mid 简化低音管理（非完整矩阵 BM）。")
+    return "\n".join(lines)
+
+
+def self_check(plan):
+    problems, warnings = [], []
+    bm = plan["bass_management"]
+    for r in plan["roles"]:
+        if not r["outputs"]:
+            problems.append("%s 没有输出通道" % r["id"])
+        if not r["enabled"]:
+            continue
+        if not (-60.0 <= r["gain_db"] <= 12.0):
+            problems.append("%s.gain_db=%s 越界" % (r["id"], r["gain_db"]))
+        if not (0.0 <= r["delay_ms"] <= 200.0):
+            problems.append("%s.delay_ms=%s 越界" % (r["id"], r["delay_ms"]))
+        for s in r["sources"]:
+            if not (-60.0 <= s["gain_db"] <= 12.0):
+                problems.append("%s source %s gain=%s 越界" % (r["id"], s["src"], s["gain_db"]))
+            if s["src"] not in plan["input_roles"]:
+                problems.append("%s source %s 不在输入布局" % (r["id"], s["src"]))
+        for key in ("highpass", "lowpass"):
+            xo = r.get(key)
+            if xo:
+                if xo["order"] not in (2, 4, 6, 8):
+                    problems.append("%s.%s order 非法" % (r["id"], key))
+                if not (20 <= xo["freq"] < plan["fs"] / 2.0):
+                    problems.append("%s.%s freq=%s 超过 fs/2" % (r["id"], key, xo["freq"]))
+        if r["id"] in plan["sub_roles"] and bm.get("enabled") and r["sources"]:
+            problems.append("%s 在 bass_management 下 sources 必须为空" % r["id"])
+    if bm.get("enabled"):
+        for rid in bm["redirect"]["targets"]:
+            if rid not in plan["sub_roles"]:
+                problems.append("bass target %r 不是 SUB 角色" % rid)
+        if not bm["redirect"]["sources"]:
+            problems.append("bass_management 打开但 redirect.sources 为空")
+    if plan.get("bass_mode") == "matrix" and bm.get("enabled") is False and any(
+            r["id"] in plan["sub_roles"] and not r["sources"] for r in plan["roles"]):
+        warnings.append("SUB 角色无源（bass 关闭？）")
+    if any(s.get("inverted") for r in plan["roles"] for s in r["sources"]):
+        warnings.append("profile 含 sources[].inverted：当前 tspi-channelmap 渲染器会丢弃（待 patch），"
+                        "独立 CamillaDSP 配置不受影响")
+    return problems, warnings
+
+
+# ---------------------------------------------------------------------------
+# 真实 CLI 校验（tspi-channelmap）
+# ---------------------------------------------------------------------------
+def _find_channelmap():
+    exe = shutil.which("tspi-channelmap")
+    if exe:
+        return [exe]
+    cand = os.path.join(HERE, "..", "audio", "overlay", "usr", "local", "bin", "tspi-channelmap")
+    if os.path.isfile(cand):
+        return [sys.executable, cand]
+    return None
+
+
+def _run_cli(cmd):
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                       encoding="utf-8", errors="replace")
+    return p
+
+
+def _rendered_audit(profile_doc, rendered):
+    """审计渲染产物是否忠实于 profile（捕获渲染器已知 bug）。"""
+    issues = []
+    steps = rendered.get("pipeline") or []
+    multi = [s for s in steps if s.get("type") == "Filter" and len(s.get("names") or []) > 1]
+    if multi:
+        issues.append("渲染器把多个滤波器放进同一 Filter step（CamillaDSP 语义会串到所有通道；"
+                      "典型渲染器 bug）：%d 处" % len(multi))
+    # 检查源反相是否保留
+    want_inv = False
+    for role in (profile_doc.get("output") or {}).get("roles") or []:
+        for s in role.get("sources") or []:
+            if s.get("inverted"):
+                want_inv = True
+    if want_inv:
+        found = False
+        for mx in (rendered.get("mixers") or {}).values():
+            for m in mx.get("mapping") or []:
+                if any(src.get("inverted") for src in m.get("sources") or []):
+                    found = True
+        if not found:
+            issues.append("profile 的 sources[].inverted 在渲染产物中丢失（已知渲染器 bug）")
+    return issues
+
+
+def _validate_profile(path, layout_presets, fs):
+    problems, warnings = [], []
+    cli = _find_channelmap()
+    if not cli:
+        warnings.append("未找到 tspi-channelmap，跳过真实 CLI 校验")
+        return problems, warnings
+    p = _run_cli(cli + ["validate", path, "--samplerate", str(fs),
+                        "--presets", layout_presets])
+    if p.returncode != 0:
+        problems.append("tspi-channelmap validate 失败（exit %d）：%s"
+                        % (p.returncode, (p.stderr or p.stdout).strip()[:800]))
+        return problems, warnings
+    warnings.extend([l for l in (p.stderr or "").splitlines() if l.strip()])
+    base = os.path.dirname(os.path.abspath(path))
+    tmp = os.path.join(base, ".upmix-render-check.yml")
+    cmd = cli + ["render", path, "--samplerate", str(fs), "--presets", layout_presets,
+                 "-o", tmp, "--no-check"]
+    q = _run_cli(cmd)
+    if q.returncode != 0:
+        problems.append("tspi-channelmap render 失败（exit %d）：%s"
+                        % (q.returncode, (q.stderr or q.stdout).strip()[:800]))
+        return problems, warnings
+    try:
+        rendered = load_yaml(tmp)
+        doc = load_yaml(path)
+        warnings.extend(_rendered_audit(doc, rendered))
+    except Exception as e:
+        warnings.append("渲染产物审计失败：%s" % e)
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    return problems, warnings
+
+
+# ---------------------------------------------------------------------------
+# 热应用
+# ---------------------------------------------------------------------------
+def _detect_mode():
+    try:
+        with open(os.path.join(RUN_DIR, "state.json"), "r", encoding="utf-8") as fh:
+            m = (json.load(fh) or {}).get("mode")
+        return m if m in ("dante", "aes67", "off") else "off"
+    except Exception:
+        return "off"
+
+
+def _systemctl(*argv):
+    exe = shutil.which("systemctl")
+    if not exe:
+        return 1, "systemctl 不存在"
+    p = subprocess.run([exe] + list(argv), capture_output=True, text=True, timeout=60)
+    return p.returncode, (p.stdout + p.stderr).strip()
+
+
+def _backup_file(path, backup_dir):
+    if not os.path.isfile(path):
+        return None
+    os.makedirs(backup_dir, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    dst = os.path.join(backup_dir, "%s-%s" % (os.path.basename(path), ts))
+    shutil.copy2(path, dst)
+    return dst
+
+
+def _apply_config(plan, cfg_text, mode, config_target, backup_dir, restart, no_check=False):
+    fs = plan["fs"]
+    os.makedirs(os.path.dirname(os.path.abspath(config_target)), exist_ok=True)
+    tmp = config_target + ".tmp.%d" % os.getpid()
+    write_text(tmp, cfg_text)
+    if not no_check:
+        exe = shutil.which("camilladsp")
+        if exe:
+            p = subprocess.run([exe, "--check", tmp], capture_output=True, text=True, timeout=60,
+                               encoding="utf-8", errors="replace")
+            if p.returncode != 0:
+                os.unlink(tmp)
+                return 4, "camilladsp --check 失败：%s" % (p.stderr or p.stdout).strip()[:800], None
+        else:
+            sys.stderr.write("提示：未找到 camilladsp，跳过 --check\n")
+    backup = _backup_file(config_target, backup_dir)
+    os.replace(tmp, config_target)
+    state = {"ok": True, "ts": datetime.datetime.now().astimezone().isoformat(),
+             "preset": plan["id"], "layout": plan["layout"], "fs": fs, "mode": mode,
+             "config": os.path.abspath(config_target), "backup": backup,
+             "source": "tspi-upmix " + TOOL_VERSION}
+    write_text(os.path.join(backup_dir, "state.json"),
+               json.dumps(state, ensure_ascii=False, indent=2))
+    if mode == "off":
+        return 0, "已写入 %s（模式 off，未启动/重启 CamillaDSP）" % config_target, backup
+    if not restart:
+        return 0, "已写入 %s（--no-restart）" % config_target, backup
+    rc, out = _systemctl("restart", UNIT)
+    if rc != 0:
+        if backup:
+            shutil.copy2(backup, config_target)
+        return 5, "systemctl restart %s 失败，已恢复备份：%s" % (UNIT, out), backup
+    time.sleep(1.5)
+    rc, out = _systemctl("is-active", UNIT)
+    if rc != 0 or out.strip() != "active":
+        if backup:
+            shutil.copy2(backup, config_target)
+        return 5, "%s 未 active（%s），已恢复备份" % (UNIT, out.strip()), backup
+    return 0, "已应用并重启 %s（fs=%d，config=%s）" % (UNIT, fs, config_target), backup
+
+
+def _path_mixing_maps(plan_stereo, plan_pass, capture_channels, out_channels, fader_ramp=200):
+    """双路径：一个 mixer 把输入分别映射到 stereo 块(0..N-1) 与直通块(N..2N-1)；
+    返回 (filters, mixers, pipeline)，pipeline 输出 out_channels。"""
+    N = int(plan_stereo["output_channels"])
+    if int(plan_pass["output_channels"]) != N:
+        die("stereo/passthrough 输出通道数不一致")
+    flt_a, mix_a, pipe_a = _camilla_core(plan_stereo, out_channels=N)
+    stereo_steps = [s for s in pipe_a if s.get("type") == "Filter"]
+
+    def _map(plan, dest_base):
+        out = []
+        for role in plan["roles"]:
+            if not role.get("enabled"):
+                continue
+            for o in role["outputs"]:
+                if int(o) >= N:
+                    continue
+                srcs = []
+                for s in role["sources"]:
+                    d = {"channel": int(plan["input_roles"][s["src"]])}
+                    if abs(float(s["gain_db"])) > 1e-9:
+                        d["gain"] = float(s["gain_db"])
+                    if s.get("inverted"):
+                        d["inverted"] = True
+                    srcs.append(d)
+                out.append({"dest": dest_base + int(o), "sources": srcs})
+        return out
+
+    mapping = _map(plan_stereo, 0) + _map(plan_pass, N)
+    mixers = {
+        "paths": {"description": "autodetect: stereo 上混路径(0..N-1) + 多声道直通路径(N..2N-1)",
+                  "channels": {"in": int(capture_channels), "out": 2 * N}, "mapping": mapping},
+    }
+    filters = dict(flt_a)
+    filters["aux_stereo"] = {"type": "Volume",
+                             "parameters": {"fader": "Aux1", "ramp_time": int(fader_ramp)}}
+    filters["aux_pass"] = {"type": "Volume",
+                           "parameters": {"fader": "Aux2", "ramp_time": int(fader_ramp)}}
+    pipeline = [{"type": "Mixer", "name": "paths"}]
+    pipeline += stereo_steps
+    pipeline.append({"type": "Filter", "description": "stereo 路径音量（Aux1；-150=静音）",
+                     "channels": list(range(N)), "names": ["aux_stereo"]})
+    pipeline.append({"type": "Filter", "description": "直通路径音量（Aux2；-150=静音）",
+                     "channels": list(range(N, 2 * N)), "names": ["aux_pass"]})
+    sum_map = []
+    for o in range(int(out_channels)):
+        srcs = []
+        if o < N:
+            srcs.append({"channel": o})
+            srcs.append({"channel": N + o})
+        sum_map.append({"dest": o, "sources": srcs})
+    mixers["sum"] = {"description": "两路径求和 -> 输出", "channels": {"in": 2 * N, "out": int(out_channels)},
+                     "mapping": sum_map}
+    pipeline.append({"type": "Mixer", "name": "sum"})
+    return filters, mixers, pipeline
+
+
+def render_autodetect(plan_stereo, plan_pass, devices, capture_channels=None, fader_ramp=200,
+                      content_mode="auto"):
+    """content_mode=auto 双路径；stereo 只上混；multichannel 只直通。"""
+    if content_mode == "stereo":
+        return render_camilladsp(plan_stereo, devices)
+    if content_mode == "multichannel":
+        return render_camilladsp(plan_pass, devices)
+    cap = int(capture_channels or plan_stereo["input_channels"])
+    out_ch = int((devices.get("playback") or {}).get("channels") or plan_stereo["output_channels"])
+    filters, mixers, pipeline = _path_mixing_maps(plan_stereo, plan_pass, cap, out_ch, fader_ramp)
+    return {
+        "title": "tspi-upmix autodetect %s（%s -> %s）" % (
+            plan_stereo["id"], plan_stereo["input_layout"], plan_stereo["layout"]),
+        "description": "输入内容检测双路径：Aux1=2.0 上混路径，Aux2=多声道直通路径；"
+                       "daemon 按 GetCaptureSignalRms 判定切换（-120 dB=静音）。",
+        "devices": devices, "filters": filters, "mixers": mixers, "pipeline": pipeline,
+    }
+
+
+def autodetect_text(plan_stereo, cfg):
+    header = ("# tspi-upmix 生成：autodetect %s\n"
+              "# 输入容器 %s（%dch）-> 输出 %s（%dch）；采样率 %d Hz\n"
+              "# 双路径：Aux1=上混(0..N-1)，Aux2=直通(N..2N-1)；由 tspi-upmix autodetect 用"
+              " SetFaderVolume 切换（-120=静音）\n"
+              "# 用途：%s\n"
+              % (plan_stereo["id"], plan_stereo["input_layout"], plan_stereo["input_channels"],
+                 plan_stereo["layout"], plan_stereo["output_channels"], plan_stereo["fs"],
+                 "独立 CamillaDSP（ALSA）" if cfg["devices"]["capture"]["type"] == "Alsa"
+                 else "CamillaDSP 文件后端（离线测试）"))
+    return header + dump_yaml(cfg)
+
+
+INPUT_CONTENT_SCHEMA = "tspi-input-content/v1"
+INPUT_MODE_SCHEMA = "tspi-input-mode/v1"
+INPUT_MODE_CHOICES = ("auto", "stereo", "multichannel")
+DEFAULT_INPUT_MODE_FILE = os.environ.get("TSPI_UPUP_INPUT_MODE_FILE", "/etc/tspi-audio/input-mode.json")
+DEFAULT_INPUT_STATE = os.environ.get("TSPI_UPUP_INPUT_STATE", "/run/tspi/input-content.json")
+MUTE_DB = -120.0
+FADER_STEREO = 1   # Aux1 = 上混路径
+FADER_PASS = 2     # Aux2 = 多声道直通路径
+
+
+def _read_json_file(path):
+    try:
+        if path and os.path.isfile(path):
+            with io.open(path, "r", encoding="utf-8") as f:
+                v = json.load(f)
+            return v if isinstance(v, dict) else None
+    except Exception:
+        return None
+    return None
+
+
+def normalize_input_mode(v, allow_none=True):
+    """auto|stereo|multichannel 归一化；接受 force-stereo/force-multichannel 等别名。"""
+    if v is None:
+        return None if allow_none else "auto"
+    s = str(v).strip().lower()
+    if s in ("auto", "自动"):
+        return "auto"
+    if s in ("stereo", "force-stereo", "2.0", "2ch", "force-2.0"):
+        return "stereo"
+    if s in ("multichannel", "force-multichannel", "multi", "mch", "force-multi"):
+        return "multichannel"
+    die("未知输入模式 %r（可用 auto|stereo|multichannel，或别名 force-stereo/force-multichannel）" % v)
+
+
+def read_input_mode(mode_file=None):
+    path = mode_file or DEFAULT_INPUT_MODE_FILE
+    doc = _read_json_file(path)
+    if not doc:
+        return "auto"
+    try:
+        return normalize_input_mode(doc.get("mode"), allow_none=False)
+    except SystemExit:
+        return "auto"
+
+
+def write_input_mode(mode, mode_file=None, updated_by="tspi-upmix"):
+    path = mode_file or DEFAULT_INPUT_MODE_FILE
+    doc = {"schema": INPUT_MODE_SCHEMA, "mode": normalize_input_mode(mode, allow_none=False),
+           "updated_unix": int(time.time()), "updated_by": str(updated_by)}
+    write_text(path, json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+    return doc
+
+
+def _db_round(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f:  # nan
+        return None
+    return round(f, 1)
+
+
+DETECT_SECONDARY = ("C", "SL", "SR", "BL", "BR", "TFL", "TFR", "TRL", "TRR", "HFL", "HFR", "HRL", "HRR")
+
+
+def detect_content(rms_db, threshold_db=-50.0, exit_db=None, stereo_roles=("FL", "FR"),
+                   secondary_roles=None):
+    """输入内容检测。rms_db: {角色: dB 或 None}。
+
+    判据（Lead 2026-11-15）：只用 C/SL/SR/height 的活动判多声道，**LFE 不作判据**
+    （H16 旧固件 2.0 内容会给 L/R+LFE；LFE 单独有能量仍是 2.0，要走板端上混）。
+    返回 dict(detected, confidence, active_channels, rms_min_db, reason)。"""
+    thr_in = float(threshold_db)
+    thr_out = float(exit_db) if exit_db is not None else thr_in
+    vals = {}
+    for r, v in (rms_db or {}).items():
+        if v is None:
+            continue
+        try:
+            vals[r] = float(v)
+        except (TypeError, ValueError):
+            continue
+    if not vals:
+        return {"detected": "unknown", "confidence": 0.0, "active_channels": [],
+                "rms_min_db": None, "reason": "no-data"}
+    stereo = [r for r in stereo_roles if r in vals]
+    if secondary_roles is None:
+        secondary = [r for r in vals if r not in stereo_roles and r != "LFE"]
+    else:
+        secondary = [r for r in secondary_roles if r in vals]
+    fl_max = max([vals[r] for r in stereo], default=None)
+    sec_max = max([vals[r] for r in secondary], default=None)
+    active = sorted([r for r in vals if vals[r] >= thr_in],
+                    key=lambda r: -vals[r])
+    if fl_max is None and sec_max is None:
+        return {"detected": "unknown", "confidence": 0.0, "active_channels": [],
+                "rms_min_db": None, "reason": "no-data"}
+    if sec_max is not None and sec_max > thr_in:
+        conf = max(0.05, min(1.0, (sec_max - thr_in) / 20.0 + 0.2))
+        return {"detected": "multichannel", "confidence": round(conf, 2),
+                "active_channels": active, "rms_min_db": round(sec_max, 1),
+                "reason": "secondary-active"}
+    if sec_max is not None and sec_max > thr_out:
+        return {"detected": "unknown", "confidence": 0.0, "active_channels": active,
+                "rms_min_db": round(sec_max, 1), "reason": "hysteresis-band"}
+    if fl_max is not None and fl_max > thr_in:
+        margin = min(20.0, thr_in - (sec_max if sec_max is not None else -240.0))
+        conf = max(0.05, min(1.0, 0.5 + margin / 40.0))
+        return {"detected": "stereo", "confidence": round(conf, 2),
+                "active_channels": active, "rms_min_db": round(sec_max, 1) if sec_max is not None else None,
+                "reason": "fl-fr-only"}
+    return {"detected": "unknown", "confidence": 0.0, "active_channels": active,
+            "rms_min_db": round(sec_max, 1) if sec_max is not None else None,
+            "reason": "no-signal"}
+
+
+def _h16_internal_upmix(detected):
+    if detected == "multichannel":
+        return True
+    if detected == "stereo":
+        return False
+    return None
+
+
+def build_content_state(content_mode, detected, override, confidence=0.0, active_channels=None,
+                        rms_db=None, threshold_db=-50.0, hold_ms=2000, reason="",
+                        container_layout=None, detector="energy"):
+    return {
+        "schema": INPUT_CONTENT_SCHEMA,
+        "content_mode": content_mode if content_mode in INPUT_MODE_CHOICES else "auto",
+        "detected": detected if detected in ("stereo", "multichannel") else "unknown",
+        "override": override if override in INPUT_MODE_CHOICES else None,
+        "confidence": round(float(confidence or 0.0), 2),
+        "active_channels": list(active_channels or []),
+        "rms_db": {k: _db_round(v) for k, v in (rms_db or {}).items() if _db_round(v) is not None},
+        "threshold_db": float(threshold_db),
+        "hold_ms": int(hold_ms),
+        "reason": str(reason or ""),
+        "h16_internal_upmix": _h16_internal_upmix(detected),
+        "container_layout": container_layout,
+        "detector": detector if detector in ("energy", "manual", "fallback") else "energy",
+        "updated_unix": int(time.time()),
+    }
+
+
+def write_content_state(state, state_path=None):
+    path = state_path or DEFAULT_INPUT_STATE
+    write_text(path, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+
+
+def _read_override(mode_file=None):
+    """返回 (生效模式, override 字段值)：文件不存在 → ("auto", None)。"""
+    doc = _read_json_file(mode_file or DEFAULT_INPUT_MODE_FILE)
+    if not doc:
+        return "auto", None
+    try:
+        mode = normalize_input_mode(doc.get("mode"), allow_none=False)
+    except SystemExit:
+        mode = "auto"
+    return mode, mode
+
+
+def _synthesized_state(override, state_path=None):
+    st = _read_json_file(state_path or DEFAULT_INPUT_STATE)
+    mode = override if override in ("stereo", "multichannel") else "auto"
+    if st:
+        st = dict(st)
+        st["override"] = override
+        if override in ("stereo", "multichannel"):
+            st["content_mode"] = override
+            st["detector"] = "manual"
+        return st
+    return build_content_state(mode, "unknown", override, confidence=0.0,
+                               reason="daemon-not-running", detector="fallback")
+
+
+# ---------------------------------------------------------------------------
+# 多声道容器 WAV：读最后窗口，算每通道 RMS
+# ---------------------------------------------------------------------------
+def _wav_fmt_info(f):
+    fmt = struct.unpack("<HHIIHH", f.read(16))
+    return {"format": fmt[0], "channels": fmt[1], "rate": fmt[2], "block_align": fmt[4], "bits": fmt[5]}
+
+
+def read_wav_channel_rms(path, window_ms=500.0):
+    """返回 (samplerate, channels, rms_db 列表)。只读最后 window_ms 的音频（省内存/时间）。"""
+    with open(path, "rb") as f:
+        head = f.read(12)
+        if len(head) < 12 or head[:4] not in (b"RIFF", b"WAVE"):
+            die("不是 WAV：%s" % path)
+        info = None
+        data_off = data_len = None
+        while True:
+            hdr = f.read(8)
+            if len(hdr) < 8:
+                break
+            cid = hdr[:4]
+            size = struct.unpack("<I", hdr[4:])[0]
+            if cid == b"fmt ":
+                info = _wav_fmt_info(f)
+                if size > 16:
+                    f.seek(size - 16, 1)
+                continue
+            if cid == b"data":
+                data_off = f.tell()
+                data_len = size
+                break
+            if size & 1:
+                size += 1
+            f.seek(size, 1)
+        if info is None or data_off is None:
+            die("WAV 缺少 fmt/data：%s" % path)
+        ch = int(info["channels"])
+        ba = int(info["block_align"] or (ch * max(1, int(info["bits"]) // 8)))
+        frames = int(data_len) // ba if ba else 0
+        win = int(info["rate"] * float(window_ms) / 1000.0)
+        n = min(frames, max(1, win))
+        f.seek(data_off + (frames - n) * ba)
+        raw = f.read(n * ba)
+    if int(info["bits"]) == 32 and int(info["format"]) == 3:
+        arr = array.array("f")
+        arr.frombytes(raw)
+        samples = list(arr)
+        scale = 1.0
+    elif int(info["bits"]) == 32 and int(info["format"]) == 1:
+        arr = array.array("i")
+        arr.frombytes(raw)
+        samples = [v / 2147483648.0 for v in arr]
+        scale = 1.0
+    elif int(info["bits"]) == 16:
+        arr = array.array("h")
+        arr.frombytes(raw)
+        samples = [v / 32768.0 for v in arr]
+        scale = 1.0
+    elif int(info["bits"]) == 24 and int(info["format"]) == 1:
+        samples = []
+        for i in range(0, len(raw) - 2, 3):
+            v = raw[i] | (raw[i + 1] << 8) | (raw[i + 2] << 16)
+            if v & 0x800000:
+                v -= 0x1000000
+            samples.append(v / 8388608.0)
+        scale = 1.0
+    else:
+        die("暂不支持的 WAV 格式：format=%s bits=%s" % (info["format"], info["bits"]))
+    n_frames = len(samples) // ch
+    rms = []
+    for c in range(ch):
+        acc = 0.0
+        for i in range(c, n_frames * ch, ch):
+            v = samples[i]
+            acc += v * v
+        rms.append(10.0 * math.log10(max(acc / max(1, n_frames), 1e-24)))
+    return int(info["rate"]), ch, rms
+
+
+def detect_wav(path, in_info, window_ms=500.0, threshold_db=-50.0):
+    fs, channels, rms = read_wav_channel_rms(path, window_ms)
+    rms_by_role = {}
+    for role, idx in in_info["roles"].items():
+        rms_by_role[role] = rms[idx] if idx < len(rms) else None
+    res = detect_content(rms_by_role, threshold_db)
+    res["rms_db"] = rms_by_role
+    res["fs"] = fs
+    res["channels"] = channels
+    return res
+
+
+# ---------------------------------------------------------------------------
+# 最小 WebSocket 客户端（stdlib；CamillaDSP 控制口）
+# ---------------------------------------------------------------------------
+class WSClient(object):
+    def __init__(self, host="127.0.0.1", port=1234, timeout=3.0):
+        self.timeout = float(timeout)
+        self.sock = socket.create_connection((host, int(port)), self.timeout)
+        self.sock.settimeout(self.timeout)
+        self.buf = b""
+        key = base64.b64encode(os.urandom(16)).decode()
+        req = ("GET / HTTP/1.1\r\n"
+               "Host: %s:%d\r\n"
+               "Upgrade: websocket\r\n"
+               "Connection: Upgrade\r\n"
+               "Sec-WebSocket-Key: %s\r\n"
+               "Sec-WebSocket-Version: 13\r\n\r\n" % (host, int(port), key))
+        self.sock.sendall(req.encode("utf-8"))
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise IOError("websocket handshake closed")
+            data += chunk
+        head, rest = data.split(b"\r\n\r\n", 1)
+        status = head.split(b"\r\n")[0]
+        if b"101" not in status:
+            raise IOError("websocket handshake failed: %r" % status)
+        self.buf = rest
+
+    def _recv_exact(self, n):
+        out = b""
+        if self.buf:
+            out, self.buf = self.buf[:n], self.buf[n:]
+        while len(out) < n:
+            chunk = self.sock.recv(n - len(out))
+            if not chunk:
+                raise IOError("websocket closed")
+            out += chunk
+        return out
+
+    def _send_frame(self, opcode, payload):
+        header = bytearray([0x80 | opcode])
+        n = len(payload)
+        if n < 126:
+            header.append(0x80 | n)
+        elif n < 65536:
+            header.append(0x80 | 126)
+            header += struct.pack("!H", n)
+        else:
+            header.append(0x80 | 127)
+            header += struct.pack("!Q", n)
+        mask = os.urandom(4)
+        header += mask
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        self.sock.sendall(bytes(header) + masked)
+
+    def send_text(self, text):
+        self._send_frame(1, text.encode("utf-8"))
+
+    def recv_text(self):
+        while True:
+            h = self._recv_exact(2)
+            b1, b2 = h[0], h[1]
+            op = b1 & 0x0F
+            ln = b2 & 0x7F
+            if ln == 126:
+                ln = struct.unpack("!H", self._recv_exact(2))[0]
+            elif ln == 127:
+                ln = struct.unpack("!Q", self._recv_exact(8))[0]
+            masked = bool(b2 & 0x80)
+            mask = self._recv_exact(4) if masked else None
+            payload = self._recv_exact(ln)
+            if masked and mask:
+                payload = bytes(x ^ mask[i % 4] for i, x in enumerate(payload))
+            if op == 1:
+                return payload.decode("utf-8", "replace")
+            if op == 8:
+                raise IOError("websocket closed by peer")
+            if op == 9:
+                self._send_frame(10, payload)
+                continue
+            if op == 10:
+                continue
+
+    def cmd(self, obj):
+        want = obj if isinstance(obj, str) else next(iter(obj.keys()))
+        self.send_text(json.dumps(obj))
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
+            text = self.recv_text()
+            try:
+                reply = json.loads(text)
+            except ValueError:
+                continue
+            if isinstance(reply, dict) and want in reply:
+                return reply[want]
+        raise IOError("timeout waiting for %s" % want)
+
+    def close(self):
+        try:
+            self._send_frame(8, b"")
+        except Exception:
+            pass
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+
+def _ws_capture_rms(ws, in_info):
+    reply = ws.cmd("GetCaptureSignalRms") or {}
+    vals = reply.get("value") or []
+    rms = {}
+    for role, idx in in_info["roles"].items():
+        v = vals[idx] if idx < len(vals) else None
+        if v is None:
+            rms[role] = -240.0
+        else:
+            try:
+                rms[role] = float(v)
+            except (TypeError, ValueError):
+                rms[role] = -240.0
+    return rms
+
+
+def _set_faders(ws, stereo_active):
+    out = []
+    want = {FADER_STEREO: 0.0 if stereo_active else MUTE_DB,
+            FADER_PASS: MUTE_DB if stereo_active else 0.0}
+    for fader, vol in want.items():
+        try:
+            rep = ws.cmd({"SetFaderVolume": [int(fader), float(vol)]}) or {}
+        except Exception as e:
+            raise IOError("SetFaderVolume(%d) 失败：%s" % (fader, e))
+        out.append((fader, vol, (rep or {}).get("result")))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 子命令
+# ---------------------------------------------------------------------------
+def _mk_alsa_devices(plan, args, fs=None):
+    fs = fs or plan["fs"]
+    pb = getattr(args, "playback_channels", None) or plan["output_channels"]
+    return _devices_alsa(plan,
+                         getattr(args, "chunksize", None) or plan["chunksize"],
+                         getattr(args, "target_level", None) or plan["target_level"],
+                         getattr(args, "adjust_period", None) or plan["adjust_period"],
+                         args.capture_device, args.capture_format,
+                         args.playback_device, args.playback_format, pb, fs,
+                         enable_rate_adjust=not getattr(args, "no_rate_adjust", False))
+
+
+def cmd_list(args):
+    presets = load_presets(args.presets)
+    rows = [(pid, (presets["presets"][pid] or {}).get("layout", "?"),
+             (presets["presets"][pid] or {}).get("label", ""))
+            for pid in sorted(presets["presets"])]
+    w = max(len(r[0]) for r in rows) if rows else 10
+    print("%-*s  %-6s  %s" % (w, "preset", "layout", "label"))
+    for pid, layout, label in rows:
+        print("%-*s  %-6s  %s" % (w, pid, layout, label))
+    print("\n共 %d 个预设；'tspi-upmix show <preset>' 查看解析结果" % len(rows))
+    return 0
+
+
+def cmd_show(args):
+    presets = load_presets(args.presets)
+    plan = build_plan(args.preset, presets, fs=args.fs,
+                      fir_dir=args.fir_dir or DEFAULT_FIR_DIR)
+    print(json.dumps(plan, ensure_ascii=False, indent=2, default=str)
+          if args.json else plan_summary(plan))
+    return 0
+
+
+def cmd_profile(args):
+    presets = load_presets(args.presets)
+    plan = build_plan(args.preset, presets, fs=args.fs,
+                      fir_dir=args.fir_dir or DEFAULT_FIR_DIR,
+                      compat="safe" if args.safe else "full")
+    if plan["decor"]["mode"] == "allpass":
+        sys.stderr.write("提示：channelmap profile 不支持 allpass（渲染器无 Allpass 字段），"
+                         "profile 将退化为固定延迟；allpass 请用独立配置（camilla/apply）。\n")
+    write_text(args.output, profile_text(plan))
+    print("已生成 profile：%s（%s -> %s）" % (args.output, plan["input_layout"], plan["layout"]))
+    return 0
+
+
+def cmd_camilla(args):
+    presets = load_presets(args.presets)
+    plan = build_plan(args.preset, presets, fs=args.fs,
+                      fir_dir=args.fir_dir or DEFAULT_FIR_DIR)
+    cfg = render_camilladsp(plan, _mk_alsa_devices(plan, args, plan["fs"]))
+    write_text(args.output, camilla_text(plan, cfg))
+    print("已生成 CamillaDSP 配置：%s（%s %dch -> %s %dch）"
+          % (args.output, args.capture_device, plan["input_channels"],
+             args.playback_device, cfg["devices"]["playback"]["channels"]))
+    return 0
+
+
+def cmd_file_config(args):
+    presets = load_presets(args.presets)
+    plan = build_plan(args.preset, presets, fs=args.fs,
+                      fir_dir=args.fir_dir or DEFAULT_FIR_DIR)
+    out_wav = args.out_wav or (args.output + ".out.wav")
+    cfg = render_camilladsp(plan, _devices_file(plan, args.chunksize or plan["chunksize"],
+                                                plan["fs"], args.input, out_wav),
+                            title="tspi-upmix file backend: %s" % plan["id"])
+    write_text(args.output, camilla_text(plan, cfg))
+    print("已生成文件后端配置：%s（in=%s -> out=%s）" % (args.output, args.input, out_wav))
+    return 0
+
+
+def cmd_detect(args):
+    """离线/运行态检测：写 /run state 或只打印。--json 输出与运行态同字段。"""
+    in_layout = args.input_layout or "h16-7.1.4"
+    state_path = args.state or DEFAULT_INPUT_STATE
+    mode_file = args.mode_file or DEFAULT_INPUT_MODE_FILE
+    mode, override_field = _read_override(mode_file)
+    if args.wav:
+        in_info = resolve_input_layout(in_layout, _LAYOUT_PRESETS_OVERRIDE)
+        res = detect_wav(args.wav, in_info, window_ms=args.window_ms,
+                         threshold_db=args.threshold_db)
+        manual = mode in ("stereo", "multichannel")
+        if manual:
+            content_mode = mode
+        elif res["detected"] == "stereo":
+            content_mode = "stereo"
+        elif res["detected"] == "multichannel":
+            content_mode = "multichannel"
+        else:
+            content_mode = "auto"
+        state = build_content_state(content_mode, res["detected"], override_field,
+                                    confidence=res["confidence"],
+                                    active_channels=res["active_channels"],
+                                    rms_db=res["rms_db"], threshold_db=args.threshold_db,
+                                    hold_ms=args.hold_ms, reason=res["reason"],
+                                    container_layout=in_info["id"],
+                                    detector="manual" if manual else "energy")
+        if args.write_state:
+            write_content_state(state, state_path)
+        print(json.dumps(state, ensure_ascii=False, indent=2))
+        return 0
+    if not os.path.isfile(state_path):
+        state = build_content_state(mode if override_field in ("stereo", "multichannel") else "auto",
+                                    "unknown", override_field, reason="daemon-not-running",
+                                    container_layout=in_layout, detector="fallback")
+        print(json.dumps(state, ensure_ascii=False, indent=2))
+        return 0
+    state = _read_json_file(state_path) or {}
+    print(json.dumps(state, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_input_mode_get(args):
+    mode, override_field = _read_override(args.mode_file)
+    st = _read_json_file(args.state or DEFAULT_INPUT_STATE)
+    if not st:
+        st = build_content_state(mode if override_field in ("stereo", "multichannel") else "auto",
+                                 "unknown", override_field, reason="daemon-not-running",
+                                 detector="fallback")
+    else:
+        st = dict(st)
+        st["override"] = override_field
+        if override_field in ("stereo", "multichannel"):
+            st["content_mode"] = override_field
+            st["detector"] = "manual"
+    print(json.dumps(st, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_input_mode_set(args):
+    mode = normalize_input_mode(args.mode, allow_none=False)
+    doc = write_input_mode(mode, args.mode_file, updated_by=args.updated_by)
+    st = _read_json_file(args.state or DEFAULT_INPUT_STATE) or build_content_state(
+        mode if mode in ("stereo", "multichannel") else "auto", "unknown", mode,
+        reason="daemon-not-running", detector="fallback")
+    st = dict(st)
+    st["override"] = mode
+    if mode in ("stereo", "multichannel"):
+        st["content_mode"] = mode
+        st["detector"] = "manual"
+    print(json.dumps(st, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_input_mode_help(args):
+    sys.stderr.write("用法：tspi-upmix input-mode get [--json] | "
+                     "tspi-upmix input-mode set auto|stereo|multichannel\n")
+    return 2
+
+
+def _apply_mute_state(args, state, in_info):
+    """写 state 文件（除非 --no-write）。"""
+    if not args.no_write:
+        write_content_state(state, args.state or DEFAULT_INPUT_STATE)
+
+
+def cmd_autodetect(args):
+    """daemon：读 CamillaDSP websocket 的 GetCaptureSignalRms，判定内容并切 Aux1/Aux2。"""
+    in_info = resolve_input_layout(args.input_layout or "h16-7.1.4", _LAYOUT_PRESETS_OVERRIDE)
+    state_path = args.state or DEFAULT_INPUT_STATE
+    mode_file = args.mode_file or DEFAULT_INPUT_MODE_FILE
+    thr = float(args.threshold_db)
+    exit_db = thr - float(args.hysteresis_db)
+    hold_ms = int(args.hold_ms)
+    freeze_ms = int(getattr(args, "startup_freeze_ms", 2500) or 0)
+    interval = max(0.05, float(args.interval_ms) / 1000.0)
+    frames = None
+    if args.simulate:
+        try:
+            doc = _read_json_file(os.path.abspath(args.simulate))
+            if doc is None:
+                die("simulate 文件必须是 JSON：%s" % args.simulate)
+            frames = doc.get("frames") if "frames" in doc else doc
+        except Exception as e:
+            die("读取 simulate 文件失败：%s" % e)
+        if not isinstance(frames, list):
+            die("simulate 文件应为 [{rms_db:{...}}, ...] 或 {frames:[...]}")
+    ws = None
+    if frames is None:
+        try:
+            ws = WSClient(args.host, args.port, timeout=args.ws_timeout)
+            ws.cmd({"SetUpdateInterval": int(args.interval_ms)})
+        except Exception as e:
+            st = build_content_state("auto", "unknown", _read_override(mode_file)[1],
+                                     threshold_db=thr, hold_ms=hold_ms,
+                                     reason="ws-error: %s" % e.strip(),
+                                     container_layout=in_info["id"], detector="fallback")
+            _apply_mute_state(args, st, in_info)
+            print(json.dumps(st, ensure_ascii=False, indent=2))
+            sys.stderr.write("tspi-upmix autodetect: 连接 CamillaDSP 失败：%s\n" % e)
+            return 3
+
+    current = None if frames is not None else "multichannel"  # auto 默认直通
+    pending, pending_since = None, None
+    last_fader = None
+    vt = 0.0
+    started = time.time()
+    last_state = None
+    try:
+        while True:
+            override_mode, override_field = _read_override(mode_file)
+            manual = override_mode in ("stereo", "multichannel")
+            if frames is not None:
+                if not frames:
+                    break
+                frame = frames.pop(0)
+                vt += interval
+                if isinstance(frame, list):
+                    raw = frame
+                    rms_by_role = {}
+                    for role, idx in in_info["roles"].items():
+                        v = raw[idx] if idx < len(raw) else None
+                        rms_by_role[role] = -240.0 if v is None else float(v)
+                elif isinstance(frame, dict):
+                    src = frame.get("rms_db") if isinstance(frame.get("rms_db"), dict) else frame
+                    rms_by_role = {r: (float(src[r]) if src.get(r) is not None else None)
+                                   for r in in_info["roles"]}
+                else:
+                    die("simulate frame 格式不支持：%r" % (frame,))
+                now = vt
+            else:
+                rms_by_role = _ws_capture_rms(ws, in_info)
+                now = time.time() - started
+
+            frozen = (freeze_ms > 0 and now * 1000.0 < freeze_ms)
+            det = detect_content(rms_by_role, thr, exit_db=exit_db)
+            if manual:
+                content_mode = override_mode
+                reason = "override-" + override_mode
+                detector = "manual"
+            elif frozen:
+                content_mode = "multichannel"   # 启动冻结：默认直通，等 H16/上游稳定
+                detector = "energy"
+                reason = "startup-freeze"
+                pending, pending_since = None, None
+            else:
+                detector = "energy"
+                cand = det["detected"] if det["detected"] in ("stereo", "multichannel") else None
+                if current is None:
+                    current = "multichannel"
+                if cand is None:
+                    pending, pending_since = None, None
+                    reason = det["reason"]
+                elif cand == current:
+                    pending, pending_since = None, None
+                    reason = det["reason"]
+                else:
+                    if pending != cand:
+                        pending, pending_since = cand, now
+                    if pending_since is not None and (now - pending_since) * 1000.0 >= hold_ms:
+                        current = cand
+                        pending, pending_since = None, None
+                    reason = det["reason"]
+                content_mode = current
+            state = build_content_state(content_mode, det["detected"],
+                                        override_field, confidence=det["confidence"],
+                                        active_channels=det["active_channels"],
+                                        rms_db=rms_by_role, threshold_db=thr,
+                                        hold_ms=hold_ms, reason=reason,
+                                        container_layout=in_info["id"], detector=detector)
+            stereo_active = (content_mode == "stereo")
+            if ws is not None and not args.dry_run and last_fader != stereo_active:
+                try:
+                    _set_faders(ws, stereo_active)
+                    last_fader = stereo_active
+                except Exception as e:
+                    state["detector"] = "fallback"
+                    state["reason"] = "fader-error: %s" % e
+            _apply_mute_state(args, state, in_info)
+            if args.simulate or args.once or args.verbose:
+                print(json.dumps(state, ensure_ascii=False))
+                sys.stdout.flush()
+            last_state = state
+            if args.once:
+                break
+            if frames is not None:
+                if not frames:
+                    break
+                continue
+            if args.max_seconds and (time.time() - started) >= args.max_seconds:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        sys.stderr.write("tspi-upmix autodetect: 收到中断，退出\n")
+    finally:
+        if ws is not None:
+            ws.close()
+    if last_state is None and frames == []:
+        # 空 frames：给一个 unknown 状态
+        st = build_content_state("auto", "unknown", _read_override(mode_file)[1],
+                                 threshold_db=thr, hold_ms=hold_ms, reason="no-data",
+                                 container_layout=in_info["id"], detector="energy")
+        _apply_mute_state(args, st, in_info)
+        print(json.dumps(st, ensure_ascii=False))
+    return 0
+
+
+def cmd_autodetect_config(args):
+    presets = load_presets(args.presets)
+    fs = args.fs or 48000
+    mode = getattr(args, "content_mode", "auto") or "auto"
+    plan_a = build_plan(args.preset, presets, fs=fs, input_layout=args.input_layout or "h16-7.1.4",
+                        path="stereo")
+    plan_b = build_plan(args.preset, presets, fs=fs, input_layout=args.input_layout or "h16-7.1.4",
+                        path="passthrough")
+    cap = args.capture_channels or plan_a["input_channels"]
+    if args.input:
+        out_wav = args.out_wav or (args.output + ".out.wav")
+        pb = args.playback_channels or plan_a["output_channels"]
+        devices = {"samplerate": fs, "chunksize": args.chunksize or plan_a["chunksize"],
+                   "capture": {"type": "WavFile",
+                               "filename": str(args.input).replace("\\", "/")},
+                   "playback": {"type": "File", "channels": int(pb),
+                                "filename": str(out_wav).replace("\\", "/"),
+                                "format": "F32_LE", "wav_header": True}}
+    else:
+        pb = args.playback_channels or 22
+        devices = _devices_alsa(plan_a, args.chunksize or plan_a["chunksize"],
+                                args.target_level or plan_a["target_level"],
+                                args.adjust_period or plan_a["adjust_period"],
+                                args.capture_device, args.capture_format,
+                                args.playback_device, args.playback_format, pb, fs,
+                                enable_rate_adjust=not args.no_rate_adjust,
+                                capture_channels=cap)
+    cfg = render_autodetect(plan_a, plan_b, devices, capture_channels=cap,
+                            fader_ramp=args.fader_ramp, content_mode=mode)
+    write_text(args.output, autodetect_text(plan_a, cfg))
+    print("已生成 autodetect 配置：%s（mode=%s，%s %dch -> %s %dch）"
+          % (args.output, mode, plan_a["input_layout"], cap, plan_a["layout"],
+             cfg["devices"]["playback"]["channels"]))
+    return 0
+
+
+def cmd_container(args):
+    """生成 H16 容器输入相关产物：上混 profile（from 容器）、直通 profile、autodetect 配置。"""
+    presets = load_presets(args.presets)
+    in_layout = args.input_layout or "h16-7.1.4"
+    fs = args.fs or 48000
+    outdir = args.output
+    prof_dir = os.path.join(outdir, "profiles")
+    cam_dir = os.path.join(outdir, "camilladsp")
+    os.makedirs(prof_dir, exist_ok=True)
+    os.makedirs(cam_dir, exist_ok=True)
+    files = []
+
+    def add(p):
+        files.append(p)
+
+    ids = args.preset or sorted(presets["presets"])
+    layouts_done = set()
+    for pid in ids:
+        if pid not in presets["presets"]:
+            die("未知预设 %r" % pid)
+        plan = build_plan(pid, presets, fs=fs, input_layout=in_layout, path="stereo")
+        # C-22：容器 profile 与 2ch 同名会撞 WebUI/CLI 的 profile.name；内部名加 -h16 区分（文件名不变）
+        plan["profile_name"] = plan["id"] + "-h16"
+        plan["description"] = plan["description"] + "（H16 容器输入）"
+        pfile = os.path.join(prof_dir, "%s-from-%s.yml" % (plan["id"], in_layout))
+        write_text(pfile, profile_text(plan))
+        add(pfile)
+        layout = plan["layout"]
+        if layout not in layouts_done:
+            layouts_done.add(layout)
+            pplan = build_plan(pid, presets, fs=fs, input_layout=in_layout, path="passthrough")
+            ppfile = os.path.join(prof_dir, "passthrough-%s-to-%s.yml" % (in_layout, layout))
+            write_text(ppfile, profile_text(pplan))
+            add(ppfile)
+        cap = args.capture_channels or plan["input_channels"]
+        pb = args.playback_channels or 22
+        devices = _devices_alsa(plan, args.chunksize or plan["chunksize"],
+                                args.target_level or plan["target_level"],
+                                args.adjust_period or plan["adjust_period"],
+                                args.capture_device, args.capture_format,
+                                args.playback_device, args.playback_format, pb, fs,
+                                enable_rate_adjust=not args.no_rate_adjust,
+                                capture_channels=cap)
+        cfile = os.path.join(cam_dir, "autodetect-%s-%s.yml" % (plan["id"], in_layout))
+        cfg = render_autodetect(plan, build_plan(pid, presets, fs=fs, input_layout=in_layout,
+                                                 path="passthrough"),
+                                devices, capture_channels=cap, fader_ramp=args.fader_ramp)
+        write_text(cfile, autodetect_text(plan, cfg))
+        add(cfile)
+        print("生成：%s / %s" % (pfile, cfile))
+    manifest = {"schema": "tspi-upmix-container/v1", "input_layout": in_layout, "fs": fs,
+                "files": [{"path": os.path.relpath(f, outdir), "sha256": sha256_file(f),
+                           "size": os.path.getsize(f)} for f in files]}
+    mpath = os.path.join(outdir, "manifest.json")
+    write_text(mpath, json.dumps(manifest, ensure_ascii=False, indent=2))
+    print("清单：%s（%d 个文件）" % (mpath, len(files)))
+    return 0
+
+
+def _assert_builtin_consistency(layout_presets):
+    """check 断言：内置布局必须与 layout-presets 逐项一致（唯一真相是板端 presets）。
+
+    返回问题列表；layout-presets 缺失也算问题（check 不用内置映射自证）。
+    """
+    problems = []
+    if not layout_presets or not os.path.isfile(layout_presets):
+        return ["layout-presets 不存在：%r（内置映射不可作为唯一真相；板端 4.1.2 = "
+                "FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7）" % layout_presets]
+    for lid in SUPPORTED_LAYOUTS:
+        got = _layout_roles_from_presets(layout_presets, lid, "output")
+        if not got:
+            problems.append("%s: layout-presets 缺少 output_layouts" % lid)
+            continue
+        exp = [(rid, [int(ch)]) for rid, ch in BUILTIN_OUTPUT_LAYOUTS[lid]]
+        if got != exp:
+            problems.append("%s: 内置映射 %r != layout-presets %r（以 layout-presets 为准，需修 BUILTIN）"
+                            % (lid, exp, got))
+    got_in = _layout_roles_from_presets(layout_presets, "pc-2ch", "input")
+    exp_in = [(rid, int(ch)) for rid, ch in BUILTIN_INPUT_LAYOUTS["pc-2ch"]]
+    if got_in is not None and got_in != exp_in:
+        problems.append("pc-2ch: 内置输入映射 %r != layout-presets %r" % (exp_in, got_in))
+    return problems
+
+
+def cmd_check(args):
+    presets = load_presets(args.presets)
+    fs = args.fs or 48000
+    consistency = _assert_builtin_consistency(args.layout_presets)
+    if consistency:
+        print("内置布局与 layout-presets 一致性断言失败：")
+        for x in consistency:
+            print("  ERROR: " + x)
+        return 3
+    print("内置布局与 layout-presets 一致性断言通过（4.1.2/5.3.2/pc-2ch）")
+    if args.profile:
+        problems, warnings = [], []
+        try:
+            doc = load_yaml(args.profile)
+        except Exception as e:
+            die("读取 profile 失败：%s" % e)
+        problems, warnings = _validate_profile(args.profile, args.layout_presets, fs)
+        if not problems:
+            print("profile 校验通过：%s（layout=%s fs=%d）"
+                  % (args.profile, ((doc.get("output") or {}).get("layout")), fs))
+        else:
+            print("profile 校验失败：%s" % args.profile)
+            for x in problems:
+                print("  ERROR: " + x)
+        for w in warnings:
+            print("  " + w)
+        return 0 if not problems else 3
+    plan = build_plan(args.preset, presets, fs=args.fs,
+                      fir_dir=args.fir_dir or DEFAULT_FIR_DIR)
+    problems, warnings = self_check(plan)
+    print(plan_summary(plan))
+    print("")
+    if problems:
+        print("自检失败：")
+        for x in problems:
+            print("  ERROR: " + x)
+    else:
+        print("自检通过（参数范围/角色/输入源/低音管理）")
+    for w in warnings:
+        print("  WARN: " + w)
+    if not args.no_cli and not problems:
+        tmpdir = args.tmpdir or os.path.join(HERE, ".check")
+        os.makedirs(tmpdir, exist_ok=True)
+        path = os.path.join(tmpdir, plan["id"] + ".yml")
+        write_text(path, profile_text(plan))
+        ps, ws = _validate_profile(path, args.layout_presets, plan["fs"])
+        for w in ws:
+            print("  " + w)
+        if ps:
+            print("真实 CLI 校验失败：")
+            for x in ps:
+                print("  ERROR: " + x)
+            return 3
+        print("真实 CLI 校验通过（tspi-channelmap validate/render）")
+    return 0 if not problems else 3
+
+
+def cmd_params(args):
+    presets = load_presets(args.presets)
+    plan = build_plan(args.preset, presets, fs=args.fs,
+                      fir_dir=args.fir_dir or DEFAULT_FIR_DIR)
+    raw = presets["presets"][args.preset]
+    view = {
+        "schema": "tspi-upmix-params/v1", "preset": plan["id"], "label": plan["label"],
+        "description": plan["description"], "layout": plan["layout"],
+        "output_channels": plan["output_channels"], "fs": plan["fs"],
+        "parameters": {
+            "front_gain_db": (raw.get("front") or {}).get("gain_db", 0.0),
+            "center": raw.get("center"), "surround": raw.get("surround"),
+            "height": raw.get("height"), "bass": raw.get("bass"),
+            "decor": raw.get("decor"),
+        },
+        "roles": [{"id": r["id"], "outputs": r["outputs"], "gain_db": r["gain_db"],
+                   "delay_ms": r["delay_ms"], "sources": r["sources"],
+                   "highpass": r.get("highpass"), "lowpass": r.get("lowpass")}
+                  for r in plan["roles"]],
+        "notes": plan["notes"],
+    }
+    print(json.dumps(view, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def cmd_all(args):
+    presets = load_presets(args.presets)
+    if not args.allow_builtin and not (args.layout_presets and os.path.isfile(args.layout_presets)):
+        die("all 需要 layout-presets（当前 %r 不存在）：拒绝使用内置映射（板端 4.1.2 = "
+            "FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7）；请部署/指定 --layout-presets，"
+            "确需内置请显式 --allow-builtin" % args.layout_presets)
+    outdir = args.output
+    prof_dir = os.path.join(outdir, "profiles")
+    cam_dir = os.path.join(outdir, "camilladsp")
+    os.makedirs(prof_dir, exist_ok=True)
+    os.makedirs(cam_dir, exist_ok=True)
+    manifest = {"generated_at": datetime.datetime.now().astimezone().isoformat(),
+                "tool": "tspi-upmix " + TOOL_VERSION,
+                "presets_file": os.path.abspath(presets["path"]), "files": []}
+
+    def add(f):
+        manifest["files"].append({"path": os.path.relpath(f, outdir),
+                                  "sha256": sha256_file(f), "size": os.path.getsize(f)})
+
+    ids = args.preset or sorted(presets["presets"])
+    for pid in ids:
+        if pid not in presets["presets"]:
+            die("未知预设 %r" % pid)
+        plan = build_plan(pid, presets, fs=args.fs)
+        if plan["layout_source"] == "builtin" and not args.allow_builtin:
+            die("预设 %r 的布局 %r 用了内置映射（layout-presets 不含该布局）：拒绝生成，"
+                "避免与板端错位；请补 layout-presets 或显式 --allow-builtin"
+                % (pid, plan["layout"]))
+        pfile = os.path.join(prof_dir, plan["id"] + ".yml")
+        write_text(pfile, profile_text(plan))
+        add(pfile)
+        safe = build_plan(pid, presets, fs=args.fs, compat="safe")
+        sfile = os.path.join(prof_dir, safe["id"] + ".yml")
+        write_text(sfile, profile_text(safe))
+        add(sfile)
+        cfile = os.path.join(cam_dir, plan["id"] + ".yml")
+        write_text(cfile, camilla_text(plan, render_camilladsp(plan, _mk_alsa_devices(plan, args))))
+        add(cfile)
+        print("生成：%s / %s / %s" % (pfile, sfile, cfile))
+    mpath = os.path.join(outdir, "manifest.json")
+    write_text(mpath, json.dumps(manifest, ensure_ascii=False, indent=2))
+    print("清单：%s（%d 个文件）" % (mpath, len(manifest["files"])))
+    return 0
+
+
+def cmd_apply(args):
+    presets = load_presets(args.presets)
+    mode = args.mode
+    if mode == "auto":
+        mode = _detect_mode()
+    fs = args.fs
+    if fs is None:
+        fs = 96000 if mode == "dante" else 48000
+    plan = build_plan(args.preset, presets, fs=fs,
+                      fir_dir=args.fir_dir or DEFAULT_FIR_DIR)
+    if mode == "dante":
+        cap_dev = args.capture_device or "inferno"
+        cap_fmt = args.capture_format or "S32_LE"
+    else:
+        cap_dev = args.capture_device or "hw:ravenna,0"
+        cap_fmt = args.capture_format or "S32_LE"
+    pb_ch = args.playback_channels or 22
+    devices = _devices_alsa(plan, args.chunksize or plan["chunksize"],
+                            args.target_level or plan["target_level"],
+                            args.adjust_period or plan["adjust_period"],
+                            cap_dev, cap_fmt, args.playback_device or "hw:motu,0",
+                            args.playback_format or "S24_3_LE", pb_ch, fs,
+                            enable_rate_adjust=not args.no_rate_adjust)
+    cfg = render_camilladsp(plan, devices)
+    text = camilla_text(plan, cfg)
+    if args.dry_run:
+        print("DRY: mode=%s fs=%d capture=%s(%s) playback=%s(%dch) -> %s"
+              % (mode, fs, cap_dev, cap_fmt, devices["playback"]["device"], pb_ch,
+                 args.config_target))
+        print(text[:2000])
+        return 0
+    rc, msg, backup = _apply_config(plan, text, mode, args.config_target,
+                                    args.backup_dir, restart=(not args.no_restart),
+                                    no_check=args.no_check)
+    print(("OK: " if rc == 0 else "ERROR: ") + msg)
+    if backup:
+        print("原配置备份：%s" % backup)
+    return rc
+
+
+def cmd_rollback(args):
+    state_path = os.path.join(args.backup_dir, "state.json")
+    try:
+        with open(state_path, "r", encoding="utf-8") as fh:
+            state = json.load(fh)
+    except Exception:
+        sys.stderr.write("没有可回滚状态：%s\n" % state_path)
+        return 2
+    backup = state.get("backup")
+    if not backup or not os.path.isfile(backup):
+        sys.stderr.write("备份文件不存在：%r\n" % backup)
+        return 2
+    target = args.config_target or state.get("config") or DEFAULT_CONFIG_TARGET
+    if args.dry_run:
+        print("DRY: 将用 %s 覆盖 %s" % (backup, target))
+        return 0
+    mode = state.get("mode", "off")
+    shutil.copy2(backup, target)
+    print("已恢复：%s -> %s" % (backup, target))
+    if mode != "off" and not args.no_restart:
+        rc, out = _systemctl("restart", UNIT)
+        print(("重启 %s：%s" % (UNIT, out)) if rc == 0 else ("重启失败：%s" % out))
+        return 0 if rc == 0 else 5
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# 入口
+# ---------------------------------------------------------------------------
+def build_parser():
+    ap = argparse.ArgumentParser(
+        prog="tspi-upmix",
+        description="2.0 立体声上混配置生成器（4.1.2 / 5.3.2，CamillaDSP + channelmap v2 profile）")
+    ap.add_argument("--presets", default=None,
+                    help="upmix 预设 YAML（默认项目内 presets/upmix-presets.yml）")
+    ap.add_argument("--input-layout", default=None,
+                    help="输入布局 id（默认 pc-2ch；H16 容器如 h16-7.1.4）")
+    ap.add_argument("--path", default=None, choices=["stereo", "passthrough"],
+                    help="生成上混(stereo)或多声道直通(passthrough)路径，默认 stereo")
+    ap.add_argument("--allow-builtin", action="store_true",
+                    help="允许在 layout-presets 缺失时使用内置布局（默认拒绝，避免 4.1.2 映射错位）")
+    ap.add_argument("--layout-presets", default=DEFAULT_LAYOUT_PRESETS,
+                    help="tspi layout-presets.yml（默认 %s）" % DEFAULT_LAYOUT_PRESETS)
+    ap.add_argument("--version", action="version", version="tspi-upmix " + TOOL_VERSION)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sp = sub.add_parser("list", help="列出预设")
+    sp.set_defaults(func=cmd_list)
+
+    sp = sub.add_parser("show", help="显示预设解析结果")
+    sp.add_argument("preset")
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--fir-dir", default=None)
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_show)
+
+    sp = sub.add_parser("profile", help="生成 channelmap v2 profile")
+    sp.add_argument("preset")
+    sp.add_argument("-o", "--output", required=True)
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--fir-dir", default=None)
+    sp.add_argument("--safe", action="store_true", help="渲染器安全变体（无源反相）")
+    sp.set_defaults(func=cmd_profile)
+
+    sp = sub.add_parser("camilla", help="生成独立 CamillaDSP ALSA 配置")
+    sp.add_argument("preset")
+    sp.add_argument("-o", "--output", required=True)
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--chunksize", type=int, default=None)
+    sp.add_argument("--target-level", type=int, default=None)
+    sp.add_argument("--adjust-period", type=int, default=None)
+    sp.add_argument("--capture-device", default="hw:ravenna,0")
+    sp.add_argument("--capture-format", default="S32_LE")
+    sp.add_argument("--playback-device", default="hw:motu,0")
+    sp.add_argument("--playback-format", default="S24_3_LE")
+    sp.add_argument("--playback-channels", type=int, default=None)
+    sp.add_argument("--no-rate-adjust", action="store_true")
+    sp.add_argument("--fir-dir", default=None)
+    sp.set_defaults(func=cmd_camilla)
+
+    sp = sub.add_parser("file-config", help="生成 CamillaDSP 文件后端配置（测试）")
+    sp.add_argument("preset")
+    sp.add_argument("-o", "--output", required=True)
+    sp.add_argument("--input", required=True, help="输入 2ch WAV")
+    sp.add_argument("--out-wav", default=None, help="输出 WAV（默认 <config>.out.wav）")
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--chunksize", type=int, default=None)
+    sp.add_argument("--fir-dir", default=None)
+    sp.set_defaults(func=cmd_file_config)
+
+    sp = sub.add_parser("detect", help="输入内容检测（离线 WAV 或读运行态 state；LFE 不作判据）")
+    sp.add_argument("--wav", default=None, help="给 WAV 做离线检测（H16 容器多声道）")
+    sp.add_argument("--input-layout", default=None, help="输入布局（默认 h16-7.1.4）")
+    sp.add_argument("--window-ms", type=float, default=500.0)
+    sp.add_argument("--threshold-db", type=float, default=-50.0)
+    sp.add_argument("--hold-ms", type=int, default=2500)
+    sp.add_argument("--json", action="store_true", help="输出 JSON（默认就是 JSON）")
+    sp.add_argument("--write-state", action="store_true", help="把结果写到 --state（默认不写）")
+    sp.add_argument("--state", default=None)
+    sp.add_argument("--mode-file", default=None)
+    sp.set_defaults(func=cmd_detect)
+
+    sp = sub.add_parser("input-mode", help="输入模式覆盖（auto|stereo|multichannel，持久化）")
+    isub = sp.add_subparsers(dest="action")
+    g = isub.add_parser("get", help="读覆盖值 + 运行态")
+    g.add_argument("--json", action="store_true")
+    g.add_argument("--state", default=None)
+    g.add_argument("--mode-file", default=None)
+    g.set_defaults(func=cmd_input_mode_get)
+    s = isub.add_parser("set", help="写覆盖值（接受 force-stereo/force-multichannel 别名）")
+    s.add_argument("mode")
+    s.add_argument("--state", default=None)
+    s.add_argument("--mode-file", default=None)
+    s.add_argument("--updated-by", default="webui")
+    s.set_defaults(func=cmd_input_mode_set)
+    sp.set_defaults(func=cmd_input_mode_help)
+
+    sp = sub.add_parser("autodetect", help="内容检测 daemon（读 CamillaDSP RMS，切 Aux1/Aux2）")
+    sp.add_argument("--input-layout", default=None, help="容器输入布局（默认 h16-7.1.4）")
+    sp.add_argument("--host", default="127.0.0.1")
+    sp.add_argument("--port", type=int, default=int(os.environ.get("TSPI_CAMILLADSP_PORT", "1234") or 1234))
+    sp.add_argument("--interval-ms", type=int, default=500)
+    sp.add_argument("--threshold-db", type=float, default=-50.0)
+    sp.add_argument("--hysteresis-db", type=float, default=6.0)
+    sp.add_argument("--hold-ms", type=int, default=2500)
+    sp.add_argument("--ws-timeout", type=float, default=3.0)
+    sp.add_argument("--startup-freeze-ms", type=int, default=2500,
+                    help="启动冻结（默认 2500ms，期间保持直通）")
+    sp.add_argument("--state", default=None)
+    sp.add_argument("--mode-file", default=None)
+    sp.add_argument("--simulate", default=None, help="回放 RMS 序列（测试/文件后端）")
+    sp.add_argument("--once", action="store_true", help="只处理一轮")
+    sp.add_argument("--dry-run", action="store_true", help="只判定/写 state，不下发 fader 命令")
+    sp.add_argument("--no-write", action="store_true", help="不写 state 文件")
+    sp.add_argument("--verbose", action="store_true", help="每轮打印 state")
+    sp.add_argument("--max-seconds", type=float, default=None)
+    sp.set_defaults(func=cmd_autodetect)
+
+    sp = sub.add_parser("autodetect-config", help="生成双路径 autodetect CamillaDSP 配置")
+    sp.add_argument("preset")
+    sp.add_argument("-o", "--output", required=True)
+    sp.add_argument("--fader-ramp", type=int, default=200)
+    sp.add_argument("--content-mode", default="auto", choices=["auto", "stereo", "multichannel"],
+                    help="auto=双路径（默认）；stereo=只有上混；multichannel=只有直通")
+    sp.add_argument("--input-layout", default=None)
+    sp.add_argument("--capture-channels", type=int, default=None)
+    sp.add_argument("--playback-channels", type=int, default=None)
+    sp.add_argument("--chunksize", type=int, default=None)
+    sp.add_argument("--target-level", type=int, default=None)
+    sp.add_argument("--adjust-period", type=int, default=None)
+    sp.add_argument("--input", default=None, help="文件后端：输入 WAV（容器多声道）")
+    sp.add_argument("--out-wav", default=None)
+    sp.add_argument("--capture-device", default="hw:ravenna,0")
+    sp.add_argument("--capture-format", default="S32_LE")
+    sp.add_argument("--playback-device", default="hw:motu,0")
+    sp.add_argument("--playback-format", default="S24_3_LE")
+    sp.add_argument("--no-rate-adjust", action="store_true")
+    sp.add_argument("--fs", type=int, default=None)
+    sp.set_defaults(func=cmd_autodetect_config)
+
+    sp = sub.add_parser("container", help="生成 H16 容器输入的上混/直通 profile + autodetect 配置")
+    sp.add_argument("-o", "--output", required=True)
+    sp.add_argument("--preset", action="append", default=None)
+    sp.add_argument("--input-layout", default=None)
+    sp.add_argument("--capture-channels", type=int, default=None)
+    sp.add_argument("--playback-channels", type=int, default=None)
+    sp.add_argument("--chunksize", type=int, default=None)
+    sp.add_argument("--target-level", type=int, default=None)
+    sp.add_argument("--adjust-period", type=int, default=None)
+    sp.add_argument("--capture-device", default="hw:ravenna,0")
+    sp.add_argument("--capture-format", default="S32_LE")
+    sp.add_argument("--playback-device", default="hw:motu,0")
+    sp.add_argument("--playback-format", default="S24_3_LE")
+    sp.add_argument("--no-rate-adjust", action="store_true")
+    sp.add_argument("--fader-ramp", type=int, default=200)
+    sp.add_argument("--fs", type=int, default=None)
+    sp.set_defaults(func=cmd_container)
+
+    sp = sub.add_parser("check", help="自检 + 真实 CLI 校验")
+    sp.add_argument("preset", nargs="?", default=None)
+    sp.add_argument("--profile", default=None, help="校验已有 profile")
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--fir-dir", default=None)
+    sp.add_argument("--tmpdir", default=None)
+    sp.add_argument("--no-cli", action="store_true")
+    sp.set_defaults(func=cmd_check)
+
+    sp = sub.add_parser("params", help="WebUI 参数视图 JSON")
+    sp.add_argument("preset")
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--fir-dir", default=None)
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_params)
+
+    sp = sub.add_parser("all", help="生成全部 profile + CamillaDSP 配置 + manifest")
+    sp.add_argument("-o", "--output", required=True)
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--preset", action="append", default=None)
+    sp.add_argument("--fir-dir", default=None)
+    sp.add_argument("--capture-device", default="hw:ravenna,0")
+    sp.add_argument("--capture-format", default="S32_LE")
+    sp.add_argument("--playback-device", default="hw:motu,0")
+    sp.add_argument("--playback-format", default="S24_3_LE")
+    sp.add_argument("--playback-channels", type=int, default=None)
+    sp.add_argument("--chunksize", type=int, default=None)
+    sp.add_argument("--target-level", type=int, default=None)
+    sp.add_argument("--adjust-period", type=int, default=None)
+    sp.add_argument("--no-rate-adjust", action="store_true")
+    sp.set_defaults(func=cmd_all)
+
+    sp = sub.add_parser("apply", help="热应用独立 CamillaDSP 配置（备份+校验+可选重启）")
+    sp.add_argument("preset")
+    sp.add_argument("--fs", type=int, default=None)
+    sp.add_argument("--mode", choices=["auto", "off", "dante", "aes67"], default="auto")
+    sp.add_argument("--config-target", default=DEFAULT_CONFIG_TARGET)
+    sp.add_argument("--backup-dir", default=DEFAULT_VAR_DIR)
+    sp.add_argument("--capture-device", default=None)
+    sp.add_argument("--capture-format", default=None)
+    sp.add_argument("--playback-device", default=None)
+    sp.add_argument("--playback-format", default=None)
+    sp.add_argument("--playback-channels", type=int, default=None)
+    sp.add_argument("--chunksize", type=int, default=None)
+    sp.add_argument("--target-level", type=int, default=None)
+    sp.add_argument("--adjust-period", type=int, default=None)
+    sp.add_argument("--no-rate-adjust", action="store_true")
+    sp.add_argument("--no-restart", action="store_true")
+    sp.add_argument("--no-check", action="store_true")
+    sp.add_argument("--dry-run", action="store_true")
+    sp.add_argument("--fir-dir", default=None)
+    sp.set_defaults(func=cmd_apply)
+
+    sp = sub.add_parser("rollback", help="回滚最近一次 apply 的配置")
+    sp.add_argument("--config-target", default=None)
+    sp.add_argument("--backup-dir", default=DEFAULT_VAR_DIR)
+    sp.add_argument("--no-restart", action="store_true")
+    sp.add_argument("--dry-run", action="store_true")
+    sp.set_defaults(func=cmd_rollback)
+    return ap
+
+
+def main(argv=None):
+    global _LAYOUT_PRESETS_OVERRIDE
+    ap = build_parser()
+    args = ap.parse_args(argv)
+    _LAYOUT_PRESETS_OVERRIDE = args.layout_presets
+    _INPUT_LAYOUT_OVERRIDE = args.input_layout
+    _PATH_OVERRIDE = args.path or "stereo"
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

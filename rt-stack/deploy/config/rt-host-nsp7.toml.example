@@ -1,0 +1,84 @@
+# /etc/tspi-rt-stack/rt-host-nsp7.toml
+# tspi-rt-host：NSP 真实 7ch 4.1.2 AES67 -> plan-arena DSP -> MOTU（常驻 systemd）
+# 来源：rt-stack/deploy/config/rt-host-nsp7.toml.example + motu-meter-dsp-20261122 64ms soak 配置
+# 安全：本配置不控制 MOTU 静音；启动前提 = CueMix koTrim[0..11]=100 + kMainTrim=100（物理静音）。
+# 状态：2026-11-22 aes67-daemon 任务安装；见 rt-stack/evidence/aes67-daemon-20261122/RUNBOOK.md
+#
+# plan 选型（2026-11-22 实测结论）：
+#   RUN2 flat/tilt10 的真实 plan（4860B, ABI v2, sha 3fced8bc…/eaa144a4…）是 **2-in** 设计
+#   （plan.adapter n_src=2），tspi-rt-host 的 userspace AES67 单 flow 7ch 只接受 **8ch strict 图输入**
+#   （错误：ERR_ROLES …只支持 8ch strict(4.1.2) 图输入（got 2）），因此不能直接接 NSP 7ch 流。
+#   生产常驻链路改用 window-nsp-e2e 已验证的 8-in/7-role 4.1.2 identity plan（ABI v1，1636B，
+#   n_in=8 / n_out=8 / sha 52f2f3adaeb4058180cea88a63232cd4ba02321d7521f60331f62afff5cb1c0d）。
+#   8-in ABI v2（含 PEQ/IIR）plan 尚未产出 → plan_abi=2 合入 7ch 链路 = NOT_RUN（见 RUNBOOK）。
+[host]
+block_size = 128
+sample_rate = 48000
+workers = 4
+graph = "plan-arena"
+safe_mode = "normal"
+
+[alsa]
+backend = "alsa"
+io_mode = "synth"
+device = "hw:UltraLitemk5,0"
+capture_channels = 20
+playback_channels = 22
+period_frames = 128
+buffer_frames = 1024
+
+[rt]
+dsp_cpus = "0-3"
+dsp_priority = 70
+io_priority = 80
+irq_priority = 90
+tick_freq_hz = 1000000000
+apply_affinity = false
+
+[web]
+bind = "127.0.0.1:8090"
+
+[control]
+url = "http://127.0.0.1:8090"
+
+[daemon]
+config = ""
+
+[paths]
+last_good = "/var/lib/tspi-rt-stack/last-good.json"
+plan = "/var/lib/tspi-rt-stack/plans/plan-412-identity.bin"
+
+[run]
+max_blocks = 0
+duration_ms = 0
+
+[capture]
+source = "aes67"
+mode = "aes67"
+aes67_transport = "userspace"
+aes67_sdp = "/var/lib/tspi-rt-stack/nsp-aes67.sdp"
+aes67_iface = "192.0.2.222"
+# task-320（可选；保持注释 = 旧行为）：
+# - 多网卡/多接口（组播每个接口一条显式 join；单播只允许 1 个接口）：
+#aes67_iface = ["192.0.2.222", "enp3s0"]
+# - 只接受指定组播组（SDP 声明的组不在列表 → 启动 fail-closed）：
+#aes67_group_allow = ["239.69.16.146"]
+# - RTP 来源白名单（IPv4/CIDR；非白名单来源丢弃并计入 flows[].io.filtered_source）：
+#aes67_source_allow = ["192.0.2.0/24"]
+aes67_stall_blocks = 400
+ptp_lock = "unlocked"
+# 64 ms 抖动缓冲：motu-meter-dsp 2026-11-22 10 min 静音 soak PASS 的实测配置
+# （无 PTP 时 60 ppm 漂移会耗尽小缓冲；64 ms 只是把耗尽时间延后，长稳仍未解决）
+aes67_jitter_latency_us = 64000
+# T239-crackle（2026-11-22）：媒体时基改为合成时钟（origin+latency+delivered），
+# 并加 stay/hold + 内部 reanchor + stale-jitter 看门狗（standalone tools/aes67-rx 同口径）。
+# 旧"墙钟 target"实现在真机 ALSA duplex/USB 节拍量化下产生 not_due 7–10% 静音插块
+# + 每块配一次 resync 丢块（≈28 次/s 可闻爆音）；见 rt-stack/evidence/aes67-crackle-20261122/。
+aes67_stay_on_stream_end = true
+# 连续静音达到 80ms 请求一次内部 reanchor（0 = 不请求；standalone --stream-end-ms 默认 80ms）。
+aes67_silence_hold_ms = 80
+# hold 静音总时长超过 10s 才 fail closed 交 systemd（0 = 永不；必须 > NSP 会话启动 6–10s）。
+aes67_stall_fail_close_ms = 10000
+# datagrams 涨但 accepted 不涨（新会话 ts/SSRC 复位被旧锚点判 late）→ 请求内部 reanchor，
+# 连续 3 次无效才 fail closed。
+aes67_reanchor_watchdog = true

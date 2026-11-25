@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# T28 dry-run mock：systemd 语义子集；状态/MOCK_LOG 由 tests/run_dryrun_tests.sh 提供。绝不触碰真实系统。
+# T28-P3-6 增强（2026-11-17）：
+#   * cat/is-active 回落到夹具安装目录 $TSPI_DEPLOY_ROOT/etc/systemd/system（04 安装的 unit 可被 06 查到）；
+#   * start target 按 unit 文件的 Wants= 建模（不再无条件拉起 host+daemon）；
+#   * show -p Environment 按 systemd.exec 语义合成有效环境：Environment= 在前、EnvironmentFile= 在后覆盖。
+set -u
+S="${MOCK_STATE:?MOCK_STATE 未设置}"; L="${MOCK_LOG:-$S/log}"; U="$S/units"; A="$S/active"; E="$S/enabled"; EN="$S/envs"
+mkdir -p "$U" "$A" "$E" "$EN" 2>/dev/null || true
+FIXTURE_ROOT="${TSPI_DEPLOY_ROOT:-/}"
+FIXTURE_SYS=""
+if [ "$FIXTURE_ROOT" != "/" ] && [ -n "$FIXTURE_ROOT" ]; then FIXTURE_SYS="${FIXTURE_ROOT%/}/etc/systemd/system"; fi
+printf "systemctl %s\n" "$*" >> "$L"
+if [ -n "${MOCK_FAIL_MATCH:-}" ]; then case " $* " in *"$MOCK_FAIL_MATCH"*) echo "mock systemctl: injected failure: $*" >&2; exit 1;; esac; fi
+
+_fixture_unit() { # unit -> fixture unit path（存在才返回 0）
+  [ -n "$FIXTURE_SYS" ] && [ -f "$FIXTURE_SYS/$1" ] && { printf "%s" "$FIXTURE_SYS/$1"; return 0; }
+  return 1
+}
+_unit_file() { # unit -> mock 或 fixture 的 unit 文件
+  [ -f "$U/$1" ] && { printf "%s" "$U/$1"; return 0; }
+  _fixture_unit "$1" 2>/dev/null && return 0
+  return 1
+}
+_unit_opt_all() { # key unit -> 该 unit 文件里 key= 的值（多行合并）
+  local key="$1" u="$2" f val=""
+  f="$( _unit_file "$u" 2>/dev/null || true )"
+  [ -n "$f" ] && [ -f "$f" ] && val="$(sed -n "s/^$key=//p" "$f" 2>/dev/null | tr "\n" " ")"
+  printf "%s" "$val"
+}
+_add_proc() { # service -> MOCK_PROCS 追加进程行（幂等）
+  [ -n "${MOCK_PROCS:-}" ] && [ -f "${MOCK_PROCS:-}" ] || return 0
+  case "$1" in
+    tspi-rt-host.service) grep -q "tspi-rt-host" "$MOCK_PROCS" || printf "4321 tspi-rt-host run --config /etc/tspi-rt-stack/rt-host.toml\n" >> "$MOCK_PROCS" ;;
+    tspi-rt-daemon.service) grep -q "tspi-rt-daemon" "$MOCK_PROCS" || printf "4322 tspi-rt-daemon serve --config /etc/tspi-rt-stack/rt-daemon.toml\n" >> "$MOCK_PROCS" ;;
+  esac
+}
+_del_proc() { # service -> 从 MOCK_PROCS 删除对应进程行
+  [ -n "${MOCK_PROCS:-}" ] && [ -f "${MOCK_PROCS:-}" ] || return 0
+  case "$1" in
+    tspi-rt-host.service) grep -v "tspi-rt-host" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true ;;
+    tspi-rt-daemon.service) grep -v "tspi-rt-daemon" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true ;;
+  esac
+}
+_fixture_abs() { # /etc/x -> $FIXTURE_ROOT/etc/x（live "/" 原样）
+  case "$1" in
+    /*) if [ -n "$FIXTURE_SYS" ]; then printf "%s%s" "${FIXTURE_ROOT%/}" "$1"; else printf "%s" "$1"; fi ;;
+    *) printf "%s" "$1" ;;
+  esac
+}
+_assignments() { # unit -> 环境赋值行：先 Environment=（unit 后 drop-in），再 EnvironmentFile=（按列出顺序，后者覆盖）
+  local u="$1" f d
+  local files=""
+  [ -f "$U/$u" ] && files="$U/$u"
+  f="$(_fixture_unit "$u" 2>/dev/null || true)"; [ -n "$f" ] && files="$files $f"
+  for d in "$U/$u.d" "$FIXTURE_SYS/$u.d"; do
+    [ -n "$d" ] && [ -d "$d" ] || continue
+    files="$files $(ls -1 "$d"/*.conf 2>/dev/null | sort | tr "\n" " ")"
+  done
+  # 1) Environment= 赋值（按文件出现顺序）
+  for f in $files; do
+    [ -f "$f" ] || continue
+    sed -n "s/^Environment=//p" "$f" 2>/dev/null | tr " " "\n"
+  done
+  # 2) EnvironmentFile= 内容（按列出顺序；systemd.exec：覆盖 Environment=）
+  for f in $files; do
+    [ -f "$f" ] || continue
+    sed -n "s/^EnvironmentFile=//p" "$f" 2>/dev/null
+  done | while IFS= read -r ef; do
+    [ -n "$ef" ] || continue
+    ef="${ef#-}"
+    fp="$(_fixture_abs "$ef")"
+    [ -f "$fp" ] && sed -n "s/^[[:space:]]*//; s/[[:space:]]*$//; /^#/d; /^$/d; p" "$fp"
+  done
+}
+_env_inline() { # unit -> 仅 Environment= 赋值（真实 systemctl show -p Environment 语义：不含 EnvironmentFile）
+  local u="$1" f d files
+  files=""
+  [ -f "$U/$u" ] && files="$U/$u"
+  f="$(_fixture_unit "$u" 2>/dev/null || true)"; [ -n "$f" ] && files="$files $f"
+  for d in "$U/$u.d" "$FIXTURE_SYS/$u.d"; do
+    [ -n "$d" ] && [ -d "$d" ] || continue
+    files="$files $(ls -1 "$d"/*.conf 2>/dev/null | sort | tr "\n" " ")"
+  done
+  for f in $files; do
+    [ -f "$f" ] || continue
+    sed -n "s/^Environment=//p" "$f" 2>/dev/null | tr " " "\n"
+  done
+}
+_effective_env() { # unit -> 有效环境（同名变量后者覆盖；按变量名排序输出）
+  local u="$1"
+  _assignments "$u" | awk -F= 'NF>=2 { v=$1; val=substr($0,index($0,"=")+1); last[v]=val } END { for (v in last) print v"="last[v] }' | sort
+}
+_env_file_list() { # unit -> EnvironmentFile= 列表（unit + drop-ins，保留 systemd 的 '-' 前缀）
+  local u="$1" f d files
+  files=""
+  [ -f "$U/$u" ] && files="$U/$u"
+  f="$(_fixture_unit "$u" 2>/dev/null || true)"; [ -n "$f" ] && files="$files $f"
+  for d in "$U/$u.d" "$FIXTURE_SYS/$u.d"; do
+    [ -n "$d" ] && [ -d "$d" ] || continue
+    files="$files $(ls -1 "$d"/*.conf 2>/dev/null | sort | tr "
+" " ")"
+  done
+  for f in $files; do
+    [ -f "$f" ] || continue
+    sed -n "s/^EnvironmentFile=//p" "$f" 2>/dev/null
+  done
+}
+
+_start_unit() { # unit -> 标记 active，并按 unit 文件 Wants=/Requires= 递归拉起依赖（systemd 语义子集）
+  local u="$1" dep deps
+  [ -f "$A/$u" ] && return 0
+  touch "$A/$u"
+  case "$u" in *.service) _add_proc "$u" ;; esac
+  deps="$(_unit_opt_all Wants "$u") $(_unit_opt_all Requires "$u")"
+  for dep in $deps; do
+    case "$dep" in
+      *.service|*.target) _start_unit "$dep" ;;
+      *) : ;;
+    esac
+  done
+}
+
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  is-active)
+    quiet=0; [ "${1:-}" = "--quiet" ] && { quiet=1; shift; }
+    u="${1:-}"
+    if [ -f "$A/$u" ]; then [ "$quiet" = "1" ] || echo active; exit 0; else [ "$quiet" = "1" ] || echo inactive; exit 3; fi ;;
+  is-enabled)
+    u="${1:-}"
+    s=disabled; [ -f "$E/$u" ] && s="$(cat "$E/$u")"
+    echo "$s"
+    case "$s" in enabled|enabled-runtime|static|indirect|masked) exit 0;; *) exit 1;; esac ;;
+  cat)
+    rc=0
+    for u in "$@"; do
+      if [ -f "$U/$u" ]; then echo "# /etc/systemd/system/$u"; cat "$U/$u";
+      elif f="$(_fixture_unit "$u" 2>/dev/null || true)" && [ -n "$f" ]; then echo "# fixture: $f"; cat "$f";
+      else echo "No files found for $u." ; rc=1; fi
+    done
+    exit "$rc" ;;
+  stop)
+    for u in "$@"; do rm -f "$A/$u"; _del_proc "$u"; done ;;
+  start)
+    # task-192：按 unit 文件 Wants=/Requires= 递归拉起依赖（含 tspi-rt-host Requires tspi-irq-affinity）
+    for u in "$@"; do _start_unit "$u"; done ;;
+  restart|try-restart|reload-or-restart)
+    for u in "$@"; do _start_unit "$u"; done ;;
+  enable)
+    for u in "$@"; do printf "enabled\n" > "$E/$u"; done ;;
+  disable)
+    for u in "$@"; do printf "disabled\n" > "$E/$u"; done ;;
+  mask)
+    for u in "$@"; do
+      # F2（2026-11-18）真实语义：/etc/systemd/system/<unit> 为普通文件时 mask 失败
+      # （systemd 需在该路径建 /dev/null 符号链接，不能覆盖既有文件）。
+      if [ -n "$FIXTURE_SYS" ] && [ -f "$FIXTURE_SYS/$u" ] && [ ! -L "$FIXTURE_SYS/$u" ]; then
+        echo "mock systemctl: Failed to mask unit: File $FIXTURE_SYS/$u already exists." >&2
+        exit 1
+      fi
+      printf "masked\n" > "$E/$u"; rm -f "$A/$u"
+    done ;;
+  unmask)
+    for u in "$@"; do printf "disabled\n" > "$E/$u"; done ;;
+  daemon-reload|preset|reset-failed|reload) : ;;
+  show)
+    prop=""; u=""; want_value=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --property=*) prop="${1#--property=}" ;;
+        -p) prop="${2:-}"; shift ;;
+        --value) want_value=1 ;;
+        -*) : ;;
+        *) u="$1" ;;
+      esac
+      shift
+    done
+    _show_env_files() { _env_file_list "$u" | tr "\n" " " | sed 's/[[:space:]]*$//'; }
+    case "$prop" in
+      Environment)
+        if [ "${MOCK_SHOW_ENV_REAL:-0}" = "1" ]; then
+          # 真实 systemd 语义（F5）：Environment 属性不含 EnvironmentFile 内容
+          val="$(_env_inline "$u" | sort -u | tr "\n" " " | sed 's/[[:space:]]*$//')"
+        else
+          val="$(_effective_env "$u" | tr "\n" " " | sed 's/[[:space:]]*$//')"
+        fi
+        if [ "$want_value" = "1" ]; then printf "%s\n" "$val"; else printf "Environment=%s\n" "$val"; fi ;;
+      MainPID)
+        pid=0
+        if [ -f "$A/$u" ]; then
+          case "$u" in
+            tspi-rt-host.service) pid=4321 ;;
+            tspi-rt-daemon.service) pid=4322 ;;
+            *) pid=4300 ;;
+          esac
+          [ -n "${MOCK_MAINPID:-}" ] && pid="$MOCK_MAINPID"
+        fi
+        if [ "$want_value" = "1" ]; then echo "$pid"; else echo "MainPID=$pid"; fi ;;
+      EnvironmentFiles)
+        val="$(_show_env_files)"
+        if [ "$want_value" = "1" ]; then printf "%s\n" "$val"; else printf "EnvironmentFiles=%s\n" "$val"; fi ;;
+      *) if [ "$want_value" = "1" ]; then echo ""; else echo "$prop="; fi ;;
+    esac ;;
+  list-unit-files|list-units)
+    echo "UNIT FILE STATE"
+    for f in "$U"/*; do [ -f "$f" ] || continue; b="$(basename "$f")"; s=disabled; [ -f "$E/$b" ] && s="$(cat "$E/$b")"; echo "$b $s"; done ;;
+  *) echo "mock systemctl: unsupported command: $cmd $*" >&2; exit 1 ;;
+esac
+exit 0

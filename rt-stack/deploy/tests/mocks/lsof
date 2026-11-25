@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -u
+printf "lsof %s\n" "$*" >> "${MOCK_LOG:-/dev/null}"
+if [ -s "${MOCK_SND_BUSY:-/dev/null}" ]; then cat "${MOCK_SND_BUSY}"; exit 0; fi
+exit 1

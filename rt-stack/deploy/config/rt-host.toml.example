@@ -1,0 +1,72 @@
+# /etc/tspi-rt-stack/rt-host.toml —— tspi-rt-host 配置模板（schema tspi-rt-host/v1，T155 冻结）
+# 安装时由 04-install-release.sh 从 .example 复制；不得覆盖已存在文件。
+# 纪律：不得出现 CamillaDSP/旧栈路径；回退只用自研 last-good 或 mute（G-no-C）。
+[host]
+block_size = 128              # runtime 仅 64/128（core-v1 Q-11）
+sample_rate = 48000           # 48000/96000
+workers = 4                   # 4 生产 / 2 独立降级 profile
+graph = "stereo_identity"     # stereo_identity | 2x2_offdiag（真实校准图加载 NOT_WIRED）
+safe_mode = "normal"          # normal | mute（mute 仅由 90-safe-mute drop-in 覆盖）
+
+[alsa]
+# fake = 本构建唯一已接线 backend（真实 ALSA open/duplex NOT_WIRED，见 deploy/README §7）
+backend = "fake"
+device = "hw:UltraLitemk5,0"
+capture_channels = 20
+playback_channels = 22
+period_frames = 128
+buffer_frames = 1024
+
+[rt]
+dsp_cpus = "4-7"              # 默认 A72 全核（RK3576 CPU4-7）；2-5 混 A53/A72 实测慢 3.1×
+                              # （planrt-20261119）；T45 依赖 IRQ 仍钉 A53（见 irq-affinity.env）。
+dsp_priority = 70             # FIFO 初值；dsp < io <= irq
+io_priority = 80
+irq_priority = 90
+tick_freq_hz = 1000000000     # T19 标定值；0 = 拒启
+apply_affinity = false        # true = 启动期真实写 mlockall/SCHED_FIFO/亲和（F6/task-216；失败 fail-closed）；
+                              # 板端播放验收用 EnvironmentFile TSPI_HOST_APPLY_AFFINITY=true 覆盖（无需改本行）
+
+[web]
+bind = "127.0.0.1:8090"       # host 只记录/探测；Web 由 tspi-rt-daemon unit 提供
+
+[control]
+url = "http://127.0.0.1:8090"
+
+[daemon]
+# 非空 = 单进程 dev/验证模式：run 会拉起同目录 tspi-rt-daemon 并探测端口（deploy 用两 unit，保持空）
+config = ""
+
+[paths]
+last_good = "/var/lib/tspi-rt-stack/last-good.json"
+
+[run]
+max_blocks = 0                # 0 = 直到 SIGINT/SIGTERM（daemon 模式）
+duration_ms = 0               # 0 = 不限时；>0 到点优雅退出
+
+# ---------------------------------------------------------------------------
+# [capture] 模板（task-320：AES67/组播监听面；整段保持注释 = 旧行为 source=synth）
+# ---------------------------------------------------------------------------
+# [capture]
+# source = "aes67"                 # synth | file | motu | inferno | aes67
+# mode = "aes67"                   # source 与 mode 一一对应（off|toslink|aes67|dante 互斥）
+# aes67_transport = "userspace"    # userspace = 自研用户态 RTP 接收端；ravenna = RAVENNA LKM
+# aes67_sdp = "/var/lib/tspi-rt-stack/nsp16-aes67.sdp"
+#
+# 收包接口（task-320）：IPv4 或网卡名；逗号列表 / 单行 TOML 数组 = 多接口（组播每个接口一条
+# 显式 IP_ADD_MEMBERSHIP；单播只允许 1 个接口）。留空 = 0.0.0.0（旧行为；多网卡启动时 WARN）。
+# aes67_iface = "enp2s0"
+# aes67_iface = "enp2s0,enp3s0"
+# aes67_iface = ["192.0.2.222", "192.0.2.223"]
+# 0.0.0.0 只能单独写（= 所有接口的旧行为，不能与具体接口混写）：
+# aes67_iface = "0.0.0.0"
+#
+# 组播组白名单（task-320；可选）：只 join/接受列出的组；SDP 声明的组不在列表 → 启动 fail-closed。
+# 空 = 旧行为（接受 SDP 声明的组）。仅对组播 flow 有效；单播 flow 配置本项会被拒绝启动。
+# aes67_group_allow = "239.69.16.146,239.69.16.147"
+# aes67_group_allow = ["239.69.16.146", "239.69.16.147"]
+#
+# RTP 来源白名单（task-320；可选）：IPv4 或 IPv4/CIDR 列表；非白名单来源的包在 RTP 解析/抖动
+# 缓冲之前丢弃并计数（capture.flows[].io.filtered_source），不污染 jitter/underrun。
+# 空 = 旧行为（接受任意来源）。
+# aes67_source_allow = "192.0.2.0/24,192.0.2.222"

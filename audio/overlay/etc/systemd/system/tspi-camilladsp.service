@@ -1,0 +1,35 @@
+[Unit]
+Description=tspi-audio: CamillaDSP (DSP engine, output -> MOTU UltraLite-mk5)
+Documentation=file:///etc/camilladsp/
+After=tspi-statime-inferno.service tspi-aes67-daemon.service tspi-phc-usrvclock.service
+ConditionPathExists=/run/tspi/camilladsp.yml
+PartOf=tspi-audio.target
+
+[Service]
+Type=simple
+# 默认值（TSPI_CAMILLADSP_PORT/BIND 等）+ tspi-mode 生成的环境（INFERNO_*）
+EnvironmentFile=-/etc/default/tspi-audio
+EnvironmentFile=-/run/tspi/camilladsp.env
+ExecStart=/usr/local/bin/camilladsp -p ${TSPI_CAMILLADSP_PORT} -a ${TSPI_CAMILLADSP_BIND} -l warn --gain1=-120 --gain2=0 /run/tspi/camilladsp.yml
+Restart=on-failure
+RestartSec=3
+
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+Nice=-10
+
+CapabilityBoundingSet=CAP_SYS_NICE CAP_IPC_LOCK CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_SYS_NICE CAP_IPC_LOCK
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+# 必须与 statime 共享 /tmp（usrvclock socket: /tmp/ptp-usrvclock）
+PrivateTmp=no
+ReadWritePaths=/run/tspi /tmp /var/lib/tspi
+DeviceAllow=/dev/snd/* rw
+ProtectClock=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

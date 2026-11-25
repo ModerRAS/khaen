@@ -1,0 +1,32 @@
+# tspi-calibration/v1.1 示例：两通道 high_shelf。
+# q=0.7 是 RBJ shelf slope S（不是 Q），落在裁决 5 的 [0.1, 1.0] 内。
+# CamillaDSP 片段写 slope=12*0.7=8.4 dB/oct，见同名 .camilladsp.yml。
+schema: tspi-calibration/v1.1
+sample_rate: 48000
+reference_index: 0
+layout: "4.1.2"
+created_unix: 1794902400
+tool: {name: tspi-calibrate, version: "0.1.0"}
+note: "示例数据。high_shelf q=0.7；只演示 FL/FR，其余角色不在本文件里"
+measurement:
+  mode: direct
+  sweep: {start_hz: 20, end_hz: 20000, seconds: 5.0, level_db: -30.0, fade_ms: 10}
+  playback: {device: "hw:motu,0", channels: 22}
+  capture: {device: "hw:UMIK1,0", channels: 1}
+  pre_seconds: 1.0
+  post_seconds: 1.0
+  repeats: 3
+channels:
+  - name: FL
+    index: 0
+    delay_samples: 0
+    polarity: normal
+    gain_db: 0.0
+    filters:
+      - {freq: 4000.0, q: 0.7, gain_db: -2.0, type: high_shelf}
+  - name: FR
+    index: 1
+    delay_samples: 8
+    polarity: invert
+    filters:
+      - {freq: 5000.0, q: 0.7, gain_db: 1.5, type: high_shelf}

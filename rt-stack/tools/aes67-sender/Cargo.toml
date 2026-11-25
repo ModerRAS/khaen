@@ -1,0 +1,60 @@
+﻿# TSPI Windows 用户态 AES67 发送端（team task-236）
+#
+# 独立 Cargo workspace（末尾的 [workspace] 空表把它从 rt-stack 公共 workspace 中摘出）：
+# rt-stack/Cargo.toml 是 integrator 独占写域，本工具不注册为 member，避免改公共根。
+#
+# 依赖（全部为 crates.io 已缓存版本，可 --offline 构建）：
+# - anyhow：CLI 错误上下文
+# - socket2：组播接口选择/TTL/loop、SO_REUSEADDR、接收超时
+# - windows（仅 Windows target）：WASAPI / WASAPI process loopback / QPC COM 绑定
+[package]
+name = "aes67-sender"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Windows user-space AES67 L24/48k RTP sender (WASAPI loopback / WAV / raw PCM / sine) + minimal Rust receiver for loopback self-check"
+license = "GPL-3.0-only"
+
+[dependencies]
+anyhow = "1"
+socket2 = "0.5"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Performance",
+    "Win32_System_Threading",
+    "Win32_Security",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[[bin]]
+name = "aes67-send"
+path = "src/bin/aes67_send.rs"
+
+[[bin]]
+name = "aes67-recv"
+path = "src/bin/aes67_recv.rs"
+
+[[bin]]
+name = "aes67-gen-wav"
+path = "src/bin/aes67_gen_wav.rs"
+
+[[bin]]
+name = "aes67-play"
+path = "src/bin/aes67_play.rs"
+
+[[bin]]
+name = "aes67-devices"
+path = "src/bin/aes67_devices.rs"
+
+[profile.release]
+opt-level = 3
+debug = false
+
+# 独立 workspace：不从属于 rt-stack/Cargo.toml（integrator 独占写域）
+[workspace]

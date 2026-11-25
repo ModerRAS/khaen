@@ -1,0 +1,83 @@
+{
+  "schema": "tspi-reference-fixture/v1",
+  "id": "C02_identity_delay_d3",
+  "title": "identity with pre-declared common delay D=3 (G=z^-3 I)",
+  "tags": [
+    "identity",
+    "D",
+    "tail"
+  ],
+  "fs_hz": 48000,
+  "generated_by": "tools/gen_fixtures.py",
+  "graph": {
+    "n_src": 1,
+    "n_out": 1,
+    "container_channels": 1,
+    "d_samples": 3,
+    "a_map": [
+      [
+        1
+      ]
+    ],
+    "a_fir": [
+      [
+        1
+      ]
+    ],
+    "participants": [
+      0
+    ],
+    "g": [
+      [
+        []
+      ]
+    ],
+    "p": [
+      [
+        1
+      ]
+    ],
+    "scatter": [
+      0
+    ]
+  },
+  "supports": {
+    "l_a": 1,
+    "l_g": 4,
+    "l_p": 1,
+    "l_f": 4,
+    "l_out": 6
+  },
+  "input": [
+    [
+      1,
+      2,
+      3
+    ]
+  ],
+  "expected": [
+    [
+      0,
+      0,
+      0,
+      1,
+      2,
+      3
+    ]
+  ],
+  "expected_len": 6,
+  "comparison": {
+    "mode": "exact"
+  },
+  "streaming": {
+    "block_sizes": [
+      1,
+      2,
+      64,
+      128
+    ],
+    "flush_zeros": 3,
+    "contract": "pad input with flush_zeros zeros, process in blocks of B, concatenate and truncate to expected_len"
+  },
+  "notes": "G=z^-3；输出 = 输入后移 3 样本；L_G=D+1=4（D 计入支撑）。"
+}

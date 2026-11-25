@@ -1,0 +1,119 @@
+{
+  "schema": "tspi-reference-fixture/v1",
+  "id": "C06_row_col_asymmetry",
+  "title": "P=diag(2,5) on rows: F=P*G != G*P",
+  "tags": [
+    "offdiag",
+    "row_column"
+  ],
+  "fs_hz": 48000,
+  "generated_by": "tools/gen_fixtures.py",
+  "graph": {
+    "n_src": 2,
+    "n_out": 2,
+    "container_channels": 2,
+    "d_samples": 0,
+    "a_map": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "a_fir": [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "participants": [
+      0,
+      1
+    ],
+    "g": [
+      [
+        [],
+        [
+          2
+        ]
+      ],
+      [
+        [
+          3
+        ],
+        [
+          3
+        ]
+      ]
+    ],
+    "p": [
+      [
+        2
+      ],
+      [
+        5
+      ]
+    ],
+    "scatter": [
+      0,
+      1
+    ]
+  },
+  "supports": {
+    "l_a": 1,
+    "l_g": 1,
+    "l_p": 1,
+    "l_f": 1,
+    "l_out": 1
+  },
+  "input": [
+    [
+      1
+    ],
+    [
+      1
+    ]
+  ],
+  "expected": [
+    [
+      6
+    ],
+    [
+      35
+    ]
+  ],
+  "expected_len": 1,
+  "comparison": {
+    "mode": "exact"
+  },
+  "streaming": {
+    "block_sizes": [
+      1,
+      2,
+      64,
+      128
+    ],
+    "flush_zeros": 0,
+    "contract": "pad input with flush_zeros zeros, process in blocks of B, concatenate and truncate to expected_len"
+  },
+  "notes": "G=[[1,2],[3,4]]；F=P*G=[[2,4],[15,20]]；y=[6,35]。",
+  "traps": [
+    {
+      "id": "output_matrix_instead_of_diagonal",
+      "explanation": "若把 P 实现成矩阵乘（G*P）而非行对角缩放，x=[1,1] 时输出会变成 [12,26] 而不是 [6,35]。",
+      "wrong_expected": [
+        [
+          12
+        ],
+        [
+          26
+        ]
+      ]
+    }
+  ]
+}

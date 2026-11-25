@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -u
+case "$*" in *NTPSynchronized*) echo yes ;; *) echo "mock timedatectl" ;; esac
+exit 0

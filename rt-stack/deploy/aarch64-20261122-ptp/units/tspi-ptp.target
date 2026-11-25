@@ -1,0 +1,8 @@
+[Unit]
+Description=TSPI PTPv2 grandmaster (ptp4l + phc2sys; requirement 15)
+Documentation=file:///opt/tspi-rt-stack/ptp/current/README.deploy.md
+Wants=tspi-ptp-master.service tspi-ptp-phc2sys.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

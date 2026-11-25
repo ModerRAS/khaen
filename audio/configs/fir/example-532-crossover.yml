@@ -1,0 +1,98 @@
+---
+# example-532-crossover.yml — 5.3.2 十路完整示例（IIR 分频 + 每路 PEQ/Delay + MOTU 22ch 补零）
+# 用法：复制到 /etc/camilladsp/ 或渲染后作为 /run/tspi/camilladsp.yml 手工调试（camilladsp --check 先校验）。
+# 采样率：AES67=48000（本示例）；Dante 改 96000。分频点/斜率/延迟/极性按实际音箱与测量调整。
+# 输入：H16-AIP 16ch（AES67 48k / Dante 96k）；容器顺序假设见 mixer 注释，待 H16 实测核对（CamillaDSP 不解码 Atmos/DTS）。
+devices:
+  samplerate: 48000
+  chunksize: 128
+  target_level: 512
+  adjust_period: 10
+  enable_rate_adjust: true
+  queuelimit: 4
+  resampler:
+    type: AsyncSinc
+    profile: Balanced
+  capture:
+    type: Alsa
+    channels: 16                # H16-AIP 16ch（7.1.4/9.1.4 容器）
+    device: "hw:ravenna,0"       # Dante 模式改 "inferno"（format 仍 S32_LE）
+    format: S32_LE
+  playback:
+    type: Alsa
+    channels: 22                 # MOTU 硬件 22ch；10 路信号 + 12 路补零
+    device: "hw:motu,0"
+    format: S24_3_LE
+
+filters:
+  # ---- 分频（Linkwitz-Riley；阶数 4=24dB/oct，可改 2/6/8）----
+  hp0: {type: BiquadCombo, parameters: {type: LinkwitzRileyHighpass, freq: 40, order: 4}}   # Front L 主箱
+  hp1: {type: BiquadCombo, parameters: {type: LinkwitzRileyHighpass, freq: 40, order: 4}}   # Front R
+  hp2: {type: BiquadCombo, parameters: {type: LinkwitzRileyHighpass, freq: 80, order: 4}}   # Center
+  hp3: {type: BiquadCombo, parameters: {type: LinkwitzRileyHighpass, freq: 80, order: 4}}   # Surround L
+  hp4: {type: BiquadCombo, parameters: {type: LinkwitzRileyHighpass, freq: 80, order: 4}}   # Surround R
+  lp5: {type: BiquadCombo, parameters: {type: LinkwitzRileyLowpass,  freq: 80, order: 4}}   # Sub 1
+  lp6: {type: BiquadCombo, parameters: {type: LinkwitzRileyLowpass,  freq: 80, order: 4}}   # Sub 2
+  lp7: {type: BiquadCombo, parameters: {type: LinkwitzRileyLowpass,  freq: 80, order: 4}}   # Sub 3
+  hp8: {type: BiquadCombo, parameters: {type: LinkwitzRileyHighpass, freq: 120, order: 4}}  # Height L
+  hp9: {type: BiquadCombo, parameters: {type: LinkwitzRileyHighpass, freq: 120, order: 4}}  # Height R
+
+  # ---- 每路 PEQ 占位（0 dB；实测后替换 freq/q/gain，可加多条）----
+  peq0: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq1: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq2: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq3: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq4: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq5: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq6: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq7: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq8: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq9: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+
+  # ---- 每路延迟占位（ms；subsample: true 可亚样本）----
+  dly0: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly1: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly2: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly3: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly4: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly5: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly6: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly7: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly8: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly9: {type: Delay, parameters: {delay: 0, unit: ms}}
+
+mixers:
+  to_532:
+    description: "2ch -> 5.3.2 10 路占位 upmix（正式实现按测量/低音管理改）"
+    channels:
+      in: 16
+      out: 22
+    mapping:
+      - {dest: 0, sources: [{channel: 0, gain: 0}]}                # Main 1-2 -> Front L  <- in0
+      - {dest: 1, sources: [{channel: 1, gain: 0}]}                # Main 1-2 -> Front R  <- in1
+      - {dest: 2, sources: [{channel: 2, gain: 0}]}                # Line 3 -> Center     <- in2
+      - {dest: 3, sources: [{channel: 4, gain: 0}]}                # Line 4 -> Surround L <- in4 Ls
+      - {dest: 4, sources: [{channel: 5, gain: 0}]}                # Line 5 -> Surround R <- in5 Rs
+      - {dest: 5, sources: [{channel: 3, gain: 0}]}                # Line 6 -> Sub 1     <- in3 LFE
+      - {dest: 6, sources: [{channel: 3, gain: 0}]}                # Line 7 -> Sub 2     <- in3 LFE
+      - {dest: 7, sources: [{channel: 3, gain: 0}]}                # Line 8 -> Sub 3     <- in3 LFE
+      - {dest: 8, sources: [{channel: 8, gain: 0}]}                # Line 9 -> Height L  <- in8 Tfl
+      - {dest: 9, sources: [{channel: 9, gain: 0}]}                # Line 10 -> Height R <- in9 Tfr
+      # in6/7（Lrs/Rrs）与 in10..15 暂不使用：5.3.2 下混策略 TBD
+      # dest 10..21 不定义 => 补零
+
+pipeline:
+  - type: Mixer
+    name: to_532
+  - type: Filter
+    description: "per-output crossover"
+    channels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    names: [hp0, hp1, hp2, hp3, hp4, lp5, lp6, lp7, hp8, hp9]
+  - type: Filter
+    description: "per-output PEQ"
+    channels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    names: [peq0, peq1, peq2, peq3, peq4, peq5, peq6, peq7, peq8, peq9]
+  - type: Filter
+    description: "per-output delay (alignment)"
+    channels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    names: [dly0, dly1, dly2, dly3, dly4, dly5, dly6, dly7, dly8, dly9]

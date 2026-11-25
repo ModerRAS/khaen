@@ -1,0 +1,3 @@
+# repo-hygiene（docs/REPO-HYGIENE-PLAN.md）：二进制不入库；本目录只提交 manifest/SHA256SUMS/units/etc/docs。
+# 完整可部署件 = 本目录 bin/（本机磁盘交付）+ dist/tspi-aarch64-20261122-deploy.tgz（根 .gitignore 的 *.tgz 已忽略）。
+bin/

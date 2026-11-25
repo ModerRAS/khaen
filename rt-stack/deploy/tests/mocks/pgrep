@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# T28 mock pgrep：只在 MOCK_PROCS 上匹配（ERE，-f 语义）；绝不读真实进程表。
+set -u
+P="${MOCK_PROCS:?MOCK_PROCS 未设置}"
+all=0; pat=""
+for a in "$@"; do
+  case "$a" in
+    -a) all=1 ;;
+    -f|-l|-x|-u|-p) : ;;
+    -*) : ;;
+    *) pat="${pat:+$pat }$a" ;;
+  esac
+done
+[ -f "$P" ] || exit 1
+found=1
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  if printf "%s\n" "$line" | grep -Eq "$pat"; then
+    if [ "$all" = "1" ]; then printf "%s\n" "$line"; else printf "%s\n" "$line" | awk "{print \$1}"; fi
+    found=0
+  fi
+done < "$P"
+exit "$found"

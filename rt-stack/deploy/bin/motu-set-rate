@@ -1,0 +1,47 @@
+#!/bin/bash
+# motu-set-rate — 把 MOTU UltraLite-mk5 设到指定采样率（只允许 44100/48000/88200/96000；禁 176400/192000）
+# 用法: motu-set-rate 44100   （要求 rt-host 已停止，设备空闲）
+# 原理: 用 aplay 一段该速率的静音流让设备切到该速率；随后用 CueMix WS 只读回读 kSampleRate 校验。
+set -u
+RATE="${1:-}"
+case "$RATE" in
+  44100|48000|88200|96000) ;;
+  176400|192000) echo "REFUSED: $RATE 被用户硬禁（192k/176.4k）" >&2; exit 2 ;;
+  *) echo "usage: $0 44100|48000|88200|96000" >&2; exit 2 ;;
+esac
+card=""
+for i in $(seq 1 20); do
+  card=$(awk '/UltraLite|Ultralite/{gsub(/[^0-9]/,"",$1); print $1; exit}' /proc/asound/cards 2>/dev/null || true)
+  [ -n "$card" ] && break; sleep 0.5
+done
+[ -z "$card" ] && { echo "MOTU not present in /proc/asound/cards (USB 掉线？先插回)" >&2; exit 3; }
+pb=$(cat /proc/asound/card$card/pcm0p/sub0/hw_params 2>/dev/null || echo closed)
+[ "$pb" != "closed" ] && { echo "MOTU playback busy (host 在跑？先 systemctl stop tspi-rt-host)" >&2; exit 4; }
+out=$(timeout 8 aplay -D hw:$card,0 -f S24_3LE -c 22 -r "$RATE" -d 1 -t raw /dev/zero 2>&1); rc=$?
+alsarate=$(awk '/rate:/{print $2}' /proc/asound/card$card/pcm0p/sub0/hw_params 2>/dev/null | cut -d" " -f1)
+CLIENT=""; for c in /usr/local/lib/tspi/cuemix_client.py /var/tmp/tspi-bw/cuemix_client.py; do [ -f "$c" ] && { CLIENT="$c"; break; }; done
+devrate=""
+if [ -n "$CLIENT" ]; then
+  timeout 12 python3 "$CLIENT" --transport ws --host 169.254.111.126 --port 1280 --read 4 --idle-stop 2 --json /tmp/motu-set-rate.json >/dev/null 2>&1 || true
+  devrate=$(python3 - <<'PY' 2>/dev/null || true
+import json
+try: d=json.load(open("/tmp/motu-set-rate.json"))
+except Exception: raise SystemExit(0)
+def walk(o):
+    if isinstance(o,dict):
+        for k,v in o.items():
+            if k=="kSampleRate": yield v
+            else: yield from walk(v)
+    elif isinstance(o,list):
+        for v in o: yield from walk(v)
+for v in walk(d):
+    if isinstance(v,list) and v: v=v[0]
+    if isinstance(v,(int,float)): print(int(v)); break
+PY
+)
+fi
+echo "aplay rc=$rc alsa_rate=${alsarate:-?} device_rate=${devrate:-unknown} requested=$RATE"
+if [ -n "$devrate" ] && [ "$devrate" = "$RATE" ]; then echo "OK: device_rate=$RATE"; exit 0; fi
+if [ -n "$alsarate" ] && [ "$alsarate" = "$RATE" ]; then echo "OK(alsa): alsa_rate=$RATE device_rate=${devrate:-unknown}"; exit 0; fi
+echo "MISMATCH: 请求 $RATE，device_rate=${devrate:-unknown} alse_rate=${alsarate:-?}" >&2
+exit 5

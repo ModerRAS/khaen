@@ -1,0 +1,212 @@
+#!/bin/bash
+# tspi-irq-affinity-pin —— 把 T45 依赖 IRQ 钉到 A53 控制核（task-192；实测依据 evidence/board-irq-affinity/）
+#
+# 为什么需要持久化（task-189 实测）：
+#   T45 scheduler plan() 要求 USB/PTP/eth 依赖 IRQ 不落在 DSP_CPUS={4,5,6,7}；板端把
+#   IRQ58(xhci/MOTU)→CPU1、IRQ56(end0/PTP)→CPU2、IRQ57(end0 第二队列)→CPU3 后 plan accepted，
+#   但 irqbalance 重启后 ≤25s 把它们搬回 A72（58→7、56→3、57→5）→ 迁移不持久。
+# 因此 04-install-release.sh 停用 irqbalance，并由 tspi-irq-affinity.service（Before=tspi-rt-host.service）
+# 在每次 host 启动前调用本脚本重新写 /proc/irq/<irq>/smp_affinity_list 并回读校验。
+#
+# 用法:
+#   irq-affinity-pin apply    # 写内核亲和并回读校验（oneshot ExecStart；失败 exit 3 → host 不启动）
+#   irq-affinity-pin wait     # 等依赖 IRQ 的 /proc/irq 节点就绪（B1 开机竞态门；超时 exit 3 → host 不启动）
+#   irq-affinity-pin verify   # 只读校验（0=全部符合，3=不符合）
+#   irq-affinity-pin status   # 打印当前亲和（只读）
+#   [--root DIR]              # 只用于本地夹具/预演；板端必须 /（缺省 /）
+#   [--config FILE]           # 缺省 /etc/tspi-rt-stack/irq-affinity.env
+# 环境变量：TSPI_IRQ_PINS / TSPI_IRQ_DSP_CPUS / TSPI_IRQ_WAIT_SECS
+#   （systemd EnvironmentFile 提供；env 优先于配置文件。TSPI_IRQ_WAIT_SECS 缺省 60，0=只查一次不等待）
+# 退出码：0 OK；2 用法/配置非法；3 写失败/回读校验失败/等待超时。
+set -u
+
+ACTION="apply"
+ROOT="/"
+CONFIG="/etc/tspi-rt-stack/irq-affinity.env"
+PINS="${TSPI_IRQ_PINS:-}"
+DSP_CPUS="${TSPI_IRQ_DSP_CPUS:-4,5,6,7}"
+WAIT_SECS="${TSPI_IRQ_WAIT_SECS:-}"
+
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    apply|verify|status|wait) ACTION="$1"; shift ;;
+    --root) ROOT="$2"; shift 2 ;;
+    --config) CONFIG="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "irq-affinity-pin: 未知参数: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+# 文件系统前缀：live 时 ROOT=/ 原样；夹具/预演时仅用于 --root 下的伪 /proc、/etc。
+PFX=""
+if [ "$ROOT" != "/" ] && [ -n "$ROOT" ]; then PFX="${ROOT%/}"; fi
+rp() { printf "%s%s" "$PFX" "$1"; }
+
+logmsg() {
+  printf 'irq-affinity: %s\n' "$*"
+  if command -v logger >/dev/null 2>&1; then logger -t tspi-irq-affinity -- "$*" 2>/dev/null || true; fi
+}
+warnmsg() { logmsg "WARN $*"; }
+
+# ---- 配置：默认 ← 配置文件 ← 环境变量（后者覆盖） ----------------------------
+CFG="$(rp "$CONFIG")"
+if [ -f "$CFG" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ""|\#*|\;*) continue ;;
+    esac
+    key="${line%%=*}"; val="${line#*=}"
+    val="${val%\"}"; val="${val#\"}"
+    case "$key" in
+      TSPI_IRQ_PINS) [ -n "$PINS" ] || PINS="$val" ;;
+      TSPI_IRQ_DSP_CPUS) [ -n "${TSPI_IRQ_DSP_CPUS:-}" ] || DSP_CPUS="$val" ;;
+      TSPI_IRQ_WAIT_SECS) [ -n "$WAIT_SECS" ] || WAIT_SECS="$val" ;;
+    esac
+  done < "$CFG"
+fi
+[ -n "$PINS" ] || PINS="58:1 56:2 57:3"
+[ -n "$WAIT_SECS" ] || WAIT_SECS=60
+
+# ---- 工具 -------------------------------------------------------------------
+trim() { printf '%s' "$1" | tr -d '[:space:]'; }
+read_aff_list() {  # irq -> smp_affinity_list 原始值（读不到输出空）
+  local f; f="$(rp "/proc/irq/$1/smp_affinity_list")"
+  if [ -f "$f" ]; then trim "$(cat "$f" 2>/dev/null || true)"; fi
+}
+read_effective() {  # irq -> effective_affinity_list（老内核无此文件时回落到 smp_affinity_list）
+  local f; f="$(rp "/proc/irq/$1/effective_affinity_list")"
+  if [ -f "$f" ]; then trim "$(cat "$f" 2>/dev/null || true)"; else read_aff_list "$1"; fi
+}
+
+validate_pins() {
+  local pair irq cpu bad=0
+  for pair in $PINS; do
+    irq="${pair%%:*}"; cpu="${pair##*:}"
+    case "$irq$cpu" in *[!0-9]*) echo "irq-affinity-pin: 非法 pin $pair（要求 <irq>:<cpu> 数字）" >&2; bad=1 ;; esac
+  done
+  [ "$bad" = "0" ] || return 1
+  return 0
+}
+validate_pins || exit 2
+
+case "$WAIT_SECS" in
+  ''|*[!0-9]*) echo "irq-affinity-pin: 非法 TSPI_IRQ_WAIT_SECS=$WAIT_SECS（要求非负整数秒）" >&2; exit 2 ;;
+esac
+
+# irqbalance 仍在跑时亲和可能随后被搬回（task-189 实测 ≤25s）→ 记录警告，最终判定交给 preflight/06。
+irqbalance_active() {
+  command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet irqbalance 2>/dev/null && return 0
+  command -v pgrep >/dev/null 2>&1 && pgrep -x irqbalance >/dev/null 2>&1 && return 0
+  return 1
+}
+if [ "$ACTION" = "apply" ] && irqbalance_active; then
+  warnmsg "irqbalance 仍 active：钉核可能在 ≤25s 内被搬回（04 应已 disable+stop；preflight/06 按失败处理）"
+fi
+
+# ---- 开机竞态等待（B1；2026-11-20 板窗 release-v11 实测） --------------------
+# 现象：开机 ~4s oneshot 先执行，end0 的 IRQ56/57 节点尚未注册（stmmac 枚举晚于 target），
+#       apply fail-closed（FAIL IRQ56 不存在），而 host Requires= 本单元 → host 不启动、无音频 owner。
+# 修复：unit 的 ExecStartPre 先调用本 wait 动作，节点就绪后再由 ExecStart 钉核；超时仍
+#       fail-closed（不启动 host，避免用错误拓扑跑 T45 admission），并给出明确 FAIL 日志。
+# 配置：TSPI_IRQ_WAIT_SECS（默认 60s；0=只查一次不等待）——见 deploy/config/irq-affinity.env.example。
+if [ "$ACTION" = "wait" ]; then
+  missing=""
+  for pair in $PINS; do
+    irq="${pair%%:*}"
+    [ -e "$(rp "/proc/irq/$irq/smp_affinity_list")" ] || missing="$missing IRQ$irq"
+  done
+  waited=0
+  if [ -n "$missing" ]; then
+    logmsg "WAIT 依赖 IRQ 节点未就绪:$missing（开机竞态；最多等 ${WAIT_SECS}s，pins=$PINS）"
+    wait_start="$(date +%s)"
+    while :; do
+      missing=""
+      for pair in $PINS; do
+        irq="${pair%%:*}"
+        [ -e "$(rp "/proc/irq/$irq/smp_affinity_list")" ] || missing="$missing IRQ$irq"
+      done
+      [ -z "$missing" ] && break
+      now="$(date +%s)"
+      [ "$((now - wait_start))" -ge "$WAIT_SECS" ] && break
+      sleep 0.2 2>/dev/null || sleep 1
+    done
+    waited="$(( $(date +%s) - wait_start ))"
+  fi
+  if [ -n "$missing" ]; then
+    logmsg "FAIL 依赖 IRQ 的 /proc/irq 节点在 ${WAIT_SECS}s 内未就绪:$missing（实际 waited=${waited}s；设备未枚举/IRQ 号变化 → fail-closed，host 不启动）"
+    logmsg "RESULT FAIL（action=wait waited=${waited}s pins=$PINS）"
+    exit 3
+  fi
+  logmsg "OK 依赖 IRQ 的 /proc/irq 节点已就绪（waited=${waited}s；pins=$PINS）"
+  logmsg "RESULT PASS（action=wait waited=${waited}s pins=$PINS）"
+  exit 0
+fi
+
+# ---- 主逻辑 -----------------------------------------------------------------
+FAILS=0
+for pair in $PINS; do
+  irq="${pair%%:*}"; want="${pair##*:}"
+  f="$(rp "/proc/irq/$irq/smp_affinity_list")"
+  if [ ! -f "$f" ]; then
+    logmsg "FAIL IRQ$irq 不存在：$f（内核无该 IRQ / 设备未枚举 / 未在 /proc/irq 下）"
+    FAILS=$((FAILS+1)); continue
+  fi
+  before="$(trim "$(cat "$f" 2>/dev/null || true)")"
+  if [ "$ACTION" = "apply" ]; then
+    if ! printf '%s\n' "$want" > "$f" 2>/dev/null; then
+      logmsg "FAIL IRQ$irq 写 $f 失败（目标 CPU$want；before=$before）"
+      FAILS=$((FAILS+1)); continue
+    fi
+  fi
+  # 回读：smp_affinity_list 必须等于目标单核；effective（若存在）也必须等于目标单核。
+  i=0; got=""
+  while [ "$i" -lt 20 ]; do
+    got="$(read_aff_list "$irq")"
+    [ "$got" = "$want" ] && break
+    sleep 0.1 2>/dev/null || true
+    i=$((i+1))
+  done
+  eff="$(read_effective "$irq")"
+  if [ "$got" = "$want" ] && [ "$eff" = "$want" ]; then
+    if [ "$ACTION" = "apply" ]; then
+      logmsg "OK IRQ$irq $before -> $got（effective=$eff，目标 CPU$want/A53）"
+    else
+      logmsg "OK IRQ$irq 当前 $got（effective=$eff，目标 CPU$want/A53）"
+    fi
+  else
+    logmsg "FAIL IRQ$irq 回读不符（want=$want smp=$got effective=$eff）"
+    FAILS=$((FAILS+1))
+  fi
+done
+
+if [ "$ACTION" = "status" ]; then
+  [ "$FAILS" -eq 0 ] || exit 3
+  exit 0
+fi
+
+# DSP_CPUS 交叉检查（T45 plan 的 IRQ 放置维度）
+DSPHIT=""
+for pair in $PINS; do
+  irq="${pair%%:*}"
+  eff="$(read_effective "$irq")"
+  oldIFS="$IFS"; IFS=","
+  for dsp in $DSP_CPUS; do
+    case ",$eff," in *",$dsp,"*) DSPHIT="$DSPHIT IRQ$irq@CPU$dsp" ;; esac
+  done
+  IFS="$oldIFS"
+done
+if [ -n "$DSPHIT" ]; then
+  logmsg "FAIL 依赖 IRQ 仍落在 DSP_CPUS=$DSP_CPUS：$DSPHIT"
+  FAILS=$((FAILS+1))
+else
+  logmsg "OK 依赖 IRQ 均不在 DSP_CPUS=$DSP_CPUS（T45 plan 的 IRQ 放置前置）"
+fi
+
+if [ "$FAILS" -gt 0 ]; then
+  logmsg "RESULT FAIL fails=$FAILS（action=$ACTION pins=$PINS）"
+  exit 3
+fi
+logmsg "RESULT PASS（action=$ACTION pins=$PINS）"
+exit 0

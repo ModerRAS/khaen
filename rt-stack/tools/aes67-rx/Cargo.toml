@@ -1,0 +1,31 @@
+# TSPI dsp-host AES67 接收端独立运行二进制（calib-chain-20261121 / aes67-rx-20261121）
+#
+# 设计：复用 crates/aoip-aes67 的 SDP/RTP L24 BE/抖动缓冲/媒体时钟，只补"运行时"部分：
+#   TX/RX 线程分离（crate 内收包线程 + 本 crate 播放线程）、SPSC 无锁抖动环（crate）、
+#   运行期零分配热路径、mlockall/SCHED_FIFO/CPU 亲和、ALSA S24_3LE 22ch 写出、
+#   4.1.2 七声道 → MOTU ch0,1,2,3,4,5,7（其余静音）、欠载静音+淡入淡出防爆音、统计报告。
+#
+# 纪律：本工具不替换 /opt 生产二进制（独立二进制，可回滚）；ALSA 设备由调用方保证独占
+# （测试窗口 systemctl stop tspi-rt-host）。
+[package]
+name = "tspi-aes67-rx"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "dsp-host AES67 用户态接收端运行二进制（L24/48k 7ch → MOTU 22ch S24_3LE；RT 线程/零分配/统计）"
+
+[[bin]]
+name = "aes67-rx"
+path = "src/main.rs"
+
+[dependencies]
+tspi-aoip-aes67 = { workspace = true }
+
+# ALSA 写出只在 Linux 板端编译（Windows 开发机不链接 libasound；bin 有 stub 入口）。
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = { workspace = true }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+debug = false

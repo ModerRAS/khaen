@@ -1,0 +1,98 @@
+{
+ "schema": "tspi-rt-stack/release/v1",
+ "release_id": "aarch64-20261122-ptp",
+ "built_at": "2026-11-22T09:45:23+08:00",
+ "target": "aarch64-unknown-linux-gnu",
+ "files": [
+  {
+   "path": "bin/phc2sys",
+   "size": 137528,
+   "sha256": "3a047d79e3e84d1e14322dda9912c184e9d1cf6671c9fa62f191c484abe84271",
+   "kind": "binary"
+  },
+  {
+   "path": "bin/phc_ctl",
+   "size": 51440,
+   "sha256": "adf17b314f20722a63dc8840ba46221b83ef1bc453b3864b600d3c4d9a0a4de7",
+   "kind": "binary"
+  },
+  {
+   "path": "bin/pmc",
+   "size": 117048,
+   "sha256": "c1eeb1456f27ff89b9ee23a9a1ff8ee572a0ca145544d7e37ac95ffdee5ed7a5",
+   "kind": "binary"
+  },
+  {
+   "path": "bin/ptp4l",
+   "size": 206592,
+   "sha256": "9f09987672e600d3ffe5fe0af0554a427fefb6b8594e18e00c73e65f835043d1",
+   "kind": "binary"
+  },
+  {
+   "path": "lib/ptp-lib.sh",
+   "size": 2337,
+   "sha256": "b4d83669506762af37f890b5c050509c648d596bfd7eaab13b578ec7c67772eb",
+   "kind": "lib"
+  },
+  {
+   "path": "lib/ptp-master-start",
+   "size": 2188,
+   "sha256": "1df9b483145f16c7af84bc858d4cb0c70dc97ac91a46f7a3480fdd5c30c87785",
+   "kind": "lib"
+  },
+  {
+   "path": "lib/ptp-phc2sys-start",
+   "size": 1206,
+   "sha256": "44d330467b3e07a3b09a587e815484595d1754dfbc3657d67e44028d8bd9519f",
+   "kind": "lib"
+  },
+  {
+   "path": "units/tspi-ptp-master.service",
+   "size": 1684,
+   "sha256": "fecb7ecc03a3f03a4e86bb80f64d70085a1e985a54f2c71884a49ae7af1b522f",
+   "kind": "unit"
+  },
+  {
+   "path": "units/tspi-ptp-phc2sys.service",
+   "size": 1040,
+   "sha256": "77d7c1105275c04b1a8b3208270a9c6a6fbacb05bd923f665f517403fe33344b",
+   "kind": "unit"
+  },
+  {
+   "path": "units/tspi-ptp.target",
+   "size": 266,
+   "sha256": "fa776d51489a0d773b9b5dbd0ceac5e0b57cb5881cc71bee2895cb9aff4523d2",
+   "kind": "unit"
+  },
+  {
+   "path": "etc/ptp-master.env.example",
+   "size": 1683,
+   "sha256": "8efca913b8590a725ecd0faaedb5515ca496b0cb97e7f0ee3e03bca5573fe360",
+   "kind": "config"
+  },
+  {
+   "path": "etc/ptp4l-master-l2.conf.example",
+   "size": 1205,
+   "sha256": "0991ceaa07b90a279e4fd506ea95f51d29a3309769b45f7d3a1f95f4474e7001",
+   "kind": "config"
+  },
+  {
+   "path": "etc/ptp4l-master-udp.conf.example",
+   "size": 1634,
+   "sha256": "51482c0a33dd3266539bfd758f58ae955e5484669d1a7c6c89ee2fd53891bc99",
+   "kind": "config"
+  },
+  {
+   "path": "README.deploy.md",
+   "size": 733,
+   "sha256": "ad23e1782b80e2180364feacaebdfc8b65031c77809b858344ebfd32ffc62e6d",
+   "kind": "doc"
+  },
+  {
+   "path": "INSTALL-ROLLBACK.md",
+   "size": 6814,
+   "sha256": "5d79accdff4241f11c58e69c3f81922694d8719a58e9ddecf55eaffafd7c51ca",
+   "kind": "doc"
+  }
+ ]
+}

@@ -1,0 +1,17 @@
+# T28/T155 —— tspi-rt-stack.target（新栈总目标，F-18/T28-P0-1 修复）
+#
+# 只 Wants 自研 host + daemon；不得 Wants/After 任何旧 C unit（deploy/tests/check_unit_syntax.py 会拒收）。
+# 安装：deploy/bin/04-install-release.sh 从 release bundle 的 units/ 复制到 /etc/systemd/system/。
+#
+# F-18 修复（2026-11-17）：target 显式 Wants/After host+daemon。
+#   只 enable/start target 即可拉起 host+daemon；service 的 WantedBy=tspi-rt-stack.target 只生成
+#   target.wants/ 链接，不能代替 target 自身的 Wants=。05-atomic-switch.sh 在 start target 后
+#   逐个校验 host/daemon active（T28-P0-a）。
+[Unit]
+Description=TSPI RT-first DSP stack (own host + control/calibration daemon; no CamillaDSP)
+Documentation=file:///opt/tspi-rt-stack/current/README.deploy.md
+After=network-online.target tspi-irq-affinity.service tspi-rt-host.service tspi-rt-daemon.service
+Wants=network-online.target tspi-irq-affinity.service tspi-rt-host.service tspi-rt-daemon.service
+
+[Install]
+WantedBy=multi-user.target

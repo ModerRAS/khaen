@@ -1,0 +1,100 @@
+---
+# tspi-audio: tspi audio - AES67 48k (5.3.2)
+# RAVENNA ALSA capture (S32_LE) -> CamillaDSP -> MOTU UltraLite-mk5 5.3.2 / 10ch out
+# 本文件是模板：tspi-mode 把占位符（__SAMPLERATE__ 等）渲染到 /run/tspi/camilladsp.yml 后启动 CamillaDSP。
+#
+# 输出布局 = 5.3.2（10 路模拟输出）：Main 1-2 + Line 3-10（USB 硬件 22 playback，通道 10..21 不用=补零）
+#   USB ch 0/1   -> Main 1-2     -> Front L / Front R
+#   USB ch 2..4  -> Line 3..5    -> Center / Surround L / Surround R（板卡实测后可能调整，见 configs/layout-5.3.2.md）
+#   USB ch 5..7  -> Line 6..8    -> Sub 1..3
+#   USB ch 8/9   -> Line 9/10    -> Height L / Height R
+# 输入 = H16-AIP 的 16ch 容器（7.1.4/9.1.4；AES67 固定 48k、Dante 96k）；输入通道顺序待 H16 实测核对（mixer 假设 0=L 1=R 2=C 3=LFE 4=Ls 5=Rs 8=Tfl 9=Tfr）。
+# CamillaDSP 不做 Atmos/DTS 解码：H16 送来的必须是已解码 PCM。
+title: "tspi audio - AES67 48k (5.3.2)"
+description: "RAVENNA ALSA capture (S32_LE) -> CamillaDSP -> MOTU UltraLite-mk5 5.3.2 / 10ch out"
+
+devices:
+  samplerate: __SAMPLERATE__
+  chunksize: __CHUNKSIZE__
+  target_level: __TARGET_LEVEL__
+  adjust_period: __ADJUST_PERIOD__
+  enable_rate_adjust: true
+  queuelimit: 4
+  resampler:
+    type: AsyncSinc
+    profile: Balanced
+  capture:
+    type: Alsa
+    channels: __CAPTURE_CHANNELS__
+    device: "__CAPTURE_DEVICE__"
+    format: __CAPTURE_FORMAT__
+  playback:
+    type: Alsa
+    channels: __PLAYBACK_CHANNELS__      # MOTU 硬件通道数（22）；10 路信号 + 其余补零
+    device: "__PLAYBACK_DEVICE__"
+    format: __PLAYBACK_FORMAT__
+
+filters:
+  # ---- 每路 PEQ 占位（0 dB；换成实测/设计值）----
+  peq0: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq1: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq2: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq3: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq4: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq5: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq6: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq7: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq8: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  peq9: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.0, gain: 0}}
+  # ---- 每路延迟占位（0 ms；unit: ms/us/mm；subsample: true 可亚样本）----
+  dly0: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly1: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly2: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly3: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly4: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly5: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly6: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly7: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly8: {type: Delay, parameters: {delay: 0, unit: ms}}
+  dly9: {type: Delay, parameters: {delay: 0, unit: ms}}
+
+
+mixers:
+  to_532:
+    description: "H16 16ch 输入（7.1.4 假设顺序，TBD）-> 5.3.2 十路；输入顺序待 H16 实测核对后调整"
+    channels:
+      in: __CAPTURE_CHANNELS__        # 16（H16-AIP）
+      out: __PLAYBACK_CHANNELS__      # 22（MOTU 硬件）
+    mapping:
+      - dest: 0   # Main 1-2 L   <- in0 Front L
+        sources: [{channel: 0, gain: 0}]
+      - dest: 1   # Main 1-2 R   <- in1 Front R
+        sources: [{channel: 1, gain: 0}]
+      - dest: 2   # Line 3 Center <- in2 Center
+        sources: [{channel: 2, gain: 0}]
+      - dest: 3   # Line 4 Surround L <- in4 Ls
+        sources: [{channel: 4, gain: 0}]
+      - dest: 4   # Line 5 Surround R <- in5 Rs
+        sources: [{channel: 5, gain: 0}]
+      - dest: 5   # Line 6 Sub 1 <- in3 LFE（低音管理 TBD）
+        sources: [{channel: 3, gain: 0}]
+      - dest: 6   # Line 7 Sub 2 <- in3 LFE
+        sources: [{channel: 3, gain: 0}]
+      - dest: 7   # Line 8 Sub 3 <- in3 LFE
+        sources: [{channel: 3, gain: 0}]
+      - dest: 8   # Line 9 Height L <- in8 Tfl
+        sources: [{channel: 8, gain: 0}]
+      - dest: 9   # Line 10 Height R <- in9 Tfr
+        sources: [{channel: 9, gain: 0}]
+      # in6/7（7.1 的 Lrs/Rrs）与 in10..15 暂未使用：5.3.2 下混策略 TBD
+      # dest 10..21 未定义 => CamillaDSP 补零（MOTU 的 SPDIF/ADAT/Phones 不接）
+
+pipeline:
+  - type: Mixer
+    name: to_532
+  - type: Filter
+    channels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    names: [peq0, peq1, peq2, peq3, peq4, peq5, peq6, peq7, peq8, peq9]
+  - type: Filter
+    channels: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    names: [dly0, dly1, dly2, dly3, dly4, dly5, dly6, dly7, dly8, dly9]

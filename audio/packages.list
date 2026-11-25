@@ -1,0 +1,60 @@
+# packages.list — 泰山派音频 DSP 设备（Debian 12 bookworm / aarch64）
+#
+# 格式：package | bookworm 版本（source 版本；二进制包可能带 +b1 等后缀） | 用途 | 必需性
+# 版本核对来源：sources.debian.org / packages.debian.org（2026-11-15）。
+# [runtime] 实际安装以 fetch-debs.sh 从 bookworm binary-arm64 Packages 解析到的文件名+sha256 为准（记录到 release/debs/MANIFEST.txt）。
+# [build]/[test] 是构建机 apt 包，版本随 bookworm 点版本变化，不参与目标镜像。
+# 用法：fetch-debs.sh 按本文件 [runtime] 段抓 aarch64 .deb；[build] 段供构建机（aarch64）；[test] 段可选。
+
+## ===== [runtime] 目标镜像必须离线预装 =====
+## 说明：libc6 / libstdc++6 / libgcc-s1 / systemd / udev / kmod / util-linux / procps / dpkg / coreutils 由 Debian12 lite 基线自带，不重复列。
+
+alsa-utils | 1.2.8-1 | aplay/arecord/alsaucm/amixer（探测与排障必需） | required
+alsa-ucm-conf | 1.2.8-1 | ALSA UCM 基础树（MOTU mk5 的 UCM 由 overlay 回移补丁提供） | required
+libasound2 | 1.2.8-1 | ALSA 用户库（CamillaDSP/Inferno 插件/aes67-daemon 依赖） | required
+libasound2-data | 1.2.8-1 | ALSA 配置数据 | required
+libavahi-client3 | 0.8-10+deb12u1 | aes67-daemon mDNS（Ravenna 发现） | required
+libavahi-common3 | 0.8-10+deb12u1 | 同上 | required
+avahi-daemon | 0.8-10+deb12u1 | mDNS 守护进程（可用 daemon.conf 关掉；默认安装） | required
+libboost-filesystem1.74.0 | 1.74.0+ds1-21 | aes67-daemon 运行时 | required
+libboost-thread1.74.0 | 1.74.0+ds1-21 | aes67-daemon 运行时 | required
+libboost-log1.74.0 | 1.74.0+ds1-21 | aes67-daemon 运行时 | required
+libboost-program-options1.74.0 | 1.74.0+ds1-21 | aes67-daemon 运行时 | required
+libboost-system1.74.0 | 1.74.0+ds1-21 | Boost.Log 运行时依赖 | required
+libsystemd0 | 252.39-1~deb12u2 | aes67-daemon systemd notify/watchdog | required
+linuxptp | 3.1.1-4 | ptp4l/phc2sys/pmc（仅 B2/B3 使用，但预装） | required
+ethtool | 1:6.1-1 | 验证网卡硬件时间戳（PTP） | required
+iproute2 | 6.1.0-3 | ip/ss/tc（诊断；基线常已带） | required
+jq | 1.6-2.1+deb12u2 | tspi-mode 解析 statime 观测 JSON / daemon API | required
+netcat-openbsd | 1.219-1 | 读 statime 观测 socket（nc -U） | required
+socat | 1.7.4.4-2 | 备选 socket 读取（netcat 不可用时） | optional
+curl | 7.88.1-10+deb12u15 | tspi-mode 读 aes67-daemon REST（ptp-lock hook 的兜底；build 机也用它下载） | required
+
+## ===== [build] 构建机（Debian 12 aarch64；不进目标镜像） =====
+build-essential | 12.9 | gcc/make（LKM、daemon、linuxptp） | build
+cmake | 3.25.1-1 | aes67-daemon 构建 | build
+pkg-config | 1.8.1-1 | 构建探测 | build
+libasound2-dev | 1.2.8-1 | CamillaDSP/Inferno/aes67-daemon 构建 | build
+libboost-all-dev | 1.74.0+ds1-21 | aes67-daemon（boost thread/filesystem/log/program_options） | build
+libavahi-client-dev | 0.8-10+deb12u1 | aes67-daemon mDNS | build
+libsystemd-dev | 252.39-1~deb12u2 | aes67-daemon systemd | build
+git | 1:2.39.5-0+deb12u* | 拉源码（构建机联网时；epoch 版本以 apt 为准） | build
+curl | 7.88.1-10+deb12u15 | 下载源码/官方资产（bookworm 点版本会变，以构建机 apt 为准） | build
+ca-certificates | 20230311+deb12u1 | https 下载 | build
+xz-utils | 5.4.1-1+deb12u1 | 解包 | build
+unzip | 6.0-28 | 解包（可选） | build
+linux-headers-rk3576 / 目标内核 build 目录 | 由 firmware-builder 提供 | 编 MergingRavennaALSA.ko 用（必须与目标 kernel 6.1.x+RT 一致，不是 Debian 的 linux-headers） | build
+
+## ===== [test] 验收工具（可选，建议放构建机或调试镜像） =====
+rt-tests | 2.4-1 | cyclictest | test
+stress-ng | 0.15.06-2 | 压力测试 | test
+sysstat | 12.6.1-1 | mpstat/pidstat | test
+sox | 14.4.2+git20190427-3.5 | 生成/分析测试音频 | test
+
+## ===== [rust] 构建工具链（不走 apt：Debian12 rustc 1.63 太旧） =====
+## 用 rustup 固定版本（建议 1.90.x 或 1.100.x），在构建机安装，产物为静态 Rust 二进制（仅依赖 libc/libasound2）。
+## 记录 rustc -V 到 release/build-info.txt。
+
+## ===== [nonfree/避免] =====
+## faac（aes67-daemon 的 streamer 功能）在 Debian main 不存在：构建时 -DWITH_STREAMER=OFF，不用 libfaac。
+## pipewire 1.4.2 只在 bookworm-backports（B2 备选接收端才需要）：pipewire | 1.4.2-1~bpo12+1 | optional-B2

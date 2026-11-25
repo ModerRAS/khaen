@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+echo "pid 1's current scheduling policy: SCHED_FIFO"
+echo "pid 1's current scheduling priority: 90"
+exit 0

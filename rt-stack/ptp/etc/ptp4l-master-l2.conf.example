@@ -1,0 +1,31 @@
+# /etc/tspi-ptp/ptp4l-master-l2.conf -- TSPI PTPv2 grandmaster, IEEE 802.3 (L2/Ethernet) profile.
+# Same GM dataset as the UDP profile; only the transport differs. Selected with
+#   TSPI_PTP_CONF=/etc/tspi-ptp/ptp4l-master-l2.conf
+# Use this when the slaves (RAVENNA/AES67 gear, some ST 2110 endpoints) listen for L2 PTP.
+# linuxptp config parser has no inline-comment support: keep comments on their own lines.
+
+[global]
+twoStepFlag                 1
+clientOnly                  0
+serverOnly                  1
+domainNumber                0
+priority1                   0
+priority2                   0
+clockClass                  248
+clockAccuracy               0xFE
+offsetScaledLogVariance     0xFFFF
+clock_type                  OC
+network_transport           L2
+delay_mechanism             E2E
+time_stamping               hardware
+logAnnounceInterval         0
+logSyncInterval             -2
+logMinDelayReqInterval      0
+announceReceiptTimeout      3
+syncReceiptTimeout          0
+transportSpecific           0x0
+ptp_dst_mac                 01:1B:19:00:00:00
+tx_timestamp_timeout        10
+free_running                0
+kernel_leap                 1
+uds_address                 /run/tspi-ptp/ptp4l.uds

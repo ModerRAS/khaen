@@ -1,0 +1,114 @@
+{
+  "schema": "tspi-reference-fixture/v1",
+  "id": "C07_factorized_fused",
+  "title": "factorized P*(G*u) equals fused F=P*G with D=1 offdiag tail",
+  "tags": [
+    "offdiag",
+    "tail",
+    "D"
+  ],
+  "fs_hz": 48000,
+  "generated_by": "tools/gen_fixtures.py",
+  "graph": {
+    "n_src": 2,
+    "n_out": 2,
+    "container_channels": 2,
+    "d_samples": 1,
+    "a_map": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "a_fir": [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "participants": [
+      0,
+      1
+    ],
+    "g": [
+      [
+        [],
+        [
+          0.5
+        ]
+      ],
+      [
+        [
+          0.25
+        ],
+        []
+      ]
+    ],
+    "p": [
+      [
+        1,
+        -1
+      ],
+      [
+        1
+      ]
+    ],
+    "scatter": [
+      0,
+      1
+    ]
+  },
+  "supports": {
+    "l_a": 1,
+    "l_g": 2,
+    "l_p": 2,
+    "l_f": 3,
+    "l_out": 4
+  },
+  "input": [
+    [
+      1,
+      0
+    ],
+    [
+      0,
+      1
+    ]
+  ],
+  "expected": [
+    [
+      0,
+      1.5,
+      -1.5,
+      0
+    ],
+    [
+      0.25,
+      0,
+      1,
+      0
+    ]
+  ],
+  "expected_len": 4,
+  "comparison": {
+    "mode": "exact"
+  },
+  "streaming": {
+    "block_sizes": [
+      1,
+      2,
+      3,
+      64,
+      128
+    ],
+    "flush_zeros": 2,
+    "contract": "pad input with flush_zeros zeros, process in blocks of B, concatenate and truncate to expected_len"
+  },
+  "notes": "G=[[z^-1,0.5],[0.25,z^-1]]；factorized 与 fused 结果一致（见 HAND-CALC H7）。"
+}

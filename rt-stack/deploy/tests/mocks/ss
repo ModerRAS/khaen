@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -u
+printf "ss %s\n" "$*" >> "${MOCK_LOG:-/dev/null}"
+cat "${MOCK_SS:-/dev/null}" 2>/dev/null || true
+exit 0

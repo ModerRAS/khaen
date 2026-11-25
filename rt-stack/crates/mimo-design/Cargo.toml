@@ -1,0 +1,11 @@
+# 低频 MIMO 优化（calib-chain-20261121 / mimo-opt-20261122）。
+# 离线设计层：读仿真 H(f) → B0/B1/B2/B3 → 每源 FIR + spec 口径指标；不参与实时路径、不接触真实测量。
+[package]
+name = "tspi-mimo-design"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Offline low-frequency MIMO FIR design over simulated H(f) matrices (synthetic sandbox)"
+
+[dependencies]
+tspi-room-sim = { workspace = true }

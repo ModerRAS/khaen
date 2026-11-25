@@ -1,0 +1,60 @@
+---
+# example-2way-crossover.yml — 2 分频（4 路输出）示例；系数需先按模式采样率生成（见 README）
+# 用途：验收矩阵“中/高 FIR”档、以及演示 MOTU 22ch 映射；不是 tspi-mode 的默认模板。
+# 手工调试：复制本文件替换令牌（或用 tspi-mode 渲染后手工改 pipeline），camilladsp --check 后启动。
+devices:
+  samplerate: 48000            # AES67=48000；Dante 改 96000 并重新生成系数
+  chunksize: 128
+  target_level: 512
+  adjust_period: 10
+  enable_rate_adjust: true
+  resampler:
+    type: AsyncSinc
+    profile: Balanced
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:ravenna,0"      # AES67；Dante 改 "inferno" 且 format 仍是 S32_LE
+    format: S32_LE
+  playback:
+    type: Alsa
+    channels: 4
+    device: "hw:motu,0"         # 22ch 设备只开 4ch（若设备要求 22ch，请改成 22 并补 mixer 静音通道）
+    format: S24_3_LE
+
+filters:
+  fir_low:
+    type: Conv
+    parameters:
+      type: Raw
+      filename: /etc/camilladsp/coeffs/fir_low_48k.txt
+  fir_high:
+    type: Conv
+    parameters:
+      type: Raw
+      filename: /etc/camilladsp/coeffs/fir_high_48k.txt
+
+mixers:
+  duplicate:
+    channels:
+      in: 2
+      out: 4
+    mapping:
+      - dest: 0
+        sources: [{channel: 0, gain: 0}]
+      - dest: 1
+        sources: [{channel: 1, gain: 0}]
+      - dest: 2
+        sources: [{channel: 0, gain: 0}]
+      - dest: 3
+        sources: [{channel: 1, gain: 0}]
+
+pipeline:
+  - type: Mixer
+    name: duplicate
+  - type: Filter
+    channels: [0, 1]
+    names: [fir_low]
+  - type: Filter
+    channels: [2, 3]
+    names: [fir_high]

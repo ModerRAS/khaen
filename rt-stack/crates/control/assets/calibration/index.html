@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TSPI 校准向导 · Calibration</title>
+<link rel="stylesheet" href="/calibration/style.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">TSPI<span>AUDIO</span></div>
+      <div class="brand-sub">Dirac 式校准流程<em>向导 DEMO</em></div>
+    </div>
+    <nav class="tabs" style="cursor:default">
+      <span class="tab active" style="cursor:default"><span class="tab-ico">◎</span>校准向导<span class="tab-tag">Calibration Flow</span></span>
+    </nav>
+    <div class="top-status">
+      <span class="pill demo"><i></i>daemon 直连 · /api/calibration/*</span>
+      <span class="src">pilot 数据与 daemon 任务分列；未应用不标 applied</span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="rail">
+      <div class="rail-head">
+        <div class="rt">校准向导</div>
+        <div class="rs">Calibration Wizard · Settings → Level → Delay → Bass → Emperor</div>
+      </div>
+      <ol class="steps" id="step-list"></ol>
+      <div class="rail-foot">
+        <div class="rail-device"><i></i>MOTU UltraLite-mk5 · USB</div>
+        <div class="rail-note">经 daemon 下发任务；applied 以 host 回执为准，pending 字段显式 501</div>
+        <button class="rail-btn" id="btn-restart" data-test="btn-restart">↺ 重新开始流程</button>
+      </div>
+    </aside>
+
+    <section class="content">
+      <header class="step-head">
+        <div class="row1">
+          <div>
+            <div class="crumb" id="step-crumb">STEP <b>1</b> / —</div>
+            <h1 id="step-title">设备与房间检查<span class="tag" id="step-tag"></span></h1>
+            <p class="sub" id="step-sub"></p>
+          </div>
+          <div class="badges" id="step-badges"></div>
+        </div>
+        <div class="step-progress" id="step-progress"></div>
+      </header>
+
+      <div class="step-body" id="step-body"></div>
+
+      <footer class="wizard-foot">
+        <div class="gate" id="gate"><i>!</i><span id="gate-text">请完成本步检查</span></div>
+        <button class="btn ghost" id="btn-run-all" data-test="btn-run-all">▶ 一键运行</button>
+        <div class="nav-btns">
+          <button class="btn ghost" id="btn-back" data-test="btn-back">上一步</button>
+          <button class="btn primary" id="btn-next" data-test="btn-next">下一步</button>
+        </div>
+      </footer>
+    </section>
+  </div>
+
+  <footer class="statusbar">
+    <span>流程参考 Dirac Live 公开文档（Device → Volume → Level → Delay → Bass → Measure → Design → Export）· 界面与素材均为自制</span>
+    <span class="r" id="status-right">pilot B · UMIK-1 · 48 kHz · 4.1.2</span>
+  </footer>
+</div>
+
+<div id="caption" hidden></div>
+<div id="toast" hidden>已保存（演示）</div>
+<div id="cursor"><i></i></div>
+
+<div class="overlay" id="modal" hidden>
+  <div class="modal" id="modal-card">
+    <div class="modal-head"><h2 id="modal-title">标题</h2><button class="x" id="modal-x" data-test="modal-x">✕</button></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-foot" id="modal-foot"></div>
+  </div>
+</div>
+
+<script src="/calibration/app.js" defer></script>
+</body>
+</html>

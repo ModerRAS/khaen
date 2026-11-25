@@ -1,0 +1,222 @@
+# tspi-upmix 生成：upmix-4.1.2-movie
+# 输入 2.0（2ch）-> 输出 4.1.2（8ch）；采样率 48000 Hz
+# 环绕/高度更响、延迟略长，对白靠 FL/FR 虚拟中置
+# 用途：独立 CamillaDSP（ALSA）
+title: tspi-upmix upmix-4.1.2-movie（2.0 -> 4.1.2）
+description: 环绕/高度更响、延迟略长，对白靠 FL/FR 虚拟中置
+devices:
+  samplerate: 48000
+  chunksize: 512
+  target_level: 1024
+  adjust_period: 10
+  enable_rate_adjust: true
+  queuelimit: 4
+  resampler:
+    type: AsyncSinc
+    profile: Balanced
+  capture:
+    type: Alsa
+    channels: 2
+    device: hw:ravenna,0
+    format: S32_LE
+  playback:
+    type: Alsa
+    channels: 22
+    device: hw:motu,0
+    format: S24_3_LE
+filters:
+  fl_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 80.0
+      order: 4
+  fr_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 80.0
+      order: 4
+  sl_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 100.0
+      order: 4
+  sl_lp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 8000.0
+      order: 4
+  sl_gain:
+    type: Gain
+    parameters:
+      gain: -3.0
+  sl_delay:
+    type: Delay
+    parameters:
+      delay: 18.0
+      unit: ms
+  sr_hp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyHighpass
+      freq: 100.0
+      order: 4
+  sr_lp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 8000.0
+      order: 4
+  sr_gain:
+    type: Gain
+    parameters:
+      gain: -3.0
+  sr_delay:
+    type: Delay
+    parameters:
+      delay: 18.0
+      unit: ms
+  hfl_gain:
+    type: Gain
+    parameters:
+      gain: -6.0
+  hfr_gain:
+    type: Gain
+    parameters:
+      gain: -6.0
+  sub1_lp:
+    type: BiquadCombo
+    parameters:
+      type: LinkwitzRileyLowpass
+      freq: 80.0
+      order: 4
+mixers:
+  upmix: &id001
+    description: upmix：2.0 -> 4.1.2（22ch）
+    channels:
+      in: 2
+      out: 22
+    mapping:
+    - dest: 0
+      sources:
+      - channel: 0
+    - dest: 1
+      sources:
+      - channel: 1
+    - dest: 2
+      sources:
+      - channel: 0
+        gain: -4.07
+      - channel: 1
+        gain: -8.539
+        inverted: true
+    - dest: 3
+      sources:
+      - channel: 0
+        gain: -8.539
+        inverted: true
+      - channel: 1
+        gain: -4.07
+    - dest: 4
+      sources:
+      - channel: 0
+        gain: -9.762
+      - channel: 1
+        gain: -15.139
+    - dest: 5
+      sources:
+      - channel: 0
+        gain: -15.139
+      - channel: 1
+        gain: -9.762
+    - dest: 7
+      sources:
+      - channel: 0
+        gain: -6.02
+      - channel: 1
+        gain: -6.02
+  to_outputs: *id001
+pipeline:
+- type: Mixer
+  name: to_outputs
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 0
+  names:
+  - fl_hp
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 1
+  names:
+  - fr_hp
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 2
+  names:
+  - sl_hp
+- type: Filter
+  description: per-role highpass
+  channels:
+  - 3
+  names:
+  - sr_hp
+- type: Filter
+  description: per-role lowpass
+  channels:
+  - 2
+  names:
+  - sl_lp
+- type: Filter
+  description: per-role lowpass
+  channels:
+  - 3
+  names:
+  - sr_lp
+- type: Filter
+  description: per-role lowpass
+  channels:
+  - 7
+  names:
+  - sub1_lp
+- type: Filter
+  description: per-role gain
+  channels:
+  - 2
+  names:
+  - sl_gain
+- type: Filter
+  description: per-role gain
+  channels:
+  - 3
+  names:
+  - sr_gain
+- type: Filter
+  description: per-role gain
+  channels:
+  - 4
+  names:
+  - hfl_gain
+- type: Filter
+  description: per-role gain
+  channels:
+  - 5
+  names:
+  - hfr_gain
+- type: Filter
+  description: per-role delay
+  channels:
+  - 2
+  names:
+  - sl_delay
+- type: Filter
+  description: per-role delay
+  channels:
+  - 3
+  names:
+  - sr_delay

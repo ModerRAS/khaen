@@ -1,0 +1,67 @@
+channelmap_roles: []
+filters:
+  cal_ch0_delay:
+    parameters:
+      delay: 0.4166666666666667
+      unit: ms
+    type: Delay
+  cal_ch1_delay:
+    parameters:
+      delay: 0.3333333333333333
+      unit: ms
+    type: Delay
+  cal_ch1_peq0:
+    parameters:
+      freq: 16000.0
+      gain: -5.94
+      q: 0.75
+      type: Peaking
+    type: Biquad
+  cal_ch1_peq1:
+    parameters:
+      freq: 13406.1
+      gain: 0.6
+      q: 2.0
+      type: Peaking
+    type: Biquad
+  cal_ch1_peq2:
+    parameters:
+      freq: 14645.7
+      gain: 0.19
+      q: 6.5
+      type: Peaking
+    type: Biquad
+  cal_ch1_peq3:
+    parameters:
+      freq: 16000.0
+      gain: -0.18
+      q: 6.5
+      type: Peaking
+    type: Biquad
+  cal_ch2_delay:
+    parameters:
+      delay: 0.20833333333333334
+      unit: ms
+    type: Delay
+note: filters/pipeline 可直接合并进渲染后的 CamillaDSP config（极性已由 Gain inverted 实现）；channelmap_roles 仅 advisory，两条路径二选一，勿同时应用以免双反相
+pipeline:
+- channels:
+  - 0
+  names:
+  - cal_ch0_delay
+  type: Filter
+- channels:
+  - 1
+  names:
+  - cal_ch1_delay
+  - cal_ch1_peq0
+  - cal_ch1_peq1
+  - cal_ch1_peq2
+  - cal_ch1_peq3
+  type: Filter
+- channels:
+  - 2
+  names:
+  - cal_ch2_delay
+  type: Filter
+schema: tspi-calibration-camilladsp/v1

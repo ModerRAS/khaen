@@ -1,0 +1,145 @@
+{
+  "schema": "tspi-hdiag-positions/v1",
+  "label": "mimo-4.1.2-20261121-a",
+  "layout": "4.1.2",
+  "created_utc": "2026-11-21T02:00:00Z",
+  "frozen_at_unix": 1795000000,
+  "actuators": [
+    "FL",
+    "FR",
+    "SL",
+    "SR",
+    "SUB1"
+  ],
+  "excluded_roles": [
+    "HFL",
+    "HFR"
+  ],
+  "mic": {
+    "model": "UMIK-1",
+    "serial": "718-7696",
+    "cal_sha256": "<sha256 of mic cal file>"
+  },
+  "session_json": "session.json",
+  "common_d0_samples": 0,
+  "freq_field": "auto",
+  "positions": [
+    {
+      "label": "p01-mlp",
+      "role": "design",
+      "weight": 1,
+      "position_json": "positions/p01-mlp/position.json",
+      "files": {
+        "FL": {
+          "path": "positions/p01-mlp/FL-ch00.analysis.json",
+          "sha256": null
+        },
+        "FR": "positions/p01-mlp/FR-ch01.analysis.json",
+        "SL": "positions/p01-mlp/SL-ch02.analysis.json",
+        "SR": "positions/p01-mlp/SR-ch03.analysis.json",
+        "SUB1": "positions/p01-mlp/SUB1-ch07.analysis.json"
+      },
+      "metadata_sha256": null
+    },
+    {
+      "label": "p02-left",
+      "role": "design",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p02-left/FL-ch00.analysis.json",
+        "FR": "positions/p02-left/FR-ch01.analysis.json",
+        "SL": "positions/p02-left/SL-ch02.analysis.json",
+        "SR": "positions/p02-left/SR-ch03.analysis.json",
+        "SUB1": "positions/p02-left/SUB1-ch07.analysis.json"
+      }
+    },
+    {
+      "label": "p03-right",
+      "role": "design",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p03-right/FL-ch00.analysis.json",
+        "FR": "positions/p03-right/FR-ch01.analysis.json",
+        "SL": "positions/p03-right/SL-ch02.analysis.json",
+        "SR": "positions/p03-right/SR-ch03.analysis.json",
+        "SUB1": "positions/p03-right/SUB1-ch07.analysis.json"
+      }
+    },
+    {
+      "label": "p04-front",
+      "role": "design",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p04-front/FL-ch00.analysis.json",
+        "FR": "positions/p04-front/FR-ch01.analysis.json",
+        "SL": "positions/p04-front/SL-ch02.analysis.json",
+        "SR": "positions/p04-front/SR-ch03.analysis.json",
+        "SUB1": "positions/p04-front/SUB1-ch07.analysis.json"
+      }
+    },
+    {
+      "label": "p05-back",
+      "role": "design",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p05-back/FL-ch00.analysis.json",
+        "FR": "positions/p05-back/FR-ch01.analysis.json",
+        "SL": "positions/p05-back/SL-ch02.analysis.json",
+        "SR": "positions/p05-back/SR-ch03.analysis.json",
+        "SUB1": "positions/p05-back/SUB1-ch07.analysis.json"
+      }
+    },
+    {
+      "label": "p06-center",
+      "role": "design",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p06-center/FL-ch00.analysis.json",
+        "FR": "positions/p06-center/FR-ch01.analysis.json",
+        "SL": "positions/p06-center/SL-ch02.analysis.json",
+        "SR": "positions/p06-center/SR-ch03.analysis.json",
+        "SUB1": "positions/p06-center/SUB1-ch07.analysis.json"
+      }
+    },
+    {
+      "label": "p07-holdout-left",
+      "role": "holdout",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p07-holdout-left/FL-ch00.analysis.json",
+        "FR": "positions/p07-holdout-left/FR-ch01.analysis.json",
+        "SL": "positions/p07-holdout-left/SL-ch02.analysis.json",
+        "SR": "positions/p07-holdout-left/SR-ch03.analysis.json",
+        "SUB1": "positions/p07-holdout-left/SUB1-ch07.analysis.json"
+      }
+    },
+    {
+      "label": "p08-holdout-right",
+      "role": "holdout",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p08-holdout-right/FL-ch00.analysis.json",
+        "FR": "positions/p08-holdout-right/FR-ch01.analysis.json",
+        "SL": "positions/p08-holdout-right/SL-ch02.analysis.json",
+        "SR": "positions/p08-holdout-right/SR-ch03.analysis.json",
+        "SUB1": "positions/p08-holdout-right/SUB1-ch07.analysis.json"
+      }
+    },
+    {
+      "label": "p09-holdout-back",
+      "role": "holdout",
+      "weight": 1,
+      "files": {
+        "FL": "positions/p09-holdout-back/FL-ch00.analysis.json",
+        "FR": "positions/p09-holdout-back/FR-ch01.analysis.json",
+        "SL": "positions/p09-holdout-back/SL-ch02.analysis.json",
+        "SR": "positions/p09-holdout-back/SR-ch03.analysis.json",
+        "SUB1": "positions/p09-holdout-back/SUB1-ch07.analysis.json"
+      }
+    }
+  ],
+  "expected": {
+    "design_points": 6,
+    "holdout_points": 3
+  }
+}

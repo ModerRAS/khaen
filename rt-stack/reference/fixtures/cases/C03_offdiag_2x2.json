@@ -1,0 +1,110 @@
+{
+  "schema": "tspi-reference-fixture/v1",
+  "id": "C03_offdiag_2x2",
+  "title": "2x2 constant offdiag matrix, P=identity",
+  "tags": [
+    "offdiag"
+  ],
+  "fs_hz": 48000,
+  "generated_by": "tools/gen_fixtures.py",
+  "graph": {
+    "n_src": 2,
+    "n_out": 2,
+    "container_channels": 2,
+    "d_samples": 0,
+    "a_map": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "a_fir": [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "participants": [
+      0,
+      1
+    ],
+    "g": [
+      [
+        [],
+        [
+          2
+        ]
+      ],
+      [
+        [
+          -1
+        ],
+        []
+      ]
+    ],
+    "p": [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "scatter": [
+      0,
+      1
+    ]
+  },
+  "supports": {
+    "l_a": 1,
+    "l_g": 1,
+    "l_p": 1,
+    "l_f": 1,
+    "l_out": 3
+  },
+  "input": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ]
+  ],
+  "expected": [
+    [
+      1,
+      2,
+      0
+    ],
+    [
+      -1,
+      1,
+      0
+    ]
+  ],
+  "expected_len": 3,
+  "comparison": {
+    "mode": "exact"
+  },
+  "streaming": {
+    "block_sizes": [
+      1,
+      2,
+      64,
+      128
+    ],
+    "flush_zeros": 0,
+    "contract": "pad input with flush_zeros zeros, process in blocks of B, concatenate and truncate to expected_len"
+  },
+  "notes": "G=[[1,2],[-1,1]]；y0=x0+2*x1、y1=-x0+x1，逐样本手算见 HAND-CALC H3。"
+}

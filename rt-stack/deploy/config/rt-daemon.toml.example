@@ -1,0 +1,14 @@
+# /etc/tspi-rt-stack/rt-daemon.toml —— tspi-rt-daemon 配置模板（schema tspi-rt-daemon/v1，T155 冻结）
+# 安装时由 04-install-release.sh 从 .example 复制；不得覆盖已存在文件。
+[daemon]
+listen = "0.0.0.0:80"         # 生产 80；本机开发 127.0.0.1:8090
+state_dir = "/var/lib/tspi-rt-stack"
+auth_file = "/etc/tspi-rt-stack/daemon-auth.json"
+job_dir = "/var/lib/tspi-rt-stack/calibration"
+
+[control]
+url = "http://127.0.0.1:8090" # host 控制面 URL（诊断展示用）
+
+[web]
+max_connections = 64
+io_timeout_secs = 10

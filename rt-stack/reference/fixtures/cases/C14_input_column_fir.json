@@ -1,0 +1,131 @@
+{
+  "schema": "tspi-reference-fixture/v1",
+  "id": "C14_input_column_fir",
+  "title": "input-side FIR A_i acts on G columns before P (A=diag([0,-1],[2]))",
+  "tags": [
+    "column_fir",
+    "offdiag",
+    "input_delay",
+    "polarity"
+  ],
+  "fs_hz": 48000,
+  "generated_by": "tools/gen_fixtures.py",
+  "graph": {
+    "n_src": 2,
+    "n_out": 2,
+    "container_channels": 2,
+    "d_samples": 0,
+    "a_map": [
+      [
+        1,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "a_fir": [
+      [
+        0,
+        -1
+      ],
+      [
+        2
+      ]
+    ],
+    "participants": [
+      0,
+      1
+    ],
+    "g": [
+      [
+        [],
+        [
+          2
+        ]
+      ],
+      [
+        [
+          -1
+        ],
+        []
+      ]
+    ],
+    "p": [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "scatter": [
+      0,
+      1
+    ]
+  },
+  "supports": {
+    "l_a": 2,
+    "l_g": 1,
+    "l_p": 1,
+    "l_f": 2,
+    "l_out": 3
+  },
+  "input": [
+    [
+      1,
+      0
+    ],
+    [
+      0,
+      1
+    ]
+  ],
+  "expected": [
+    [
+      0,
+      3,
+      0
+    ],
+    [
+      0,
+      3,
+      0
+    ]
+  ],
+  "expected_len": 3,
+  "comparison": {
+    "mode": "exact"
+  },
+  "streaming": {
+    "block_sizes": [
+      1,
+      2,
+      64,
+      128
+    ],
+    "flush_zeros": 1,
+    "contract": "pad input with flush_zeros zeros, process in blocks of B, concatenate and truncate to expected_len"
+  },
+  "notes": "a0=[0,-1]（延迟 1+反相）、a1=[2]；F_ji=p_j*G_ji*A_i 的列作用手算见 HAND-CALC H12。",
+  "traps": [
+    {
+      "id": "output_side_input_fir",
+      "explanation": "若把输入侧 A_i 错误地作用在输出侧（对 y_j 卷积 a_j），结果会变成 ch0=[0,0,-3,0]、ch1=[0,6,0]，而不是手算的 [0,3,0]。",
+      "wrong_outputs": {
+        "0": [
+          0,
+          0,
+          -3,
+          0
+        ],
+        "1": [
+          0,
+          6,
+          0
+        ]
+      }
+    }
+  ]
+}

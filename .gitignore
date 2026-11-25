@@ -1,0 +1,75 @@
+# TSPI audio DSP — version control snapshot
+# 规则：只入库源码 / 配置 / 文档 / 小体积文本证据；生成物、二进制、大文件不入库。
+# 依据与执行记录：docs/REPO-HYGIENE-PLAN.md、rt-stack/evidence/repo-hygiene/。
+# 维护：2026-11-18 repo-hygiene 整理（task-237）
+
+# ---- 构建产物 / 缓存 ----
+**/target/
+**/build/
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/venv/
+.playwright-cli/
+
+# ---- 发布载荷 / 生成包（二进制与镜像走发布产物 / OEM 交付）----
+web/dist/
+audio/release/
+firmware/logs/
+rt-stack/evidence/baseline/payload-copy/
+rt-stack/evidence/**/artifact/
+rt-stack/evidence/**/release-bundle/
+
+# ---- 过程工作区（本地保留，不入库）----
+scratch/
+
+# ---- 固件 / 镜像 / 二进制 / 压缩包 / 采集数据 ----
+*.img
+*.img.gz
+*.iso
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.a
+*.rlib
+*.rmeta
+*.pdb
+*.ko
+*.deb
+*.rpm
+*.zstd
+*.zst
+*.tgz
+*.tar.gz
+*.tar.bz2
+*.7z
+*.zip
+*.gz
+*.raw
+*.npz
+*.npy
+
+# ---- 采集音频 / 大截图（二进制证据只留 hash 清单，见 repo-hygiene）----
+*.wav
+*.flac
+*.mp3
+# 例外：Web 前端内嵌测试音是源码资产，继续跟踪
+!web/assets/test-tone.wav
+rt-stack/evidence/zidoo-toslink/*.png
+
+# ---- 敏感信息（密钥 / token / 本地配置；模板与公钥除外）----
+deploy/ssh/tspi_audio_ed25519
+deploy/ssh/id_*
+*.pem
+*.key
+auth.json
+**/config.toml
+
+# ---- 系统杂项 ----
+Thumbs.db
+desktop.ini
+.DS_Store

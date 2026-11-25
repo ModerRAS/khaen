@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TSPI Audio · 低切分频 / ART 支持 · 交互演示</title>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">TSPI<span>AUDIO</span></div>
+      <div class="brand-sub">房间校准交互演示<em>DEMO</em></div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="bc" data-test="tab-bc" role="tab"><span class="tab-ico">◧</span>低切 / 分频<span class="tab-tag">Bass Control</span></button>
+      <button class="tab" data-tab="art" data-test="tab-art" role="tab"><span class="tab-ico">◫</span>ART 支持<span class="tab-tag">Active Room Treatment</span></button>
+    </nav>
+    <div class="top-status">
+      <span class="pill demo"><i></i>演示模式 · 未连接设备</span>
+      <span class="src">数据：2026-11-18 板端实测 FR · 座位 B</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ================= Bass Control page ================= -->
+    <section class="page active" id="page-bc">
+      <div class="chart-panel">
+        <div class="chart-head">
+          <div class="chart-title">
+            <h1>频响 / 分频设计</h1>
+            <span class="chart-sub" id="bc-group-label">主箱 L/R（FL + FR）</span>
+          </div>
+          <div class="legend" id="bc-legend">
+            <span class="item lg-meas" data-toggle="meas"><i></i>实测 FR</span>
+            <span class="item lg-hp" data-toggle="hp"><i></i>主箱高通</span>
+            <span class="item lg-sub" data-toggle="sub"><i></i>SUB 互补低通</span>
+            <span class="item lg-pred" data-toggle="pred"><i></i>预测合成</span>
+            <span class="item lg-det" data-toggle="det"><i class="dash"></i>实测下潜</span>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="bc-canvas"></canvas>
+          <div class="chart-corner" id="bc-corner">
+            <div><span class="k">频率</span> <b id="corner-f">—</b></div>
+            <div><span class="k">预测</span> <b id="corner-db">—</b></div>
+          </div>
+        </div>
+        <div class="chart-foot">
+          <span class="hint">拖动橙色竖线调整低切；双击图内任意位置也可设置；虚线为实测有效下潜。</span>
+          <span class="foot-right" id="bc-foot-status"></span>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="sec">
+          <div class="sec-title">扬声器组 <span class="sec-hint">每组独立分频点</span></div>
+          <div class="seg group-tabs" id="bc-group-tabs">
+            <button class="seg-btn active" data-group="mains" data-test="group-mains">主箱 L/R</button>
+            <button class="seg-btn" data-group="surround" data-test="group-surround">环绕 L/R</button>
+          </div>
+        </div>
+
+        <div class="cut-card">
+          <div class="cut-label"><span>低切频率 · High-pass</span><span class="cut-hint">可拖动 / 可直接输入</span></div>
+          <div class="cut-value">
+            <input id="cutoff-input" type="number" min="20" max="200" step="1" value="80" data-test="cutoff-input">
+            <span class="unit">Hz</span>
+          </div>
+          <div class="slope-row">
+            <span class="row-label">斜率</span>
+            <div class="seg slope-tabs" id="slope-tabs">
+              <button data-slope="12">12 dB/oct</button>
+              <button data-slope="24" class="active">24 dB/oct</button>
+              <button data-slope="48">48 dB/oct</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="range-card">
+          <div class="range-top"><span>有效范围（实测）</span><span class="mono" id="range-text"></span></div>
+          <div class="range-track">
+            <div class="range-warn" id="range-warn"></div>
+            <div class="range-safe" id="range-safe"></div>
+            <div class="range-det" id="range-det"></div>
+            <div class="range-cur" id="range-cur"></div>
+          </div>
+          <div class="range-scale mono"><span>20</span><span>50</span><span>100</span><span>200</span></div>
+          <div class="range-note" id="range-note"></div>
+        </div>
+
+        <div class="sec presets">
+          <div class="sec-title">预设 <span class="sec-hint">求稳优先 · 一组一键</span></div>
+          <div class="preset-row">
+            <button class="preset" data-preset="mains" data-test="preset-main-55"><b>主箱</b> 55 Hz<small>按标称 ±3 dB ≈55 Hz</small></button>
+            <button class="preset" data-preset="surround" data-test="preset-sur-60"><b>环绕</b> 60 Hz<small>按房间实测下潜</small></button>
+          </div>
+        </div>
+
+        <div class="sec sub-card">
+          <div class="sec-title">低音炮 <span class="sec-hint">互补低通跟随分频点</span></div>
+          <div class="sub-row"><span class="dot amber"></span><span class="sub-name">SUB1</span><span class="sub-desc">低通 = 低切点 · LR 互补</span></div>
+          <label class="slider-row"><span>电平</span><input id="sub-gain" type="range" min="-6" max="6" step="0.5" value="0" data-test="sub-gain"><output id="sub-gain-out">0.0 dB</output></label>
+          <div class="sub-row muted"><span class="dot off"></span><span class="sub-name">SUB2</span><span class="sub-desc">未连接（演示）</span></div>
+        </div>
+
+        <div class="warn-card" id="bc-warn" hidden>
+          <div class="warn-ico">!</div>
+          <div class="warn-body"><b id="bc-warn-title">低于实测下潜</b><p id="bc-warn-text"></p></div>
+        </div>
+
+        <div class="side-actions">
+          <button class="btn primary" id="btn-save" data-test="btn-save">保存 / 导出配置</button>
+          <button class="btn ghost" id="btn-reset" data-test="btn-reset">重置</button>
+        </div>
+        <p class="tiny-note">预测为近似模型：实测幅度 × LR 分频复数和（假设相位已对齐，未含目标曲线 EQ）。交互布局参考 Dirac Live 公开文档，界面素材均为自制。</p>
+      </aside>
+    </section>
+
+    <!-- ================= ART page ================= -->
+    <section class="page" id="page-art">
+      <div class="chart-panel">
+        <div class="chart-head">
+          <div class="chart-title">
+            <h1>衰减时间预测</h1>
+            <span class="chart-sub" id="art-group-label">主组 FL · 20–160 Hz</span>
+          </div>
+          <div class="legend">
+            <span class="item lg-before"><i></i>校正前（示意）</span>
+            <span class="item lg-after"><i></i>预测后（示意）</span>
+            <span class="item lg-det"><i class="dot" style="color:var(--amber);background:var(--amber)"></i>当前主组</span>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="art-canvas"></canvas>
+          <div class="chart-corner" id="art-corner">
+            <div><span class="k">低频平均 RT60</span> <b id="art-before-rt">—</b> → <b id="art-after-rt">—</b></div>
+            <div><span class="k">衰减改善</span> <b id="art-improve">—</b></div>
+            <div><span class="k">支持连接</span> <b id="art-conn">—</b></div>
+          </div>
+        </div>
+        <div class="chart-foot">
+          <span class="hint">衰减预览为演示模型（示意），非实测；实际效果需 ART 计算与复测。</span>
+          <span class="foot-right" id="art-foot-status"></span>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="sec">
+          <div class="sec-title">主组 Main groups <span class="sec-hint">被支持的主扬声器</span></div>
+          <div class="seg art-row-tabs" id="art-row-tabs">
+            <button class="seg-btn active" data-row="FL" data-test="art-row-FL">FL</button>
+            <button class="seg-btn" data-row="FR" data-test="art-row-FR">FR</button>
+            <button class="seg-btn" data-row="SL" data-test="art-row-SL">SL</button>
+            <button class="seg-btn" data-row="SR" data-test="art-row-SR">SR</button>
+            <button class="seg-btn" data-row="LFE" data-test="art-row-LFE">LFE</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-title">支持矩阵 <span class="sec-hint">行 = 主组 · 列 = 支持组</span></div>
+          <div class="matrix" id="art-matrix"></div>
+          <div class="matrix-legend"><span><i class="on"></i>已启用</span><span><i class="sel"></i>当前选中</span><span>数字 = 支持量 dB</span></div>
+        </div>
+
+        <div class="cell-card">
+          <div class="cell-title"><b id="cell-title">FL ← SUB1</b>
+            <label class="switch" title="启用/停用该支持组" data-test="cell-toggle"><input type="checkbox" id="cell-enabled" data-test="cell-enabled"><span></span></label>
+          </div>
+          <label class="slider-row"><span>支持量</span><input id="support-level" type="range" min="-24" max="-1" step="1" value="-18" data-test="support-level"><output id="support-level-out">-18 dB</output></label>
+          <div class="range-row"><span>F-support Low</span><input id="fs-low" type="range" min="20" max="150" step="5" value="20" data-test="fs-low"><output id="fs-low-out">20 Hz</output></div>
+          <div class="range-row"><span>F-support High</span><input id="fs-high" type="range" min="20" max="150" step="5" value="120" data-test="fs-high"><output id="fs-high-out">120 Hz</output></div>
+          <div class="hint-line">支持量 -24 dB = 最强，-1 dB = 最弱；Fsiso 为支持上限频率（50–150 Hz）。</div>
+        </div>
+
+        <div class="sec fsiso-card">
+          <div class="range-row" style="margin:0"><span style="flex:0 0 70px">Fsiso</span><input id="fsiso" type="range" min="50" max="150" step="5" value="150" data-test="fsiso"><output id="fsiso-out">150 Hz</output></div>
+        </div>
+
+        <div class="warn-card" id="art-warn" hidden>
+          <div class="warn-ico">!</div>
+          <div class="warn-body"><b id="art-warn-title">风险提示</b><p id="art-warn-text"></p></div>
+        </div>
+
+        <div class="side-actions">
+          <button class="btn primary" id="btn-calc" data-test="btn-calc">计算 ART 滤波器</button>
+          <button class="btn ghost" id="btn-art-export" data-test="btn-art-export">导出配置</button>
+        </div>
+        <p class="tiny-note">支持矩阵 / 支持量 / 衰减预览均为演示交互，数值为示意。交互参考 Dirac Live ART 公开文档，界面素材均为自制。</p>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span>交互参考：Dirac Live Bass Control / Active Room Treatment 公开文档 · 界面与素材均为自制，未使用任何商标图素</span>
+    <span class="r">本地演示页 · 不连接设备 · 不出声</span>
+  </footer>
+</div>
+
+<div id="caption" hidden></div>
+<div id="toast" hidden>已保存（演示）</div>
+<div id="cursor"><i></i></div>
+
+<!-- export modal (BC) -->
+<div class="overlay" id="export-overlay" hidden>
+  <div class="modal">
+    <div class="modal-head"><h2>导出分频配置</h2><button class="x" data-close="export">✕</button></div>
+    <div class="modal-body">
+      <div class="tabs-mini" id="export-tabs">
+        <button class="active" data-view="json">crossover-config.json</button>
+        <button data-view="yaml">channelmap 片段（YAML）</button>
+      </div>
+      <pre class="code" id="export-code"></pre>
+      <div class="code-note">保存后写入 channelmap 的每一角色：<b>highpass</b> 控制主箱低切，<b>bass_management</b> 生成 SUB 互补低通；演示页不写设备。</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close="export">关闭</button>
+      <button class="btn primary" id="btn-download" style="flex:0 0 auto">下载 JSON</button>
+    </div>
+  </div>
+</div>
+
+<!-- confirm modal (ART) -->
+<div class="overlay" id="confirm-overlay" hidden>
+  <div class="modal narrow">
+    <div class="modal-head"><h2>确认应用 ART 支持配置</h2><button class="x" data-close="confirm">✕</button></div>
+    <div class="modal-body">
+      <div class="confirm-note" style="margin-top:0">将按当前支持矩阵重新计算滤波器。以下为选择摘要与风险检查：</div>
+      <ul class="confirm-list" id="confirm-list"></ul>
+      <div class="confirm-note">ART 计算会协同使用多只扬声器；应用前请确认支持组能力与摆位，避免小箱过载。演示环境不会写入任何设备。</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close="confirm">取消</button>
+      <button class="btn primary" id="btn-confirm-apply" data-test="btn-confirm-apply" style="flex:0 0 auto">应用并计算</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/*__JS__*/
+</script>
+</body>
+</html>

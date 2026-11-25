@@ -1,0 +1,15 @@
+{
+  "schema": "tspi-rt-stack/switch-window/v1",
+  "window_id": "EXAMPLE-NOT-AUTHORIZED-2026-11-20",
+  "authorized_by": "REPLACE-WITH-USER-OR-LEAD",
+  "board_host": "tspi-audio-dsp",
+  "start": "2026-11-20T10:00:00+08:00",
+  "end": "2026-11-20T11:20:00+08:00",
+  "max_duration_min": 90,
+  "scope": ["snapshot", "preflight", "retire-c", "install-release", "start-new", "verify", "mark-last-good", "rollback"],
+  "audio_off_required": true,
+  "s1_stop_acknowledged": true,
+  "soak_absent": true,
+  "physical_access": "REPLACE: 现场/串口/可断电恢复手段",
+  "notes": "EXAMPLE ONLY：示例窗口不是授权，live 门会校验时间与 scope；本文件不得直接用于切换。"
+}

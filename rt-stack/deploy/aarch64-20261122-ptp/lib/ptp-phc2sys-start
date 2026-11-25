@@ -1,0 +1,34 @@
+#!/bin/sh
+# tspi-ptp-phc2sys-start -- ExecStart wrapper for tspi-ptp-phc2sys.service.
+# Copies the (NTP/manual) system clock into the NIC PHC with the TAI offset.
+# Exits 0 without starting phc2sys when the interface has no PHC (software-timestamp hosts).
+set -eu
+
+LIB=/usr/local/lib/tspi/ptp-lib.sh
+if [ ! -r "$LIB" ]; then
+    echo "tspi-ptp: ERROR: $LIB missing (bundle lib/ not installed)" >&2
+    exit 78
+fi
+# shellcheck source=ptp-lib.sh
+. "$LIB"
+
+IFACE=$(resolve_ptp_iface) || exit 78
+if ! PHC=$(detect_ptp_phc "$IFACE"); then
+    ptp_log "iface=$IFACE has no PHC: phc2sys not applicable (software-timestamp GM keeps the system clock); exiting 0"
+    exit 0
+fi
+
+SRC=${TSPI_PHC2SYS_SRC:-CLOCK_REALTIME}
+OFF=${TSPI_PTP_UTC_OFFSET:-37}
+PHC2SYS=/opt/tspi-rt-stack/ptp/current/bin/phc2sys
+if [ ! -x "$PHC2SYS" ]; then
+    ptp_log "ERROR: $PHC2SYS missing or not executable (bundle bin/ not installed)"
+    exit 78
+fi
+
+if [ ! -d /run/tspi-ptp ]; then
+    mkdir -p /run/tspi-ptp || { ptp_log "ERROR: cannot create /run/tspi-ptp"; exit 73; }
+fi
+ptp_log "iface=$IFACE phc=$PHC src=$SRC utc_offset=$OFF"
+ptp_log "exec: $PHC2SYS -s $SRC -c $IFACE -O $OFF -m"
+exec "$PHC2SYS" -s "$SRC" -c "$IFACE" -O "$OFF" -m

@@ -1,0 +1,37 @@
+{
+  "calibration_file": {
+    "path": "examples/offline/nopairs.yml",
+    "sha256": "091999f8e3f036ad359f3033235f6b3c4b44327e12acc1c3feb66453ba97a9ad"
+  },
+  "created_unix": 1794738466,
+  "environment": {
+    "capture": "examples/offline\\cap-ch00.raw",
+    "capture_channels": 1,
+    "chunksize": 64,
+    "playback": "simulated",
+    "playback_channels": 4
+  },
+  "global_validation": {
+    "passed": true,
+    "worst_freq_hz": 19896.974154826014,
+    "worst_margin_db": 9.02855162425215
+  },
+  "layout": "synthetic-4",
+  "negative_controls": {
+    "items": [],
+    "status": "not_run"
+  },
+  "overall_pass": false,
+  "overall_status": "INCOMPLETE",
+  "pair_validation": {
+    "all_pairs_pass": true,
+    "pairs": [],
+    "status": "not_run"
+  },
+  "sample_rate": 48000,
+  "schema": "tspi-calibration-report/v1",
+  "tool": {
+    "name": "tspi-calibrate",
+    "version": "0.1.0"
+  }
+}

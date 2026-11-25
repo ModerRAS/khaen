@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -u
+echo "-- mock journalctl $* --"
+exit 0

@@ -1,0 +1,12 @@
+# TSPI file runner：文件输入驱动 core plan（T06 scaffold；leaf T14）
+# WBS T06 scaffold；本 manifest 只由 integrator 写。
+[package]
+name = "tspi-file-runner"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "TSPI file runner：文件输入驱动 core plan（T06 scaffold；leaf T14）"
+
+[dependencies]
+tspi-dsp-core = { workspace = true }
+tspi-rt-host = { workspace = true }

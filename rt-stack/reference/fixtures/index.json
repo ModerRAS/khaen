@@ -1,0 +1,177 @@
+{
+  "schema": "tspi-reference-fixtures-index/v1",
+  "generated_by": "tools/gen_fixtures.py",
+  "cases": [
+    {
+      "id": "C01_identity_d0_1x1",
+      "file": "cases/C01_identity_d0_1x1.json",
+      "tags": [
+        "identity",
+        "baseline"
+      ],
+      "comparison": "exact",
+      "sha256": "d790f0ac00253936e4c18917d2cbcbd9a84dc19c85fa4680f3f4d3ee83868b9c",
+      "bytes": 1217
+    },
+    {
+      "id": "C02_identity_delay_d3",
+      "file": "cases/C02_identity_delay_d3.json",
+      "tags": [
+        "identity",
+        "D",
+        "tail"
+      ],
+      "comparison": "exact",
+      "sha256": "b71722f35a15122721e9b47d0f1976b9b2e4935d4e0ee0b53f506d09169cce9e",
+      "bytes": 1226
+    },
+    {
+      "id": "C03_offdiag_2x2",
+      "file": "cases/C03_offdiag_2x2.json",
+      "tags": [
+        "offdiag"
+      ],
+      "comparison": "exact",
+      "sha256": "75c341b46673e45b14fcfe23c77f3a7656e24944aa65510173a4180af69fbb01",
+      "bytes": 1455
+    },
+    {
+      "id": "C04_tail_conv_1x1",
+      "file": "cases/C04_tail_conv_1x1.json",
+      "tags": [
+        "tail"
+      ],
+      "comparison": "exact",
+      "sha256": "974bda5d1b75cca57c2ee3a0a2c140c4d70841673c163cce4f3d91ef9376642b",
+      "bytes": 1646
+    },
+    {
+      "id": "C05_d_in_support",
+      "file": "cases/C05_d_in_support.json",
+      "tags": [
+        "D",
+        "tail"
+      ],
+      "comparison": "exact",
+      "sha256": "e78e1e6cd6dc7e968b0e18cf8c7f314d6a9e2f80bcbbff121a0766e4650f9a14",
+      "bytes": 1260
+    },
+    {
+      "id": "C06_row_col_asymmetry",
+      "file": "cases/C06_row_col_asymmetry.json",
+      "tags": [
+        "offdiag",
+        "row_column"
+      ],
+      "comparison": "exact",
+      "sha256": "28e33ce073f9917c28e0ebf3d46c517bf431130f043cefe0a6e3567887f78526",
+      "bytes": 1715
+    },
+    {
+      "id": "C07_factorized_fused",
+      "file": "cases/C07_factorized_fused.json",
+      "tags": [
+        "offdiag",
+        "tail",
+        "D"
+      ],
+      "comparison": "exact",
+      "sha256": "28a98beccf41b71b9e7c864d5804258444dc6733a1a3be269f3c30d51614a1de",
+      "bytes": 1542
+    },
+    {
+      "id": "C08_stereo_strict_scatter",
+      "file": "cases/C08_stereo_strict_scatter.json",
+      "tags": [
+        "strict",
+        "scatter",
+        "polarity",
+        "zerofill"
+      ],
+      "comparison": "exact",
+      "sha256": "ab60a9497adaa3cc1cb3e3b8b3f30510e8c150b95b2120a621fdf525ec06a570",
+      "bytes": 2571
+    },
+    {
+      "id": "C09_4_1_2_5x5_embed",
+      "file": "cases/C09_4_1_2_5x5_embed.json",
+      "tags": [
+        "offdiag",
+        "tail",
+        "D",
+        "five_by_five",
+        "embed",
+        "scatter",
+        "multichannel"
+      ],
+      "comparison": "exact",
+      "sha256": "fb350e39a9fb2c2d282ee6505d85b4cbda4e973e8b70e0cf6c0ecf9681f84cd6",
+      "bytes": 5479
+    },
+    {
+      "id": "C10_streaming_128",
+      "file": "cases/C10_streaming_128.json",
+      "tags": [
+        "streaming",
+        "offdiag",
+        "tail",
+        "D"
+      ],
+      "comparison": "exact",
+      "sha256": "ccfaf9451dad98677f00cc81f34fcc316a51d71bdb08ed422f05b7d6469d7d5a",
+      "bytes": 7247
+    },
+    {
+      "id": "C11_tolerance_f64",
+      "file": "cases/C11_tolerance_f64.json",
+      "tags": [
+        "tolerance",
+        "offdiag",
+        "D"
+      ],
+      "comparison": "tolerance",
+      "sha256": "60d2ddb27fcaa718bff508f27ecb4d9c4601678c021647b824f0cc27709e6d87",
+      "bytes": 2616
+    },
+    {
+      "id": "C13_identity_graph_4_1_2_d2",
+      "file": "cases/C13_identity_graph_4_1_2_d2.json",
+      "tags": [
+        "identity",
+        "D",
+        "scatter",
+        "multichannel"
+      ],
+      "comparison": "exact",
+      "sha256": "8f73ef5ecc960c5bc1b2af4b41a26ce203ee1c62ccdae5f612b7fba5b26bf4e5",
+      "bytes": 3720
+    },
+    {
+      "id": "C14_input_column_fir",
+      "file": "cases/C14_input_column_fir.json",
+      "tags": [
+        "column_fir",
+        "offdiag",
+        "input_delay",
+        "polarity"
+      ],
+      "comparison": "exact",
+      "sha256": "2935bb4ba2773234dbe5e40f4ace3b37931a9d8ba5526a261c9ccff95267dc35",
+      "bytes": 1969
+    },
+    {
+      "id": "C12_dense_5x5_D3_exact",
+      "file": "cases/C12_dense_5x5_D3_exact.json",
+      "tags": [
+        "dense",
+        "offdiag",
+        "tail",
+        "D",
+        "random_exact"
+      ],
+      "comparison": "exact",
+      "sha256": "dcab7018765390ae2d67bb031d91181856908b1fc744bbf69af4cd73325d93ae",
+      "bytes": 7098
+    }
+  ]
+}
