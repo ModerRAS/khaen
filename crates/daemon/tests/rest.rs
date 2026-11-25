@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use khaen_calibration::{compile_peq_design, PlanCompileOptions};
 use khaen_daemon::{router, DaemonState};
+use khaen_designer::modal_peq::{BandType, ChannelPeq, DesignMode, ModalBand, PeqDesign};
 use khaen_host::plan::{
     ContentSection, CrossoverFilter, CrossoverSection, Fold, MatrixSection, Plan, ProtectionEntry,
     ProtectionSection, RoutingSection,
@@ -838,4 +840,177 @@ async fn mode_off_and_on_over_http() {
     assert_eq!(unmuted, input);
     let (_, restored) = request("GET", &format!("{}/api/status", server.base), None).await;
     assert_eq!(restored["mode"], Value::String("aes67".into()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn calibration_plan_roundtrips_through_control_plane() {
+    let (server, state) = spawn().await;
+
+    // 真实校准产物：两个通道各一条 +4 dB / 100 Hz 模态滤波，lane 增益 0 / -1 dB。
+    let design = calibration_design();
+    let options = PlanCompileOptions {
+        sample_rate: SAMPLE_RATE,
+        block_size: BLOCK_FRAMES,
+        channels: CHANNELS,
+        lane_gain_db: vec![0.0, -1.0],
+        lane_delay: Vec::new(),
+    };
+    let compiled = compile_peq_design(&design, &options).expect("compile calibration plan");
+    let decoded = Plan::decode(&compiled.bytes).expect("decode compiled plan");
+    assert_eq!(compiled.sha256, sha256_hex(&compiled.bytes));
+    assert_eq!(compiled.graph_id, decoded.graph_id_hex());
+    // 同输入再编译一次：字节与 sha256 逐位相同（可复现 sha 是目标④的硬要求）。
+    let again = compile_peq_design(&design, &options).expect("compile again");
+    assert_eq!(compiled.bytes, again.bytes, "同输入必须逐字节可复现");
+    assert_eq!(compiled.sha256, again.sha256);
+
+    let file = TempPlan::new("calibration", &compiled.bytes);
+
+    // 只读 inspect：不产生草稿、不改变正在跑的图。
+    let body = json!({ "plan_path": file.path(), "plan_sha256": file.sha256 }).to_string();
+    let (status, inspected) = request(
+        "POST",
+        &format!("{}/api/plan/inspect", server.base),
+        Some(&body),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(inspected["staged"], Value::Bool(false));
+    assert_eq!(inspected["admission"]["accepted"], Value::Bool(true));
+    assert_eq!(
+        inspected["graph_id"],
+        Value::String(compiled.graph_id.clone())
+    );
+
+    // 错误的 sha256：400，不进入草稿。
+    let bad = json!({ "plan_path": file.path(), "plan_sha256": "0".repeat(64) }).to_string();
+    let (status, response) =
+        request("POST", &format!("{}/api/prepare", server.base), Some(&bad)).await;
+    assert_eq!(status, 400);
+    assert_eq!(response["error"], Value::String("bad_request".into()));
+
+    // 两阶段：prepare 只产生草稿，commit 才在块边界生效。
+    let (status, prepared) =
+        request("POST", &format!("{}/api/prepare", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(prepared["planned_version"], Value::from(1));
+    assert_eq!(
+        prepared["graph_id"],
+        Value::String(compiled.graph_id.clone())
+    );
+    assert_eq!(prepared["admission"]["accepted"], Value::Bool(true));
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let (_, before) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(
+        before["epoch"],
+        Value::Null,
+        "还没提交过方案：epoch 如实为 null"
+    );
+    assert_eq!(before["applied_block"], Value::Null);
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, committed) =
+        request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(committed["version"], Value::from(1));
+    assert_eq!(
+        committed["graph_id"],
+        Value::String(compiled.graph_id.clone())
+    );
+
+    // 图里确实有校准滤波器：逐 lane 用方案系数独立复算，输出必须一致。
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 21);
+    let calibrated = run_block(&state, &input);
+    assert_ne!(calibrated, input, "方案含 +4 dB 模态滤波，输出不应等于直通");
+    let protection = decoded.protection.as_ref().expect("protection section");
+    for lane in 0..usize::from(CHANNELS) {
+        let entry = protection
+            .entries
+            .iter()
+            .find(|entry| usize::from(entry.lane) == lane)
+            .expect("lane entry");
+        let expected = expected_lane(&input, lane, entry, BLOCK_FRAMES as usize);
+        for frame in 0..BLOCK_FRAMES as usize {
+            let actual = calibrated[frame * usize::from(CHANNELS) + lane];
+            assert!(
+                (actual - expected[frame]).abs() <= 1e-4,
+                "lane {lane} frame {frame}: {actual} vs {}",
+                expected[frame]
+            );
+        }
+    }
+
+    // 换回恒等方案 v2，再 rollback 回校准方案 v1：版本递增，但图回到校准产物。
+    let identity = TempPlan::new("calibration-identity", &identity_plan().encode());
+    let body = json!({ "plan_path": identity.path(), "plan_sha256": identity.sha256 }).to_string();
+    let (_, prepared) = request("POST", &format!("{}/api/prepare", server.base), Some(&body)).await;
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let _ = request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    let passthrough = run_block(&state, &input);
+    assert_eq!(passthrough, input);
+
+    let (status, rolled) =
+        request("POST", &format!("{}/api/rollback", server.base), Some("{}")).await;
+    assert_eq!(status, 200);
+    assert_eq!(rolled["rolled_back_to"], Value::from(1));
+    assert_eq!(rolled["planned_version"], Value::from(3));
+    assert_eq!(rolled["graph_id"], Value::String(compiled.graph_id.clone()));
+    let token = rolled["engine_token"].as_str().expect("token").to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, committed) =
+        request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(committed["version"], Value::from(3));
+    let restored = run_block(&state, &input);
+    assert_eq!(
+        restored, calibrated,
+        "rollback 后应与第一次下发的校准图逐样本一致"
+    );
+}
+
+/// 用方案里的保护项系数独立复算一条 lane 的期望输出（f64 计算，f32 系数）。
+fn expected_lane(
+    input: &[f32],
+    lane: usize,
+    entry: &khaen_host::plan::ProtectionEntry,
+    frames: usize,
+) -> Vec<f32> {
+    assert_eq!(entry.peq.len(), 1, "夹具每条 lane 只有一段 PEQ");
+    let section = entry.peq[0];
+    let channels = usize::from(CHANNELS);
+    let gain = f64::from(10f32.powf(entry.gain_db / 20.0));
+    let (mut y1, mut y2, mut x1, mut x2) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let mut out = Vec::with_capacity(frames);
+    for frame in 0..frames {
+        let x = f64::from(input[frame * channels + lane]);
+        let y = f64::from(section.b0) * x + f64::from(section.b1) * x1 + f64::from(section.b2) * x2
+            - f64::from(section.a1) * y1
+            - f64::from(section.a2) * y2;
+        out.push((y * gain) as f32);
+        y2 = y1;
+        y1 = y;
+        x2 = x1;
+        x1 = x;
+    }
+    out
+}
+
+/// 校准设计夹具：两个通道各一条 +4 dB / 100 Hz 模态滤波。
+fn calibration_design() -> PeqDesign {
+    let mut design = PeqDesign::new(SAMPLE_RATE, DesignMode::ModalOnly).expect("design");
+    for (name, index) in [("FL", 0u32), ("FR", 1u32)] {
+        let mut channel = ChannelPeq::new(name, index).expect("channel");
+        channel.push_band(
+            ModalBand::from_params(BandType::Peaking, 100.0, 4.0, 4.0, f64::from(SAMPLE_RATE))
+                .expect("band"),
+        );
+        design.add_channel(channel).expect("add channel");
+    }
+    design
 }

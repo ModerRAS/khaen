@@ -282,6 +282,8 @@ name = "khaen-daemon"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "khaen-calibration",
+ "khaen-designer",
  "khaen-host",
  "serde_json",
  "tokio",

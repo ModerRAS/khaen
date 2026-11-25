@@ -10,3 +10,8 @@ khaen-host = { path = "../host" }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "io-util"] }
 serde_json = "1"
+
+[dev-dependencies]
+# 校准产物 → 控制面两阶段下发的端到端测试：编译真实校准方案并通过 REST 下发/回滚。
+khaen-calibration = { path = "../calibration" }
+khaen-designer = { path = "../designer" }
