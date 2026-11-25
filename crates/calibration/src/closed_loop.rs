@@ -533,6 +533,48 @@ pub fn report_sha256(report: &ClosedLoopReport) -> String {
     khaen_core::sha256::sha256_hex(&report_bytes(report))
 }
 
+/// 带域电平集合的确定性 JSON 字节（khaen-closed-loop-levels/v1）。
+///
+/// 与 report_bytes 同一规范：固定键序、10 位有效数字、末尾换行；
+/// 任何用本函数写出的文件都能被闭环 CLI 直接读回。
+pub fn levels_bytes(set: &LevelSet) -> Vec<u8> {
+    let mut out = String::new();
+    out.push('{');
+    out.push_str(&format!("\"schema\":\"{LEVELS_SCHEMA}\","));
+    out.push_str(&format!(
+        "\"sample_rate_hz\":{},",
+        fmt_sig(set.sample_rate_hz)
+    ));
+    out.push_str("\"points\":[");
+    for (point_index, point) in set.points.iter().enumerate() {
+        if point_index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"name\":\"{}\",\"bands\":[",
+            json_escape(&point.name)
+        ));
+        for (band_index, band) in point.bands.iter().enumerate() {
+            if band_index > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"center_hz\":{},\"level_db\":{}}}",
+                fmt_sig(band.center_hz),
+                opt_fmt(band.level_db)
+            ));
+        }
+        out.push_str("]}");
+    }
+    out.push_str("]}\n");
+    out.into_bytes()
+}
+
+/// 带域电平集合的 sha256（十六进制）；与 levels_bytes 一一对应。
+pub fn levels_sha256(set: &LevelSet) -> String {
+    khaen_core::sha256::sha256_hex(&levels_bytes(set))
+}
+
 fn opt_fmt(value: Option<f64>) -> String {
     match value {
         Some(value) => fmt_sig(value),

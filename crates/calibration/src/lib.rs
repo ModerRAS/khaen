@@ -50,6 +50,7 @@ pub mod noise_est;
 pub mod peq_fit;
 pub mod phase_fit;
 pub mod plan_compile;
+pub mod plan_levels;
 pub mod positions;
 pub mod rt60;
 pub mod single_point_bundle;
@@ -61,14 +62,18 @@ pub mod sweep;
 pub mod capture;
 
 pub use closed_loop::{
-    compare, report_bytes, report_sha256, BandComparison, BandLevel, ClosedLoopConfig,
-    ClosedLoopError, ClosedLoopReport, LevelSet, PointComparison, PointLevels, Verdict,
-    DEFAULT_MIN_COMPARED_BANDS, DEFAULT_TOLERANCE_DB, LEVELS_SCHEMA as CLOSED_LOOP_LEVELS_SCHEMA,
-    REPORT_SCHEMA as CLOSED_LOOP_REPORT_SCHEMA,
+    compare, levels_bytes, levels_sha256, report_bytes, report_sha256, BandComparison, BandLevel,
+    ClosedLoopConfig, ClosedLoopError, ClosedLoopReport, LevelSet, PointComparison, PointLevels,
+    Verdict, DEFAULT_MIN_COMPARED_BANDS, DEFAULT_TOLERANCE_DB,
+    LEVELS_SCHEMA as CLOSED_LOOP_LEVELS_SCHEMA, REPORT_SCHEMA as CLOSED_LOOP_REPORT_SCHEMA,
 };
 pub use deconvolve::deconvolve;
 pub use plan_compile::{
     compile_peq_design, CompiledPlan, PlanCompileError, PlanCompileOptions, PLAN_ARTIFACT_PATH,
+};
+pub use plan_levels::{
+    lane_name, predicted_levels, PlanLevelsError, DEFAULT_CENTERS_HZ,
+    TOOL_NAME as PLAN_LEVELS_TOOL_NAME,
 };
 pub use single_point_bundle::{
     build_bundle, design_digest, verify_bundle, write_bundle, BundleError, BundleFile, PlanBundle,

@@ -13,7 +13,15 @@ path = "src/main.rs"
 name = "khaen-closed-loop"
 path = "src/bin/closed_loop.rs"
 
+[[bin]]
+name = "khaen-plan-levels"
+path = "src/bin/plan_levels.rs"
+
 [dependencies]
 khaen-calibration = { path = "../calibration" }
+khaen-core = { path = "../core" }
 khaen-mimo-design = { path = "../mimo-design" }
 serde_json = "1"
+
+[dev-dependencies]
+khaen-plan-builder = { path = "../plan-builder" }

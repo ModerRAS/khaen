@@ -120,3 +120,29 @@ out/
 - 输出目录必须为空或不存在，防止把旧报告混进来。
 - `out/report.json` 键序固定、浮点 10 位有效数字、末尾换行；同输入两次逐字节相同（sha256 可复现）。
 - 判定容差默认 2.0 dB（与目标 ④ 一致），`--min-bands` 默认 3（不足判 INCOMPLETE，不硬判 PASS）。
+
+---
+
+# khaen-plan-levels（从方案推预测电平，离线）
+
+把已编译的方案（plan ABI v3）变成闭环复测的 **predicted 侧**：读方案文件，算每个保护项
+（lane）在该 lane 的 PEQ + 增益下的预测带域电平，写出 `khaen-closed-loop-levels/v1`
+JSON，可直接喂给 `khaen-closed-loop --predicted`。
+
+    khaen-plan-levels --plan plan.bin --out levels.json [--centers 25,31.5,40,...]
+
+| 退出码 | 含义 |
+| --- | --- |
+| 0 | 成功 |
+| 2 | 输入/用法/方案错误（E_USAGE / E_IO / E_PLAN / E_PLAN_LEVELS_INPUT / E_PLAN_LEVELS_CONFIG / E_PLAN_LEVELS_PLAN） |
+| 1 | 写输出失败（E_WRITE） |
+
+- 预测口径：`gain_db` + 该 lane 全部 PEQ biquad 在中心频率处的级联幅度（dB）；biquad 稳态
+  频响为 `(b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)`。
+- 测点名来自 lane 序号（`L00` / `L01` / ...），因为方案里没有测点名字；实测文件必须用同一命名。
+- 只接受恒等的内容布局 / 分频 / 矩阵 / 路由段；否则报 E_PLAN_LEVELS_PLAN 而不是悄悄少算。
+- ⚠ 诚实边界：这是**相对频响**（0 dB = 方案外无滤波），不含房间、单元与麦克风响应；
+  实测侧必须用同一参考归一化后再对账。方案系数是 f32 量化的，低频远带预测误差量级约
+  1e-2 dB（远小于 2 dB 判定容差，测试里用 0.05 dB 锁住该边界）。
+- 输出 JSON 与 `khaen-closed-loop` 的输入同一规范：固定键序、10 位有效数字、末尾换行，
+  同输入两次逐字节相同。
