@@ -1,8 +1,8 @@
-# SPEC — TSPI f64 核心卷积参考规范（tspi-reference/v1，P0）
+# SPEC — KHAEN f64 核心卷积参考规范（khaen-reference/v1，P0）
 
-2026-11-16 · rt-reference（WBS **T03** 行 / team task-23）。写域：`projects/tspi-audio-dsp/rt-stack/reference/`。
+2026-11-16 · rt-reference（WBS **T03** 行 / team task-23）。写域：`projects/khaen-audio-dsp/rt-stack/reference/`。
 状态：**P0 规范 + 手算向量 + 夹具**，独立于 T06 Cargo workspace、未来 `rt-check`、任何 Rust 实现；不碰板端/ALSA/服务。
-权威计划：[TSPI-RT-STACK-WBS.md](../scratch/lead/planner/TSPI-RT-STACK-WBS.md#L38)（T03 行）、
+权威计划：[KHAEN-RT-STACK-WBS.md](../scratch/lead/planner/KHAEN-RT-STACK-WBS.md#L38)（T03 行）、
 [DSP-HOST-DECISION.md](../scratch/lead/planner/DSP-HOST-DECISION.md#L26)（统一模型 §1）、
 [DSP-HOST-CPU-BUDGET.md](../scratch/lead/planner/DSP-HOST-CPU-BUDGET.md#L80)（F_ji 公式 §5）。输入 hash 见 `evidence/T03/manifest.json`。
 
@@ -200,7 +200,7 @@ CPU 预算的通用式给出融合路由：`F_ji = p_j * G_ji * A_i`（§2.7）�
 
 ### 5.1 4.1.2（当前验收布局）
 
-唯一 role→DAC 来源是板端 overlay `audio/overlay/etc/tspi-audio/layout-presets.yml`（本项目内只读副本；
+唯一 role→DAC 来源是板端 overlay `audio/overlay/etc/khaen-audio/layout-presets.yml`（本项目内只读副本；
 运行时必须解析 + 绑定 hash，不得硬编码快照——T57 负责完整解析）：
 
 | role index | role id | 容器/DAC | 低带 participant（dense） |
@@ -236,13 +236,13 @@ layout hash 与 role 解析的权威实现/验收属 T57，本文件不复制其
 
 ---
 
-## 6. 夹具格式 tspi-reference-fixture/v1
+## 6. 夹具格式 khaen-reference-fixture/v1
 
 ### 6.1 文件与绑定
 
 ```
 reference/
-├── fixtures/index.json          # schema tspi-reference-fixtures-index/v1 + 每个 case 的 sha256/size
+├── fixtures/index.json          # schema khaen-reference-fixtures-index/v1 + 每个 case 的 sha256/size
 ├── fixtures/cases/<ID>.json     # 一个 case 一个文件（ID 与文件名一致）
 ├── SPEC.md / HAND-CALC.md
 ├── tools/gen_fixtures.py        # 确定性生成器（--write / --check）
@@ -258,7 +258,7 @@ reference/
 
 | 字段 | 类型 | 必填 | 语义 |
 |---|---|---|---|
-| schema | string | 是 | 必须 = `tspi-reference-fixture/v1` |
+| schema | string | 是 | 必须 = `khaen-reference-fixture/v1` |
 | id | string | 是 | 唯一，与文件名（去 .json）一致 |
 | title / notes | string | 是/可 | 人读说明 |
 | tags | string[] | 是 | 覆盖矩阵标签（见 6.5） |
@@ -361,7 +361,7 @@ python tools/make_evidence.py             # 生成 evidence/T03/manifest.json + 
 
 ## 9. 版本与变更
 
-- schema `tspi-reference-fixture/v1` 与本文档规则固定；新增夹具可以（id 唯一），
+- schema `khaen-reference-fixture/v1` 与本文档规则固定；新增夹具可以（id 唯一），
   改变语义/容差判据/字段含义必须升版本（v2）并保留 v1 夹具；
 - 不得事后放宽既有容差或修改 expected；发现规范错误须记录 issue 与新旧差异，由评审确认后升版；
 - 所有输入文件 hash 与生成/验证命令记录在 `evidence/T03/manifest.json`，可重放 `gen --check` + `verify` 复核。

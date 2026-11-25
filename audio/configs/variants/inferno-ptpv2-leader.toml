@@ -4,7 +4,7 @@
 # 不适用：只有 PTPv1 的老 Dante 设备（它们只认 PTPv1；开源无 PTPv1 leader 实现，见 RISKS R3/D2）。
 # 未上板验证：启用前做 24h 时钟稳定性与 Dante Controller 观察。
 #
-# 用法：替换 /etc/statime/inferno-ptpv1.toml 并改名为 inferno-ptpv1.toml（tspi-mode 只渲染该名），
+# 用法：替换 /etc/statime/inferno-ptpv1.toml 并改名为 inferno-ptpv1.toml（khaen-mode 只渲染该名），
 #       或在 overlay 里直接改权威文件；同时确认 Inferno 的 CLOCK_PATH 仍为 /tmp/ptp-usrvclock。
 
 loglevel = "info"
@@ -24,5 +24,5 @@ hardware-clock = "auto"
 protocol-version = "PTPv2"
 
 [observability]
-observation-path = "/run/tspi/statime-observe.sock"
+observation-path = "/run/khaen/statime-observe.sock"
 observation-permissions = 438

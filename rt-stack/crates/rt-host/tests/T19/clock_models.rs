@@ -8,7 +8,7 @@
 
 use super::*;
 use khaen_core::rt::RtStatus;
-use khaen_core::workers::TspiRtControlV1;
+use khaen_core::workers::KhaenRtControlV1;
 
 const FS: u32 = 48_000;
 const M0: u64 = 1_000_000_000;
@@ -232,7 +232,7 @@ fn t19_rt_tick_is_monotonic() {
 
 #[test]
 fn t19_tick_budget_enforces_three_reads() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut budget = TickBudget::from_control(&ctl);
     assert_eq!(budget.max_reads(), 3);
     assert_eq!(budget.reads(), 0);
@@ -253,7 +253,7 @@ fn t19_tick_budget_enforces_three_reads() {
 
 #[test]
 fn t19_rt_tick_budgeted_reads_ctl_budget() {
-    let mut ctl = TspiRtControlV1::new();
+    let mut ctl = KhaenRtControlV1::new();
     assert_eq!(tick_read_budget(&ctl), 3);
     ctl.tick_read_budget = 2;
     assert_eq!(tick_read_budget(&ctl), 2);
@@ -620,8 +620,8 @@ fn t19_epoch_info_flags_and_layout() {
     assert_eq!(info.flags & 1, 1);
     assert_eq!(info.start_mono_ns, M0);
     assert_eq!(info.reserved, [0; 3]);
-    assert_eq!(core::mem::size_of::<TspiEpochInfoV1>(), 64);
-    assert_eq!(core::mem::align_of::<TspiEpochInfoV1>(), 64);
+    assert_eq!(core::mem::size_of::<KhaenEpochInfoV1>(), 64);
+    assert_eq!(core::mem::align_of::<KhaenEpochInfoV1>(), 64);
     let plain = map.epoch_info(0, 64, 0, 0, 1, false);
     assert_eq!(plain.flags, 0);
 }

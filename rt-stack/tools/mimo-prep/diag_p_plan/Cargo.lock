@@ -72,60 +72,60 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
-name = "tspi-aoip-aes67"
+name = "khaen-aoip-aes67"
 version = "0.1.0"
 
 [[package]]
-name = "tspi-calibration"
+name = "khaen-calibration"
 version = "0.1.0"
 dependencies = [
- "tspi-dsp-compat",
- "tspi-dsp-core",
- "tspi-fir-designer",
- "tspi-modal-design",
- "tspi-rt-host",
+ "khaen-dsp-compat",
+ "khaen-dsp-core",
+ "khaen-fir-designer",
+ "khaen-modal-design",
+ "khaen-rt-host",
 ]
 
 [[package]]
-name = "tspi-dsp-compat"
+name = "khaen-dsp-compat"
 version = "0.1.0"
 dependencies = [
- "tspi-dsp-core",
+ "khaen-dsp-core",
 ]
 
 [[package]]
-name = "tspi-dsp-core"
+name = "khaen-dsp-core"
 version = "0.1.0"
 
 [[package]]
-name = "tspi-fir-designer"
+name = "khaen-fir-designer"
 version = "0.1.0"
 dependencies = [
- "tspi-dsp-core",
+ "khaen-dsp-core",
 ]
 
 [[package]]
-name = "tspi-mimo-diag-plan"
+name = "khaen-mimo-diag-plan"
 version = "0.1.0"
 dependencies = [
- "tspi-calibration",
- "tspi-dsp-core",
- "tspi-fir-designer",
+ "khaen-calibration",
+ "khaen-dsp-core",
+ "khaen-fir-designer",
 ]
 
 [[package]]
-name = "tspi-modal-design"
+name = "khaen-modal-design"
 version = "0.1.0"
 dependencies = [
- "tspi-dsp-core",
- "tspi-fir-designer",
+ "khaen-dsp-core",
+ "khaen-fir-designer",
 ]
 
 [[package]]
-name = "tspi-rt-host"
+name = "khaen-rt-host"
 version = "0.1.0"
 dependencies = [
  "alsa",
- "tspi-aoip-aes67",
- "tspi-dsp-core",
+ "khaen-aoip-aes67",
+ "khaen-dsp-core",
 ]

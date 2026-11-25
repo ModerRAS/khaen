@@ -1,6 +1,6 @@
 //! [NONRT] 自有严格 JSON 解析/规范化写作（零第三方依赖）。
 //!
-//! session manifest、`tspi-fir/v1` manifest、`tspi-cal-ir-draft/v1` 绑定与 runner 报告全部是 JSON；
+//! session manifest、`khaen-fir/v1` manifest、`khaen-cal-ir-draft/v1` 绑定与 runner 报告全部是 JSON；
 //! crate 不引入 serde。本模块是唯一 JSON 入口：
 //!
 //! - **解析**：RFC 8259 子集，严格拒绝注释/尾逗号/重复键/非有限数/尾随内容/超深嵌套；

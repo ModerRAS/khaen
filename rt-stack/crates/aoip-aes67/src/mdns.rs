@@ -753,7 +753,7 @@ pub struct MdnsService {
     pub service_type: DnsName,
     /// 子类型全名（如 _ravenna_session._sub._rtsp._tcp.local.）。
     pub subtypes: Vec<DnsName>,
-    /// 目标主机名（如 tspi-aes67-1.local.）。
+    /// 目标主机名（如 khaen-aes67-1.local.）。
     pub host: DnsName,
     /// 端口。
     pub port: u16,
@@ -1600,7 +1600,7 @@ mod tests {
     fn test_service() -> MdnsService {
         ravenna_session_service(
             "Line 1",
-            name("tspi-aes67-1.local."),
+            name("khaen-aes67-1.local."),
             8854,
             Ipv4Addr::new(192, 0, 2, 94),
         )
@@ -1701,7 +1701,7 @@ mod tests {
             panic!("srv rdata");
         };
         assert_eq!(*port, 8854);
-        assert_eq!(target.to_absolute(), "tspi-aes67-1.local.");
+        assert_eq!(target.to_absolute(), "khaen-aes67-1.local.");
         let txt = additionals
             .iter()
             .find(|r| r.rtype == TYPE_TXT)
@@ -1728,7 +1728,7 @@ mod tests {
         let node = ravenna_node_service(
             "My-Corp devicex 1234-5678",
             RavennaNodeService::Rtsp,
-            name("tspi-aes67-1.local."),
+            name("khaen-aes67-1.local."),
             8854,
             Ipv4Addr::new(192, 0, 2, 94),
         )
@@ -1740,7 +1740,7 @@ mod tests {
         let http = ravenna_node_service(
             "My-Corp devicex 1234-5678",
             RavennaNodeService::Http,
-            name("tspi-aes67-1.local."),
+            name("khaen-aes67-1.local."),
             8080,
             Ipv4Addr::new(192, 0, 2, 94),
         )
@@ -1796,7 +1796,7 @@ mod tests {
         let instance = &instances[0];
         assert_eq!(instance.instance, "Line 1");
         assert_eq!(instance.service_type, "_rtsp._tcp.local.");
-        assert_eq!(instance.host, "tspi-aes67-1.local.");
+        assert_eq!(instance.host, "khaen-aes67-1.local.");
         assert_eq!(instance.port, 8854);
         assert_eq!(instance.addresses, vec![Ipv4Addr::new(192, 0, 2, 94)]);
         assert!(instance.ttl_remaining_s > 0);
@@ -1909,10 +1909,7 @@ mod tests {
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].instance, "Line 1");
         assert_eq!(instances[0].port, 8854);
-        assert_eq!(
-            instances[0].addresses,
-            vec![Ipv4Addr::new(192, 0, 2, 94)]
-        );
+        assert_eq!(instances[0].addresses, vec![Ipv4Addr::new(192, 0, 2, 94)]);
         assert!(advertiser.announces_sent() >= 2);
         browser.stop();
         advertiser.stop();

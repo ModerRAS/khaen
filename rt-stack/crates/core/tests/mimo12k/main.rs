@@ -16,9 +16,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use khaen_core::mimo12k::{
-    Mimo12kLayout, Mimo12kRuntime, MIMO12K_GROUP, MIMO12K_LOWRATE_HZ,
-};
+use khaen_core::mimo12k::{Mimo12kLayout, Mimo12kRuntime, MIMO12K_GROUP, MIMO12K_LOWRATE_HZ};
 const M: usize = 5;
 const TAPS: usize = 4096;
 const D12: usize = 120;
@@ -81,8 +79,8 @@ fn artifact_dir() -> PathBuf {
 }
 
 fn read_f32(path: &Path, expected: usize) -> Vec<f32> {
-    let bytes = std::fs::read(path)
-        .unwrap_or_else(|err| panic!("读取产物失败 {}: {err}", path.display()));
+    let bytes =
+        std::fs::read(path).unwrap_or_else(|err| panic!("读取产物失败 {}: {err}", path.display()));
     assert_eq!(
         bytes.len(),
         expected * 4,
@@ -200,7 +198,10 @@ fn artifact_kernel_matches_python_reference() {
     assert_eq!(rt.delay48(), DSYS, "layout Δsys 与产物不一致");
     assert_eq!(rt.layout().predelay_low, D12 as u16);
     assert_eq!(rt.layout().taps, TAPS as u32);
-    assert_eq!(rt.layout().partitions, (TAPS / (BLOCK48 / MIMO12K_GROUP)) as u16);
+    assert_eq!(
+        rt.layout().partitions,
+        (TAPS / (BLOCK48 / MIMO12K_GROUP)) as u16
+    );
     let got = run_stream(&mut rt, &art.stimulus, STIM_SAMPLES);
     let rel = rel_l2(&got, &art.expected_corr);
     let peak = max_abs(&art.expected_corr);
@@ -237,7 +238,9 @@ fn resampler_passband_and_alias_image_gates() {
     let art = load_artifact();
     let rt = build_runtime(&art, BLOCK48);
     let mut gains = Vec::new();
-    for f in [20.0f64, 40.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 300.0] {
+    for f in [
+        20.0f64, 40.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 300.0,
+    ] {
         let g = rt.resampler_gain_db(f, true);
         gains.push((f, g));
         assert!(
@@ -248,10 +251,7 @@ fn resampler_passband_and_alias_image_gates() {
     // 12 kHz 抽取/插值后落入 20-300 Hz 的混叠/镜像来源：11.7-12 kHz / 23.5-24 kHz。
     for f in [11_700.0f64, 11_900.0, 12_100.0, 23_500.0, 23_900.0] {
         let d = rt.resampler_gain_db(f, false);
-        assert!(
-            d <= -60.0,
-            "抽取滤波器 {f} Hz 抑制 {d:.1} dB 不足 60 dB"
-        );
+        assert!(d <= -60.0, "抽取滤波器 {f} Hz 抑制 {d:.1} dB 不足 60 dB");
         let i = rt.resampler_gain_db(f, false) + 20.0 * (MIMO12K_GROUP as f64).log10();
         assert!(i <= -60.0, "插值镜像 {f} Hz 抑制 {i:.1} dB 不足 60 dB");
     }

@@ -9,7 +9,7 @@
 //!   报告必须写 magnitude_only 与 not-equivalent 声明；EquivalenceClaim 非 None 直接
 //!   E_FIR_EQUIV_CLAIM。模块内 min_phase_from_magnitude_table 只是**诊断/oracle**（用于测试
 //!   证明最小相位替代会违反相位门），不是设计家族输出，也不得被当成本家族结果。
-//! - 不生成 WAV / tspi-fir/v1 manifest / 20-20k Endpoint 报告文件（T55）；不导入目标文件（T11）；
+//! - 不生成 WAV / khaen-fir/v1 manifest / 20-20k Endpoint 报告文件（T55）；不导入目标文件（T11）；
 //!   不做 P/G 融合（T12）；不做运行期/板端/RT 路径；不判定 15/25/40 ms 整链预算（T56/T26）。
 //! - 不做 target_sha256 加权（spec §3.6 的 weights: target_sha256 语义在 v1.2-draft 未定义，
 //!   显式 E_FIR_FAMILY 拒收，不静默猜一个）。
@@ -58,7 +58,7 @@ pub const FAMILY_CORRECTED: &str = "corrected";
 /// 家族 id（§1.7/§2.2；lowdelay 是本模块的同一显式幅相设计族的低延迟模式）。
 pub const FAMILY_LOWDELAY: &str = "lowdelay";
 /// 系数产物 schema（§2.2；本模块只做设计/验证，WAV/manifest 由 T55 落盘）。
-pub const FIR_SCHEMA: &str = "tspi-fir/v1";
+pub const FIR_SCHEMA: &str = "khaen-fir/v1";
 /// 规范 §3.6/§2.2：最小 taps。
 pub const MIN_TAPS: usize = 8;
 /// 规范 §2.1/§7.2：设计 taps 上限。
@@ -1753,7 +1753,7 @@ pub struct EquivalenceReport {
     pub note: String,
 }
 
-/// corrected/lowdelay 设计产物（tspi-fir/v1 的系数/报告源；WAV/manifest 归 T55）。
+/// corrected/lowdelay 设计产物（khaen-fir/v1 的系数/报告源；WAV/manifest 归 T55）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct CorrectedDesign {
     /// 原参数。

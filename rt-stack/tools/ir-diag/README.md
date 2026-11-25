@@ -1,6 +1,6 @@
 # ir-diag - G0 RAW time-domain baseline (IR / EDC / T20 / waterfall)
 
-Pure offline analysis of a **single-point** TSPI measurement.  No playback, no device I/O,
+Pure offline analysis of a **single-point** KHAEN measurement.  No playback, no device I/O,
 no apply.  It answers one question only: *what does the RAW (P_post bypass) low-frequency
 decay look like* - and it is the frozen reference every later G1/G2/G3 measurement must be
 compared against with the **same code + same parameter hash**.

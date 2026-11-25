@@ -9,7 +9,7 @@
 - _需求: 1, 2_
 
 - [x] 2. 目标曲线
-- 新增 `target.rs`：`tspi-target-curve/v1` 的加载、校验、对数频率插值
+- 新增 `target.rs`：`khaen-target-curve/v1` 的加载、校验、对数频率插值
 - 内置 `flat`；`--target flat|id|@file`，缺省 `flat`
 - 曲线只进入报告，不进入校准 YAML 的应用字段
 - _需求: 4_

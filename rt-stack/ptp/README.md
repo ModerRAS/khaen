@@ -1,10 +1,10 @@
-# TSPI PTPv2 grandmaster (requirement 15) — board clock owner, offline-prepared
+# KHAEN PTPv2 grandmaster (requirement 15) — board clock owner, offline-prepared
 
 > Status: **offline implementation + lab validation done; board run NOT_RUN** (board 192.0.2.215 powered off,
 > never contacted). See `docs/BOARD-PTP-MASTER.md` for the full solution/deployment/risk document and
 > `rt-stack/evidence/board-ptp-20261122/` for evidence.
 
-The TSPI 3M (Rockchip RK3576, Debian 12 arm64) must act as the **network-audio PTP master** so that future
+The KHAEN 3M (Rockchip RK3576, Debian 12 arm64) must act as the **network-audio PTP master** so that future
 slave-only devices (e.g. NuPrime H16-AIP class endpoints) can lock. This directory is the single source of
 truth for that clock owner: units, ptp4l profile templates, env knobs, launcher wrappers and the offline
 validation harness. The aarch64 binaries are cross-built from pinned linuxptp source (not the distro package)
@@ -22,11 +22,11 @@ and shipped as a release add-on bundle next to `deploy/aarch64-20261122/`.
 | Ownership conflict | one daemon = one clock owner | statime already owns the Dante PTPv1 path |
 
 statime stays the Inferno/Dante (PTPv1) follower path. The GM units **Conflict** with the slave-only owners
-(`tspi-statime-inferno`, `tspi-aes67-daemon`, `tspi-ravenna-lkm`, legacy `tspi-ptp4l-master`/`tspi-phc2sys`),
+(`khaen-statime-inferno`, `khaen-aes67-daemon`, `khaen-ravenna-lkm`, legacy `khaen-ptp4l-master`/`khaen-phc2sys`),
 so the box never runs two PTP clocks at once.
 
 Pinned build: linuxptp **v4.2** (`17195fd9cd8f2aaebe76cbb914f161307f81cbf1`), cross-compiled in builder VM
-`tspi-audio-build` with the Debian 12 arm64 sysroot; GLIBC symbol floor 2.34 <= board 2.36.
+`khaen-audio-build` with the Debian 12 arm64 sysroot; GLIBC symbol floor 2.34 <= board 2.36.
 
 ## 2. Clock architecture
 
@@ -42,11 +42,11 @@ Pinned build: linuxptp **v4.2** (`17195fd9cd8f2aaebe76cbb914f161307f81cbf1`), cr
 
 * **Hardware timestamping first**: the wrapper detects PHC/HW-timestamp capability (`ethtool -T` ->
 `PTP Hardware Clock`, then `/sys/class/net/<if>/device/ptp/ptp*`) and runs `ptp4l -H`.
-* **Software fallback**: with `TSPI_PTP_HW_TS=auto` (default) and no PHC, the wrapper runs `ptp4l -S` and logs a
+* **Software fallback**: with `KHAEN_PTP_HW_TS=auto` (default) and no PHC, the wrapper runs `ptp4l -S` and logs a
   loud WARN. `on` refuses to start instead of silently degrading; `off` forces software mode for lab work.
 * **TAI, not UTC**: IEEE 1588 uses the TAI timescale. `phc2sys -O 37` keeps the PHC 37 s ahead of UTC
 (the board B2 run proved that a UTC PHC makes linuxptp slaves see a fake ~36.35 s offset and never lock).
-Update `TSPI_PTP_UTC_OFFSET` on a leap second.
+Update `KHAEN_PTP_UTC_OFFSET` on a leap second.
 * **Two profiles**: `ptp4l-master.conf` = UDP/IPv4 (default, lab-validated); `ptp4l-master-l2.conf` =
 IEEE 802.3 L2 (lab-validated). The transport must match the slaves' listener (AES67/RAVENNA deployments
 often use L2); it is a deployment-time choice, not a rebuild.
@@ -55,9 +55,9 @@ often use L2); it is a deployment-time choice, not a rebuild.
 
 | path | purpose |
 | --- | --- |
-| `units/tspi-ptp-master.service` | ptp4l GM (wrapper ExecStart, sandbox, capabilities, Conflicts) |
-| `units/tspi-ptp-phc2sys.service` | phc2sys system->PHC with `-O 37`; exits 0 when no PHC |
-| `units/tspi-ptp.target` | Wants both; `enable` this (not the units directly) |
+| `units/khaen-ptp-master.service` | ptp4l GM (wrapper ExecStart, sandbox, capabilities, Conflicts) |
+| `units/khaen-ptp-phc2sys.service` | phc2sys system->PHC with `-O 37`; exits 0 when no PHC |
+| `units/khaen-ptp.target` | Wants both; `enable` this (not the units directly) |
 | `etc/ptp4l-master-udp.conf.example` | ptp4l profile, UDP/IPv4, domain 0, GM dataset |
 | `etc/ptp4l-master-l2.conf.example` | same dataset, IEEE 802.3 transport |
 | `etc/ptp-master.env.example` | runtime knobs (iface, conf, hw-ts policy, TAI offset) |
@@ -81,7 +81,7 @@ make -j8 CROSS_COMPILE=aarch64-linux-gnu-      EXTRA_CFLAGS="--sysroot=$ROOTFS -
 sudo tests/lab-gm-slave.sh --ptp4l <native>/ptp4l --pmc <native>/pmc      --gm-conf etc/ptp4l-master-udp.conf.example --transport udp --duration 120 --out /tmp/udp
 
 # same with the shipped wrapper (proves the ExecStart path + software fallback)
-sudo tests/lab-gm-slave.sh --gm-wrapper /usr/local/lib/tspi/ptp-master-start      --ptp4l <native>/ptp4l --pmc <native>/pmc --gm-conf /etc/tspi-ptp/ptp4l-master.conf      --transport udp --duration 120 --out /tmp/wrapper
+sudo tests/lab-gm-slave.sh --gm-wrapper /usr/local/lib/khaen/ptp-master-start      --ptp4l <native>/ptp4l --pmc <native>/pmc --gm-conf /etc/khaen-ptp/ptp4l-master.conf      --transport udp --duration 120 --out /tmp/wrapper
 ```
 
 Measured results (2026-11-22, builder VM) are recorded in

@@ -14,7 +14,7 @@
   ```
 
 - 全部离线：admission 用 `AdmissionEnv/MemoryPlan` 值（不执行真实 mlockall/getrlimit）、
-  不打开 ALSA/设备、不起 RT/watchdog 线程；watchdog 用栈上 `TspiRtControlV1` + 手工样本序列，
+  不打开 ALSA/设备、不起 RT/watchdog 线程；watchdog 用栈上 `KhaenRtControlV1` + 手工样本序列，
   直方图/事件/quarantine/fallback 用固定数组与 POD 值。真实独立核 watchdog 线程、CPU 亲和与
   板端 RT 实测 **NOT_RUN**（见 `evidence/T21/MANIFEST.md` §8）。
 

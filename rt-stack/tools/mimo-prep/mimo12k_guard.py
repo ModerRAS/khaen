@@ -294,7 +294,7 @@ def _cmd_smoke(args):
     _save(os.path.join(results, "lite-gate-synthetic-refused.json"), lite_bad)
     rec("lite-gate-synthetic-refused", {"ok": lite_bad["ok"], "codes": [], "reasons": {}}, False,
         extra={"exit_code": sub.returncode})
-    summary = {"schema": "tspi-mimo-12k-guard-smoke/v1", "task": "task-255",
+    summary = {"schema": "khaen-mimo-12k-guard-smoke/v1", "task": "task-255",
                "passed": int(all_ok), "cases": len(records),
                "failed": [r["case"] for r in records if not r["passed"]],
                "records": records, "work_dir": work, "results_dir": results,

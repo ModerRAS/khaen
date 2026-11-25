@@ -32,7 +32,7 @@ crates/control/src/modes.rs 文件末的 #[cfg(test)] 子模块 include! 编译�
 | 模拟服务状态 A07/A11 | SimulatedServices 状态机（inactive/active/failed/not-present）、启动顺序 PTP->等锁->data->自检->新 epoch->claim servo、切换时 data->PTP 逆序停止、report steps/started_units 可见 |
 | A06 串行/独占 | 在途 409（exit 10 / RtStatus 120）、calibration 独占（exit 4 / RtStatus 117）、同模式幂等 vs force、dry-run/preview 零副作用 |
 | T42/T43/T19 接口 | ModeAck 字段域、RuntimeConfig::validate 全模式、EngineSnapshot 字段映射、AES67 静态 plan 过 T43 validate_aes67_capture+service、Dante InfernoEnv 过 T43 validate、PtpSource 与 AoipProtocol 期望值一致、EpochClock/ClockServo 唯一 owner 语义 |
-| 状态 JSON | 内部 schema tspi-mode-state/v1、T42 MODE_STATUS_SCHEMA 兼容体、A04 legacy tspi-audio/v1 顶层字段（含 outputs 7 角色、camilladsp null）、JsonValue 往返 |
+| 状态 JSON | 内部 schema khaen-mode-state/v1、T42 MODE_STATUS_SCHEMA 兼容体、A04 legacy khaen-audio/v1 顶层字段（含 outputs 7 角色、camilladsp null）、JsonValue 往返 |
 
 ## 与生产的边界（NOT_RUN）
 

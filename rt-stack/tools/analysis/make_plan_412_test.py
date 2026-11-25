@@ -19,7 +19,7 @@ Modes:
   gains    : FL=1.0 FR=1.0 SL=0.5 SR=0.5 TFL=2.0 TFR=2.0 LFE=1.0
              (per-role distinct gain -> proves AES67 7ch -> role/container -> DSP -> ALAC mapping)
   from-512 : same 7 output slots, wire inputs 0,1,4,5,6,7,3 (NSP 5.1.2 content order;
-             center wire index 2 is not a path). graph_id seed is tspi-plan-512-to-412-v1.
+             center wire index 2 is not a path). graph_id seed is khaen-plan-512-to-412-v1.
 
 Usage: python3 make_plan_412_test.py --mode identity --out plan-412-identity.bin [--json out.json]
 """
@@ -68,15 +68,15 @@ def build_plan(mode):
         # out slots stay ROLE_SLOTS; in is NSP 5.1.2 wire order (C=2 is absent).
         in_indices = [0, 1, 4, 5, 6, 7, 3]
         gains = [1.0] * 7
-        graph_seed = "tspi-plan-512-to-412-v1"
+        graph_seed = "khaen-plan-512-to-412-v1"
     elif mode == "identity":
         in_indices = list(ROLE_SLOTS)
         gains = [1.0] * 7
-        graph_seed = "tspi-plan-412-7ch-identity-v1"
+        graph_seed = "khaen-plan-412-7ch-identity-v1"
     else:
         in_indices = list(ROLE_SLOTS)
         gains = [GAIN_MAP[n] for n in ROLE_NAMES]
-        graph_seed = "tspi-plan-412-7ch-gains-v1"
+        graph_seed = "khaen-plan-412-7ch-gains-v1"
     # coefficient blobs in table order: paths first, then diags; each 64-byte aligned in region
     region = bytearray()
     offsets = []

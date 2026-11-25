@@ -5,7 +5,7 @@ use khaen_rt_check::host_file::{make_sample, run_session};
 
 #[test]
 fn t26_host_file_e2e_wav_to_wav() {
-    let base = std::env::temp_dir().join(format!("tspi-t26-host-file-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("khaen-t26-host-file-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     make_sample(&base, 256).expect("sample session must build");
     let outcome = run_session(&base, "session.json", &base.join("output.wav"))
@@ -18,7 +18,9 @@ fn t26_host_file_e2e_wav_to_wav() {
     assert_eq!(outcome.blocks, 2);
     assert_eq!(outcome.status, "ok");
     assert!(outcome.output_bytes > 0);
-    assert!(outcome.runner_report.contains("khaen-file-runner-report/v1"));
+    assert!(outcome
+        .runner_report
+        .contains("khaen-file-runner-report/v1"));
     assert!(base.join("output.wav").is_file());
     let _ = std::fs::remove_dir_all(&base);
 }

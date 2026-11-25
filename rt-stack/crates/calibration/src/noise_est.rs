@@ -21,7 +21,7 @@
 //! 不是真实板端证据）。
 
 /// 估计器 schema（写进测量 summary 证据，冻结口径）。
-pub const ROBUST_SNR_SCHEMA: &str = "tspi-robust-snr/v1";
+pub const ROBUST_SNR_SCHEMA: &str = "khaen-robust-snr/v1";
 
 /// dBFS 下限（0 幅度）。
 pub const SILENCE_DBFS: f64 = -200.0;

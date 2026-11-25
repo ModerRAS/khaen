@@ -1,8 +1,8 @@
-# tspi-upmix 生成：upmix-4.1.2-wide
+# khaen-upmix 生成：upmix-4.1.2-wide
 # 输入 2.0（2ch）-> 输出 4.1.2（8ch）；采样率 48000 Hz
 # 环绕/高度左右延迟差 3ms，制造扩散感（音乐/现场）
 # 用途：独立 CamillaDSP（ALSA）
-title: tspi-upmix upmix-4.1.2-wide（2.0 -> 4.1.2）
+title: khaen-upmix upmix-4.1.2-wide（2.0 -> 4.1.2）
 description: 环绕/高度左右延迟差 3ms，制造扩散感（音乐/现场）
 devices:
   samplerate: 48000

@@ -1,6 +1,6 @@
 # MOTU / CueMix 交付说明
 
-日期：2026-11-16。范围：`projects/tspi-audio-dsp/web`。没有连真机，没有改 CamillaDSP / PTP / AES67，没有重启这些服务。
+日期：2026-11-16。范围：`projects/khaen-audio-dsp/web`。没有连真机，没有改 CamillaDSP / PTP / AES67，没有重启这些服务。
 
 ## 改了什么
 
@@ -43,7 +43,7 @@
 
 ## 命令和结果
 
-在 `projects/tspi-audio-dsp/web`：
+在 `projects/khaen-audio-dsp/web`：
 
 ```text
 cargo fmt --check          # 无差异
@@ -53,7 +53,7 @@ cargo build --release --offline
 # Finished release profile [optimized] in 1m 09s
 ```
 
-`TSPI_MOCK=1 cargo run --offline -- --mock` 现正在 `http://127.0.0.1/`（默认 80；非 root 或 80 被占用时加 `--listen 127.0.0.1:8088` 回退）。这是重启后的干净进程：首次打开会要求设置管理密码，mock 不写 `auth.json`。下面的 curl 读回是同一次演练里、重启前那次进程的记录。token 是 `mock-token`。
+`KHAEN_MOCK=1 cargo run --offline -- --mock` 现正在 `http://127.0.0.1/`（默认 80；非 root 或 80 被占用时加 `--listen 127.0.0.1:8088` 回退）。这是重启后的干净进程：首次打开会要求设置管理密码，mock 不写 `auth.json`。下面的 curl 读回是同一次演练里、重启前那次进程的记录。token 是 `mock-token`。
 
 未认证：
 
@@ -92,7 +92,7 @@ final insert（HTTP 200）：
 
 Main 音量（HTTP 200）：`{"trim_db":10,"confirm":true}` → `written 1`。读回 `main_trim 10`，`main_db -10.0`，直通仍是 7。
 
-失败注入不在这个进程里做（会把正在看的页面写坏）。`tests/api.rs` 的 `motu_apply_fail_returns_rollback` 用 `TSPI_MOCK_MOTU_APPLY_FAILS=1`：HTTP 500，`ok false`，`written 0`，`rollback true`，`rollback_verified true`，`error.code` 为 `internal_error`，直通条数不变。
+失败注入不在这个进程里做（会把正在看的页面写坏）。`tests/api.rs` 的 `motu_apply_fail_returns_rollback` 用 `KHAEN_MOCK_MOTU_APPLY_FAILS=1`：HTTP 500，`ok false`，`written 0`，`rollback true`，`rollback_verified true`，`error.code` 为 `internal_error`，直通条数不变。
 
 页面（浏览器，mock）：首次设置密码后进入「MOTU / CueMix」。设备卡是 UL5L / −28.0 dB / 直通 7 条，表里有 in7→out7 和 in8→out8。点「全部静音（会关闭 CueMix 输入直通）」并确认后，直通变成「暂无数据」，提示「已关闭 CueMix 输入直通（读回校验通过，written=7）」。点「恢复快照」后 7 条回来。把 Main 滑到 10 并确认后，设备卡是 `10（-10.0 dB）`。展开矩阵仍能看到 12 条 USB（USB Main L/R、Line 3–10、Phones）推子 1.000。
 

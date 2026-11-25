@@ -38,7 +38,7 @@ use khaen_designer::crossover::{
 use crate::job::sha256_hex;
 
 /// crossover 接线证据 schema（measured summary / compile report / wiring summary 引用）。
-pub const CROSSOVER_WIRING_SCHEMA: &str = "tspi-cal-crossover-wiring/v1";
+pub const CROSSOVER_WIRING_SCHEMA: &str = "khaen-cal-crossover-wiring/v1";
 /// crossover config 进入 plan 的稳定错误码（包装 T39 <code>E_FIR_XOVER_*</code>/<code>E_FIR_TAPS</code>）。
 pub const E_MEASURED_CROSSOVER: &str = "E_WIRING_MEASURED_CROSSOVER";
 /// 本接线（P_post 分频）只允许的实验布局（4.1.2 五执行器，含 SUB1）。
@@ -214,8 +214,7 @@ impl CrossoverSpecConfig {
         let method = self.t39_method()?;
         let _ = kind;
         let _ = method;
-        if self.taps < khaen_designer::crossover::MIN_TAPS || self.taps > CROSSOVER_TAPS_PLAN_MAX
-        {
+        if self.taps < khaen_designer::crossover::MIN_TAPS || self.taps > CROSSOVER_TAPS_PLAN_MAX {
             return Err(cross_err(format!(
                 "crossover.taps={} 越界（{}..={CROSSOVER_TAPS_PLAN_MAX}；extended taps 不在本次 plan 接线内）",
                 self.taps,
@@ -630,7 +629,7 @@ pub fn compose_segments(segments: &[FirSegment]) -> Result<Vec<f64>, String> {
 /// 组合核 canonical sha256（D7 证据/回归用；f64 17 位有效数字，确定性）。
 pub fn kernel_sha256(kernel: &[f64]) -> String {
     let mut canonical = String::with_capacity(kernel.len() * 26 + 64);
-    canonical.push_str("tspi-cal-p-post-kernel/v1\n");
+    canonical.push_str("khaen-cal-p-post-kernel/v1\n");
     let _ = writeln!(canonical, "taps={}", kernel.len());
     for value in kernel {
         let _ = writeln!(canonical, "{value:.17e}");
@@ -641,7 +640,7 @@ pub fn kernel_sha256(kernel: &[f64]) -> String {
 /// T39 设计报告 canonical sha256（判据/合并/延迟/系数摘要绑定）。
 pub fn design_report_sha256(design: &CrossoverDesign) -> String {
     let mut text = String::with_capacity(4096);
-    text.push_str("tspi-cal-crossover-report/v1\n");
+    text.push_str("khaen-cal-crossover-report/v1\n");
     let _ = writeln!(
         text,
         "kind={} method={} fs={} fc={:.17e} taps={} fc_tier={} experimental={} attenuation={:.17e}",

@@ -2,7 +2,7 @@
 //!
 //! 一期：认证、总览、CamillaDSP、PTP、AES67/Inferno、ALSA/MOTU、
 //! 运行模式切换（dante / aes67 / off）、音频格式有限编辑、电源操作。
-//! TSPI_MOCK=1 时全部后端走内存 mock，不执行任何系统命令。
+//! KHAEN_MOCK=1 时全部后端走内存 mock，不执行任何系统命令。
 
 pub mod alsa;
 pub mod aoip;

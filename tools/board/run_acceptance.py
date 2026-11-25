@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline-first orchestrator for tspi-audio-dsp board acceptance (T1/T2/T4/T5).
+"""Offline-first orchestrator for khaen-audio-dsp board acceptance (T1/T2/T4/T5).
 
 Live mode SSHes with paramiko. The import happens only inside ``build_transport``
 when a live run constructs a connection. ``--dry-run`` never calls that factory,
@@ -26,21 +26,21 @@ from typing import Callable, Mapping, Protocol, Sequence
 
 TOOL_NAME = "run_acceptance.py"
 TOOL_VERSION = "1.0.0"
-SCHEMA = "tspi-board-acceptance-run/v1"
+SCHEMA = "khaen-board-acceptance-run/v1"
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_KEY = ROOT / "deploy" / "ssh" / "tspi_audio_ed25519"
+DEFAULT_KEY = ROOT / "deploy" / "ssh" / "khaen_audio_ed25519"
 DEFAULT_HOST = "192.0.2.215"
 DEFAULT_USER = "root"
 DEFAULT_CALIBRATE_BIN = "/tmp/khaen-calibrate"
 
-SOAK_UNIT = "tspi-soak12.service"
+SOAK_UNIT = "khaen-soak12.service"
 SOAK_SERVICE_ARGV = ("systemctl", "is-active", SOAK_UNIT)
 SAFE_SOAK_STATES = frozenset({"inactive", "failed", "unknown"})
 RUNNING_SOAK_STATES = frozenset({"active", "activating", "deactivating", "reloading"})
 
-REMOTE_ROOT = "/var/lib/tspi-calib"
-SOAK_DIR = "/var/lib/tspi-soak"
+REMOTE_ROOT = "/var/lib/khaen-calib"
+SOAK_DIR = "/var/lib/khaen-soak"
 CAMILLA_YML = f"{SOAK_DIR}/camilla.yml"
 SOAK_SCRIPT = f"{SOAK_DIR}/soak12.sh"
 STATUS_CSV = f"{SOAK_DIR}/status.csv"
@@ -86,7 +86,7 @@ T4_CHANNELS: tuple[tuple[str, int], ...] = (
 
 DRY_RUN_GATE_NOTE = (
     "dry-run does not open SSH, sockets, or paramiko; "
-    "the live soak state of tspi-soak12.service cannot be read; "
+    "the live soak state of khaen-soak12.service cannot be read; "
     "the gate is printed but not evaluated; "
     "a live run refuses before any measurement unless the state is inactive, failed, or unknown"
 )
@@ -99,10 +99,10 @@ ASSUMPTIONS: tuple[str, ...] = (
     "t1.cuemix_routing and t1.final_insert_direct_routes come only from --cuemix-state JSON; "
     "otherwise they are null.",
     "SSH user is root, so runbook sudo is omitted (no tty password prompt).",
-    "T5 uses the runbook argv soak12.sh 1 and unit tspi-t5-64. "
+    "T5 uses the runbook argv soak12.sh 1 and unit khaen-t5-64. "
     "tools/board/restart_soak5m.sh shows $1 is hours (~3600s). "
     "The runbook comment and ACCEPTANCE §7 say 600s/10min. A human must confirm before a live T5.",
-    "The 128-frame run is a separate unit tspi-t5-128 with sed s/chunksize: 64/chunksize: 128/. "
+    "The 128-frame run is a separate unit khaen-t5-128 with sed s/chunksize: 64/chunksize: 128/. "
     "The runbook only prints the 64 command.",
     "Per-channel fit is skipped; the runbook says merge refits internally.",
     "--negative-controls is omitted (runbook: report records not_run).",
@@ -590,7 +590,7 @@ def t5_sed_argv(chunksize: int) -> list[str]:
 
 
 def t5_systemd_argv(chunksize: int) -> list[str]:
-    unit = f"tspi-t5-{chunksize}"
+    unit = f"khaen-t5-{chunksize}"
     return [
         "systemd-run",
         f"--unit={unit}",
@@ -770,7 +770,7 @@ def _phase_t4_merge(opts: Options) -> Phase:
 def _phase_t5(chunksize: int) -> Phase:
     subrun = f"chunksize-{chunksize}"
     remote_dir = f"{REMOTE_ROOT}/t5/{subrun}"
-    unit = f"tspi-t5-{chunksize}"
+    unit = f"khaen-t5-{chunksize}"
     service = f"{unit}.service"
     steps = (
         _gate("t5", subrun),
@@ -1685,7 +1685,7 @@ def parse_and_validate(argv: Sequence[str]) -> Options:
         description=(
             "Board acceptance orchestrator for T1 (partial out9->in7), T2 (UMIK x3), "
             "T4 (5.3.2 merge), and T5 (chunksize 64 and 128). "
-            "Live mode checks systemctl is-active tspi-soak12.service first and refuses "
+            "Live mode checks systemctl is-active khaen-soak12.service first and refuses "
             "unless the state is inactive, failed, or unknown. --dry-run does not connect."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -51,4 +51,4 @@
 - 默认 playback format = `S24_3LE`（MOTU 唯一可用格式）。
 - 4.1.2 默认输出映射（0-based）：FL=0、FR=1、SL=2、SR=3、HFL=4、HFR=5、SUB1=7（即 1-based 1-2/3-4/5-6/8），通道 6 与 8-21 静音填充。
 - 回归：v2 测试 **37/37 PASS**（新增 MOTU 默认通道/4.1.2 映射用例）；渲染产物 `camilladsp --check` valid。
-- 覆盖文件：`tspi-channelmap` sha256 `ea245721b180ae4de44ae5771f9ed1dbfa0249ec800949a65f697ec1fee1df19`；`layout-presets.yml` sha256 `4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da`。
+- 覆盖文件：`khaen-channelmap` sha256 `ea245721b180ae4de44ae5771f9ed1dbfa0249ec800949a65f697ec1fee1df19`；`layout-presets.yml` sha256 `4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da`。

@@ -4,7 +4,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.modules["numpy"] = None  # 阻断 numpy，验证 plan/run --dry-run 纯标准库
-import tspi_cal_batch as cli
+import khaen_cal_batch as cli
 
 tmp = tempfile.mkdtemp(prefix="calib-batch-lazy-")
 rc1 = cli.main(["plan", "--config", "configs/batch-config.production-4.1.2.json",

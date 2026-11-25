@@ -1,4 +1,4 @@
-# TSPI RT-first DSP stack（rt-stack）
+# KHAEN RT-first DSP stack（rt-stack）
 
 > 状态：**T06 scaffold 已落地 + leaf 逐步合入中**（2026-11-17，T90 批次更新）。唯一 Cargo workspace、10 个 crate、
 > `rt-check` CLI 与离线 CI 入口由 T06 建立；leaf（T07/T08/T09/T10/T12/T13/T16…）由各自任务实现并在
@@ -14,7 +14,7 @@
 | `spec/fir-toolbox.md` | T04 | FIR 七家族 + 10 段模态 PEQ + target 导入（设计器 leaf 输入） |
 | `spec/compat-matrix.md` | T05 | REST/WS/YAML/AoIP/保护/拒收矩阵（compat/control leaf 输入） |
 | `reference/SPEC.md` | T03 | f64 参考语义、手算向量、fixture 格式（core 对拍基准） |
-| `scratch/lead/planner/TSPI-RT-STACK-WBS.md` | T06 | 写域/依赖/DoD 唯一计划来源 |
+| `scratch/lead/planner/KHAEN-RT-STACK-WBS.md` | T06 | 写域/依赖/DoD 唯一计划来源 |
 
 T06 证据：`evidence/T06/manifest.md`（输入 hash、命令/exit code、executed test 数、未测项、契约偏差登记）。
 
@@ -31,7 +31,7 @@ rt-stack/
 └── spec/                          # T02/T04/T05 产物（只读）
 ```
 
-约束（WBS §1）：**只有** `projects/tspi-audio-dsp/rt-stack/Cargo.toml` 这一个 Cargo 根；禁止在 rt-stack 内
+约束（WBS §1）：**只有** `projects/khaen-audio-dsp/rt-stack/Cargo.toml` 这一个 Cargo 根；禁止在 rt-stack 内
 另建 crate/workspace/Cargo.toml（新建 crate 必须经 integrator 在 T06/T26/T32 串行合入）。
 
 ## 2. crate 表
@@ -146,7 +146,7 @@ RT-MODULE 标记：DSP 纯 RT 模块文件头写 `//! RT-MODULE: ...`（同时�
 | --- | --- | --- | --- |
 | O-1 | core-v1 §3.2 `TBLOCK_64_48K_NS=1333333` 是 floor，而 `TBLOCK_128_48K_NS=2666667` 是 ceil；两行取整口径不一致 | 保留字面值；`gate_ns` 用 floor（更严）；`t_block_ns_ceil(48k,64)=1333334` 由公式给出并在测试中单独断言 | 仅常量注释；不放宽任何门 |
 | O-2 | core-v1 §12.3 `core::rt::master_block` 签名需要 `&RtControl`，§13.2 又把 `RtControl` 位置写在 `rt-host::swap`（core→rt-host 会成环） | `RtControl` 规范定义在 `core::rt`，`rt-host::swap` 重导出；两条路径均存在 | 类型语义/needs_drop 不变；建议 T02 升 1.0.x 文字澄清 |
-| O-3 | §13.2 表把 `BlockIo<'a>`/`WorkerRtCtx<'a>` 标 Copy，但其字段含 `&mut [f32]`/`&mut TspiWorkerStatsV1`，Rust 不可 Copy | 按 §12.3 冻结签名实现，不 derive Copy；`needs_drop == false` 由测试保证 | 无 RT ABI 影响；Copy 列澄清 |
+| O-3 | §13.2 表把 `BlockIo<'a>`/`WorkerRtCtx<'a>` 标 Copy，但其字段含 `&mut [f32]`/`&mut KhaenWorkerStatsV1`，Rust 不可 Copy | 按 §12.3 冻结签名实现，不 derive Copy；`needs_drop == false` 由测试保证 | 无 RT ABI 影响；Copy 列澄清 |
 | O-4 | §12.3 把 `kernel_direct/kernel_partitioned` 列在 core::rt，WBS 又让 T07/T08 实现 `direct.rs/partitioned.rs` | T06 在 `core::rt` 放签名 stub；leaf 在自己的模块实现后由 integrator 在 T26 调整 re-export/委托 | 公共注册只 integrator 改 |
 | O-5 | `plan-hash`/`state-machine` 的完整实现依赖 T12/T13/T21/T26 | T06 只提供可运行入口，明确 exit 3 与 owner；不冒充已实现 | CI 不调用这两个命令 |
 | O-6 | core-v1 v1.1 §8.2 追加 event kind 36–40（EV_STARTING/PLAN_ABORTED/EPOCH_ABORTED/ACK_SLOT_EXHAUSTED/CROSSFADE_BUDGET_REJECT），T06 `events.rs` 原仅 35 | T90 按 spec v1.1.1 全量补齐 36–40 常量 + `event_name` 导出 + 编译期断言（任务卡写 36–38，按 spec 同步到 40，不静默漏项） | 仅新增常量/映射，不改 1–35 编号；leaf 实现可直接引用 |
@@ -170,7 +170,7 @@ RT-MODULE 标记：DSP 纯 RT 模块文件头写 `//! RT-MODULE: ...`（同时�
   - khaen-rt-host admission-check：T18 plan_memory 容量/预算 + T22 format 契约自校验。
 - rt-check host-file --work DIR --frames N（或 --session FILE --output FILE）：file 端到端 WAV → T14 session/plan（BlockSource 同源切分）→ T09 4-worker DAG → 真实 WAV。rt-host 不能反向依赖 file-runner（会成环），故 file 命令入口在 rt-check。
 - 本 T26 批次未接：T20 swap/crossfade、T21 fault 事件导出、T42/T44 REST/WS+mode、T45 内核亲和/IRQ 实写、T25/T23/T56 的整链入口；真实 ALSA/MOTU 打开与板端 RT/soak 亦未做（NOT_RUN）。
-- **T155 最终接线（部署前冻结）**：`khaen-rt-host run --config rt-host.toml`（schema khaen-rt-host/v1）：建图 / ALSA owner 契约(fake) / 4 worker DAG + T45 调度计划逐块 gate / T20 swap all-ack / T21 fault 事件+watchdog / Web 端口（external 或 spawn 探测 /healthz 200）/ 优雅退出（SIGINT/SIGTERM、--blocks、--duration-ms、TSPI_HOST_SAFE_MODE=mute 保护输出）；`tspi-rt-daemon serve --config rt-daemon.toml`（schema tspi-rt-daemon/v1）：T42 REST + T44 modes + T70 Web/WS 同端口，`/healthz` 200、`/` 8656 B 页面。配置模板 deploy/config/rt-host.toml.example、rt-daemon.toml.example；aarch64 gnu 双 bin release `t155-final-20261117`（khaen-rt-host 768,384 B sha256 e011745c…；tspi-rt-daemon 1,210,296 B sha256 009a110e…；manifest 11 files 校验 ok）。
+- **T155 最终接线（部署前冻结）**：`khaen-rt-host run --config rt-host.toml`（schema khaen-rt-host/v1）：建图 / ALSA owner 契约(fake) / 4 worker DAG + T45 调度计划逐块 gate / T20 swap all-ack / T21 fault 事件+watchdog / Web 端口（external 或 spawn 探测 /healthz 200）/ 优雅退出（SIGINT/SIGTERM、--blocks、--duration-ms、KHAEN_HOST_SAFE_MODE=mute 保护输出）；`khaen-rt-daemon serve --config rt-daemon.toml`（schema khaen-rt-daemon/v1）：T42 REST + T44 modes + T70 Web/WS 同端口，`/healthz` 200、`/` 8656 B 页面。配置模板 deploy/config/rt-host.toml.example、rt-daemon.toml.example；aarch64 gnu 双 bin release `t155-final-20261117`（khaen-rt-host 768,384 B sha256 e011745c…；khaen-rt-daemon 1,210,296 B sha256 009a110e…；manifest 11 files 校验 ok）。
 - **T155 仍未接/未测**：真实 ALSA PCM open/duplex（backend=fake only）、内核亲和/FIFO/IRQ 实写（T45 只计划不写内核）、T25/T23/T56 整链入口、板端安装/启动/真实设备/浏览器/真实 systemd（NOT_RUN）；T20 crossfade 双图仅 swap ack 层、T21 事件未接 UI 消费、daemon 用 MemoryEngine 替身（真实 host engine 注入属 follow-up）。
 
 ## 9. 变更记录
@@ -179,6 +179,6 @@ RT-MODULE 标记：DSP 纯 RT 模块文件头写 `//! RT-MODULE: ...`（同时�
 | --- | --- |
 | 2026-11-17 | T06：建立唯一 workspace + 10 crate scaffold + rt-check（abi-layout/forbid/drop-audit）+ ci/ + 本 README；cargo test --workspace / cargo fmt --all --check 真实执行（见 evidence/T06/manifest.md）。 |
 | 2026-11-17 | T26（task-132）：crates/rt-host/src/main.rs host 入口（bin khaen-rt-host：selftest/fake-io/admission-check，4 worker B2 四线程并行、T16 SPSC/T19 tick/T22 format/T18 admission 串行接线）+ rt-check host-file（T14 file WAV→4-worker DAG→WAV 端到端）+ 集成测试；验证见 evidence/T26/manifest.md。T20/T21/T42/T44/T45/T25/T23/T56 入口接线与真实 ALSA/板端仍 NOT_RUN。 |
-| 2026-11-17 | **T155（task-155）最终接线**：khaen-rt-host run --config（建图/ALSA owner 契约/T45 调度计划/T20 swap all-ack/T21 fault 事件/T70 Web 接线/优雅退出/safe-mode mute）+ tspi-rt-daemon serve --config（T42 REST+T44 modes+T70 Web/WS）；deploy 新增 rt-host.toml/rt-daemon.toml 模板并冻结 env 契约；aarch64 gnu 双 bin 重建（khaen-rt-host 768,384 B sha256 e011745c…、tspi-rt-daemon 1,210,296 B sha256 009a110e…，release t155-final-20261117，manifest 11 files ok）；全 workspace 57 target/1990 passed/0 failed，fmt/rt-check 全绿。见 evidence/final-wiring/ |
+| 2026-11-17 | **T155（task-155）最终接线**：khaen-rt-host run --config（建图/ALSA owner 契约/T45 调度计划/T20 swap all-ack/T21 fault 事件/T70 Web 接线/优雅退出/safe-mode mute）+ khaen-rt-daemon serve --config（T42 REST+T44 modes+T70 Web/WS）；deploy 新增 rt-host.toml/rt-daemon.toml 模板并冻结 env 契约；aarch64 gnu 双 bin 重建（khaen-rt-host 768,384 B sha256 e011745c…、khaen-rt-daemon 1,210,296 B sha256 009a110e…，release t155-final-20261117，manifest 11 files ok）；全 workspace 57 target/1990 passed/0 failed，fmt/rt-check 全绿。见 evidence/final-wiring/ |
 | 2026-11-17 | T90 批次：rt-host 增加 Linux target-specific `alsa=0.12` 依赖（cfg 门控 + Windows 不编译）+ core events v1.1 kind 36–40 + T10/T60 私有集成测试注册 + README/ci 更新；验证见 evidence/T90/manifest.md。 
-| 2026-11-17 | **INTEGRATOR-BATCH2（task-105）**：core::rt `TICK_READS_PER_BLOCK_MAX` 2→3（I04，加断言测试）；`TspiWorkerAffinityV1`（32B/align8）+ `TspiPlanHeaderV1` v1.1 affinity/ctl 字段提升到 `core::abi`（repr(C) 合法对齐版 **errata E1** 待 T02 确认，abi-layout scanned 109→120）；`AdmissionEnv/Report` 合并 sched 字段（cpu_set_mask/allowed_cpu/actual_cpu/expected_workers/sched_priority/irq_dependency_mask/ack_mask），validate 加 expected_workers 一致性闸门；T45 include! 自注册确认（不入 public_registration）。验证见 `evidence/INTEGRATOR-BATCH2/manifest.md`：全量 43 target/964 passed/0 failed（T55 收口后终态）、fmt exit 0、rt-check 3 PASS ||
+| 2026-11-17 | **INTEGRATOR-BATCH2（task-105）**：core::rt `TICK_READS_PER_BLOCK_MAX` 2→3（I04，加断言测试）；`KhaenWorkerAffinityV1`（32B/align8）+ `KhaenPlanHeaderV1` v1.1 affinity/ctl 字段提升到 `core::abi`（repr(C) 合法对齐版 **errata E1** 待 T02 确认，abi-layout scanned 109→120）；`AdmissionEnv/Report` 合并 sched 字段（cpu_set_mask/allowed_cpu/actual_cpu/expected_workers/sched_priority/irq_dependency_mask/ack_mask），validate 加 expected_workers 一致性闸门；T45 include! 自注册确认（不入 public_registration）。验证见 `evidence/INTEGRATOR-BATCH2/manifest.md`：全量 43 target/964 passed/0 failed（T55 收口后终态）、fmt exit 0、rt-check 3 PASS ||

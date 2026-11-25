@@ -36,7 +36,10 @@ mod imp {
     pub fn mlock_all() -> Result<(), String> {
         let rc = unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) };
         if rc != 0 {
-            return Err(format!("mlockall failed errno={}", std::io::Error::last_os_error()));
+            return Err(format!(
+                "mlockall failed errno={}",
+                std::io::Error::last_os_error()
+            ));
         }
         Ok(())
     }
@@ -64,11 +67,7 @@ mod imp {
         let bytes = &mut set as *mut libc::cpu_set_t as *mut u8;
         unsafe {
             *bytes.add(cpu / 8) |= 1u8 << (cpu % 8);
-            let rc = libc::sched_setaffinity(
-                0,
-                std::mem::size_of::<libc::cpu_set_t>(),
-                &set,
-            );
+            let rc = libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set);
             if rc != 0 {
                 return Err(format!(
                     "sched_setaffinity(cpu={cpu}) failed errno={}",

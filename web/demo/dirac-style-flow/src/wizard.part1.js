@@ -1,5 +1,5 @@
 /* =========================================================
- * TSPI Audio · Dirac 式完整校准流程向导（演示）
+ * KHAEN Audio · Dirac 式完整校准流程向导（演示）
  * 11 步：设备检查 → 布局分配 → 麦克风/校准设置 → Level 对齐 →
  *        Delay 对齐 → Bass management → 测点 → 测量 → 分析 →
  *        设计（目标/低切/ART/MIMO） → 回顾/应用/回滚
@@ -126,7 +126,7 @@ const DEFAULT_STATE = () => ({
   },
 });
 // 正式页面：所有设置/测量/求解/复测都走 daemon 的 /api/calibration/*（不再有 ?live=1 演示分支）。
-const TSPI_LIVE = true;
+const KHAEN_LIVE = true;
 const CAL_LANES = ['FL', 'FR', 'SL', 'SR', 'HFL', 'HFR', 'SUB1'];
 const CAL_API = {
   settings: '/api/calibration/settings',
@@ -136,17 +136,17 @@ const CAL_API = {
   clear: '/api/calibration/clear',
   run: '/api/calibration/run',
 };
-let TSPI_CSRF = null;
-function tspiErrorText(error) {
+let KHAEN_CSRF = null;
+function khaenErrorText(error) {
   if (!error) return 'unknown error';
   if (error.code) return error.code + ': ' + error.message;
   if (error.message) return error.message;
   return String(error);
 }
-async function tspiApi(method, path, body) {
+async function khaenApi(method, path, body) {
   const headers = { Accept: 'application/json' };
   if (body !== undefined && body !== null) headers['Content-Type'] = 'application/json';
-  if (method !== 'GET' && TSPI_CSRF) headers['X-TSPI-CSRF'] = TSPI_CSRF;
+  if (method !== 'GET' && KHAEN_CSRF) headers['X-KHAEN-CSRF'] = KHAEN_CSRF;
   const response = await fetch(path, {
     method,
     headers,
@@ -166,16 +166,16 @@ async function tspiApi(method, path, body) {
   }
   return json;
 }
-async function tspiLoadSession() {
+async function khaenLoadSession() {
   try {
-    const session = await tspiApi('GET', '/api/auth/session');
-    TSPI_CSRF = session && session.csrf_token ? session.csrf_token : null;
+    const session = await khaenApi('GET', '/api/auth/session');
+    KHAEN_CSRF = session && session.csrf_token ? session.csrf_token : null;
     return true;
   } catch (error) {
     return false;
   }
 }
-function tspiJobBody(stage) {
+function khaenJobBody(stage) {
   const body = {
     kind: 'emperor',
     stage: stage,
@@ -191,18 +191,18 @@ function tspiJobBody(stage) {
   if (state.jobId) body.job_id = state.jobId;
   return body;
 }
-async function tspiPostJob(stage) {
-  const payload = await tspiApi('POST', CAL_API.jobs, tspiJobBody(stage));
+async function khaenPostJob(stage) {
+  const payload = await khaenApi('POST', CAL_API.jobs, khaenJobBody(stage));
   state.jobId = payload.job_id;
   state.lastJob = payload;
   return payload;
 }
 // 复用现有 job 状态机：轮询 GET /api/calibration/jobs/{id}（不另起一套 job/轮询机制）。
-function tspiPollJob(jobId, onUpdate) {
+function khaenPollJob(jobId, onUpdate) {
   let tries = 0;
   return new Promise(function (resolve, reject) {
     function tick() {
-      tspiApi('GET', CAL_API.jobs + '/' + encodeURIComponent(jobId)).then(function (job) {
+      khaenApi('GET', CAL_API.jobs + '/' + encodeURIComponent(jobId)).then(function (job) {
         if (onUpdate) onUpdate(job);
         const terminal = ['complete', 'failed', 'cancelled', 'rolled_back'].indexOf(job.state) >= 0;
         tries += 1;
@@ -424,7 +424,7 @@ function nextStep() {
     return false;
   }
   if (!state.completed.includes(state.step)) state.completed.push(state.step);
-  if (state.step === STEP.design) { tspiPostJob('solve').catch(() => {}); }
+  if (state.step === STEP.design) { khaenPostJob('solve').catch(() => {}); }
   if (state.step === STEP.review) { finishFlow(); renderRail(); return true; }
   goStep(state.step + 1);
   return true;

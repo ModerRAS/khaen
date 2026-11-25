@@ -3,9 +3,9 @@
 镜像：OEM v14 候选前 v13（1,414,687,363 B，sha256 `11dcfa17…def7`）；板端已烧 v13，LKM 修复版加载成功。
 
 ## 1. v13 载荷核验（板端实测）
-- tspi-mode `c4ec1b88…c329`；tspi-upmix `3625bd60…a0e5`；upmix presets `5004dac3…45b9`；autodetect unit `53d79568…a0`；camilladsp unit `4f72cb3b…7c11`（含 `--gain1=-120 --gain2=0`）；channelmap `7abe6c92…ca1`；LKM `9b722905…98d1`。
+- khaen-mode `c4ec1b88…c329`；khaen-upmix `3625bd60…a0e5`；upmix presets `5004dac3…45b9`；autodetect unit `53d79568…a0`；camilladsp unit `4f72cb3b…7c11`（含 `--gain1=-120 --gain2=0`）；channelmap `7abe6c92…ca1`；LKM `9b722905…98d1`。
 - `/proc/asound/cards`：3=UMIK-1（U18dB）、4=MOTU UltraLite-mk5、5=Loopback、6=ravenna；`MergingRavennaALSA` 已加载。
-- `tspi-mode status --json` 含 `input_content` 字段；units inactive（按需）。
+- `khaen-mode status --json` 含 `input_content` 字段；units inactive（按需）。
 
 ## 2. UMIK 声学闭环（v13，1kHz / -50 dBFS 源）
 - 链路：VM Inferno TX（`inferno-vm-tx`，1kHz -50dBFS 循环）→ 板端 Inferno capture（fake usrvclock）→ CamillaDSP 2.0→4.1.2 → MOTU card4（22ch/48k/S24_3_LE，chunksize 256）。
@@ -38,11 +38,11 @@
 - 注意：该方式把**主线程也设为 FIFO 80**（全进程），长时间/异常时有饥饿风险；60s 实验不足以证明量产稳定，需 24h soak + 真实 Dante/UMIK 链路复测。
 - 结论：SCHED_FIFO 80 使 **64/128 明显改善（0 xrun）**，32 仍不可用（362，更差）。若进镜像：systemd unit 加 CPUSchedulingPolicy=fifo + CPUSchedulingPriority=80（保留 Nice=-10/LimitRTPRIO=99），无需 CamillaDSP 参数。
 
-## 4. 正式 `tspi-mode dante` 阻塞点（记录）
-- 板端 v13（MOTU/UMIK 在位、无 H16、无 Dante 源）：`tspi-mode dante --allow-unlocked-ptp` 到 CamillaDSP 启动后 **exit / abort**，`tspi-mode status` 为 `mode=off, state=error`，journal 显示 CamillaDSP panic/abort。
+## 4. 正式 `khaen-mode dante` 阻塞点（记录）
+- 板端 v13（MOTU/UMIK 在位、无 H16、无 Dante 源）：`khaen-mode dante --allow-unlocked-ptp` 到 CamillaDSP 启动后 **exit / abort**，`khaen-mode status` 为 `mode=off, state=error`，journal 显示 CamillaDSP panic/abort。
 - 原因判定：**当前环境无 H16/无 Inferno 订阅媒体源，也无有效 PTPv1 master**；Inferno capture 无时钟/无订阅时 hw_params 超时，CamillaDSP 退出。属预期环境限制，不是 v13 载荷回归。
-- 建议（后续）：tspi-mode 在 dante 模式启动前/失败时给出明确提示（无 active channelmap / 无 Inferno 订阅源 / PTP 未锁），避免 generic panic；正式模式验证需 H16 或先预置 16ch Inferno 订阅 + 可用 PTP 时钟。
+- 建议（后续）：khaen-mode 在 dante 模式启动前/失败时给出明确提示（无 active channelmap / 无 Inferno 订阅源 / PTP 未锁），避免 generic panic；正式模式验证需 H16 或先预置 16ch Inferno 订阅 + 可用 PTP 时钟。
 - 手工链路（fake usrvclock + 预置 rx_subscriptions）已验证可用（见 §2）。
 
 ## 5. v14 同步
-- `/etc/default/tspi-audio` 的 `TSPI_IFACE=end0`、`TSPI_MOTU_CARD_ID=UltraLitemk5` 在 Windows canonical overlay 已一致（2026-11-15 核）。
+- `/etc/default/khaen-audio` 的 `KHAEN_IFACE=end0`、`KHAEN_MOTU_CARD_ID=UltraLitemk5` 在 Windows canonical overlay 已一致（2026-11-15 核）。

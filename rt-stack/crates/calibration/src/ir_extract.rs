@@ -110,11 +110,7 @@ pub fn render_sweep(timeline: &SweepTimeline) -> Result<Vec<f64>, String> {
     let mut out = Vec::with_capacity(frames);
     for t in 0..frames {
         let time = t as f64 / sample_rate;
-        let phase = 2.0
-            * std::f64::consts::PI
-            * f0
-            * duration
-            / log_ratio
+        let phase = 2.0 * std::f64::consts::PI * f0 * duration / log_ratio
             * ((time / duration * log_ratio).exp() - 1.0);
         let envelope = segment_envelope(t, frames, fade);
         out.push(peak * envelope * phase.sin());
@@ -335,12 +331,7 @@ mod tests {
         let prod: Vec<C64> = fa
             .iter()
             .zip(fb.iter())
-            .map(|(x, y)| {
-                C64::new(
-                    x.re * y.re - x.im * y.im,
-                    x.re * y.im + x.im * y.re,
-                )
-            })
+            .map(|(x, y)| C64::new(x.re * y.re - x.im * y.im, x.re * y.im + x.im * y.re))
             .collect();
         irfft(&prod, nfft)
     }
@@ -531,4 +522,3 @@ mod tests {
         );
     }
 }
-

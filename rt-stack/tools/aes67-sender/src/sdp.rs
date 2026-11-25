@@ -58,7 +58,7 @@ impl SdpConfig {
         s.push_str(&format!("a=ts-refclk:{}\n", self.ts_refclk));
         s.push_str("a=mediaclk:direct=0\n");
         s.push_str(&format!(
-            "a=ssrc:{} cname:tspi-aes67-sender@{}\n",
+            "a=ssrc:{} cname:khaen-aes67-sender@{}\n",
             self.ssrc, self.origin_ip
         ));
         Ok(s)
@@ -92,7 +92,7 @@ mod tests {
 
     fn cfg() -> SdpConfig {
         SdpConfig {
-            session_name: "TSPI Windows AES67 sender".to_string(),
+            session_name: "KHAEN Windows AES67 sender".to_string(),
             origin_ip: "192.0.2.94".to_string(),
             dest_ip: "239.69.63.10".to_string(),
             multicast: true,
@@ -115,7 +115,7 @@ mod tests {
         assert!(s.contains("a=ptime:1\n"));
         assert!(s.contains("a=ts-refclk:local\n"));
         assert!(s.contains("a=mediaclk:direct=0\n"));
-        assert!(s.contains("a=ssrc:16909060 cname:tspi-aes67-sender@192.0.2.94\n"));
+        assert!(s.contains("a=ssrc:16909060 cname:khaen-aes67-sender@192.0.2.94\n"));
     }
 
     #[test]

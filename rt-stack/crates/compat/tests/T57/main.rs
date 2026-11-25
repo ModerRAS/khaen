@@ -17,13 +17,11 @@
 //! 只读输入：overlay/web layout-presets.yml 与 calibration-spec 示例经 include_str! 绑定；
 //! 不写任何临时文件（本机 %TEMP% 在内存盘 R:，写盘可能 PermissionDenied）。
 
-use khaen_compat::calibration::{
-    merge_calibration, parse_calibration_yaml_with_layout, Polarity,
-};
+use khaen_compat::calibration::{merge_calibration, parse_calibration_yaml_with_layout, Polarity};
 use khaen_compat::roles::*;
 
 const OVERLAY_PRESETS: &str =
-    include_str!("../../../../../audio/overlay/etc/tspi-audio/layout-presets.yml");
+    include_str!("../../../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
 const WEB_PRESETS: &str = include_str!("../../../../../web/assets/layout-presets.yml");
 const CALIBRATION_412_EXAMPLE: &str =
     include_str!("../../../../../calibration-spec/examples/calibration-4.1.2.example.yml");
@@ -31,14 +29,19 @@ const CALIBRATION_412_EXAMPLE: &str =
 /// 仓库内 overlay layout-presets.yml 的 SHA-256。
 /// 2026-11-22 追加输入布局 nsp-5.1.2 后更新；追加前的 11,228 B 基线仍记在
 /// `rt-stack/spec/core-v1.md`（4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da）。
-const OVERLAY_SHA256: &str = "a698edb4b1b507297a46f7fc35821e3511d5b7c1fa3d9babc6d6271181853e73";
-/// 4.1.2 语义绑定 hash（tspi-layout-binding/v1 canonical 文本 SHA-256；测试/证据双绑）。
-const LAYOUT_4_1_2_HASH: &str = "6a1927040dfe1759dc0693a074f510879c88e74544df4fabcc68257f34d912c6";
+// renamed tspi -> khaen (2026-11-25)
+// (schema string tspi-layout-presets/v2 -> khaen-layout-presets/v2 grows the file by 1 B; same frozen property)
+const OVERLAY_SHA256: &str = "17f255069b4bd451f509aec16c04906ebab1b4c9c1b36495dbdc62f90963b58d";
+/// 4.1.2 语义绑定 hash（khaen-layout-binding/v1 canonical 文本 SHA-256；测试/证据双绑）。
+// renamed tspi -> khaen (2026-11-25)
+const LAYOUT_4_1_2_HASH: &str = "9461b644783361da9f81e2a61b5e29fedb340f44b04d56ab440ba69d4e04f771";
 /// corrected 全频基线修正链 hash（7 角色 identity）。
+// renamed tspi -> khaen (2026-11-25)
 const CORRECTIONS_BASELINE_HASH: &str =
-    "bdb4089ad53e4ba393772b89fb0b7b343db78f7ee6fc4392922796020f8375b2";
+    "91aef008016a6a9aba624847cb2abd84d16faf60bffafcd6f4d0f5c6cd1cf202";
 /// 5.3.2 语义绑定 hash（证明不是只支持硬编码 4.1.2）。
-const LAYOUT_5_3_2_HASH: &str = "00af93919b5a70a7c68ce3027fd00725fcaa2447bc075ef72c31249e87bf326c";
+// renamed tspi -> khaen (2026-11-25)
+const LAYOUT_5_3_2_HASH: &str = "b60b6d11141f7eeaf16becf44e3bc1dd4fbaf273492ee8fa51734a066b6b2380";
 
 fn overlay() -> LayoutPresets {
     LayoutPresets::parse_overlay(OVERLAY_PRESETS.as_bytes())
@@ -57,7 +60,7 @@ fn role_ids(bound: &BoundLayout) -> Vec<&str> {
 
 fn minimal_doc(roles_body: &str) -> String {
     format!(
-        "schema: tspi-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    roles:\n{roles_body}"
+        "schema: khaen-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    roles:\n{roles_body}"
     )
 }
 
@@ -806,13 +809,13 @@ fn roles_overlay_schema_and_strictness_negative_matrix() {
     // schema 不匹配 / 缺失。
     let error = parse_error(
         valid
-            .replace(LAYOUT_PRESETS_SCHEMA, "tspi-layout-presets/v1")
+            .replace(LAYOUT_PRESETS_SCHEMA, "khaen-layout-presets/v1")
             .as_bytes(),
     );
     assert_eq!(error.code, RolesErrorCode::Schema);
     let error = parse_error(
         minimal_doc(&valid_roles)
-            .replace("schema: tspi-layout-presets/v2\n", "")
+            .replace("schema: khaen-layout-presets/v2\n", "")
             .as_bytes(),
     );
     assert_eq!(error.code, RolesErrorCode::MissingField);
@@ -822,7 +825,7 @@ fn roles_overlay_schema_and_strictness_negative_matrix() {
     assert_eq!(error.field, "$.extra");
     // 未知嵌套字段（layout 级 / role 级）。
     let error = parse_error(
-        "schema: tspi-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    extra: 1\n    roles:\n"
+        "schema: khaen-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    extra: 1\n    roles:\n"
             .to_string()
             .as_bytes(),
     );
@@ -831,14 +834,15 @@ fn roles_overlay_schema_and_strictness_negative_matrix() {
     assert_eq!(error.code, RolesErrorCode::FieldUnknown);
     // roles 缺失/为空/超上限。
     let error = parse_error(
-        "schema: tspi-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    label: x\n".as_bytes(),
+        "schema: khaen-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    label: x\n".as_bytes(),
     );
     assert_eq!(error.code, RolesErrorCode::MissingField);
     // roles: 后无内容 = null（FieldType）；显式空数组 = LayoutRoles。
     let error = parse_error(minimal_doc("").as_bytes());
     assert_eq!(error.code, RolesErrorCode::FieldType);
     let error = parse_error(
-        "schema: tspi-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    roles: []\n".as_bytes(),
+        "schema: khaen-layout-presets/v2\noutput_layouts:\n  \"4.1.2\":\n    roles: []\n"
+            .as_bytes(),
     );
     assert_eq!(error.code, RolesErrorCode::LayoutRoles);
     let mut too_many = String::new();
@@ -879,7 +883,7 @@ fn roles_overlay_schema_and_strictness_negative_matrix() {
     assert_eq!(error.code, RolesErrorCode::RoleOutputs);
     // 布局 id 非法。
     let error = parse_error(
-        "schema: tspi-layout-presets/v2\noutput_layouts:\n  \"bad id\":\n    roles:\n      - {id: FL, outputs: [0]}\n"
+        "schema: khaen-layout-presets/v2\noutput_layouts:\n  \"bad id\":\n    roles:\n      - {id: FL, outputs: [0]}\n"
             .as_bytes(),
     );
     assert_eq!(error.code, RolesErrorCode::LayoutId);
@@ -891,7 +895,7 @@ fn roles_overlay_schema_and_strictness_negative_matrix() {
     let error = parse_error(&[0xFFu8, 0xFE, 0x00]);
     assert_eq!(error.code, RolesErrorCode::Encoding);
     // 缺失 ':' / 流式未闭合 / 值后多余字符。
-    let error = parse_error("schema tspi-layout-presets/v2\n".as_bytes());
+    let error = parse_error("schema khaen-layout-presets/v2\n".as_bytes());
     assert_eq!(error.code, RolesErrorCode::YamlSyntax);
     let error = parse_error("schema: {x: 1\n".as_bytes());
     assert_eq!(error.code, RolesErrorCode::YamlSyntax);
@@ -905,7 +909,7 @@ fn roles_overlay_schema_and_strictness_negative_matrix() {
 
 #[test]
 fn roles_yaml_subset_flow_quoted_scalars_and_unsupported() {
-    let text = "schema: \"tspi-layout-presets/v2\"\noutput_layouts:\n  \"4.1.2\":\n    label: 'Single ''quoted'''\n    description: \"with \\\"escaped\\\" quote and # hash inside\"\n    roles:\n      - id: FL\n        outputs: [0]\n        label: Front L\n      - id: FR\n        outputs: [1, 2]\n";
+    let text = "schema: \"khaen-layout-presets/v2\"\noutput_layouts:\n  \"4.1.2\":\n    label: 'Single ''quoted'''\n    description: \"with \\\"escaped\\\" quote and # hash inside\"\n    roles:\n      - id: FL\n        outputs: [0]\n        label: Front L\n      - id: FR\n        outputs: [1, 2]\n";
     let presets = LayoutPresets::parse_overlay(text.as_bytes()).expect("合法 YAML 子集");
     let layout = presets.output_layout("4.1.2").expect("4.1.2");
     assert_eq!(layout.label.as_deref(), Some("Single 'quoted'"));
@@ -925,24 +929,24 @@ fn roles_yaml_subset_flow_quoted_scalars_and_unsupported() {
     // 不支持的 YAML 特性：块标量/anchor/alias/tag/tab 缩进/多文档。
     for (text, expected) in [
         (
-            "schema: tspi-layout-presets/v2\noutput_layouts: |\n  x\n",
+            "schema: khaen-layout-presets/v2\noutput_layouts: |\n  x\n",
             RolesErrorCode::YamlUnsupported,
         ),
         (
-            "schema: &anchor tspi-layout-presets/v2\n",
+            "schema: &anchor khaen-layout-presets/v2\n",
             RolesErrorCode::YamlUnsupported,
         ),
         ("schema: *alias\n", RolesErrorCode::YamlUnsupported),
         (
-            "schema: !tag tspi-layout-presets/v2\n",
+            "schema: !tag khaen-layout-presets/v2\n",
             RolesErrorCode::YamlUnsupported,
         ),
         (
-            "\tschema: tspi-layout-presets/v2\n",
+            "\tschema: khaen-layout-presets/v2\n",
             RolesErrorCode::YamlUnsupported,
         ),
         (
-            "---\nschema: tspi-layout-presets/v2\n",
+            "---\nschema: khaen-layout-presets/v2\n",
             RolesErrorCode::YamlUnsupported,
         ),
     ] {
@@ -1019,7 +1023,7 @@ fn roles_error_codes_catalog_and_display() {
 #[test]
 fn roles_load_overlay_file_from_repo() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let path = manifest_dir.join("../../../audio/overlay/etc/tspi-audio/layout-presets.yml");
+    let path = manifest_dir.join("../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
     let loaded = LayoutPresets::load_overlay_file(&path).expect("仓库 overlay 必须可读");
     assert_eq!(loaded.source_sha256(), OVERLAY_SHA256);
     assert_eq!(loaded.layout_hash("4.1.2").unwrap(), LAYOUT_4_1_2_HASH);

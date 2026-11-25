@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C02_identity_delay_d3",
   "title": "identity with pre-declared common delay D=3 (G=z^-3 I)",
   "tags": [

@@ -1,7 +1,7 @@
 ---
-# tspi-audio: tspi audio - Dante 96k (5.3.2)
+# khaen-audio: khaen audio - Dante 96k (5.3.2)
 # Inferno ALSA plugin (S32_LE) -> CamillaDSP -> MOTU UltraLite-mk5 5.3.2 / 10ch out
-# 本文件是模板：tspi-mode 把占位符（__SAMPLERATE__ 等）渲染到 /run/tspi/camilladsp.yml 后启动 CamillaDSP。
+# 本文件是模板：khaen-mode 把占位符（__SAMPLERATE__ 等）渲染到 /run/khaen/camilladsp.yml 后启动 CamillaDSP。
 #
 # 输出布局 = 5.3.2（10 路模拟输出）：Main 1-2 + Line 3-10（USB 硬件 22 playback，通道 10..21 不用=补零）
 #   USB ch 0/1   -> Main 1-2     -> Front L / Front R
@@ -10,7 +10,7 @@
 #   USB ch 8/9   -> Line 9/10    -> Height L / Height R
 # 输入 = H16-AIP 的 16ch 容器（7.1.4/9.1.4；AES67 固定 48k、Dante 96k）；输入通道顺序待 H16 实测核对（mixer 假设 0=L 1=R 2=C 3=LFE 4=Ls 5=Rs 8=Tfl 9=Tfr）。
 # CamillaDSP 不做 Atmos/DTS 解码：H16 送来的必须是已解码 PCM。
-title: "tspi audio - Dante 96k (5.3.2)"
+title: "khaen audio - Dante 96k (5.3.2)"
 description: "Inferno ALSA plugin (S32_LE) -> CamillaDSP -> MOTU UltraLite-mk5 5.3.2 / 10ch out"
 
 devices:

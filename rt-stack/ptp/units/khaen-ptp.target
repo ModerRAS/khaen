@@ -1,0 +1,8 @@
+[Unit]
+Description=KHAEN PTPv2 grandmaster (ptp4l + phc2sys; requirement 15)
+Documentation=file:///opt/khaen-rt-stack/ptp/current/README.deploy.md
+Wants=khaen-ptp-master.service khaen-ptp-phc2sys.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

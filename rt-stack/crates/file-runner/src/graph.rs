@@ -2,7 +2,7 @@
 //!
 //! 本模块是 file runner 的“prepare”阶段（对齐 T12 core::compile、T09 WorkerDagPlan、T13 IR、T55 manifest）：
 //!
-//! 1. 加载并校验输入 WAV（`crate::wav`）与每个系数槽（`crate::fir` 的 `tspi-fir/v1`）；
+//! 1. 加载并校验输入 WAV（`crate::wav`）与每个系数槽（`crate::fir` 的 `khaen-fir/v1`）；
 //! 2. 组装 T03 reference 语义图（A：N×L_A；G：M×M×L_G；P：O×L_P）并应用 T13 IR 的 P/phase/D
 //!    （`apply_post_to_p`，coeff_embedded 不再加、role_metadata 应用一次）；
 //! 3. 用 `core::compile::compile` 做 factorized/fused 成本/长度/预算校验并保留 CompileReport；
@@ -14,7 +14,7 @@
 //!    ProtectionFallback）或安全 mute；绝不半图输出，绝不把失效校准悄悄套用到输出。
 //!
 //! 说明（与 WBS T14 依赖一致）：T14 的 crate 依赖只有 core + rt-host，因此 T13/T55 通过**数据合同**
-//! 对齐（IR 草案 JSON / tspi-fir/v1 manifest）；T12 compile 与 T09 workers 是 core 内的真实接口调用。
+//! 对齐（IR 草案 JSON / khaen-fir/v1 manifest）；T12 compile 与 T09 workers 是 core 内的真实接口调用。
 //! fused 图只作为设计期产物计算摘要（chosen/reason/fused digest 进元数据），执行形态固定 factorized
 //! （fused 的 RT 执行归 T26/T56 hybrid DAG），不做“假合并省算”。
 
@@ -822,7 +822,7 @@ fn selection_reason_str(reason: khaen_core::compile::SelectionReason) -> &'stati
 
 fn fused_digest(fused: &FusedGraph) -> String {
     let mut buffer: Vec<u8> = Vec::new();
-    buffer.extend_from_slice(b"TSPI-FILE-RUNNER-FUSED-v1\n");
+    buffer.extend_from_slice(b"KHAEN-FILE-RUNNER-FUSED-v1\n");
     for path in &fused.paths {
         let header = format!(
             "path={}|{}|{}|{}|{}\n",

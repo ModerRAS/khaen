@@ -27,7 +27,7 @@ import os
 import sys
 import tarfile
 
-SCHEMA = "tspi-rt-stack/deploy-tar/v1"
+SCHEMA = "khaen-rt-stack/deploy-tar/v1"
 EXEC_MODE = 0o755
 FILE_MODE = 0o644
 DIR_MODE = 0o755
@@ -136,7 +136,7 @@ def cmd_pack(opts):
         return die(f"pack 写失败: {e}", 7)
     info = {
         "ok": True,
-        "schema": "tspi-rt-stack/deploy-tar-pack/v1",
+        "schema": "khaen-rt-stack/deploy-tar-pack/v1",
         "archive": out,
         "size": os.path.getsize(out),
         "sha256": sha256_file(out),
@@ -243,7 +243,7 @@ def cmd_verify(opts):
         return die(f"verify 读取归档失败: {e}", 3)
     info = {
         "ok": not failures,
-        "schema": "tspi-rt-stack/deploy-tar-verify/v1",
+        "schema": "khaen-rt-stack/deploy-tar-verify/v1",
         "archive": os.path.abspath(archive),
         "size": os.path.getsize(archive),
         "sha256": sha256_file(archive),

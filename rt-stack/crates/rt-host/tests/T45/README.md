@@ -17,7 +17,7 @@
 
 | 组 | 内容 |
 |---|---|
-| A 布局/常量 | §11.13 TspiWorkerAffinityV1 32B/align8 偏移；needs_drop==false；FIFO 70/80/90；IRQ 位义；tick 预算 |
+| A 布局/常量 | §11.13 KhaenWorkerAffinityV1 32B/align8 偏移；needs_drop==false；FIFO 70/80/90；IRQ 位义；tick 预算 |
 | B 实测解析 | /sys CPU 列表（0-3,6,7）；/proc/cmdline isolcpus/nohz_full；lscpu -e=CPU,CORE,SOCKET,ONLINE,...；/proc/irq/N/smp_affinity_list |
 | C 拓扑快照 | mask/core 查询、IRQ 注入、实测集合一致性负向 |
 | D 准入请求 | profile 4/2、优先级排序（dsp<io<=irq）、tick/spin/cutoff 未标定拒收、CPU 槽/IRQ 位负向 |

@@ -30,7 +30,7 @@ lscpu | sed -n '1,40p'
 cat /sys/devices/system/cpu/isolated 2>/dev/null; cat /sys/devices/system/cpu/nohz_full 2>/dev/null
 cat /proc/sys/kernel/sched_rt_runtime_us; cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor | sort -u
 cat /proc/interrupts > before-interrupts.txt
-systemctl list-units --type=service --no-pager | grep -Ei 'camilla|tspi|aes67|ptp|alsa' || true
+systemctl list-units --type=service --no-pager | grep -Ei 'camilla|khaen|aes67|ptp|alsa' || true
 pgrep -a camilladsp || echo NO_CAMILLA_PROCESS
 ls /sys/class/thermal/thermal_zone*/temp 2>/dev/null; uptime
 
@@ -119,7 +119,7 @@ T20 swap + T21 fault + T45 亲和已接线（当前均 NOT_WIRED/NOT_RUN）。
 
 ~~~bash
 # 3.1 soak 启动（示例；真实参数以 deploy/config/rt-host.toml 冻结值为准）
-khaen-rt-host run --config /etc/tspi-rt-stack/rt-host.toml --duration-ms 3600000 \
+khaen-rt-host run --config /etc/khaen-rt-stack/rt-host.toml --duration-ms 3600000 \
   > soak-1h-run1.log 2>&1 &
 HOST_PID=$!
 # 同时每 10 s 采样：温度/频率、/proc/interrupts 差值、进程 RSS、per-worker 统计、

@@ -2,7 +2,7 @@
 <!-- Minimal test APK: does the AudioTrack sample rate control the Zidoo S/PDIF/TOSLink output rate?
      Built by hand with aapt2 + javac + d8 + apksigner (no AndroidX, no native code, no gradle). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.tspi.fixed48test"
+    package="com.khaen.fixed48test"
     android:versionCode="1"
     android:versionName="1.0">
 

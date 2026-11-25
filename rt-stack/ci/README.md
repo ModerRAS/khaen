@@ -1,4 +1,4 @@
-# ci/ —— TSPI rt-stack 离线检查入口（WBS T06）
+# ci/ —— KHAEN rt-stack 离线检查入口（WBS T06）
 
 本目录只由 integrator 维护（T06/T26/T32）；离线、无网络依赖、无板端动作。
 

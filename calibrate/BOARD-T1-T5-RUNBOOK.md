@@ -5,7 +5,7 @@
 > T3 保留 + 新增 T6 holdout；话筒 90° 校准/朝天花板；merge 的 negative-controls 由“可省略”改为“省略即 INCOMPLETE”。
 > **B3 修订（2026-11-17）**：C-19 capture 映射按 K7（ch12=L/ch13=R、ch8/9=内部 USB loopback，删旧 S/PDIF）；T5 时长统一写秒（≥3600 s，10 min 仅 screening）；T1/T4 的 capture 通道数按 dump-hw-params 实测（当前 MOTU=20ch）。
 > **裁决落地（2026-11-17，D8/D3/D7）**：D8 SUB1 唯一物理口=**Line Out 8（槽位7）**，Line Out 10（槽9）仅 2026-11 临时测试历史、不是候选；D3 5.3.2 中置按设计=**全频（与主箱相同）**，当前无中置，中置 HP80/低频重定向/中置 pair/测试全部 **deferred/NEEDS_HW**，移出 P1（4.1.2 不受影响）；D7 **允许 +3 dB boost**，但须执行削波/headroom/总增益帽检查并写入 T3/T6 报告（详见 §0.1）。
-> 前置：soak 结束/停止（`sudo systemctl stop tspi-soak12.service`），MOTU=card4、UMIK=card3；一次只做一项；不接功放/后级（T5 除外）；不连外网。
+> 前置：soak 结束/停止（`sudo systemctl stop khaen-soak12.service`），MOTU=card4、UMIK=card3；一次只做一项；不接功放/后级（T5 除外）；不连外网。
 
 ## 0. 每次测量前统一设置（C-16）
 
@@ -23,7 +23,7 @@
 ## 0.1 部署
 ```bash
 scp target/release/khaen-calibrate lckfb@192.0.2.215:/tmp/ && ssh lckfb@192.0.2.215 'chmod +x /tmp/khaen-calibrate'
-sudo mkdir -p /var/lib/tspi-calib/{t1,t2,t4,t6,t5}
+sudo mkdir -p /var/lib/khaen-calib/{t1,t2,t4,t6,t5}
 ```
 
 ## T1 前置：CueMix 状态确认（用户当前：仅 in7→out7、in8→out8）
@@ -36,7 +36,7 @@ sudo mkdir -p /var/lib/tspi-calib/{t1,t2,t4,t6,t5}
    - `cuemix_in7_to_out9: none`
    - `cuemix_other_input_to_output: none`
    - `cuemix_out7_out8_downstream: disconnected`
-   - 截图 `/var/lib/tspi-calib/t1/cuemix-routing.png`
+   - 截图 `/var/lib/khaen-calib/t1/cuemix-routing.png`
 3. T1 报告字段（ACCEPTANCE §3.1，必须含新增字段）：
    ```
    t1.status: partial
@@ -50,7 +50,7 @@ sudo mkdir -p /var/lib/tspi-calib/{t1,t2,t4,t6,t5}
    isolation: other capture channels <= -60 dB AND >=10 dB below noise floor
    mitigation: remaining outputs via file backend + T4 UMIK acoustic evidence
    claim: non-1:1 spot check only; does not claim 1:1 mapping
-   cuemix_routing: {in7_to_out7: on, in8_to_out8: on, in7_to_out9: none, other_input_to_output: none, out7_out8_downstream: disconnected, screenshot: /var/lib/tspi-calib/t1/cuemix-routing.png}
+   cuemix_routing: {in7_to_out7: on, in8_to_out8: on, in7_to_out9: none, other_input_to_output: none, out7_out8_downstream: disconnected, screenshot: /var/lib/khaen-calib/t1/cuemix-routing.png}
    final_insert_direct_routes: ["in7->out7", "in8->out8"]   # 最终 insert 前必须全部关闭
    ```
 4. **最终 insert 模式必须关闭 in7→out7、in8→out8 以及全部 input→output 直通**，否则硬件直通与 USB DSP 双路径并存；报告需写明该前提。
@@ -64,12 +64,12 @@ sudo mkdir -p /var/lib/tspi-calib/{t1,t2,t4,t6,t5}
 ```bash
 arecord -D hw:4,0 --dump-hw-params /dev/null   # 按实测填 capture 通道数（当前 MOTU=20ch）
 # 先测无激励噪声底（3 s 静音），写进报告
-/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t1 --out-prefix /var/lib/tspi-calib/t1/t1-noise \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/khaen-calib/t1 --out-prefix /var/lib/khaen-calib/t1/t1-noise \
   --loopback-map 9:7 --names NOISE \
   --playback hw:4,0 --playback-channels 22 --capture hw:4,0 --capture-channels 20 \
   --rate 48000 --seconds 3 --level-db -120 --pre-seconds 0.5 --post-seconds 0.5 \
   --period-size 128 --buffer-size 512
-/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t1 --out-prefix /var/lib/tspi-calib/t1/t1 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/khaen-calib/t1 --out-prefix /var/lib/khaen-calib/t1/t1 \
   --loopback-map 9:7 --names OUT9_IN7 \
   --playback hw:4,0 --playback-channels 22 --capture hw:4,0 --capture-channels 20 \
   --rate 48000 --seconds 5 --level-db -12 --pre-seconds 1.5 --post-seconds 1.5 \
@@ -91,7 +91,7 @@ arecord -D hw:4,0 --dump-hw-params /dev/null   # 按实测填 capture 通道数�
 ```bash
 # kMainTrim=0；麦 90° 校准、麦轴朝天花板；记录 cal 文件 sha256
 for i in 1 2 3; do
-  /tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t2/run$i --out-prefix /var/lib/tspi-calib/t2/run$i \
+  /tmp/khaen-calibrate measure-multi --out-dir /var/lib/khaen-calib/t2/run$i --out-prefix /var/lib/khaen-calib/t2/run$i \
     --channels 0,1 --names FL,FR --playback hw:4,0 --playback-channels 22 \
     --capture hw:3,0 --capture-channels 1 --rate 48000 --seconds 5 --level-db -30 \
     --pre-seconds 1.5 --post-seconds 1.5 --period-size 128 --buffer-size 512 --mic umik
@@ -104,7 +104,7 @@ T2 数值阈值是 engineering default、待 pilot（先用现有 3 次 + 加测
 ## T3：应用校准后逐通道复测（必须，K4）
 
 1. 把 `calibration.yml` 应用到目标 profile/CamillaDSP 配置；保留 apply diff 与 sha256；
-2. `tspi-channelmap validate/render` rc=0；独立配置 `camilladsp --check` rc=0；
+2. `khaen-channelmap validate/render` rc=0；独立配置 `camilladsp --check` rc=0；
 3. 按 T2 同条件（同麦同位置同电平）复测 T3 各通道，按 ACCEPTANCE §5 表判定（残余延迟 ≤0.5 sample、极性与 YAML 一致、
    PEQ 实现差 ≤0.75 dB、目标偏差 ≤±3 dB 仅统计可校正频段、无削波）；
 4. **禁止用 merge 的 predicted 结果代替 T3**；T3 未执行 → INCOMPLETE。
@@ -119,16 +119,16 @@ T2 数值阈值是 engineering default、待 pilot（先用现有 3 次 + 加测
 ```bash
 arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 # 4.1.2 播放通道 = 0,1,2,3,4,5,7（7 路角色；22ch 设备域）
-/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4 --out-prefix /var/lib/tspi-calib/t4/t4 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/khaen-calib/t4 --out-prefix /var/lib/khaen-calib/t4/t4 \
   --channels 0,1,2,3,4,5,7 --names FL,FR,SL,SR,HFL,HFR,SUB1 \
   --playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 1 \
   --rate 48000 --seconds 5 --level-db -30 --pre-seconds 1.5 --post-seconds 1.5 \
   --period-size 128 --buffer-size 512 --mic umik --polarity-offset normal
 # 合并；分频点/对必须与 profile 一致（FL/FR HP80 + SUB1 LP80）
-/tmp/khaen-calibrate merge --dir /var/lib/tspi-calib/t4 --out /var/lib/tspi-calib/t4/calibration.yml \
+/tmp/khaen-calibrate merge --dir /var/lib/khaen-calib/t4 --out /var/lib/khaen-calib/t4/calibration.yml \
   --names FL,FR,SL,SR,HFL,HFR,SUB1 --layout 4.1.2 --crossovers 80 \
   --pairs FL:SUB1:80,FR:SUB1:80 --chunksize 128 --boost-cap-db 3 \
-  --negative-controls /var/lib/tspi-calib/t4/negative-controls.json
+  --negative-controls /var/lib/khaen-calib/t4/negative-controls.json
 ```
 - **负向用例 5/5**（N1–N5，N2=0.25 ms/12 samples）：把注入与检出结果写成 JSON 数组交给 `--negative-controls`；
   **省略 = not_run = T4 INCOMPLETE**（C-P1-6；工具当前不会因此改 overall，验收按 ACCEPTANCE §9 判）。
@@ -141,13 +141,13 @@ arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 ### T4-B 5.3.2（**NEEDS_HW**：十只单元/三 SUB 接好后才验收）
 ```bash
 # FL0 FR1 C2 SL3 SR4 SUB1=5 SUB2=6 SUB3=7 HFL8 HFR9
-/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4-532 --out-prefix /var/lib/tspi-calib/t4-532/t4 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/khaen-calib/t4-532 --out-prefix /var/lib/khaen-calib/t4-532/t4 \
   --channels 0,1,2,3,4,5,6,7,8,9 --names FL,FR,C,SL,SR,SUB1,SUB2,SUB3,HFL,HFR \
   --playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 1 \
   --rate 48000 --seconds 5 --level-db -30 --pre-seconds 1.5 --post-seconds 1.5 \
   --period-size 128 --buffer-size 512 --mic umik --polarity-offset normal
 # 三 SUB 先做 §6.2 组检查，再用“SUB 组等效”与 FL/FR 成对；中置按 D3 全频设计、当前无中置，C 不参与 pair
-/tmp/khaen-calibrate merge --dir /var/lib/tspi-calib/t4-532 --out /var/lib/tspi-calib/t4-532/calibration.yml \
+/tmp/khaen-calibrate merge --dir /var/lib/khaen-calib/t4-532 --out /var/lib/khaen-calib/t4-532/calibration.yml \
   --names FL,FR,C,SL,SR,SUB1,SUB2,SUB3,HFL,HFR --layout 5.3.2 --crossovers 80 \
   --pairs FL:SUB1:80,FR:SUB1:80 --chunksize 128 --boost-cap-db 3
 ```
@@ -159,7 +159,7 @@ arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 ```bash
 # 在甜点附近取 1–3 个 holdout 点（如 ±0.3 m 左右/前后，或不同麦高），这些点不参与 merge 拟合
 # 应用校准后，按 T3 流程在每个 holdout 点重测（同电平同麦方向）
-/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t6/holdout1 --out-prefix /var/lib/tspi-calib/t6/holdout1 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/khaen-calib/t6/holdout1 --out-prefix /var/lib/khaen-calib/t6/holdout1 \
   --channels 0,1,2,3,4,5,7 --names FL,FR,SL,SR,HFL,HFR,SUB1 \
   --playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 1 \
   --rate 48000 --seconds 5 --level-db -30 --pre-seconds 1.5 --post-seconds 1.5 \
@@ -175,7 +175,7 @@ arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 两边不一致时 `polarity_confidence=low`，两份结果都留在 JSON 里。SUB 不要用听音位符号，除非麦贴在低音炮上并加 `--sub-reference-nearfield`。
 
 ```bash
-/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4r --out-prefix /var/lib/tspi-calib/t4r/t4 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/khaen-calib/t4r --out-prefix /var/lib/khaen-calib/t4r/t4 \
   --channels 0,1,2,3,4,5,7 --names FL,FR,SL,SR,HFL,HFR,SUB1 \
   --playback hw:4,0 --playback-channels 22 \
   --capture hw:3,0 --capture-channels 1 \
@@ -194,9 +194,9 @@ arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 ```bash
 # 64/128 各跑 ≥3600 s（60 min；10 min 只作 screening，不写 PASS）；记录 period/buffer/xrun/RT 线程
 # soak12.sh 的参数单位=小时：1 = 3600 s（ACCEPTANCE §7 已定稿 ≥60 min）
-sudo sed -i 's/chunksize: 128/chunksize: 64/' /var/lib/tspi-soak/camilla.yml
-sudo systemd-run --unit=tspi-t5-64 --property=Type=simple /bin/bash /var/lib/tspi-soak/soak12.sh 1
-# 读 /var/lib/tspi-soak/status.csv 与 camilla.log；无 xrun、FF/80 CPU4-7
+sudo sed -i 's/chunksize: 128/chunksize: 64/' /var/lib/khaen-soak/camilla.yml
+sudo systemd-run --unit=khaen-t5-64 --property=Type=simple /bin/bash /var/lib/khaen-soak/soak12.sh 1
+# 读 /var/lib/khaen-soak/status.csv 与 camilla.log；无 xrun、FF/80 CPU4-7
 # CPU 口径：camilladsp 进程 utime+stime / 墙钟；同绑核同频率；记录空载本底；前后变化 ≤10%
 ```
 
@@ -207,7 +207,7 @@ sudo systemd-run --unit=tspi-t5-64 --property=Type=simple /bin/bash /var/lib/tsp
 
 1. 关闭 CueMix **全部 input→output 直通**，明确包括 in7→out7、in8→out8；
 2. 仅保留 USB playback→output；
-3. 截图留证 `/var/lib/tspi-calib/final-insert/cuemix-final.png`；
+3. 截图留证 `/var/lib/khaen-calib/final-insert/cuemix-final.png`；
 4. 报告记录：`final_insert_direct_routes: []`、`cuemix_input_to_output: none`、`cuemix_usb_playback_to_output: enabled`；
 5. 未关闭直通前不得声称“可替代 CueMix/insert 模式验收通过”。
 

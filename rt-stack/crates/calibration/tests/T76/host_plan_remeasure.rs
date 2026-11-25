@@ -26,7 +26,7 @@ static UNIQUE: AtomicU64 = AtomicU64::new(0);
 
 fn temp_dir(tag: &str) -> PathBuf {
     let id = UNIQUE.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("tspi-t76-{tag}-{}-{id}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("khaen-t76-{tag}-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create test dir");
     dir
@@ -45,8 +45,8 @@ fn plan_bytes_for(
     workers: u8,
 ) -> Vec<u8> {
     let mut bytes = vec![0u8; 256];
-    bytes[0..4].copy_from_slice(&khaen_core::abi::TSPI_PLAN_MAGIC.to_le_bytes());
-    bytes[4..6].copy_from_slice(&khaen_core::abi::TSPI_PLAN_ABI_V2.to_le_bytes());
+    bytes[0..4].copy_from_slice(&khaen_core::abi::KHAEN_PLAN_MAGIC.to_le_bytes());
+    bytes[4..6].copy_from_slice(&khaen_core::abi::KHAEN_PLAN_ABI_V2.to_le_bytes());
     bytes[6..8].copy_from_slice(&128u16.to_le_bytes());
     bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
     bytes[12..16].copy_from_slice(&sample_rate.to_le_bytes());
@@ -154,7 +154,7 @@ fn main() {
     if stem.contains("arecord") {
         let channels = parse_arg(&args, "-c").unwrap_or(1);
         let block = parse_arg(&args, "--period-size").unwrap_or(128);
-        let blocks: usize = std::env::var("TSPI_T76_ARECORD_BLOCKS")
+        let blocks: usize = std::env::var("KHAEN_T76_ARECORD_BLOCKS")
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(300);

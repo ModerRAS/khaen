@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环工具包（task-201）。
+"""KHAEN 校准批量闭环工具包（task-201）。
 
 模块：
   config   冻结配置加载/fail-closed 校验
@@ -12,4 +12,4 @@
 """
 
 __version__ = "1.0.0"
-TOOL_NAME = "tspi-cal-batch"
+TOOL_NAME = "khaen-cal-batch"

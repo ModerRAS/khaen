@@ -2,11 +2,11 @@
 """T28 独立检查器：rollback 文件/回退契约（WBS T28 计划验收命令 rt-check rollback-file 的等价离线检查）。
 
 本检查器不信任脚本自报，独立做三层校验：
-  A last-good.json（可选）：schema=tspi-rt-stack/last-good/v1、c_policy=never-camilladsp、
+  A last-good.json（可选）：schema=khaen-rt-stack/last-good/v1、c_policy=never-camilladsp、
     previous 仍是自研 release（不出现 camilladsp）、release_dir 存在性（--require-release）。
-  B deploy/bin|lib 源码：禁止任何启动/使能/解除屏蔽 CamillaDSP/upmix-autodetect 或 `tspi-mode dante|aes67`
+  B deploy/bin|lib 源码：禁止任何启动/使能/解除屏蔽 CamillaDSP/upmix-autodetect 或 `khaen-mode dante|aes67`
     的语句（注释除外）；rollback 只允许 last-good/previous/mute 三个目标。
-  C service/ 单元草案：不得依赖/启动旧 C（camilladsp、tspi-upmix-autodetect、tspi-audio.target）。
+  C service/ 单元草案：不得依赖/启动旧 C（camilladsp、khaen-upmix-autodetect、khaen-audio.target）。
 用法: check_rollback_file.py --deploy DIR [--service DIR] [--last-good FILE] [--require-release]
 输出 JSON；exit 0=PASS，3=FAIL，2=用法错误。
 """
@@ -16,9 +16,9 @@ import re
 import sys
 
 FORBIDDEN = [
-    (re.compile(r"^\s*(?:run\s+|sudo\s+)?systemctl\s+(?:start|restart|try-restart|reload-or-restart|enable|unmask)\b[^\n]*(?:camilladsp|tspi-upmix-autodetect)", re.I),
+    (re.compile(r"^\s*(?:run\s+|sudo\s+)?systemctl\s+(?:start|restart|try-restart|reload-or-restart|enable|unmask)\b[^\n]*(?:camilladsp|khaen-upmix-autodetect)", re.I),
      "systemctl start/enable/unmask 旧 C unit"),
-    (re.compile(r"^\s*(?:run\s+|sudo\s+)?tspi-mode\s+(?:dante|aes67)\b"), "调用旧 tspi-mode 开启 C 音频模式"),
+    (re.compile(r"^\s*(?:run\s+|sudo\s+)?khaen-mode\s+(?:dante|aes67)\b"), "调用旧 khaen-mode 开启 C 音频模式"),
     (re.compile(r"^\s*ExecStart\s*=\s*\S*camilladsp", re.I), "ExecStart 启动 camilladsp"),
 ]
 
@@ -45,7 +45,7 @@ def scan_shell(paths):
 def scan_units(paths):
     hits = []
     dep = re.compile(r"^(?:After|Before|Wants|Requires|BindsTo|PartOf|Conflicts|OnFailure)\s*=")
-    forbid = re.compile(r"(camilladsp|tspi-upmix-autodetect|tspi-audio\.target)", re.I)
+    forbid = re.compile(r"(camilladsp|khaen-upmix-autodetect|khaen-audio\.target)", re.I)
     for p in paths:
         try:
             for i, line in enumerate(open(p, encoding='utf-8', errors='replace'), 1):
@@ -67,7 +67,7 @@ def check_last_good(path, require_release):
         d = json.load(open(path, encoding='utf-8'))
     except (OSError, json.JSONDecodeError) as e:
         return ['last-good 不可读/非法: ' + str(e)]
-    if d.get('schema') != 'tspi-rt-stack/last-good/v1':
+    if d.get('schema') != 'khaen-rt-stack/last-good/v1':
         problems.append('schema 不符')
     if d.get('c_policy') != 'never-camilladsp':
         problems.append('c_policy 必须是 never-camilladsp')

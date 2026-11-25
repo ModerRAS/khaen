@@ -468,7 +468,7 @@ struct Fixture {
 impl Fixture {
     fn parse(text: &str) -> Self {
         let root = JsonReader::new(text).parse();
-        if root.get("schema").as_str() != "tspi-reference-fixture/v1" {
+        if root.get("schema").as_str() != "khaen-reference-fixture/v1" {
             panic!("unexpected fixture schema");
         }
         let graph = root.get("graph");

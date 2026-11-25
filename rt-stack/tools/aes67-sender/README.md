@@ -86,7 +86,7 @@ ASIO-only 应用请通过 **FlexASIO / ASIO4ALL** 输出到某个真实 WASAPI �
 ```
 v=0
 o=- 23735502336229376 1 IN IP4 <origin-ip>
-s=TSPI Windows AES67 sender
+s=KHAEN Windows AES67 sender
 c=IN IP4 <dest-ip>/32          # 组播时带 /32；单播不带
 t=0 0
 m=audio <port> RTP/AVP 97
@@ -94,7 +94,7 @@ a=rtpmap:97 L24/48000/<channels>
 a=ptime:<ms>
 a=ts-refclk:local
 a=mediaclk:direct=0
-a=ssrc:<ssrc> cname:tspi-aes67-sender@<origin-ip>
+a=ssrc:<ssrc> cname:khaen-aes67-sender@<origin-ip>
 ```
 
 ## 组成

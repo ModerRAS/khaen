@@ -240,7 +240,8 @@ mod tests {
 
     #[test]
     fn missing_socket_does_not_invent_a_job() {
-        let mut port = HostSocketPort::with_exchange("/tmp/tspi-host-missing.sock", refuse_connect);
+        let mut port =
+            HostSocketPort::with_exchange("/tmp/khaen-host-missing.sock", refuse_connect);
         let error = port.start(&emperor(true)).expect_err("socket down");
         assert!(matches!(error, CalPortError::Unavailable(_)), "{error:?}");
         assert!(port.list().is_empty());
@@ -248,7 +249,7 @@ mod tests {
 
     #[test]
     fn full_kind_is_rejected_before_a_socket_call() {
-        let mut port = HostSocketPort::with_exchange("/tmp/tspi-host-missing.sock", accept_enter);
+        let mut port = HostSocketPort::with_exchange("/tmp/khaen-host-missing.sock", accept_enter);
         let error = port
             .start(&CalStartRequest {
                 kind: "full".to_string(),
@@ -271,7 +272,7 @@ mod tests {
 
     #[test]
     fn emperor_enter_uses_the_socket_response() {
-        let mut port = HostSocketPort::with_exchange("/tmp/tspi-host.sock", accept_enter);
+        let mut port = HostSocketPort::with_exchange("/tmp/khaen-host.sock", accept_enter);
         let job = port.start(&emperor(true)).expect("enter");
         assert_eq!(job.kind, "emperor");
         assert_eq!(job.state, "preflight");

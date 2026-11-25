@@ -9,8 +9,8 @@ dev box.  The board window only needs a portable fail-closed gate that answers:
   * does anything claim synthetic/dry-run?
 
 Usage (board / any python3):
-  python3 mimo12k_guard_lite.py check --artifact /var/tmp/tspi-12k-offline/artifacts \
-      --plan-dir /var/tmp/tspi-12k-offline/plan [--expect-g-pure-sha SHA]
+  python3 mimo12k_guard_lite.py check --artifact /var/tmp/khaen-12k-offline/artifacts \
+      --plan-dir /var/tmp/khaen-12k-offline/plan [--expect-g-pure-sha SHA]
       [--expect-plan-sha SHA] [--json-out gate.json]
 Exit codes: 0 = PASS, 3 = REFUSE (do not render/apply), 2 = usage/IO.
 """
@@ -31,8 +31,8 @@ A12_D12 = 120
 A12_GROUP = 4
 A12_DSYS = 574
 A12_RESAMP_TAPS = 95
-ART_PROV_SCHEMA = "tspi-mimo-12k-artifact-provenance/v1"
-PLAN_PROV_SCHEMA = "tspi-mimo-12k-plan-provenance/v1"
+ART_PROV_SCHEMA = "khaen-mimo-12k-artifact-provenance/v1"
+PLAN_PROV_SCHEMA = "khaen-mimo-12k-plan-provenance/v1"
 
 
 def sha256_file(path):
@@ -78,7 +78,7 @@ class Gate(object):
 
     def verdict(self):
         return {"ok": not self.codes, "codes": self.codes, "reasons": self.reasons,
-                "metrics": self.metrics, "schema": "tspi-mimo-12k-guard-lite/v1"}
+                "metrics": self.metrics, "schema": "khaen-mimo-12k-guard-lite/v1"}
 
 
 def check_artifact(g, adir, expect_g_pure_sha=None):

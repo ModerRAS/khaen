@@ -1,7 +1,7 @@
 # peq[].type：profile 的 peaking / shelf 语义与 CamillaDSP 映射
 
 > 依据：Lead 裁决 2026-11-16（`calibration-spec/review/V11-CONSUMER-DECISIONS-2026-11-16.md` 裁决 1/2/5）、
-> CONTRACT §3.4/§4.1/§4.2。实现：`audio/overlay/usr/local/bin/tspi-channelmap`（板端唯一权威）。
+> CONTRACT §3.4/§4.1/§4.2。实现：`audio/overlay/usr/local/bin/khaen-channelmap`（板端唯一权威）。
 
 ## 1. 字段与校验
 
@@ -31,7 +31,7 @@
   producer `fit` 默认 S=0.7；消费方若自己实现 biquad，必须用这个 S 公式，不得套 peaking 的 Q 公式
   （同参最多差 0.48 dB）。
 
-## 3. 渲染映射（tspi-channelmap render → CamillaDSP config）
+## 3. 渲染映射（khaen-channelmap render → CamillaDSP config）
 
 | profile peq | CamillaDSP filter parameters |
 | --- | --- |
@@ -55,7 +55,7 @@ CamillaDSP 4.1.3 校验 `Slope must be <= 12.0`（`biquad.rs` check_slope）。�
 
 ## 5. 示例（profile 片段）
 
-    schema: tspi-channelmap/v2
+    schema: khaen-channelmap/v2
     version: 2
     output:
       device: auto
@@ -75,8 +75,8 @@ CamillaDSP 4.1.3 校验 `Slope must be <= 12.0`（`biquad.rs` check_slope）。�
 
 CLI：
 
-    tspi-channelmap validate profile.yml
-    tspi-channelmap render profile.yml -o /run/tspi/camilladsp.yml --playback-device hw:motu,0
+    khaen-channelmap validate profile.yml
+    khaen-channelmap render profile.yml -o /run/khaen/camilladsp.yml --playback-device hw:motu,0
 
 ## 6. producer → profile 的写入规则（CONTRACT §4.1）
 

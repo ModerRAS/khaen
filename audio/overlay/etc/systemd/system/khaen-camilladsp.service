@@ -1,0 +1,35 @@
+[Unit]
+Description=khaen-audio: CamillaDSP (DSP engine, output -> MOTU UltraLite-mk5)
+Documentation=file:///etc/camilladsp/
+After=khaen-statime-inferno.service khaen-aes67-daemon.service khaen-phc-usrvclock.service
+ConditionPathExists=/run/khaen/camilladsp.yml
+PartOf=khaen-audio.target
+
+[Service]
+Type=simple
+# 默认值（KHAEN_CAMILLADSP_PORT/BIND 等）+ khaen-mode 生成的环境（INFERNO_*）
+EnvironmentFile=-/etc/default/khaen-audio
+EnvironmentFile=-/run/khaen/camilladsp.env
+ExecStart=/usr/local/bin/camilladsp -p ${KHAEN_CAMILLADSP_PORT} -a ${KHAEN_CAMILLADSP_BIND} -l warn --gain1=-120 --gain2=0 /run/khaen/camilladsp.yml
+Restart=on-failure
+RestartSec=3
+
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+Nice=-10
+
+CapabilityBoundingSet=CAP_SYS_NICE CAP_IPC_LOCK CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_SYS_NICE CAP_IPC_LOCK
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+# 必须与 statime 共享 /tmp（usrvclock socket: /tmp/ptp-usrvclock）
+PrivateTmp=no
+ReadWritePaths=/run/khaen /tmp /var/lib/khaen
+DeviceAllow=/dev/snd/* rw
+ProtectClock=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

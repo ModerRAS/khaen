@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Board SSH helper for tspi-audio-dsp (paramiko, no ssh.exe quoting).
+"""Board SSH helper for khaen-audio-dsp (paramiko, no ssh.exe quoting).
 
 Usage:
   python board.py status
-  python board.py run --cmd "systemctl is-active tspi-soak12.service"
+  python board.py run --cmd "systemctl is-active khaen-soak12.service"
   python board.py put --local file --remote /tmp/file
-  python board.py get --remote /var/lib/tspi-soak/status.csv --local status.csv
+  python board.py get --remote /var/lib/khaen-soak/status.csv --local status.csv
   python board.py reboot
-Environment/defaults: host 192.0.2.215, user root, key deploy/ssh/tspi_audio_ed25519.
+Environment/defaults: host 192.0.2.215, user root, key deploy/ssh/khaen_audio_ed25519.
 """
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from pathlib import Path
 
 import paramiko
 
-ROOT = Path(__file__).resolve().parents[2]  # projects/tspi-audio-dsp
-DEFAULT_KEY = ROOT / "deploy" / "ssh" / "tspi_audio_ed25519"
-DEFAULT_HOST = os.environ.get("TSPI_HOST", "192.0.2.215")
-DEFAULT_USER = os.environ.get("TSPI_USER", "root")
+ROOT = Path(__file__).resolve().parents[2]  # projects/khaen-audio-dsp
+DEFAULT_KEY = ROOT / "deploy" / "ssh" / "khaen_audio_ed25519"
+DEFAULT_HOST = os.environ.get("KHAEN_HOST", "192.0.2.215")
+DEFAULT_USER = os.environ.get("KHAEN_USER", "root")
 
 
 def connect(args):
@@ -51,8 +51,8 @@ def run(client, cmd: str, timeout: float = 60.0) -> tuple[int, str, str]:
 def cmd_status(client, args) -> int:
     cmds = [
         ("host", "hostname; date '+%F %T %z'; uptime"),
-        ("soak", "systemctl is-active tspi-soak12.service 2>&1; systemctl show tspi-soak12.service -p ActiveState -p SubState -p ExecMainStartTimestamp 2>&1"),
-        ("xrun", "tail -n 3 /var/lib/tspi-soak/status.csv 2>&1"),
+        ("soak", "systemctl is-active khaen-soak12.service 2>&1; systemctl show khaen-soak12.service -p ActiveState -p SubState -p ExecMainStartTimestamp 2>&1"),
+        ("xrun", "tail -n 3 /var/lib/khaen-soak/status.csv 2>&1"),
         ("audio", "cat /proc/asound/cards 2>&1"),
         ("kernel", "uname -a; cat /sys/kernel/realtime 2>&1"),
     ]
@@ -99,7 +99,7 @@ def cmd_reboot(client, args) -> int:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="tspi-audio-dsp board SSH helper")
+    p = argparse.ArgumentParser(description="khaen-audio-dsp board SSH helper")
     p.add_argument("--host", default=DEFAULT_HOST)
     p.add_argument("--user", default=DEFAULT_USER)
     p.add_argument("--port", type=int, default=22)

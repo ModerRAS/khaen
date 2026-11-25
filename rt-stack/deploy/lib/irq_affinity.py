@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TSPI IRQ 亲和检查（task-192；deploy 侧 T45 依赖 IRQ 放置前置的最小检查器）。
+"""KHAEN IRQ 亲和检查（task-192；deploy 侧 T45 依赖 IRQ 放置前置的最小检查器）。
 
 背景（task-189 实测，证据 evidence/board-irq-affinity/）：
   T45 scheduler plan() 要求 worker 依赖 IRQ（bit0/1 USB、bit2 PTP、bit3 eth）不落在
@@ -24,7 +24,7 @@ import json
 import os
 import sys
 
-SCHEMA = 'tspi-rt-stack/irq-affinity-check/v1'
+SCHEMA = 'khaen-rt-stack/irq-affinity-check/v1'
 DEFAULT_PINS = '58:1 56:2 57:3'
 DEFAULT_DSP = '4,5,6,7'
 DEFAULT_T45 = 'usb=58,ptp=56,eth=56'

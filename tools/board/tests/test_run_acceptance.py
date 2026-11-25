@@ -22,9 +22,9 @@ T1_MEASURE = [
     BIN,
     "measure-multi",
     "--out-dir",
-    "/var/lib/tspi-calib/t1",
+    "/var/lib/khaen-calib/t1",
     "--out-prefix",
-    "/var/lib/tspi-calib/t1/t1",
+    "/var/lib/khaen-calib/t1/t1",
     "--loopback-map",
     "9:7",
     "--names",
@@ -100,15 +100,15 @@ class FakeTransport:
         if len(self.calls) == 2:
             payload = json.loads((self.out / "run.json").read_text(encoding="utf-8"))
             self.saw_prior_gate = any(
-                cmd.get("argv", [])[:3] == ["systemctl", "is-active", "tspi-soak12.service"]
+                cmd.get("argv", [])[:3] == ["systemctl", "is-active", "khaen-soak12.service"]
                 for cmd in payload["commands"]
             )
-        if argv[:3] == ["systemctl", "is-active", "tspi-soak12.service"]:
+        if argv[:3] == ["systemctl", "is-active", "khaen-soak12.service"]:
             token = argv and self.soak.strip()
             rc = 0 if token == "active" else 3
             text = self.soak if self.soak.endswith("\n") or self.soak == "" else self.soak + "\n"
             return rc, text, ""
-        if argv[:2] == ["systemctl", "is-active"] and argv[-1].startswith("tspi-t5-"):
+        if argv[:2] == ["systemctl", "is-active"] and argv[-1].startswith("khaen-t5-"):
             return 3, "inactive\n", ""
         if argv[:2] == ["systemctl", "show"]:
             return 0, self.show_stdout, ""
@@ -123,7 +123,7 @@ class FakeTransport:
         if argv and argv[0] == "grep" and "chunksize:" in argv:
             shown = self.lock_chunk if self.lock_chunk is not None else self.chunk
             return 0, f"4:  chunksize: {shown}\n", ""
-        if len(argv) > 1 and argv[1] == "measure-multi" and "/var/lib/tspi-calib/t1" in argv:
+        if len(argv) > 1 and argv[1] == "measure-multi" and "/var/lib/khaen-calib/t1" in argv:
             return self.t1_measure_rc, "measure-multi done\n", ""
         return 0, "", ""
 
@@ -161,7 +161,7 @@ class AcceptanceTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--capture-channels") + 1], "1")
             self.assertEqual(argv[argv.index("--mic") + 1], "umik")
             self.assertEqual(argv[argv.index("--playback") + 1], "hw:4,0")
-            remote = f"/var/lib/tspi-calib/t2/run{index}"
+            remote = f"/var/lib/khaen-calib/t2/run{index}"
             self.assertEqual(argv[argv.index("--out-dir") + 1], remote)
             self.assertEqual(argv[argv.index("--out-prefix") + 1], remote)
             self.assertNotIn("--loopback-map", argv)
@@ -205,24 +205,24 @@ class AcceptanceTests(unittest.TestCase):
     def test_t5_argv_64_and_128_are_separate(self) -> None:
         self.assertEqual(
             ra.t5_sed_argv(64),
-            ["sed", "-i", "s/chunksize: 128/chunksize: 64/", "/var/lib/tspi-soak/camilla.yml"],
+            ["sed", "-i", "s/chunksize: 128/chunksize: 64/", "/var/lib/khaen-soak/camilla.yml"],
         )
         self.assertEqual(
             ra.t5_sed_argv(128),
-            ["sed", "-i", "s/chunksize: 64/chunksize: 128/", "/var/lib/tspi-soak/camilla.yml"],
+            ["sed", "-i", "s/chunksize: 64/chunksize: 128/", "/var/lib/khaen-soak/camilla.yml"],
         )
         self.assertEqual(
             ra.t5_systemd_argv(64),
             [
                 "systemd-run",
-                "--unit=tspi-t5-64",
+                "--unit=khaen-t5-64",
                 "--property=Type=simple",
                 "/bin/bash",
-                "/var/lib/tspi-soak/soak12.sh",
+                "/var/lib/khaen-soak/soak12.sh",
                 "1",
             ],
         )
-        self.assertEqual(ra.t5_systemd_argv(128)[1], "--unit=tspi-t5-128")
+        self.assertEqual(ra.t5_systemd_argv(128)[1], "--unit=khaen-t5-128")
         self.assertNotEqual(ra.t5_systemd_argv(64), ra.t5_systemd_argv(128))
 
     def test_t1_partial_block_uses_ten_layout_outputs(self) -> None:
@@ -265,9 +265,9 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(
             t2_dirs,
             [
-                "/var/lib/tspi-calib/t2/run1",
-                "/var/lib/tspi-calib/t2/run2",
-                "/var/lib/tspi-calib/t2/run3",
+                "/var/lib/khaen-calib/t2/run1",
+                "/var/lib/khaen-calib/t2/run2",
+                "/var/lib/khaen-calib/t2/run3",
             ],
         )
         self.assertIn("t2/run1/FL-ch00.fr.csv", [item.local_rel for item in phases[1].artifacts])
@@ -277,8 +277,8 @@ class AcceptanceTests(unittest.TestCase):
         self.assertNotIn("--negative-controls", merge_argv)
         t5 = [phase for phase in phases if phase.tier == "t5"]
         self.assertEqual([phase.subrun for phase in t5], ["chunksize-64", "chunksize-128"])
-        self.assertEqual(t5[0].meta["unit"], "tspi-t5-64")
-        self.assertEqual(t5[1].meta["unit"], "tspi-t5-128")
+        self.assertEqual(t5[0].meta["unit"], "khaen-t5-64")
+        self.assertEqual(t5[1].meta["unit"], "khaen-t5-128")
         self.assertNotEqual(t5[0].meta["remote_dir"], t5[1].meta["remote_dir"])
         for phase in phases:
             for step in phase.steps:
@@ -320,7 +320,7 @@ class AcceptanceTests(unittest.TestCase):
             )
             payload = json.loads((out / "run.json").read_text(encoding="utf-8"))
         self.assertEqual(code, 3)
-        self.assertEqual(fake.calls, [["systemctl", "is-active", "tspi-soak12.service"]])
+        self.assertEqual(fake.calls, [["systemctl", "is-active", "khaen-soak12.service"]])
         self.assertIn("UNSAFE", stderr)
         self.assertTrue(fake.closed)
         self.assertEqual(payload["exit_code"], 3)
@@ -335,7 +335,7 @@ class AcceptanceTests(unittest.TestCase):
             diag = json.dumps({"isolation_other_max_db": -62.5}).encode("utf-8")
             fake = FakeTransport(
                 out,
-                files={"/var/lib/tspi-calib/t1/OUT9_IN7-ch08.diag.json": diag},
+                files={"/var/lib/khaen-calib/t1/OUT9_IN7-ch08.diag.json": diag},
             )
             code, _stdout, stderr = self.run_main(
                 ["t1", "--out", str(out), "--key", str(_key(root))],
@@ -402,8 +402,8 @@ class AcceptanceTests(unittest.TestCase):
         for tier in ("t1", "t2", "t4", "t5"):
             self.assertIn(f"TIER {tier}", text)
         self.assertIn("--loopback-map 9:7", text)
-        self.assertIn("--unit=tspi-t5-64", text)
-        self.assertIn("--unit=tspi-t5-128", text)
+        self.assertIn("--unit=khaen-t5-64", text)
+        self.assertIn("--unit=khaen-t5-128", text)
         self.assertIn("soak12.sh 1", text)
         self.assertNotIn("--negative-controls", text)
         self.assertTrue(dry_payload["dry_run"])
@@ -446,10 +446,10 @@ class AcceptanceTests(unittest.TestCase):
             root = Path(tmp)
             out = root / "out"
             files = {
-                "/var/lib/tspi-calib/t5/chunksize-64/camilla.log": b"period_size: 64\nbuffer_size: 256\n",
-                "/var/lib/tspi-calib/t5/chunksize-128/camilla.log": b"period_size: 128\nbuffer_size: 512\n",
-                "/var/lib/tspi-calib/t5/chunksize-64/status.csv": b"ts,xrun_total\n0,0\n",
-                "/var/lib/tspi-calib/t5/chunksize-128/status.csv": b"ts,xrun_total\n0,1\n",
+                "/var/lib/khaen-calib/t5/chunksize-64/camilla.log": b"period_size: 64\nbuffer_size: 256\n",
+                "/var/lib/khaen-calib/t5/chunksize-128/camilla.log": b"period_size: 128\nbuffer_size: 512\n",
+                "/var/lib/khaen-calib/t5/chunksize-64/status.csv": b"ts,xrun_total\n0,0\n",
+                "/var/lib/khaen-calib/t5/chunksize-128/status.csv": b"ts,xrun_total\n0,1\n",
             }
             fake = FakeTransport(out, files=files)
             code, _stdout, stderr = self.run_main(["t5", "--out", str(out), "--key", str(_key(root))], fake)
@@ -470,8 +470,8 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(runs[0]["meta"]["chunksize"], 64)
         self.assertEqual(runs[1]["meta"]["chunksize"], 128)
         self.assertEqual(runs[0]["meta"]["chunksize_source"], "camilla.yml readback")
-        self.assertEqual(runs[0]["meta"]["unit"], "tspi-t5-64")
-        self.assertEqual(runs[1]["meta"]["service"], "tspi-t5-128.service")
+        self.assertEqual(runs[0]["meta"]["unit"], "khaen-t5-64")
+        self.assertEqual(runs[1]["meta"]["service"], "khaen-t5-128.service")
         self.assertEqual(runs[0]["meta"]["period_size"], 64)
         self.assertEqual(runs[0]["meta"]["buffer_size"], 256)
         self.assertEqual(runs[1]["meta"]["period_size"], 128)
@@ -501,7 +501,7 @@ class AcceptanceTests(unittest.TestCase):
             code, _stdout, _stderr = self.run_main(["t5", "--out", str(out), "--key", str(_key(root))], fake)
         self.assertEqual(code, 1)
         units = [call[1] for call in fake.calls if call and call[0] == "systemd-run"]
-        self.assertEqual(units, ["--unit=tspi-t5-64"])
+        self.assertEqual(units, ["--unit=khaen-t5-64"])
 
     def test_run_json_schema_and_atomic_update(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -550,8 +550,8 @@ class AcceptanceTests(unittest.TestCase):
             root = Path(tmp)
             required_out = root / "req"
             optional_out = root / "opt"
-            required = FakeTransport(required_out, missing={"/var/lib/tspi-calib/t1/OUT9_IN7-ch08.fr.csv"})
-            optional = FakeTransport(optional_out, missing={"/var/lib/tspi-calib/t1/cuemix-routing.png"})
+            required = FakeTransport(required_out, missing={"/var/lib/khaen-calib/t1/OUT9_IN7-ch08.fr.csv"})
+            optional = FakeTransport(optional_out, missing={"/var/lib/khaen-calib/t1/cuemix-routing.png"})
             required_code, _stdout, required_err = self.run_main(
                 ["t1", "--out", str(required_out), "--key", str(_key(root))],
                 required,
@@ -573,7 +573,7 @@ class AcceptanceTests(unittest.TestCase):
             root = Path(tmp)
             out = root / "out"
             report = json.dumps({"environment": {"chunksize": 64}, "schema": "khaen-calibration-report/v1"}).encode()
-            fake = FakeTransport(out, files={"/var/lib/tspi-calib/t4/calibration.yml.report.json": report})
+            fake = FakeTransport(out, files={"/var/lib/khaen-calib/t4/calibration.yml.report.json": report})
             code, _stdout, stderr = self.run_main(
                 ["t4", "--out", str(out), "--key", str(_key(root)), "--pairs", PAIRS],
                 fake,
@@ -600,7 +600,7 @@ class AcceptanceTests(unittest.TestCase):
             stopped = json.loads((out / "run.json").read_text(encoding="utf-8"))
         self.assertEqual(code, 1)
         self.assertIn("TIER FAIL", stderr)
-        self.assertFalse(any("/var/lib/tspi-calib/t2/" in " ".join(call) for call in fake.calls))
+        self.assertFalse(any("/var/lib/khaen-calib/t2/" in " ".join(call) for call in fake.calls))
         self.assertEqual(stopped["tiers"]["t1"]["status"], "failed")
         self.assertEqual(stopped["tiers"]["t2"]["status"], "skipped")
 
@@ -666,7 +666,7 @@ class AcceptanceTests(unittest.TestCase):
             code = ra.main(["--help"])
         self.assertEqual(code, 0)
         self.assertIn("--dry-run", stdout.getvalue())
-        self.assertIn("tspi-soak12", stdout.getvalue())
+        self.assertIn("khaen-soak12", stdout.getvalue())
         self.assertNotIn("paramiko", sys.modules)
         source = Path(ra.__file__).read_text(encoding="utf-8")
         self.assertNotIn("shell=True", source)

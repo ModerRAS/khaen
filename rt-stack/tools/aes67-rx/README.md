@@ -1,7 +1,7 @@
 # aes67-rx —— dsp-host AES67 接收端运行二进制
 
 > 证据任务：`evidence/calib-chain-20261121/aes67-rx-20261121/`（2026-11-21）
-> 定位：**独立二进制**，不替换/不改 `/opt/tspi-rt-stack` 生产二进制；MOTU 独占由测试窗口保证。
+> 定位：**独立二进制**，不替换/不改 `/opt/khaen-rt-stack` 生产二进制；MOTU 独占由测试窗口保证。
 
 ## 链路
 

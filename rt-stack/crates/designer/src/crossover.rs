@@ -84,7 +84,7 @@
 //!
 //! # 未测项（NOT_RUN，不得当已验证）
 //!
-//! 无板端/ALSA/CueMix/实时/soak；无 tspi-fir/v1 WAV/manifest 落盘（T55）；无与 T12 融合/T23 图
+//! 无板端/ALSA/CueMix/实时/soak；无 khaen-fir/v1 WAV/manifest 落盘（T55）；无与 T12 融合/T23 图
 //! 节点/T56 资源计划的集成；f32 运行期量化误差复算归 T55/T22；本文件只做 f64 离线设计。
 //!
 //! 测试（私有，include! 内联，integrator 无需注册）：
@@ -101,7 +101,7 @@ use std::fmt;
 pub const FAMILY: &str = "crossover";
 
 /// 系数/manifest schema（T55 报告器消费，本模块不落盘）。
-pub const FIR_SCHEMA: &str = "tspi-fir/v1";
+pub const FIR_SCHEMA: &str = "khaen-fir/v1";
 
 /// 默认运行采样率（spec §1.1）。
 pub const DEFAULT_FS: f64 = 48_000.0;

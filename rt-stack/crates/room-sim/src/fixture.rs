@@ -18,7 +18,7 @@ use crate::sha256::{digest, to_hex};
 use crate::wav::decode_f32_mono;
 
 /// 支持的夹具格式版本。
-pub const FIXTURE_FORMAT_V1: &str = "tspi-roomforge-mimo-fixture/v1";
+pub const FIXTURE_FORMAT_V1: &str = "khaen-roomforge-mimo-fixture/v1";
 /// rerender 对拍阈值（max|Δ| 与相对误差，WAV 单位）。
 pub const RERENDER_TOLERANCE: f64 = 1e-5;
 

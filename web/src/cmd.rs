@@ -2,7 +2,7 @@
 //!
 //! 真机通过 tokio::process 启动 systemctl / pmc / aplay / ip 等命令；
 //! mock 模式使用 `MockCommandRunner`，任何命令调用都返回错误，
-//! 确保 TSPI_MOCK=1 时绝不会真的操作系统。
+//! 确保 KHAEN_MOCK=1 时绝不会真的操作系统。
 
 use std::time::Duration;
 

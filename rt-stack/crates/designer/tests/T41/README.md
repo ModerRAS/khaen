@@ -34,7 +34,7 @@ public_registration.rs**（会重复注册/编译失败，因为文件按模块�
 - shelf S/Q 语义：q 字段承载 S（不是 Q），slope=12*S ≤12，中心修正=半增益；
 - 类型/界限：未知 type 拒绝（E_PEQ_TYPE）、freq/gain/q/fs 界限、通道名正则、契约采样率；
 - 预测/精度：DC/Nyquist、极点半径 ≤0.999999、V15 f32 量化偏差与 requires_f64、V15 极点半径；
-- 导出：tspi-modal-peq/v1 字段/确定性/≥17 位有效数字，导出 b/a 与字段自洽（≤0.1 dB/1°）；
+- 导出：khaen-modal-peq/v1 字段/确定性/≥17 位有效数字，导出 b/a 与字段自洽（≤0.1 dB/1°）；
 - 段数/策略：模态 peaking ≤10、每 shelf ≤1、总 ≤32、模态只切、宽带 boost cap（0/+3 dB）与 allow_boost；
 - IIR 不硬截 FIR：L_req 公式（r=0.999→11508、r=0.9995→23021）、极限模态段 E_PEQ_FIR_TAIL + required_len、温和段 4096 可通过；
 - 原图比对：2a/2b 分报、平坦通过、检出设计改善、过切/正增益 2a FAIL、模态带外新增窄缺口 2b FAIL、1/24 oct 原始分辨率另报（6.833 vs 1/3 oct 2.873）、部分覆盖 warning、非法曲线拒绝；

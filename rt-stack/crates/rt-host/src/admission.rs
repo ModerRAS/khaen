@@ -87,7 +87,7 @@
 //!
 //! 运行：cargo test -p khaen-rt-host admission（executed > 0）。
 
-use khaen_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
+use khaen_core::abi::{KhaenDiagFirV1, KhaenPathV1, KhaenRoleV1};
 use khaen_core::rt::{
     fft_size, max_partitions, PlanVersion, PlanView, RtStatus, BLOCK_SIZES, EVENT_RING_SLOTS,
     HIST_BUCKETS, MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_MATRIX_PATHS, MAX_OUTPUT_CHANNELS,
@@ -151,27 +151,27 @@ pub const fn precreated_stacks_bytes(workers: u8) -> u64 {
     precreated_threads(workers) * STACK_BYTES_PER_THREAD
 }
 
-/// §11.13 TspiRtControlV1 字节数。
+/// §11.13 KhaenRtControlV1 字节数。
 pub const RT_CONTROL_BYTES: u64 = 128;
-/// §11.13 TspiSwapAckV1 字节数。
+/// §11.13 KhaenSwapAckV1 字节数。
 pub const SWAP_ACK_BYTES: u64 = 64;
-/// §11.13 TspiEventRingLaneV1 字节数。
+/// §11.13 KhaenEventRingLaneV1 字节数。
 pub const EVENT_LANE_HEADER_BYTES: u64 = 64;
 /// 事件环 lane 数（§8.1：固定 8 lane）。
 pub const EVENT_LANES: u64 = 8;
-/// §11.5 TspiEventV1 记录字节数。
+/// §11.5 KhaenEventV1 记录字节数。
 pub const EVENT_RECORD_BYTES: u64 = 64;
-/// §11.13 TspiWorkerRegsV1 字节数。
+/// §11.13 KhaenWorkerRegsV1 字节数。
 pub const WORKER_REGS_BYTES: u64 = 128;
-/// §11.13 TspiMasterRegsV1 字节数。
+/// §11.13 KhaenMasterRegsV1 字节数。
 pub const MASTER_REGS_BYTES: u64 = 128;
-/// §11.13 TspiCrossfadeBudgetV1 字节数。
+/// §11.13 KhaenCrossfadeBudgetV1 字节数。
 pub const CROSSFADE_BUDGET_BYTES: u64 = 64;
 /// §3.4 ACK_SLOTS（固定 ack 槽数，与 playback ring 对齐）。
 pub const ACK_SLOTS: u64 = 4;
-/// §11.6 TspiBlockAckV1 字节数（ack 槽元素）。
+/// §11.6 KhaenBlockAckV1 字节数（ack 槽元素）。
 pub const BLOCK_ACK_BYTES: u64 = 64;
-/// §11.8 TspiWorkerStatsV1 字节数。
+/// §11.8 KhaenWorkerStatsV1 字节数。
 pub const WORKER_STATS_BYTES: u64 = 64;
 /// §8.4 每 worker 每 metric 固定直方图 metric 数。
 pub const HIST_METRICS: u64 = 6;
@@ -186,15 +186,15 @@ pub const FFT_COMPLEX_BYTES: u64 = 8;
 /// f32 样本字节数（RT arena payload）。
 pub const SAMPLE_BYTES: u64 = 4;
 
-/// §11.10 PlanArena header 字节数（TspiPlanHeaderV1）。
+/// §11.10 PlanArena header 字节数（KhaenPlanHeaderV1）。
 pub const PLAN_HEADER_BYTES: u64 = 128;
-/// §11.10 path 表项字节数（TspiPathV1）。
-pub const PATH_ENTRY_BYTES: u64 = core::mem::size_of::<TspiPathV1>() as u64;
-/// §11.10 diag FIR 表项字节数（TspiDiagFirV1）。
-pub const DIAG_ENTRY_BYTES: u64 = core::mem::size_of::<TspiDiagFirV1>() as u64;
-/// §11.10 role 表项字节数（TspiRoleV1）。
-pub const ROLE_ENTRY_BYTES: u64 = core::mem::size_of::<TspiRoleV1>() as u64;
-/// §11.3 TspiBlockDescV1（SPSC desc 槽元素）字节数。
+/// §11.10 path 表项字节数（KhaenPathV1）。
+pub const PATH_ENTRY_BYTES: u64 = core::mem::size_of::<KhaenPathV1>() as u64;
+/// §11.10 diag FIR 表项字节数（KhaenDiagFirV1）。
+pub const DIAG_ENTRY_BYTES: u64 = core::mem::size_of::<KhaenDiagFirV1>() as u64;
+/// §11.10 role 表项字节数（KhaenRoleV1）。
+pub const ROLE_ENTRY_BYTES: u64 = core::mem::size_of::<KhaenRoleV1>() as u64;
+/// §11.3 KhaenBlockDescV1（SPSC desc 槽元素）字节数。
 pub const DESC_BYTES: u64 = 64;
 
 /// §11.13 控制面共享结构字节（不含 CONTROL_RESERVE_BYTES）。

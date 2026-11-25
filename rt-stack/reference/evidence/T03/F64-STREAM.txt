@@ -1,5 +1,5 @@
 $ python.exe tools/ref_f64.py --case fixtures/cases/C10_streaming_128.json --mode streaming --block 64 --summary
-[cwd] C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack\reference
+[cwd] C:\WorkSpace\Claw\projects\khaen-audio-dsp\rt-stack\reference
 [exit_code] 0
 --- stdout ---
 case=C10_streaming_128 mode=streaming expected_len=130 channels=2

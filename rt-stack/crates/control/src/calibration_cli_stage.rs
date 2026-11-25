@@ -1,14 +1,14 @@
-//! [NONRT] CLI stage backend —— 真实音频校准（TSPI_CAL_STAGE=cli）。
+//! [NONRT] CLI stage backend —— 真实音频校准（KHAEN_CAL_STAGE=cli）。
 //!
-//! 角色：daemon 在 CLI 模式（env \`TSPI_CAL_STAGE=cli\` / toml \`[calibration] stage="cli"\`）
+//! 角色：daemon 在 CLI 模式（env \`KHAEN_CAL_STAGE=cli\` / toml \`[calibration] stage="cli"\`）
 //! 构造本 backend 注入 T60 JobManager（khaen_calibration::job::JobManager）。每个 JobStage
-//! 都调用本机脚本 \`/usr/local/lib/tspi/calib-stage.sh <stage> <job_dir> <json_args>\`：
+//! 都调用本机脚本 \`/usr/local/lib/khaen/calib-stage.sh <stage> <job_dir> <json_args>\`：
 //! 真实 MOTU/UMIK 测量（measure-multi）、Farina 分析、PEQ 拟合、merge、validate、file apply。
 //!
 //! ## 诚实边界（证据必须照抄）
 //! - 测量/分析/拟合/合并是真实音频路径（synthetic=false, real_audio=true）；
 //! - **apply 是 file-backend**：只把 calibration.yml 写到
-//!   \`/var/lib/tspi-rt-stack/calibration/active.yml\` 并记录 state，host 当前没有加载
+//!   \`/var/lib/khaen-rt-stack/calibration/active.yml\` 并记录 state，host 当前没有加载
 //!   calibration.yml 的 PEQ/plan 路径 ⇒ 状态 = **NOT_APPLIED_TO_AUDIO**，不是 actual；
 //! - retest 是真实重测，但因为 apply 未进音频路径，测的是未加滤波的硬件（见 result.json）。
 //!
@@ -41,15 +41,15 @@ pub const CAL_PORT_BACKEND_CLI: &str = "cli-stage-script+real-measure+file-apply
 pub const CAL_PORT_NOTE_CLI: &str =
     "T60 JobManager 状态机真实执行；preflight/measure/analyze/fit/merge=真实 MOTU+UMIK 音频(CLI stage script)；apply=file-backend active.yml，host 尚未消费 calibration.yml ⇒ NOT_APPLIED_TO_AUDIO（不是 actual）";
 
-/// 默认 stage 脚本路径（可被 env \`TSPI_CAL_STAGE_SCRIPT\` 覆盖）。
-pub const DEFAULT_STAGE_SCRIPT: &str = "/usr/local/lib/tspi/calib-stage.sh";
-/// 默认 host unit（可被 env \`TSPI_CAL_HOST_UNIT\` 覆盖）。
+/// 默认 stage 脚本路径（可被 env \`KHAEN_CAL_STAGE_SCRIPT\` 覆盖）。
+pub const DEFAULT_STAGE_SCRIPT: &str = "/usr/local/lib/khaen/calib-stage.sh";
+/// 默认 host unit（可被 env \`KHAEN_CAL_HOST_UNIT\` 覆盖）。
 pub const DEFAULT_HOST_UNIT: &str = "khaen-rt-host";
-/// 默认校准状态根（可被 env \`TSPI_CAL_ROOT\` 覆盖）。
-pub const DEFAULT_CAL_ROOT: &str = "/var/lib/tspi-rt-stack/calibration";
-/// 默认 mute drop-in（可被 env \`TSPI_CAL_SAFE_MUTE_ENV\` 覆盖）。
-pub const DEFAULT_SAFE_MUTE_ENV: &str = "/etc/tspi-rt-stack/90-safe-mute.env";
-/// stage 脚本单次执行上限（默认 15 分钟；env \`TSPI_CAL_STAGE_TIMEOUT_SECS\` 覆盖）。
+/// 默认校准状态根（可被 env \`KHAEN_CAL_ROOT\` 覆盖）。
+pub const DEFAULT_CAL_ROOT: &str = "/var/lib/khaen-rt-stack/calibration";
+/// 默认 mute drop-in（可被 env \`KHAEN_CAL_SAFE_MUTE_ENV\` 覆盖）。
+pub const DEFAULT_SAFE_MUTE_ENV: &str = "/etc/khaen-rt-stack/90-safe-mute.env";
+/// stage 脚本单次执行上限（默认 15 分钟；env \`KHAEN_CAL_STAGE_TIMEOUT_SECS\` 覆盖）。
 pub const DEFAULT_STAGE_TIMEOUT_SECS: u64 = 900;
 
 /// CLI stage backend 配置（daemon 启动时由 env 决定；构造期不触碰设备）。
@@ -92,34 +92,34 @@ impl CliStageConfig {
     /// 从环境变量构造（缺省用默认；未知值不静默改变安全口径）。
     pub fn from_env() -> Self {
         let mut config = CliStageConfig::default();
-        if let Ok(value) = std::env::var("TSPI_CAL_STAGE_SCRIPT") {
+        if let Ok(value) = std::env::var("KHAEN_CAL_STAGE_SCRIPT") {
             if !value.trim().is_empty() {
                 config.script = PathBuf::from(value);
             }
         }
-        if let Ok(value) = std::env::var("TSPI_CAL_CHANNELS") {
+        if let Ok(value) = std::env::var("KHAEN_CAL_CHANNELS") {
             if !value.trim().is_empty() {
                 config.channels = value;
             }
         }
-        if let Ok(value) = std::env::var("TSPI_CAL_NAMES") {
+        if let Ok(value) = std::env::var("KHAEN_CAL_NAMES") {
             if !value.trim().is_empty() {
                 config.names = value;
             }
         }
-        if let Ok(value) = std::env::var("TSPI_CAL_LEVEL_DBFS") {
+        if let Ok(value) = std::env::var("KHAEN_CAL_LEVEL_DBFS") {
             if let Ok(level) = value.trim().parse::<f32>() {
                 if (-60.0..=0.0).contains(&level) {
                     config.drive_level_dbfs = level;
                 }
             }
         }
-        if let Ok(value) = std::env::var("TSPI_CAL_REPEATS") {
+        if let Ok(value) = std::env::var("KHAEN_CAL_REPEATS") {
             if let Ok(repeats) = value.trim().parse::<u32>() {
                 config.repeats = repeats.clamp(1, 8);
             }
         }
-        if let Ok(value) = std::env::var("TSPI_CAL_STAGE_TIMEOUT_SECS") {
+        if let Ok(value) = std::env::var("KHAEN_CAL_STAGE_TIMEOUT_SECS") {
             if let Ok(secs) = value.trim().parse::<u64>() {
                 config.timeout_secs = secs.max(30);
             }
@@ -367,7 +367,10 @@ impl CliStageBackend {
                 }
                 Err(error) => {
                     // 已登记过同内容/不可变冲突不致命；其他错误也只在 stderr 提示，不伪造成功。
-                    eprintln!("cli-stage: artifact {relative} not recorded: {}", error.message);
+                    eprintln!(
+                        "cli-stage: artifact {relative} not recorded: {}",
+                        error.message
+                    );
                     self.recorded.insert(relative);
                 }
             }
@@ -490,16 +493,16 @@ pub struct CliSafety {
 impl CliSafety {
     /// 从 env 构造（不执行任何命令）。
     pub fn from_env() -> Self {
-        let calib_root = std::env::var("TSPI_CAL_ROOT")
+        let calib_root = std::env::var("KHAEN_CAL_ROOT")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CAL_ROOT));
-        let host_unit = std::env::var("TSPI_CAL_HOST_UNIT")
+        let host_unit = std::env::var("KHAEN_CAL_HOST_UNIT")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_HOST_UNIT.to_string());
-        let safe_mute_env = std::env::var("TSPI_CAL_SAFE_MUTE_ENV")
+        let safe_mute_env = std::env::var("KHAEN_CAL_SAFE_MUTE_ENV")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .map(PathBuf::from)
@@ -576,7 +579,7 @@ impl CliSafety {
 
     fn mute_configured(&self) -> bool {
         fs::read_to_string(&self.safe_mute_env)
-            .map(|text| text.contains("TSPI_HOST_SAFE_MODE=mute"))
+            .map(|text| text.contains("KHAEN_HOST_SAFE_MODE=mute"))
             .unwrap_or(false)
     }
 
@@ -682,8 +685,16 @@ mod tests {
         for stage in JobStage::ALL {
             let name = script_stage(stage);
             assert!(
-                ["preflight", "measure", "analyze", "fit", "merge", "apply", "retest"]
-                    .contains(&name),
+                [
+                    "preflight",
+                    "measure",
+                    "analyze",
+                    "fit",
+                    "merge",
+                    "apply",
+                    "retest"
+                ]
+                .contains(&name),
                 "stage {} mapped to unexpected script stage {name}",
                 stage.as_str()
             );
@@ -723,7 +734,8 @@ mod tests {
 
     #[test]
     fn cli_safety_construction_does_not_run_commands() {
-        let safety = CliSafety::with_paths("khaen-rt-host", "/tmp/does-not-exist-cal", "/tmp/no.env");
+        let safety =
+            CliSafety::with_paths("khaen-rt-host", "/tmp/does-not-exist-cal", "/tmp/no.env");
         assert_eq!(safety.last_good_version(), None);
         assert!(!safety.mute_configured());
     }

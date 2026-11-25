@@ -5,7 +5,7 @@
 - CamillaDSP 4.1.3（Windows 文件后端用官方 windows-amd64 包；板端 /usr/local/bin/camilladsp）。
 - Python 3 + PyYAML：跑生成器与文件后端脚本（板端自带 python3-yaml）。
 - numpy + scipy：仅开发机做信号生成与结果分析（板端不装也可，分析可回传开发机）。
-- tspi-channelmap：renderer 变体需要（板端 OEM v5 已含修复版）。
+- khaen-channelmap：renderer 变体需要（板端 OEM v5 已含修复版）。
 
 ## 2. 测试信号（tests/gen_signals.py）
 
@@ -24,9 +24,9 @@
 python3 tests/gen_signals.py --out /tmp/upmix-signals
 python3 tests/run_file_backend.py --workdir /tmp/upmix-run \
   --signals /tmp/upmix-signals --camilladsp /path/to/camilladsp \
-  --tspi-upmix ./tspi-upmix \
-  --layout-presets /etc/tspi-audio/layout-presets.yml \
-  --channelmap /usr/local/bin/tspi-channelmap \
+  --khaen-upmix ./khaen-upmix \
+  --layout-presets /etc/khaen-audio/layout-presets.yml \
+  --channelmap /usr/local/bin/khaen-channelmap \
   --variants standalone,renderer \
   --presets upmix-4.1.2-music,upmix-4.1.2-movie,upmix-4.1.2-wide,upmix-5.3.2-music,upmix-5.3.2-movie,upmix-5.3.2-wide
 python3 tests/analyze.py --workdir /tmp/upmix-run --report /tmp/upmix-run/report.md
@@ -66,11 +66,11 @@ python3 tests/analyze.py --workdir /tmp/upmix-run --report /tmp/upmix-run/report
 只跑文件后端与配置校验，**不占声卡、不启动服务**。
 
 ```bash
-# 开发机把 signals/、tests/、tspi-upmix 传到板端 /tmp/upmix-test 后：
+# 开发机把 signals/、tests/、khaen-upmix 传到板端 /tmp/upmix-test 后：
 python3 tests/board_time.py --workdir /tmp/upmix-test/run \
   --signals /tmp/upmix-test/signals \
-  --tspi-upmix /usr/local/bin/tspi-upmix \
-  --layout-presets /etc/tspi-audio/layout-presets.yml \
+  --khaen-upmix /usr/local/bin/khaen-upmix \
+  --layout-presets /etc/khaen-audio/layout-presets.yml \
   --camilladsp /usr/local/bin/camilladsp \
   --presets upmix-4.1.2-music,upmix-5.3.2-music \
   --chunksizes 128,256,512,1024,2048
@@ -78,9 +78,9 @@ python3 tests/board_time.py --workdir /tmp/upmix-test/run \
 python3 tests/run_file_backend.py --workdir /tmp/upmix-test/run-backend \
   --signals /tmp/upmix-test/signals \
   --camilladsp /usr/local/bin/camilladsp \
-  --tspi-upmix /usr/local/bin/tspi-upmix \
-  --layout-presets /etc/tspi-audio/layout-presets.yml \
-  --channelmap /usr/local/bin/tspi-channelmap --channelmap-python python3 \
+  --khaen-upmix /usr/local/bin/khaen-upmix \
+  --layout-presets /etc/khaen-audio/layout-presets.yml \
+  --channelmap /usr/local/bin/khaen-channelmap --channelmap-python python3 \
   --variants standalone,renderer \
   --presets upmix-4.1.2-music,upmix-5.3.2-music \
   --signals-filter 'tone_*,noise_pink_stereo.wav,impulse.wav,sine_40hz_center.wav'
@@ -135,8 +135,8 @@ python3 tests/run_file_backend.py --workdir /tmp/upmix-test/run-backend \
 # 开发机生成容器信号（numpy），板端只需上传 WAV
 python3 tests/gen_container_signals.py --out /tmp/container-signals
 
-python3 tests/test_input_mode.py --tspi-upmix ./tspi-upmix \
-  --layout-presets /etc/tspi-audio/layout-presets.yml \
+python3 tests/test_input_mode.py --khaen-upmix ./khaen-upmix \
+  --layout-presets /etc/khaen-audio/layout-presets.yml \
   --signals /tmp/container-signals --camilladsp /usr/local/bin/camilladsp
 ```
 

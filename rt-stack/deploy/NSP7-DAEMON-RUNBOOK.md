@@ -9,11 +9,11 @@
 | 组件 | 仓库源 | 板上安装位置 |
 |---|---|---|
 | systemd unit | `deploy/config/khaen-rt-host-nsp7.service` | `/etc/systemd/system/khaen-rt-host-nsp7.service` |
-| host 配置 | `deploy/config/rt-host-nsp7.toml.example` | `/etc/tspi-rt-stack/rt-host-nsp7.toml` |
-| NSP-first 闸门 | `deploy/config/nsp7-wait-stream.sh` | `/usr/local/lib/tspi-rt-stack/nsp7-wait-stream.sh` |
-| host 二进制 | 板端 `/root/candidate/day-window/bin/khaen-rt-host`（sha f510ed64…） | `/usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host` |
-| NSP SDP | NSP `observed/aes67.sdp` 副本（sha 731ea83c…） | `/var/lib/tspi-rt-stack/nsp-aes67.sdp` |
-| plan | 8-in/7-role identity ABI v1（sha 52f2f3ad…） | `/var/lib/tspi-rt-stack/plans/plan-412-identity.bin` |
+| host 配置 | `deploy/config/rt-host-nsp7.toml.example` | `/etc/khaen-rt-stack/rt-host-nsp7.toml` |
+| NSP-first 闸门 | `deploy/config/nsp7-wait-stream.sh` | `/usr/local/lib/khaen-rt-stack/nsp7-wait-stream.sh` |
+| host 二进制 | 板端 `/root/candidate/day-window/bin/khaen-rt-host`（sha f510ed64…） | `/usr/local/lib/khaen-rt-stack/f510ed64/khaen-rt-host` |
+| NSP SDP | NSP `observed/aes67.sdp` 副本（sha 731ea83c…） | `/var/lib/khaen-rt-stack/nsp-aes67.sdp` |
+| plan | 8-in/7-role identity ABI v1（sha 52f2f3ad…） | `/var/lib/khaen-rt-stack/plans/plan-412-identity.bin` |
 | 操作脚本 | `deploy/tools/nsp7-*.sh` | `/root/aes67-rx-work/tools/` |
 
 /opt 生产二进制 **不复用也不替换**：`775bdb23…` 构建早于 userspace AES67 路径。unit 的 ExecStart 指向
@@ -24,16 +24,16 @@
 ```bash
 # 0) 静音确认（fresh 回读）：koTrim[0..11]=100, kMainTrim=100；UMIK 基线
 # 1) 二进制与数据
-install -d -m 0755 /usr/local/lib/tspi-rt-stack/f510ed64
-install -m 0755 /root/candidate/day-window/bin/khaen-rt-host /usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host
-install -m 0755 nsp7-wait-stream.sh /usr/local/lib/tspi-rt-stack/nsp7-wait-stream.sh
-install -d -m 0755 /var/lib/tspi-rt-stack/plans
-cp /root/aes67-rx-work/chain/plan-412-identity.bin /var/lib/tspi-rt-stack/plans/
-cp /root/aes67-rx-work/chain/nsp-aes67.sdp     /var/lib/tspi-rt-stack/
+install -d -m 0755 /usr/local/lib/khaen-rt-stack/f510ed64
+install -m 0755 /root/candidate/day-window/bin/khaen-rt-host /usr/local/lib/khaen-rt-stack/f510ed64/khaen-rt-host
+install -m 0755 nsp7-wait-stream.sh /usr/local/lib/khaen-rt-stack/nsp7-wait-stream.sh
+install -d -m 0755 /var/lib/khaen-rt-stack/plans
+cp /root/aes67-rx-work/chain/plan-412-identity.bin /var/lib/khaen-rt-stack/plans/
+cp /root/aes67-rx-work/chain/nsp-aes67.sdp     /var/lib/khaen-rt-stack/
 # 2) 配置/unit
-install -m 0644 rt-host-nsp7.toml.example /etc/tspi-rt-stack/rt-host-nsp7.toml
+install -m 0644 rt-host-nsp7.toml.example /etc/khaen-rt-stack/rt-host-nsp7.toml
 install -m 0644 khaen-rt-host-nsp7.service  /etc/systemd/system/khaen-rt-host-nsp7.service
-cp -a /etc/systemd/system/tspi-rt-stack.target /etc/systemd/system/tspi-rt-stack.target.bak-nsp7-$(date +%Y%m%d)
+cp -a /etc/systemd/system/khaen-rt-stack.target /etc/systemd/system/khaen-rt-stack.target.bak-nsp7-$(date +%Y%m%d)
 # 3) 启动关系：target Wants/After 的 khaen-rt-host.service -> khaen-rt-host-nsp7.service（手工编辑或用 evidence installed/ 里的样例）
 # 4) 停旧 standalone rx（释放 5004 + ALSA），再 enable/start
 bash /root/aes67-rx-work/tools/stop-rx.sh
@@ -57,13 +57,13 @@ NSP 中断 >2.1 s → host fail-closed → systemd 2 s 重启 → wrapper 重新
 ```bash
 bash /root/aes67-rx-work/tools/nsp7-status.sh
 systemctl is-active khaen-rt-host-nsp7
-tail -n 3 /var/log/tspi-rt-stack/host-nsp7-run.err      # 期望空
+tail -n 3 /var/log/khaen-rt-stack/host-nsp7-run.err      # 期望空
 ```
 判据：unit active、唯一 1 个 khaen-rt-host、5004 仅 host 持有、card1 pcm0p RUNNING owner=host；
 host 退出报告 `status=ok`、`flow_layout=4.1.2-7ch-sMPTE2110(41,2)`、`jitter_latency_us=64000`、
 `loss_events=0`、`stall_events=0`、`alsa.xruns=0`；CPU 34–37 %（4C）、RSS ≈17.6 MB、xruns=0；
 UMIK 基线（−73…−74 dBFS RMS）。之后每次 host 退出会在
-`/var/log/tspi-rt-stack/host-nsp7-run.jsonl` 追加一份 JSON 报告。
+`/var/log/khaen-rt-stack/host-nsp7-run.jsonl` 追加一份 JSON 报告。
 
 ## 5. 回滚
 
@@ -72,7 +72,7 @@ UMIK 基线（−73…−74 dBFS RMS）。之后每次 host 退出会在
 bash /root/aes67-rx-work/tools/rollback-to-rx.sh
 # 永久：恢复旧 unit/启动关系
 systemctl disable --now khaen-rt-host-nsp7
-cp /etc/systemd/system/tspi-rt-stack.target.bak-nsp7-20261122 /etc/systemd/system/tspi-rt-stack.target
+cp /etc/systemd/system/khaen-rt-stack.target.bak-nsp7-20261122 /etc/systemd/system/khaen-rt-stack.target
 systemctl daemon-reload
 systemctl enable khaen-rt-host.service
 bash /root/aes67-rx-work/tools/start-rx.sh
@@ -103,7 +103,7 @@ bash /root/aes67-rx-work/tools/nsp7-restart-after-mimo.sh
 ```
 
 - **xrun 精确计数只在 host 优雅退出时写入 report**；live 只能验证 `state=RUNNING`、hw_ptr 单调、无 XRUN/SETUP。
-  需要某段运行的 xrun 数时，在该段结束优雅 stop 后读 `/var/log/tspi-rt-stack/host-nsp7-run.jsonl` 最后一行。
+  需要某段运行的 xrun 数时，在该段结束优雅 stop 后读 `/var/log/khaen-rt-stack/host-nsp7-run.jsonl` 最后一行。
 - 2026-11-22 实测：出声窗口 50 s（游戏试听）report = status ok / xruns 0 / underruns 0 / loss 0 / stall 0 /
   not_due 0.17 %；为 MIMO A/B 让出两次（11:32:58、11:34:39），11:46:02 重启并验证 streaming（PID 237769，
   CPU 34.7 %，RSS 18,000 kB，NSP ≈908 pps）。

@@ -6,11 +6,11 @@
 
 1. synthetic    生成确定性合成 analysis/diag JSON 目录树（默认 6 design + 3 validation），
                 全部内容带 SIMULATED 标注；seed/SHA 固定，可重现；
-2. synthetic-ir 生成确定性合成 IR WAV（逐位置/逐通道），供 tspi-cal rt60 生成逐位置
+2. synthetic-ir 生成确定性合成 IR WAV（逐位置/逐通道），供 khaen-cal rt60 生成逐位置
                 RT60 产物（SIMULATED；只用于工具链完整性预演）；
 3. build        输入“按位置命名的 analysis JSON 目录”（如 D1/FL.json … V1/FR.json），
                 逐文件校验 schema/fs/频响/SNR/clock/repeats 等质量门，输出
-                tspi-cal-measured-design/v2 spec + sha256 manifest；
+                khaen-cal-measured-design/v2 spec + sha256 manifest；
 4. check        校验已有 spec v2 的结构、文件可达性与质量门（不重写 spec）；
 5. selftest     工具自测（正向 + 负向 + 确定性），写 SELFTEST.json；
 6. verify-e2e   读取离线全链（measured -> FitP -> compile -> plan-arena fake）证据目录，
@@ -51,14 +51,14 @@ import wave
 TOOL_NAME = "make-multipoint-spec"
 TOOL_VERSION = "1.0.0"
 
-SPEC_SCHEMA_V2 = "tspi-cal-measured-design/v2"
-SPEC_SCHEMA_V1 = "tspi-cal-measured-design/v1"
-ANALYSIS_SCHEMA = "tspi-channel-measurement/v1"
+SPEC_SCHEMA_V2 = "khaen-cal-measured-design/v2"
+SPEC_SCHEMA_V1 = "khaen-cal-measured-design/v1"
+ANALYSIS_SCHEMA = "khaen-channel-measurement/v1"
 DIAG_SCHEMA = "khaen-calibration-diag/v1"
-MANIFEST_SCHEMA = "tspi-cal-multipoint-spec-manifest/v1"
-SYNTH_SCHEMA = "tspi-cal-multipoint-synthetic-fixtures/v1"
-POSITIONS_SCHEMA = "tspi-cal-multipoint-positions/v1"
-VERIFY_SCHEMA = "tspi-cal-multipoint-prep-verify/v1"
+MANIFEST_SCHEMA = "khaen-cal-multipoint-spec-manifest/v1"
+SYNTH_SCHEMA = "khaen-cal-multipoint-synthetic-fixtures/v1"
+POSITIONS_SCHEMA = "khaen-cal-multipoint-positions/v1"
+VERIFY_SCHEMA = "khaen-cal-multipoint-prep-verify/v1"
 VALIDATION_INDEPENDENT = "independent_validation_positions"
 
 T6_MIN_DESIGN = 6
@@ -193,7 +193,7 @@ def new_ctx():
 # analysis / diag 校验
 # ---------------------------------------------------------------------------
 def inspect_analysis(path, fs, min_snr_db, ctx, where):
-    """校验旧工具 analysis JSON（schema tspi-channel-measurement/v1）。
+    """校验旧工具 analysis JSON（schema khaen-channel-measurement/v1）。
 
     返回 dict：sha256/bytes/channel/delay_samples/snr_band_db/points/频带。
     fail-closed：读不到/JSON 坏/schema 错/fs 不一致/fr 点不足/频点非法/频带过窄/
@@ -1166,7 +1166,7 @@ def synth_ir(out_dir, design_count, validation_count, channels, seed, rate, leng
                 }
             )
     manifest = {
-        "schema": "tspi-cal-multipoint-synthetic-ir/v1",
+        "schema": "khaen-cal-multipoint-synthetic-ir/v1",
         "tool": {"name": TOOL_NAME, "version": TOOL_VERSION},
         "seed": seed,
         "simulated": True,
@@ -1457,7 +1457,7 @@ def cmd_selftest(args):
 
     passed = sum(1 for case in cases if case.get("pass"))
     result = {
-        "schema": "tspi-cal-multipoint-spec-selftest/v1",
+        "schema": "khaen-cal-multipoint-spec-selftest/v1",
         "tool": {"name": TOOL_NAME, "version": TOOL_VERSION},
         "seed": seed,
         "out": out_dir,
@@ -1939,12 +1939,12 @@ def build_parser():
     selftest.add_argument("--force", action="store_true")
 
     verify = sub.add_parser("verify-e2e", help="断言离线全链证据（run/report/perturbed）")
-    verify.add_argument("--run", required=True, help="tspi-cal run 输出目录")
+    verify.add_argument("--run", required=True, help="khaen-cal run 输出目录")
     verify.add_argument("--report", default=None, help="multipoint_probe report 输出目录")
     verify.add_argument("--package", default=None, help="合成/交接包目录（spec.json + spec-manifest.json + synthetic-manifest.json）")
     verify.add_argument("--perturbed-run", default=None, help="扰动 validation 数据后的第二次 run 目录（holdout 隔离对照）")
     verify.add_argument("--perturbed-report", default=None, help="扰动 validation 数据后的 multipoint_probe report 目录")
-    verify.add_argument("--rt60-by-position", default=None, help="tspi-cal rt60 逐位置输出目录")
+    verify.add_argument("--rt60-by-position", default=None, help="khaen-cal rt60 逐位置输出目录")
     verify.add_argument("--expect-design", type=int, default=6)
     verify.add_argument("--expect-validation", type=int, default=3)
     verify.add_argument("--out", default="VERIFY.json")

@@ -52,11 +52,23 @@ fn parse_args() -> Result<Args, String> {
             "--taps" => {
                 taps = take("--taps")?
                     .split(',')
-                    .map(|text| text.trim().parse::<usize>().map_err(|e| format!("--taps: {e}")))
+                    .map(|text| {
+                        text.trim()
+                            .parse::<usize>()
+                            .map_err(|e| format!("--taps: {e}"))
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
             }
-            "--anchor63" => anchor_63 = take("--anchor63")?.parse().map_err(|e| format!("anchor63: {e}"))?,
-            "--anchor100" => anchor_100 = take("--anchor100")?.parse().map_err(|e| format!("anchor100: {e}"))?,
+            "--anchor63" => {
+                anchor_63 = take("--anchor63")?
+                    .parse()
+                    .map_err(|e| format!("anchor63: {e}"))?
+            }
+            "--anchor100" => {
+                anchor_100 = take("--anchor100")?
+                    .parse()
+                    .map_err(|e| format!("anchor100: {e}"))?
+            }
             "--anchor" => anchor_mode = take("--anchor")?,
             other => return Err(format!("未知参数 {other}")),
         }
@@ -72,7 +84,9 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn grid_freqs() -> Vec<f64> {
-    (0..NFFT / 2 + 1).map(|k| k as f64 * FS / NFFT as f64).collect()
+    (0..NFFT / 2 + 1)
+        .map(|k| k as f64 * FS / NFFT as f64)
+        .collect()
 }
 
 fn taper_weight(f: f64, data_lo: f64, data_hi: f64) -> f64 {
@@ -123,7 +137,11 @@ fn interp_grid(host: &SinglePointH, source: usize, freqs: &[f64]) -> Vec<Cx> {
         let pos = lf.partition_point(|v| *v <= x).min(lf.len() - 1);
         let i0 = pos.saturating_sub(1);
         let i1 = pos;
-        let t = if i1 > i0 { ((x - lf[i0]) / (lf[i1] - lf[i0])).clamp(0.0, 1.0) } else { 0.0 };
+        let t = if i1 > i0 {
+            ((x - lf[i0]) / (lf[i1] - lf[i0])).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let mag = (lm[i0] + (lm[i1] - lm[i0]) * t).exp();
         let ph = phase[i0] + (phase[i1] - phase[i0]) * t;
         let w = taper_weight(*f, data_lo, data_hi);
@@ -173,7 +191,11 @@ fn run() -> Result<(), String> {
     let baseline: Vec<Vec<f64>> = h_grid
         .iter()
         .map(|spec| {
-            let delayed: Vec<Cx> = spec.iter().zip(shift.iter()).map(|(h, s)| h.mul(*s)).collect();
+            let delayed: Vec<Cx> = spec
+                .iter()
+                .zip(shift.iter())
+                .map(|(h, s)| h.mul(*s))
+                .collect();
             ir_of_spectrum(&delayed, NFFT)
         })
         .collect();
@@ -193,7 +215,10 @@ fn run() -> Result<(), String> {
         for band in [63.0f64, 100.0] {
             let component = bandpass_ir(ir, FS, band);
             let Some(estimate) = t20_from_ir(&component, FS) else {
-                band_infos.push(format!("{{\"role\":{},\"band\":{band},\"valid\":false}}", source));
+                band_infos.push(format!(
+                    "{{\"role\":{},\"band\":{band},\"valid\":false}}",
+                    source
+                ));
                 continue;
             };
             let rt60 = if args.anchor_mode == "predicted" {
@@ -241,10 +266,15 @@ fn run() -> Result<(), String> {
                         let undo = Cx::exp_pos_j(std::f64::consts::TAU * f * D_ALIGN as f64 / FS);
                         let raw = raw.mul(undo);
                         let mag = raw.abs();
-                        if mag > cap { raw.scale(cap / mag) } else { raw }
+                        if mag > cap {
+                            raw.scale(cap / mag)
+                        } else {
+                            raw
+                        }
                     }
                 } else if *f < PASS_HI_HZ {
-                    let t = ((f.ln() - PASS_LO_HZ.ln()) / (PASS_HI_HZ.ln() - PASS_LO_HZ.ln())).clamp(0.0, 1.0);
+                    let t = ((f.ln() - PASS_LO_HZ.ln()) / (PASS_HI_HZ.ln() - PASS_LO_HZ.ln()))
+                        .clamp(0.0, 1.0);
                     Cx::new(1.0 + (0.0 - 1.0) * t, 0.0)
                 } else {
                     Cx::one()
@@ -259,9 +289,11 @@ fn run() -> Result<(), String> {
         }
         fir_sets.push((taps, coeffs));
     }
-    let design_freqs: Vec<f64> = (0..160).map(|i| 20.0 * (20_000.0f64 / 20.0).powf(i as f64 / 159.0)).collect();
+    let design_freqs: Vec<f64> = (0..160)
+        .map(|i| 20.0 * (20_000.0f64 / 20.0).powf(i as f64 / 159.0))
+        .collect();
     // 输出 + 指标
-    let mut summary = String::from("{\n  \"schema\": \"tspi-mimo-diag-p-fir/v1\",\n  \"claim\": \"PREDICTED_ONLY / SINGLE_POINT_NOT_SPATIAL / NO_MEASUREMENT\",\n");
+    let mut summary = String::from("{\n  \"schema\": \"khaen-mimo-diag-p-fir/v1\",\n  \"claim\": \"PREDICTED_ONLY / SINGLE_POINT_NOT_SPATIAL / NO_MEASUREMENT\",\n");
     summary.push_str(&format!(
         "  \"fs\": {FS}, \"nfft\": {NFFT}, \"d_align_samples\": {D_ALIGN}, \"d_role_samples\": {D_ROLE},\n  \"anchor_t20_63_s\": {:.4}, \"anchor_t20_100_s\": {:.4}, \"cap_db\": {CAP_DB},\n",
         args.anchor_63_t20_s, args.anchor_100_t20_s
@@ -280,9 +312,13 @@ fn run() -> Result<(), String> {
             for (tap, value) in values.iter().enumerate() {
                 text.push_str(&format!("{tap},{value:.17e}\n"));
             }
-            fs::write(directory.join(format!("{role}.csv")), text).map_err(|e| format!("write fir: {e}"))?;
+            fs::write(directory.join(format!("{role}.csv")), text)
+                .map_err(|e| format!("write fir: {e}"))?;
             let response = fir_response_at(values, FS, &design_freqs);
-            let max_db = response.iter().map(|r| 20.0 * r.abs().max(1e-30).log10()).fold(f64::NEG_INFINITY, f64::max);
+            let max_db = response
+                .iter()
+                .map(|r| 20.0 * r.abs().max(1e-30).log10())
+                .fold(f64::NEG_INFINITY, f64::max);
             let pass_db = response
                 .iter()
                 .zip(design_freqs.iter())
@@ -295,7 +331,10 @@ fn run() -> Result<(), String> {
                 max_db <= CAP_DB + 1e-6
             ));
         }
-        set_lines.push(format!("    {{\"taps\": {taps}, \"roles\": [{}]}}", rows.join(", ")));
+        set_lines.push(format!(
+            "    {{\"taps\": {taps}, \"roles\": [{}]}}",
+            rows.join(", ")
+        ));
     }
     summary.push_str(&set_lines.join(",\n"));
     summary.push_str("\n  ]\n}\n");
@@ -305,7 +344,11 @@ fn run() -> Result<(), String> {
     for (taps, coeffs) in &fir_sets {
         for (source, values) in coeffs.iter().enumerate() {
             let p_resp = fir_spectrum(values, NFFT);
-            let y_spec: Vec<Cx> = h_grid[source].iter().zip(p_resp.iter()).map(|(h, p)| h.mul(*p)).collect();
+            let y_spec: Vec<Cx> = h_grid[source]
+                .iter()
+                .zip(p_resp.iter())
+                .map(|(h, p)| h.mul(*p))
+                .collect();
             let y_ir = ir_of_spectrum(&y_spec, NFFT);
             let mut row = format!("taps,{},{}", taps, host.roles[source]);
             for band in [63.0f64, 100.0] {
@@ -313,7 +356,12 @@ fn run() -> Result<(), String> {
                 let after = t20_from_ir(&bandpass_ir(&y_ir, FS, band), FS);
                 match (before, after) {
                     (Some(b), Some(a)) if b.valid && a.valid => {
-                        row.push_str(&format!(",{band},{:.4},{:.4},{:.3}", b.t20_s, a.t20_s, 1.0 - a.t20_s / b.t20_s));
+                        row.push_str(&format!(
+                            ",{band},{:.4},{:.4},{:.3}",
+                            b.t20_s,
+                            a.t20_s,
+                            1.0 - a.t20_s / b.t20_s
+                        ));
                     }
                     _ => row.push_str(&format!(",{band},NaN,NaN,NaN")),
                 }
@@ -340,7 +388,9 @@ fn spectrum_of(samples: &[f64]) -> Vec<Cx> {
     let mut re = samples.to_vec();
     let mut im = vec![0.0f64; samples.len()];
     khaen_mimo_design::fir::fft_in_place(&mut re, &mut im);
-    (0..samples.len() / 2 + 1).map(|k| Cx::new(re[k], im[k])).collect()
+    (0..samples.len() / 2 + 1)
+        .map(|k| Cx::new(re[k], im[k]))
+        .collect()
 }
 
 fn fir_spectrum(coeffs: &[f64], nfft: usize) -> Vec<Cx> {

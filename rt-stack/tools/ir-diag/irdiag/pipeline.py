@@ -171,7 +171,7 @@ def run(capture_path, meta_dir, out_dir, verbose=True, decay_fit=None):
     noise_slice = (0, int(round(1.8 * A.FS)))
 
     result = {
-        "schema": "tspi-ir-diag/v1",
+        "schema": "khaen-ir-diag/v1",
         "group": "G0",
         "treatment": "RAW / P_post bypass (identity)",
         "apply": "NOT_RUN",

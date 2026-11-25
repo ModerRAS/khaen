@@ -58,7 +58,7 @@ fn test_web_config() -> WebConfig {
 }
 
 fn token_header() -> (&'static str, &'static str) {
-    ("X-TSPI-Token", TEST_TOKEN)
+    ("X-KHAEN-Token", TEST_TOKEN)
 }
 
 fn json_body(response: &RawResponse) -> JsonValue {
@@ -572,7 +572,7 @@ fn write_http_request(
     request.push_str(method);
     request.push(' ');
     request.push_str(path);
-    request.push_str(" HTTP/1.1\r\nHost: tspi-test\r\n");
+    request.push_str(" HTTP/1.1\r\nHost: khaen-test\r\n");
     for (name, value) in headers {
         request.push_str(name);
         request.push_str(": ");
@@ -656,7 +656,7 @@ impl WsClient {
     fn connect(addr: SocketAddr, headers: &[(&str, &str)]) -> (RawResponse, Option<WsClient>) {
         let mut stream = tcp_connect(addr);
         let mut request = format!(
-            "GET {} HTTP/1.1\r\nHost: tspi-test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {}\r\n",
+            "GET {} HTTP/1.1\r\nHost: khaen-test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {}\r\n",
             WS_PATH, WS_TEST_KEY
         );
         for (name, value) in headers {
@@ -938,7 +938,7 @@ fn t70_web_assets_are_embedded_and_identifiable() {
         "app.js head={:?}",
         APP_JS.chars().take(24).collect::<String>()
     );
-    assert!(APP_JS.contains("tspi.token"));
+    assert!(APP_JS.contains("khaen.token"));
     assert!(FAVICON_SVG.starts_with("<svg"));
     assert!(
         INDEX_HTML.len() > 6000,
@@ -1013,7 +1013,7 @@ fn t70_web_static_routes_have_ui_security_headers() {
         assert_eq!(response.header("Cache-Control"), Some("no-store"));
     }
     let html = http_request(server.addr, "GET", "/", &[], None).text();
-    assert!(html.contains("TSPI"));
+    assert!(html.contains("KHAEN"));
     assert!(html.contains("/app.js"));
     println!(
         "SAMPLE_STATIC index bytes={} head={:?}",
@@ -1048,7 +1048,7 @@ fn parse_request_bytes(raw: &[u8]) -> Result<Option<HttpRequest>, HttpError> {
 
 #[test]
 fn t70_web_http_parses_request_line_headers_and_body() {
-    let raw = b"POST /api/runtime/volume?x=1&y=%E4%B8%AD HTTP/1.1\r\nHost: h\r\nX-TSPI-Token: tok\r\nContent-Length: 10\r\n\r\n{\"db\": -3}";
+    let raw = b"POST /api/runtime/volume?x=1&y=%E4%B8%AD HTTP/1.1\r\nHost: h\r\nX-KHAEN-Token: tok\r\nContent-Length: 10\r\n\r\n{\"db\": -3}";
     let request = parse_request_bytes(raw).expect("parse").expect("request");
     assert_eq!(request.method, Method::Post);
     assert_eq!(request.path, "/api/runtime/volume");
@@ -1059,7 +1059,7 @@ fn t70_web_http_parses_request_line_headers_and_body() {
             ("y".to_string(), "中".to_string())
         ]
     );
-    assert_eq!(request.header_value("x-tspi-token"), Some("tok"));
+    assert_eq!(request.header_value("x-khaen-token"), Some("tok"));
     assert_eq!(request.body, b"{\"db\": -3}".to_vec());
     assert!(request.keep_alive);
     assert_eq!(request.version, "HTTP/1.1");
@@ -1146,14 +1146,14 @@ fn t70_web_http_keep_alive_serves_multiple_requests() {
     let server = TestServer::start(service());
     let mut stream = tcp_connect(server.addr);
     stream
-        .write_all(b"GET /healthz HTTP/1.1\r\nHost: tspi-test\r\n\r\n")
+        .write_all(b"GET /healthz HTTP/1.1\r\nHost: khaen-test\r\n\r\n")
         .expect("write");
     stream.flush().expect("flush");
     let first = read_http_response(&mut stream);
     assert_status(&first, 200);
     assert_eq!(first.header("Connection"), Some("keep-alive"));
     stream
-        .write_all(b"GET /style.css HTTP/1.1\r\nHost: tspi-test\r\nConnection: close\r\n\r\n")
+        .write_all(b"GET /style.css HTTP/1.1\r\nHost: khaen-test\r\nConnection: close\r\n\r\n")
         .expect("write");
     stream.flush().expect("flush");
     let second = read_http_response(&mut stream);
@@ -1243,7 +1243,7 @@ fn t70_web_api_public_healthz_and_auth_required() {
     let server = TestServer::start(service());
     let health = http_request(server.addr, "GET", "/healthz", &[], None);
     assert_status(&health, 200);
-    assert_eq!(health.header("X-TSPI-API-Version"), Some("1"));
+    assert_eq!(health.header("X-KHAEN-API-Version"), Some("1"));
     let body = json_body(&health);
     assert_eq!(expect_json_str(&body, "status"), "ok");
     assert!(!expect_json_str(&body, "version").is_empty());
@@ -1266,7 +1266,7 @@ fn t70_web_api_public_healthz_and_auth_required() {
         server.addr,
         "GET",
         "/api/runtime/status",
-        &[("X-TSPI-Token", "wrong-token")],
+        &[("X-KHAEN-Token", "wrong-token")],
         None,
     );
     assert_status(&wrong, 401);
@@ -1318,7 +1318,7 @@ fn t70_web_api_unknown_paths_and_methods_are_json_errors() {
         server.addr,
         "GET",
         "/api/runtime/status",
-        &[token_header(), ("X-TSPI-API-Version", "nope")],
+        &[token_header(), ("X-KHAEN-API-Version", "nope")],
         None,
     );
     assert_status(&bad_version, 400);
@@ -2044,7 +2044,7 @@ fn t70_web_ws_upgrade_requires_same_auth_as_rest() {
     assert!(client.is_none());
     assert_status(&anonymous, 401);
     assert_eq!(error_code(&anonymous), "unauthorized");
-    let (wrong, client) = WsClient::connect(server.addr, &[("X-TSPI-Token", "wrong")]);
+    let (wrong, client) = WsClient::connect(server.addr, &[("X-KHAEN-Token", "wrong")]);
     assert!(client.is_none());
     assert_status(&wrong, 401);
     assert_eq!(error_code(&wrong), "unauthorized");
@@ -2137,7 +2137,7 @@ fn t70_web_ws_telemetry_and_volume_actual_ack() {
     let config_doc = ws_reply_value(&ws.exchange("\"GetConfig\""), "GetConfig");
     match config_doc {
         ws::JsonValue::String(document) => {
-            assert!(document.contains("tspi-runtime-config/v1"));
+            assert!(document.contains("khaen-runtime-config/v1"));
         }
         other => panic!("GetConfig must be a string: {other:?}"),
     }
@@ -2344,7 +2344,7 @@ fn t70_web_ws_session_cookie_auth_csrf_write() {
 #[test]
 fn t70_web_ws_in_memory_transport_drives_same_rest_core() {
     let rest = Arc::new(service());
-    let auth_headers = vec![("X-TSPI-Token".to_string(), TEST_TOKEN.to_string())];
+    let auth_headers = vec![("X-KHAEN-Token".to_string(), TEST_TOKEN.to_string())];
     let mut plane = RestWsPlane::new(Arc::clone(&rest), auth_headers.clone());
     let context = WebWsContext::new(Arc::clone(&rest), auth_headers);
     let mut input = Vec::new();
@@ -2416,7 +2416,7 @@ fn t70_web_csp_is_split_between_ui_and_api() {
 #[test]
 fn t70_web_ws_extension_command_contract() {
     assert_eq!(WS_CAL_COMMANDS, ["GetCalibrationJobs", "GetCalibrationJob"]);
-    assert_eq!(WS_CAL_SCHEMA, "tspi-ws-cal/v1");
+    assert_eq!(WS_CAL_SCHEMA, "khaen-ws-cal/v1");
     for command in WS_CAL_COMMANDS {
         assert!(
             !ws::SUPPORTED_COMMANDS.contains(&command),
@@ -2593,7 +2593,7 @@ fn t70_web_calibration_wizard_page_and_assets_are_served() {
     assert!(page.content_type().starts_with("text/html"));
     let html = page.text();
     // 页面是内嵌模板；交互控件由 /calibration/app.js 渲染（下面断言 app.js 包含控件）。
-    assert!(html.contains("TSPI 校准向导"));
+    assert!(html.contains("KHAEN 校准向导"));
     assert!(html.contains("btn-run-all"));
     // 校准向导是正式页面：外部同源资源，无 inline script/style（CSP script-src 'self'）。
     assert!(html.contains("href=\"/calibration/style.css\""));
@@ -2649,7 +2649,7 @@ fn t70_web_api_calibration_settings_level_delay_bass_lanes() {
     let settings = http_authed(server.addr, "GET", "/api/calibration/settings", None);
     assert_status(&settings, 200);
     let body = json_body(&settings);
-    assert_eq!(expect_json_str(&body, "schema"), "tspi-cal-settings/v1");
+    assert_eq!(expect_json_str(&body, "schema"), "khaen-cal-settings/v1");
     assert_eq!(
         expect_json_str(&body, "calibration_state"),
         "RELATIVE_UNCALIBRATED"
@@ -2663,7 +2663,7 @@ fn t70_web_api_calibration_settings_level_delay_bass_lanes() {
         server.addr,
         "POST",
         "/api/calibration/settings",
-        Some(r#"{"mic":{"kind":"analog_48v","device":"hw:UltraLitemk5,0","channel":0,"phantom_48v":true,"gain_db":24},"cal_file":{"path":"/var/lib/tspi-rt-stack/cal/umik.txt","name":"umik.txt","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","source":"path"},"orientation_deg":90,"target_mode":"flat","bass":{"enabled":true,"crossover_hz":80,"main_slope":"LR4","sub_slope":"LR4","linear_phase":true,"sub_gain_db":0,"strategy":"multi_b"}}"#),
+        Some(r#"{"mic":{"kind":"analog_48v","device":"hw:UltraLitemk5,0","channel":0,"phantom_48v":true,"gain_db":24},"cal_file":{"path":"/var/lib/khaen-rt-stack/cal/umik.txt","name":"umik.txt","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","source":"path"},"orientation_deg":90,"target_mode":"flat","bass":{"enabled":true,"crossover_hz":80,"main_slope":"LR4","sub_slope":"LR4","linear_phase":true,"sub_gain_db":0,"strategy":"multi_b"}}"#),
     );
     assert_status(&save, 200);
     let saved = json_body(&save);
@@ -2701,7 +2701,7 @@ fn t70_web_api_calibration_settings_level_delay_bass_lanes() {
     assert!(!expect_json_bool(&applied, "applied_to_audio"));
     assert_eq!(cal_arr(cal_obj(&applied, "applied"), "level_trims").len(), 2);
     let status = json_body(&http_authed(server.addr, "GET", "/api/calibration/status", None));
-    assert_eq!(expect_json_str(&status, "schema"), "tspi-cal-status/v1");
+    assert_eq!(expect_json_str(&status, "schema"), "khaen-cal-status/v1");
     assert_eq!(
         cal_arr(cal_obj(&status, "applied"), "level_trims").len(),
         2
@@ -2770,7 +2770,7 @@ fn t70_web_calibration_one_click_six_stage_flow() {
     );
     assert_status(&dry_run, 200);
     let plan = json_body(&dry_run);
-    assert_eq!(expect_json_str(&plan, "schema"), "tspi-cal-run/v1");
+    assert_eq!(expect_json_str(&plan, "schema"), "khaen-cal-run/v1");
     assert!(expect_json_bool(&plan, "dry_run"));
     assert!(!expect_json_bool(&plan, "audible"));
     let stages = cal_arr(&plan, "stages");

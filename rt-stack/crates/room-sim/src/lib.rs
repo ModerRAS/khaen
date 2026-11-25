@@ -1,7 +1,7 @@
 //! RoomForge 鞋盒镜像源法（ISM）仿真移植（calib-chain-20261121 / mimo-opt-20261122）。
 //!
 //! **SIMULATED / SYNTHETIC ONLY**：本 crate 不读任何音频设备，不参与实时路径；
-//! 它只把 RoomForge 的确定性声学模型移植进 TSPI，供离线夹具加载、跨语言校验与 MIMO 设计研究使用。
+//! 它只把 RoomForge 的确定性声学模型移植进 KHAEN，供离线夹具加载、跨语言校验与 MIMO 设计研究使用。
 //!
 //! 12 个模块（complex/room/ism/rir/wav/sha256/json/fft/matrix/fixture/metrics）已全部实现；
 //! 公开 API、口径与跨语言验证结果见 `crates/room-sim/API.md`。

@@ -21,7 +21,7 @@
 //!
 //! 边界（本 leaf 不改公共根；integrator/T26 适配）：
 //! - core::rt::RtControl 是 T06 scaffold 的简化结构，缺 core-v1 v1.1 §11.13 的
-//!   block_start_seq 配方；本文件按 §11.13 定义 leaf-local TspiRtControlV1
+//!   block_start_seq 配方；本文件按 §11.13 定义 leaf-local KhaenRtControlV1
 //!   （128 B / align 64，字段顺序与规范一致，tests/T09 断言 offset），待 integrator
 //!   提升到 core::abi 后删除本地定义（与 T12 "plan 字节打包不在写域" 同类处理）。
 //! - 生产 RT 线程入口 run_worker/run_master（core-v1 §12.3）需要 T16 SPSC、T18
@@ -43,7 +43,7 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::abi::{
-    TspiBlockAckV1, TspiBlockDescV1, TspiWorkerStatsV1, ABI_VERSION, TSPI_RING_MAGIC,
+    KhaenBlockAckV1, KhaenBlockDescV1, KhaenWorkerStatsV1, ABI_VERSION, KHAEN_RING_MAGIC,
 };
 use crate::direct::{
     DirectCoeffsF32, DirectLayout, DirectTopology, DIRECT_MAX_BLOCK, DIRECT_MAX_ROLES,
@@ -101,11 +101,11 @@ pub const WORKER_ACK_FLAG_VALID: u8 = 1;
 pub const WORKER_ACK_FLAG_LATE_SEEN: u8 = 2;
 /// ack.flags 允许位掩码（其余位必须 0，否则 RT_E_ABI_RUNTIME）。
 pub const WORKER_ACK_FLAG_MASK: u8 = WORKER_ACK_FLAG_VALID | WORKER_ACK_FLAG_LATE_SEEN;
-/// TspiWorkerStatsV1.flags bit0：alive。
+/// KhaenWorkerStatsV1.flags bit0：alive。
 pub const WORKER_STAT_FLAG_ALIVE: u64 = 1;
-/// TspiWorkerStatsV1.flags bit1：last_block_late（迟到 worker 记录自身，见 §7.3）。
+/// KhaenWorkerStatsV1.flags bit1：last_block_late（迟到 worker 记录自身，见 §7.3）。
 pub const WORKER_STAT_FLAG_LAST_BLOCK_LATE: u64 = 2;
-/// TspiWorkerStatsV1.flags bit2：cutoff_seen。
+/// KhaenWorkerStatsV1.flags bit2：cutoff_seen。
 pub const WORKER_STAT_FLAG_CUTOFF_SEEN: u64 = 4;
 /// quarantine 槽：空闲。
 pub const WORKER_QUARANTINE_FREE: u32 = 0;
@@ -145,8 +145,8 @@ pub const WORKER_CONTROL_FLAG_RT_MODE: u32 = 0x1;
 /// 在完成 1–4 前，本类型只保证布局/语义与规范一致，不代表 abi 已冻结。
 #[repr(C, align(64))]
 #[derive(Debug)]
-pub struct TspiRtControlV1 {
-    /// = TSPI_RING_MAGIC（复用 ring 魔数区分结构）。
+pub struct KhaenRtControlV1 {
+    /// = KHAEN_RING_MAGIC（复用 ring 魔数区分结构）。
     pub magic: u32,
     /// = ABI_VERSION。
     pub abi_version: u16,
@@ -179,7 +179,7 @@ pub struct TspiRtControlV1 {
     /// bit0=rt_mode、bit1=two_worker，其余 0。
     ///
     /// 注：core-v1 §11.13 原文为 plain u32；本 leaf 用 AtomicU32 以便 control 在共享
-    /// 引用（&TspiRtControlV1）下发布/读取 two_worker profile，大小/偏移不变（4 B @76），
+    /// 引用（&KhaenRtControlV1）下发布/读取 two_worker profile，大小/偏移不变（4 B @76），
     /// 待 T02 编辑者确认后由 integrator 同步到 core::abi（登记为 leaf 契约偏差）。
     pub flags: AtomicU32,
     /// master 每 block Release fetch_add；watchdog 只读。
@@ -200,11 +200,11 @@ pub struct TspiRtControlV1 {
     pub reserved: u64,
 }
 
-impl TspiRtControlV1 {
+impl KhaenRtControlV1 {
     /// 构造全零/规范初值控制块（admission 前/测试）。
     pub const fn new() -> Self {
         Self {
-            magic: TSPI_RING_MAGIC,
+            magic: KHAEN_RING_MAGIC,
             abi_version: ABI_VERSION,
             size: 128,
             block_start_seq: AtomicU64::new(0),
@@ -232,7 +232,7 @@ impl TspiRtControlV1 {
     }
 }
 
-impl Default for TspiRtControlV1 {
+impl Default for KhaenRtControlV1 {
     fn default() -> Self {
         Self::new()
     }
@@ -261,8 +261,8 @@ impl WorkerBlockStart {
     };
 }
 
-fn control_valid(ctl: &TspiRtControlV1) -> RtStatus {
-    if ctl.magic != TSPI_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
+fn control_valid(ctl: &KhaenRtControlV1) -> RtStatus {
+    if ctl.magic != KHAEN_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
         return RtStatus::ERR_BAD_LAYOUT;
     }
     RtStatus::OK
@@ -272,7 +272,7 @@ fn control_valid(ctl: &TspiRtControlV1) -> RtStatus {
 ///
 /// 返回 RtStatus；调用者（master）必须在 worker 可读前完成全部描述写。
 pub fn publish_block_start(
-    ctl: &TspiRtControlV1,
+    ctl: &KhaenRtControlV1,
     epoch_id: u64,
     frame_index: u64,
     plan_version: u32,
@@ -292,7 +292,7 @@ pub fn publish_block_start(
 }
 
 /// [RT] 读取当前 block_start 身份字段（必须在观察到序号递增后调用；字段为 Relaxed 读）。
-pub fn read_block_start(ctl: &TspiRtControlV1) -> WorkerBlockStart {
+pub fn read_block_start(ctl: &KhaenRtControlV1) -> WorkerBlockStart {
     WorkerBlockStart {
         epoch_id: ctl.block_start_epoch.load(Ordering::Relaxed),
         frame_index: ctl.block_start_frame.load(Ordering::Relaxed),
@@ -306,7 +306,7 @@ pub fn read_block_start(ctl: &TspiRtControlV1) -> WorkerBlockStart {
 /// 返回新序号；序号回退 = RT_E_INVARIANT，safety_request 置位 = RT_E_WATCHDOG，
 /// spin 上界耗尽 = RT_E_CUTOFF（有界等待，绝不无界）。
 pub fn wait_block_start(
-    ctl: &TspiRtControlV1,
+    ctl: &KhaenRtControlV1,
     last_seq: u64,
     spin_max_iters: u32,
 ) -> Result<u64, RtStatus> {
@@ -336,7 +336,7 @@ pub fn wait_block_start(
 
 /// [RT] worker 消费一个 block_start：要求序号恰好 +1（禁止跳变/重放，§6.4）。
 pub fn consume_block_start(
-    ctl: &TspiRtControlV1,
+    ctl: &KhaenRtControlV1,
     last_seq: u64,
     spin_max_iters: u32,
 ) -> Result<(u64, WorkerBlockStart), RtStatus> {
@@ -1108,7 +1108,7 @@ fn expected_valid(expected_workers: u8) -> bool {
 }
 
 /// [RT] ack 槽静态检查（expected/flags/位图越界位；不改槽）。
-pub fn ack_slot_validate(ack: &TspiBlockAckV1) -> RtStatus {
+pub fn ack_slot_validate(ack: &KhaenBlockAckV1) -> RtStatus {
     if !expected_valid(ack.expected_workers) {
         return RtStatus::ERR_ADMISSION_SCHED;
     }
@@ -1131,7 +1131,7 @@ pub fn ack_slot_validate(ack: &TspiBlockAckV1) -> RtStatus {
 ///
 /// 本入口不做 epoch/block 标签比对（调用者已在 worker_begin_block / ack_phase_labeled
 /// 完成标签校验）；标签可能过期的路径必须用 ack_phase_labeled。
-pub fn ack_phase(ack: &TspiBlockAckV1, worker: WorkerId, phase: u8) -> RtStatus {
+pub fn ack_phase(ack: &KhaenBlockAckV1, worker: WorkerId, phase: u8) -> RtStatus {
     if phase >= WORKER_PHASE_COUNT as u8 {
         return RtStatus::ERR_BAD_LAYOUT;
     }
@@ -1153,10 +1153,10 @@ pub fn ack_phase(ack: &TspiBlockAckV1, worker: WorkerId, phase: u8) -> RtStatus 
 /// [RT] 带标签的 ack：epoch/block_seq/plan_version 与槽标签不一致时拒绝写位（I08）。
 ///
 /// 返回 RT_E_EPOCH_MISMATCH（epoch 不符）或 RT_E_PARTIAL_LATE（block/plan 不符，迟到 worker）。
-/// 迟到统计由 worker 本地 stats（TspiWorkerStatsV1.flags bit1 / late_blocks）记录，
+/// 迟到统计由 worker 本地 stats（KhaenWorkerStatsV1.flags bit1 / late_blocks）记录，
 /// 不修改当前 ack 槽的任何位（§7.3 "不匹配不得修改当前槽"）。
 pub fn ack_phase_labeled(
-    ack: &TspiBlockAckV1,
+    ack: &KhaenBlockAckV1,
     worker: WorkerId,
     phase: u8,
     epoch_id: u64,
@@ -1174,7 +1174,7 @@ pub fn ack_phase_labeled(
 
 /// [RT] master 有界等待单个 phase 的 all-ack（cutoff 置位立即返回迟到）。
 pub fn wait_phase_done(
-    ack: &TspiBlockAckV1,
+    ack: &KhaenBlockAckV1,
     phase: u8,
     expected_workers: u8,
     spin_max_iters: u32,
@@ -1210,7 +1210,7 @@ pub fn wait_phase_done(
 }
 
 /// [RT] master 有界等待 B1/B2/B3 全部 all-ack（期望 expected 位；禁用 0xF 硬编码）。
-pub fn wait_phases(ack: &TspiBlockAckV1, expected_workers: u8, spin_max_iters: u32) -> RtStatus {
+pub fn wait_phases(ack: &KhaenBlockAckV1, expected_workers: u8, spin_max_iters: u32) -> RtStatus {
     if !expected_valid(expected_workers) {
         return RtStatus::ERR_ADMISSION_SCHED;
     }
@@ -1247,7 +1247,7 @@ pub fn wait_phases(ack: &TspiBlockAckV1, expected_workers: u8, spin_max_iters: u
 }
 
 /// [RT] master 置 cutoff（整块 invalid；worker 必须丢弃输出/partial 结果）。
-pub fn set_cutoff(ack: &TspiBlockAckV1) -> RtStatus {
+pub fn set_cutoff(ack: &KhaenBlockAckV1) -> RtStatus {
     if !expected_valid(ack.expected_workers) {
         return RtStatus::ERR_ADMISSION_SCHED;
     }
@@ -1256,7 +1256,7 @@ pub fn set_cutoff(ack: &TspiBlockAckV1) -> RtStatus {
 }
 
 /// [RT] ack 是否 all-ack（expected 位到齐且 cutoff=0）。
-pub fn ack_all(ack: &TspiBlockAckV1) -> bool {
+pub fn ack_all(ack: &KhaenBlockAckV1) -> bool {
     if !expected_valid(ack.expected_workers) {
         return false;
     }
@@ -1275,19 +1275,19 @@ pub fn ack_all(ack: &TspiBlockAckV1) -> bool {
 }
 
 /// [RT] worker 记录迟到（本地 stats；不写 ack 槽）：late_blocks+1、flags=last_block_late。
-pub fn worker_record_late(stats: &mut TspiWorkerStatsV1) {
+pub fn worker_record_late(stats: &mut KhaenWorkerStatsV1) {
     stats.late_blocks = stats.late_blocks.wrapping_add(1);
     stats.flags |= WORKER_STAT_FLAG_LAST_BLOCK_LATE;
 }
 
 /// [RT] worker 记录 cutoff（本地 stats）：invalid_blocks+1、flags |= cutoff_seen。
-pub fn worker_record_cutoff(stats: &mut TspiWorkerStatsV1) {
+pub fn worker_record_cutoff(stats: &mut KhaenWorkerStatsV1) {
     stats.invalid_blocks = stats.invalid_blocks.wrapping_add(1);
     stats.flags |= WORKER_STAT_FLAG_CUTOFF_SEEN;
 }
 
 /// [RT] worker 完成一个 block：blocks_done+1、清 last_block_late 位。
-pub fn worker_record_block_done(stats: &mut TspiWorkerStatsV1) {
+pub fn worker_record_block_done(stats: &mut KhaenWorkerStatsV1) {
     stats.blocks_done = stats.blocks_done.wrapping_add(1);
     stats.flags &= !WORKER_STAT_FLAG_LAST_BLOCK_LATE;
 }
@@ -1304,7 +1304,7 @@ pub fn worker_record_block_done(stats: &mut TspiWorkerStatsV1) {
 #[derive(Debug)]
 pub struct WorkerAckSlotPool {
     /// 4 个 ack 槽（固定容量；槽被占用且未终态时禁止复用）。
-    pub slots: [TspiBlockAckV1; WORKER_ACK_SLOTS],
+    pub slots: [KhaenBlockAckV1; WORKER_ACK_SLOTS],
     state: [AtomicU32; WORKER_ACK_SLOTS],
 }
 
@@ -1312,7 +1312,7 @@ impl WorkerAckSlotPool {
     /// 全 FREE 构造（admission 一次分配；无堆分配）。
     pub const fn new() -> Self {
         Self {
-            slots: [const { TspiBlockAckV1::new(0, 0, 0, 0) }; WORKER_ACK_SLOTS],
+            slots: [const { KhaenBlockAckV1::new(0, 0, 0, 0) }; WORKER_ACK_SLOTS],
             state: [const { AtomicU32::new(WORKER_ACK_SLOT_FREE) }; WORKER_ACK_SLOTS],
         }
     }
@@ -1438,7 +1438,7 @@ impl WorkerAckSlotPool {
     }
 
     /// 槽引用（worker 只读/写原子位图）。
-    pub fn slot(&self, index: usize) -> Option<&TspiBlockAckV1> {
+    pub fn slot(&self, index: usize) -> Option<&KhaenBlockAckV1> {
         self.slots.get(index)
     }
 
@@ -1661,7 +1661,7 @@ impl WorkerReAdmission {
     }
 
     /// [NONRT] 请求降级：置 switch_state=ABORT（master 不得再启动新 block），进入 Draining。
-    pub fn request_degrade(&mut self, ctl: &TspiRtControlV1) -> RtStatus {
+    pub fn request_degrade(&mut self, ctl: &KhaenRtControlV1) -> RtStatus {
         if self.mode != WorkerMode::FourCore {
             return RtStatus::RT_E_SLOT_STATE;
         }
@@ -1699,7 +1699,7 @@ impl WorkerReAdmission {
         topology: &DirectTopology,
         block_size: u16,
         pool: &WorkerAckSlotPool,
-        ctl: &TspiRtControlV1,
+        ctl: &KhaenRtControlV1,
     ) -> Result<u64, RtStatus> {
         if self.mode != WorkerMode::Degrading {
             return Err(RtStatus::ERR_SWITCH_BUSY);
@@ -1753,7 +1753,7 @@ impl WorkerReAdmission {
     }
 
     /// [NONRT] 重准入失败/安全兜底：只允许 safety mute，禁止继续旧图。
-    pub fn to_safety_mute(&mut self, ctl: &TspiRtControlV1) -> RtStatus {
+    pub fn to_safety_mute(&mut self, ctl: &KhaenRtControlV1) -> RtStatus {
         let status = control_valid(ctl);
         if !status.is_ok() {
             return status;
@@ -1766,7 +1766,7 @@ impl WorkerReAdmission {
     }
 
     /// 当前是否允许启动新 block（2 核 profile 必须已重新准入；旧 epoch 不得继续）。
-    pub fn accepts_new_blocks(&self, ctl: &TspiRtControlV1) -> bool {
+    pub fn accepts_new_blocks(&self, ctl: &KhaenRtControlV1) -> bool {
         let allowed_mode = self.mode == WorkerMode::FourCore || self.mode == WorkerMode::TwoCore;
         if !allowed_mode {
             return false;
@@ -1784,10 +1784,10 @@ impl WorkerReAdmission {
 /// 失败语义：switch_state=ABORT（降级中）-> ERR_SWITCH_BUSY（不得继续旧图）；
 /// ack 槽耗尽 -> RT_E_ACK_SLOT_EXHAUSTED + 置 safety_request（§7.3/§7.6）。
 pub fn master_start_block(
-    ctl: &TspiRtControlV1,
+    ctl: &KhaenRtControlV1,
     pool: &mut WorkerAckSlotPool,
     plan: &WorkerDagPlan,
-    desc: &TspiBlockDescV1,
+    desc: &KhaenBlockDescV1,
 ) -> Result<u32, RtStatus> {
     let status = control_valid(ctl);
     if !status.is_ok() {
@@ -1855,7 +1855,7 @@ pub fn master_start_block(
 
 /// [RT] worker 等待并校验自己的下一个 block 启动身份（序号必须 +1；plan/epoch 一致）。
 pub fn worker_begin_block(
-    ctl: &TspiRtControlV1,
+    ctl: &KhaenRtControlV1,
     plan: &WorkerDagPlan,
     last_seq: u64,
     spin_max_iters: u32,
@@ -1883,7 +1883,7 @@ pub fn worker_begin_block(
 
 /// [RT] worker 在 phase 边界的有界等待（= wait_phase_done 的语义别名）。
 pub fn worker_phase_barrier(
-    ack: &TspiBlockAckV1,
+    ack: &KhaenBlockAckV1,
     phase: u8,
     expected_workers: u8,
     spin_max_iters: u32,
@@ -1967,7 +1967,7 @@ pub fn execute_block_scheduled(
     epoch_id: u64,
     block_seq: u64,
     valid_frames: usize,
-    ack: &TspiBlockAckV1,
+    ack: &KhaenBlockAckV1,
     partials: &mut WorkerPartials,
     bad_output: &AtomicU32,
     spin_max_iters: u32,
@@ -2156,38 +2156,38 @@ const _: () = {
 };
 
 const _: () = {
-    // §11.13 TspiRtControlV1 布局（128 B / align 64；待 integrator 提升到 core::abi）。
-    assert!(core::mem::size_of::<TspiRtControlV1>() == 128);
-    assert!(core::mem::align_of::<TspiRtControlV1>() == 64);
-    assert!(core::mem::offset_of!(TspiRtControlV1, magic) == 0);
-    assert!(core::mem::offset_of!(TspiRtControlV1, abi_version) == 4);
-    assert!(core::mem::offset_of!(TspiRtControlV1, size) == 6);
-    assert!(core::mem::offset_of!(TspiRtControlV1, block_start_seq) == 8);
-    assert!(core::mem::offset_of!(TspiRtControlV1, block_start_epoch) == 16);
-    assert!(core::mem::offset_of!(TspiRtControlV1, block_start_frame) == 24);
-    assert!(core::mem::offset_of!(TspiRtControlV1, block_start_plan_version) == 32);
-    assert!(core::mem::offset_of!(TspiRtControlV1, block_start_slot) == 36);
-    assert!(core::mem::offset_of!(TspiRtControlV1, current_plan_ptr) == 40);
-    assert!(core::mem::offset_of!(TspiRtControlV1, current_plan_version) == 48);
-    assert!(core::mem::offset_of!(TspiRtControlV1, pending_plan_version) == 52);
-    assert!(core::mem::offset_of!(TspiRtControlV1, pending_plan_ptr) == 56);
-    assert!(core::mem::offset_of!(TspiRtControlV1, switch_state) == 64);
-    assert!(core::mem::offset_of!(TspiRtControlV1, safety_request) == 68);
-    assert!(core::mem::offset_of!(TspiRtControlV1, safety_reason) == 72);
-    assert!(core::mem::offset_of!(TspiRtControlV1, flags) == 76);
-    assert!(core::mem::offset_of!(TspiRtControlV1, heartbeat_seq) == 80);
-    assert!(core::mem::offset_of!(TspiRtControlV1, spin_max_iters) == 88);
-    assert!(core::mem::offset_of!(TspiRtControlV1, cutoff_drain_iters) == 92);
-    assert!(core::mem::offset_of!(TspiRtControlV1, tick_freq_hz) == 96);
-    assert!(core::mem::offset_of!(TspiRtControlV1, tick_read_budget) == 100);
-    assert!(core::mem::offset_of!(TspiRtControlV1, capture_ring_offset) == 104);
-    assert!(core::mem::offset_of!(TspiRtControlV1, playback_ring_offset) == 112);
-    assert!(core::mem::offset_of!(TspiRtControlV1, reserved) == 120);
+    // §11.13 KhaenRtControlV1 布局（128 B / align 64；待 integrator 提升到 core::abi）。
+    assert!(core::mem::size_of::<KhaenRtControlV1>() == 128);
+    assert!(core::mem::align_of::<KhaenRtControlV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, magic) == 0);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, abi_version) == 4);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, size) == 6);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, block_start_seq) == 8);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, block_start_epoch) == 16);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, block_start_frame) == 24);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, block_start_plan_version) == 32);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, block_start_slot) == 36);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, current_plan_ptr) == 40);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, current_plan_version) == 48);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, pending_plan_version) == 52);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, pending_plan_ptr) == 56);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, switch_state) == 64);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, safety_request) == 68);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, safety_reason) == 72);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, flags) == 76);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, heartbeat_seq) == 80);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, spin_max_iters) == 88);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, cutoff_drain_iters) == 92);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, tick_freq_hz) == 96);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, tick_read_budget) == 100);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, capture_ring_offset) == 104);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, playback_ring_offset) == 112);
+    assert!(core::mem::offset_of!(KhaenRtControlV1, reserved) == 120);
 };
 
 const _: () = {
     // §13.2 无 RT 析构：本文件 RT 可见类型全部 needs_drop == false。
-    assert!(!core::mem::needs_drop::<TspiRtControlV1>());
+    assert!(!core::mem::needs_drop::<KhaenRtControlV1>());
     assert!(!core::mem::needs_drop::<WorkerBlockStart>());
     assert!(!core::mem::needs_drop::<WorkerDagPlan>());
     assert!(!core::mem::needs_drop::<WorkerPartials>());

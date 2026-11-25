@@ -1,4 +1,4 @@
-# mimo_kit — fixed TSPI MIMO planrt analysis kit (task-249)
+# mimo_kit — fixed KHAEN MIMO planrt analysis kit (task-249)
 
 修复 2026-11-19 route-a INVALID 的两个 kit bug，并补上单测与噪声/静音防护。
 

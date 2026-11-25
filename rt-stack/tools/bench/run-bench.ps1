@@ -1,4 +1,4 @@
-# TSPI RT-first DSP offline perf harness runner (WBS T29/T46/T30; task-156)
+# KHAEN RT-first DSP offline perf harness runner (WBS T29/T46/T30; task-156)
 #
 # Discipline (rt-stack/README.md section 1/3): the rt-stack repo allows exactly ONE Cargo root,
 # so this script does NOT create any crate/workspace/Cargo.toml inside rt-stack. It copies
@@ -115,7 +115,7 @@ function Invoke-BuildAndRun([string]$StageRoot) {
             throw "cargo build failed (exit $buildExit); see $buildLog"
         }
 
-        $exe = Join-Path $targetDir "release\tspi-perf-harness.exe"
+        $exe = Join-Path $targetDir "release\khaen-perf-harness.exe"
         if (-not (Test-Path $exe)) {
             $exe = (Get-ChildItem (Join-Path $targetDir "release") -Filter "*.exe" -ErrorAction SilentlyContinue |
                     Where-Object { $_.Name -notmatch "^(cargo|build)" } |
@@ -152,9 +152,9 @@ function Invoke-BuildAndRun([string]$StageRoot) {
 }
 
 # Prefer RAM disk (R:) for the throwaway build; fall back to C: LOCALAPPDATA if staging fails.
-$stageRoots = @((Join-Path $env:TEMP "tspi-perf-harness"))
+$stageRoots = @((Join-Path $env:TEMP "khaen-perf-harness"))
 if ($env:TEMP -match '^[A-Za-z]:\\') {
-    $stageRoots += (Join-Path $env:LOCALAPPDATA "Temp\tspi-perf-harness")
+    $stageRoots += (Join-Path $env:LOCALAPPDATA "Temp\khaen-perf-harness")
 }
 $lastError = $null
 foreach ($root in $stageRoots) {

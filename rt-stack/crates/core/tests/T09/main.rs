@@ -18,7 +18,7 @@
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::thread;
 
-use khaen_core::abi::{TspiBlockAckV1, TspiBlockDescV1, ABI_VERSION};
+use khaen_core::abi::{KhaenBlockAckV1, KhaenBlockDescV1, ABI_VERSION};
 use khaen_core::direct::{
     direct_block_f32, DirectCoeffsF32, DirectLayout, DirectTopology, DIRECT_MAX_PARTICIPANTS,
     DIRECT_MAX_ROLES, DIRECT_NO_SOURCE,
@@ -28,7 +28,7 @@ use khaen_core::workers::{
     ack_all, ack_mask, ack_phase, ack_phase_labeled, consume_block_start, execute_block_scheduled,
     master_start_block, publish_block_start, read_block_start, set_cutoff, wait_block_start,
     wait_phase_done, wait_phases, worker_begin_block, worker_phase_b1, worker_phase_barrier,
-    worker_record_block_done, worker_record_late, worker_state_zero, TspiRtControlV1,
+    worker_record_block_done, worker_record_late, worker_state_zero, KhaenRtControlV1,
     WorkerAckSlotPool, WorkerBlockStart, WorkerDagPlan, WorkerMode, WorkerPartials,
     WorkerQuarantine, WorkerReAdmission, WorkerScheduleStats, RT_E_ACK_SLOT_EXHAUSTED,
     WORKER_ACK_FLAG_VALID, WORKER_ACK_SLOTS, WORKER_ACK_SLOT_ALL_ACK, WORKER_ACK_SLOT_FREE,
@@ -230,10 +230,10 @@ fn make_ack(
     epoch_id: u64,
     plan_version: u32,
     expected_workers: u8,
-) -> TspiBlockAckV1 {
-    TspiBlockAckV1 {
+) -> KhaenBlockAckV1 {
+    KhaenBlockAckV1 {
         flags: WORKER_ACK_FLAG_VALID,
-        ..TspiBlockAckV1::new(block_seq, epoch_id, plan_version, expected_workers)
+        ..KhaenBlockAckV1::new(block_seq, epoch_id, plan_version, expected_workers)
     }
 }
 
@@ -457,8 +457,8 @@ fn compare_tolerance(
     (rel_l2, max_abs_diff)
 }
 
-fn base_desc(epoch_id: u64, block_seq: u64, plan_version: u32, block: u16) -> TspiBlockDescV1 {
-    TspiBlockDescV1 {
+fn base_desc(epoch_id: u64, block_seq: u64, plan_version: u32, block: u16) -> KhaenBlockDescV1 {
+    KhaenBlockDescV1 {
         epoch_id,
         block_seq,
         frame_index: block_seq * block as u64,
@@ -466,7 +466,7 @@ fn base_desc(epoch_id: u64, block_seq: u64, plan_version: u32, block: u16) -> Ts
         flags: 1,
         valid_frames: block as u32,
         block_size: block,
-        ..TspiBlockDescV1::ZERO
+        ..KhaenBlockDescV1::ZERO
     }
 }
 
@@ -481,7 +481,7 @@ fn one_block(
     input: &[Vec<f32>],
     epoch_id: u64,
     block_seq: u64,
-    ack: &TspiBlockAckV1,
+    ack: &KhaenBlockAckV1,
     output_fill: f32,
     spin_max_iters: u32,
 ) -> (RtStatus, Vec<f32>, Vec<f32>, WorkerScheduleStats) {
@@ -723,7 +723,7 @@ fn workers_ack_mask_parameterized_and_bounded_waits() {
 
 #[test]
 fn workers_block_start_seq_recipe() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     assert_eq!(ctl.block_start_seq.load(Ordering::Acquire), 0);
     assert_eq!(wait_block_start(&ctl, 0, 8), Err(RtStatus::RT_E_CUTOFF));
 
@@ -761,7 +761,7 @@ fn workers_block_start_seq_recipe() {
     assert_eq!(wait_block_start(&ctl, 4, 8), Err(RtStatus::RT_E_WATCHDOG));
 
     // 结构校验：魔数/版本/大小非法 -> ERR_BAD_LAYOUT（不 panic）。
-    let mut bad = TspiRtControlV1::new();
+    let mut bad = KhaenRtControlV1::new();
     bad.magic = 0;
     assert_eq!(wait_block_start(&bad, 0, 8), Err(RtStatus::ERR_BAD_LAYOUT));
     assert_eq!(
@@ -772,7 +772,7 @@ fn workers_block_start_seq_recipe() {
     // worker_begin_block：plan 版本/two_worker profile 必须与 ctl 一致。
     let graph = graph_4_1_2();
     let plan4 = WorkerDagPlan::build(&graph.topo, 128, 4, 11).expect("build");
-    let ctl2 = TspiRtControlV1::new();
+    let ctl2 = KhaenRtControlV1::new();
     assert_eq!(publish_block_start(&ctl2, 5, 0, 11, 0), RtStatus::OK);
     let ready = worker_begin_block(&ctl2, &plan4, 0, 8).expect("worker begin");
     assert_eq!(ready.0, 1);
@@ -792,7 +792,7 @@ fn workers_block_start_seq_recipe() {
 
 #[test]
 fn workers_block_start_thread_handoff() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let done = AtomicU64::new(0);
     let errors = AtomicU32::new(0);
     thread::scope(|scope| {
@@ -872,7 +872,7 @@ fn workers_ack_phase_and_late_slot_label() {
     assert!(ack_phase_labeled(&ack, 1, 0, 5, 9, 4).is_ok());
     assert_eq!(ack.phase_done[0].load(Ordering::Acquire), 0x3);
     // 迟到 worker 只记本地 stats（不写 ack 槽）。
-    let mut stats = khaen_core::abi::TspiWorkerStatsV1::default();
+    let mut stats = khaen_core::abi::KhaenWorkerStatsV1::default();
     stats.flags = 0;
     worker_record_late(&mut stats);
     assert_eq!(stats.late_blocks, 1);
@@ -1315,7 +1315,7 @@ fn workers_quarantine_all_ack_and_lost_worker() {
 fn workers_two_core_re_admission_fresh_epoch() {
     let graph = graph_4_1_2();
     let plan4 = WorkerDagPlan::build(&graph.topo, 128, 4, 1).expect("plan4");
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     ctl.current_plan_version.store(1, Ordering::Release);
     let mut pool = WorkerAckSlotPool::new();
     let desc = base_desc(100, 0, 1, 128);
@@ -1390,7 +1390,7 @@ fn workers_two_core_re_admission_fresh_epoch() {
     // drain 未完成（存在未终态 ack 槽）时禁止重准入。
     let plan4b = WorkerDagPlan::build(&graph.topo, 128, 4, 1).expect("plan4b");
     let mut blocked = WorkerReAdmission::new(plan4b, 5).expect("state2");
-    let ctl2 = TspiRtControlV1::new();
+    let ctl2 = KhaenRtControlV1::new();
     assert_eq!(blocked.request_degrade(&ctl2), RtStatus::OK);
     let mut pool2 = WorkerAckSlotPool::new();
     assert!(pool2.try_acquire(0, 5, 1, 4, 0).is_ok());
@@ -1413,7 +1413,7 @@ fn workers_two_core_re_admission_failure_safety_mute() {
     let graph = graph_4_1_2();
     let plan4 = WorkerDagPlan::build(&graph.topo, 128, 4, 1).expect("plan4");
     let mut state_machine = WorkerReAdmission::new(plan4, 7).expect("state");
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     // 未降级不能直接重准入。
     let scratch_pool = WorkerAckSlotPool::new();
     assert_eq!(
@@ -1479,7 +1479,7 @@ fn workers_epoch_and_plan_label_mismatch_rejected() {
         one_block(&graph, &plan, 128, &input, 21, 0, &ack, 7.0, 8).0,
         RtStatus::RT_E_PLAN_MISMATCH
     );
-    let ack = TspiBlockAckV1::new(0, 21, 7, 4);
+    let ack = KhaenBlockAckV1::new(0, 21, 7, 4);
     assert_eq!(
         one_block(&graph, &plan, 128, &input, 21, 0, &ack, 7.0, 8).0,
         RtStatus::RT_E_ABI_RUNTIME
@@ -1515,28 +1515,28 @@ fn workers_nonfinite_output_guard() {
 #[test]
 fn workers_rt_visible_types_and_layout() {
     use core::mem::{align_of, needs_drop, offset_of, size_of};
-    assert_eq!(size_of::<TspiRtControlV1>(), 128);
-    assert_eq!(align_of::<TspiRtControlV1>(), 64);
-    assert_eq!(offset_of!(TspiRtControlV1, magic), 0);
-    assert_eq!(offset_of!(TspiRtControlV1, block_start_seq), 8);
-    assert_eq!(offset_of!(TspiRtControlV1, block_start_epoch), 16);
-    assert_eq!(offset_of!(TspiRtControlV1, block_start_frame), 24);
-    assert_eq!(offset_of!(TspiRtControlV1, block_start_plan_version), 32);
-    assert_eq!(offset_of!(TspiRtControlV1, block_start_slot), 36);
-    assert_eq!(offset_of!(TspiRtControlV1, current_plan_ptr), 40);
-    assert_eq!(offset_of!(TspiRtControlV1, switch_state), 64);
-    assert_eq!(offset_of!(TspiRtControlV1, safety_request), 68);
-    assert_eq!(offset_of!(TspiRtControlV1, heartbeat_seq), 80);
-    assert_eq!(offset_of!(TspiRtControlV1, spin_max_iters), 88);
-    assert_eq!(offset_of!(TspiRtControlV1, capture_ring_offset), 104);
-    assert_eq!(offset_of!(TspiRtControlV1, playback_ring_offset), 112);
-    assert_eq!(offset_of!(TspiRtControlV1, reserved), 120);
+    assert_eq!(size_of::<KhaenRtControlV1>(), 128);
+    assert_eq!(align_of::<KhaenRtControlV1>(), 64);
+    assert_eq!(offset_of!(KhaenRtControlV1, magic), 0);
+    assert_eq!(offset_of!(KhaenRtControlV1, block_start_seq), 8);
+    assert_eq!(offset_of!(KhaenRtControlV1, block_start_epoch), 16);
+    assert_eq!(offset_of!(KhaenRtControlV1, block_start_frame), 24);
+    assert_eq!(offset_of!(KhaenRtControlV1, block_start_plan_version), 32);
+    assert_eq!(offset_of!(KhaenRtControlV1, block_start_slot), 36);
+    assert_eq!(offset_of!(KhaenRtControlV1, current_plan_ptr), 40);
+    assert_eq!(offset_of!(KhaenRtControlV1, switch_state), 64);
+    assert_eq!(offset_of!(KhaenRtControlV1, safety_request), 68);
+    assert_eq!(offset_of!(KhaenRtControlV1, heartbeat_seq), 80);
+    assert_eq!(offset_of!(KhaenRtControlV1, spin_max_iters), 88);
+    assert_eq!(offset_of!(KhaenRtControlV1, capture_ring_offset), 104);
+    assert_eq!(offset_of!(KhaenRtControlV1, playback_ring_offset), 112);
+    assert_eq!(offset_of!(KhaenRtControlV1, reserved), 120);
     assert_eq!(align_of::<WorkerPartials>(), 64);
     assert_eq!(size_of::<WorkerPartials>(), WORKER_PARTIAL_SAMPLES * 4);
     assert_eq!(align_of::<WorkerAckSlotPool>(), 64);
     assert_eq!(align_of::<WorkerQuarantine>(), 64);
     assert_eq!(size_of::<WorkerBlockStart>(), 24);
-    assert!(!needs_drop::<TspiRtControlV1>());
+    assert!(!needs_drop::<KhaenRtControlV1>());
     assert!(!needs_drop::<WorkerDagPlan>());
     assert!(!needs_drop::<WorkerPartials>());
     assert!(!needs_drop::<WorkerAckSlotPool>());
@@ -1544,10 +1544,10 @@ fn workers_rt_visible_types_and_layout() {
     assert!(!needs_drop::<WorkerMode>());
     assert!(!needs_drop::<WorkerReAdmission>());
     assert!(!needs_drop::<WorkerScheduleStats>());
-    assert!(!needs_drop::<TspiBlockAckV1>());
+    assert!(!needs_drop::<KhaenBlockAckV1>());
     assert!(!needs_drop::<RtStatus>());
-    let ctl = TspiRtControlV1::new();
-    assert_eq!(ctl.magic, khaen_core::abi::TSPI_RING_MAGIC);
+    let ctl = KhaenRtControlV1::new();
+    assert_eq!(ctl.magic, khaen_core::abi::KHAEN_RING_MAGIC);
     assert_eq!(ctl.abi_version, ABI_VERSION);
     assert_eq!(ctl.size, 128);
     assert_eq!(ctl.block_start_seq.load(Ordering::Acquire), 0);
@@ -1759,7 +1759,7 @@ fn workers_re_admission_version_publish_contract() {
     // --- 失败路径（终态）：不发布 version/flags、保持旧 plan，但立即置 safety_request ---
     let mut failed = WorkerReAdmission::new(plan4, 30).expect("failed machine");
     let mut fail_pool = WorkerAckSlotPool::new();
-    let ctl_fail = TspiRtControlV1::new();
+    let ctl_fail = KhaenRtControlV1::new();
     ctl_fail.current_plan_version.store(1, Ordering::Release);
     assert_eq!(failed.request_degrade(&ctl_fail), RtStatus::OK);
     assert_eq!(
@@ -1793,7 +1793,7 @@ fn workers_re_admission_version_publish_contract() {
     let plan4b = WorkerDagPlan::build(&graph.topo, 128, 4, 1).expect("plan4b");
     let mut ok = WorkerReAdmission::new(plan4b, 40).expect("ok machine");
     let mut pool = WorkerAckSlotPool::new();
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     ctl.current_plan_version.store(1, Ordering::Release);
     assert_eq!(ok.request_degrade(&ctl), RtStatus::OK);
     let new_epoch = ok

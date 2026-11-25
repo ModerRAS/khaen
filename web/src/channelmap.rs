@@ -1,8 +1,8 @@
 //! channelmap v2 对接：通用布局 / remap / 角色校准 / 低音管理 / FIR。
 //!
-//! 契约来源：audio-stack 的 tspi-channelmap（schema=tspi-channelmap/v2）
-//! 与 /etc/tspi-audio/layout-presets.yml（schema=tspi-layout-presets/v2）。
-//! 命令：tspi-channelmap probe/validate/print/render/apply/rollback/profiles/...
+//! 契约来源：audio-stack 的 khaen-channelmap（schema=khaen-channelmap/v2）
+//! 与 /etc/khaen-audio/layout-presets.yml（schema=khaen-layout-presets/v2）。
+//! 命令：khaen-channelmap probe/validate/print/render/apply/rollback/profiles/...
 //! 退出码：0 ok；2 schema/用法；3 取值/校验；4 渲染/--check；5 apply/重启；9 回滚。
 //!
 //! 设计：WebUI 只维护显式 output.roles + sources（物化后保存），
@@ -20,13 +20,13 @@ use crate::config::ChannelmapConfig;
 use crate::error::{AppError, AppResult};
 use crate::util;
 
-pub const CHANNELMAP_SCHEMA: &str = "tspi-channelmap/v2";
-pub const PRESETS_SCHEMA: &str = "tspi-layout-presets/v2";
+pub const CHANNELMAP_SCHEMA: &str = "khaen-channelmap/v2";
+pub const PRESETS_SCHEMA: &str = "khaen-layout-presets/v2";
 pub const EMBEDDED_LAYOUT_PRESETS: &str = include_str!("../assets/layout-presets.yml");
 
 // ===== 基础模型 =====
 
-/// 通道数：auto 或固定整数（与 tspi-channelmap v2 一致）。
+/// 通道数：auto 或固定整数（与 khaen-channelmap v2 一致）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ChannelCount {
@@ -338,7 +338,7 @@ impl Default for ChannelMap {
     }
 }
 
-// ===== 布局预设（tspi-layout-presets/v2） =====
+// ===== 布局预设（khaen-layout-presets/v2） =====
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -652,7 +652,7 @@ pub fn draft_document(
     doc
 }
 
-// ===== probe（tspi-channelmap probe --json） =====
+// ===== probe（khaen-channelmap probe --json） =====
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -727,7 +727,7 @@ fn validate_xo(xo: &Option<XoBand>, path: &str, strict_hz: f64, errors: &mut Vec
     }
 }
 
-/// 本地校验（仅 mock/测试/演示使用），规则镜像板端 tspi-channelmap v2。
+/// 本地校验（仅 mock/测试/演示使用），规则镜像板端 khaen-channelmap v2。
 ///
 /// 真机不再回退到这里：板端 Python 是唯一权威；CLI 不可用时 `validate()` 直接报错。
 /// 对齐要点：`peq.type` ∈ {peaking, low_shelf, high_shelf}；
@@ -927,7 +927,7 @@ pub fn local_validate(
             if !matches!(ty, "peaking" | "low_shelf" | "high_shelf") {
                 errors.push(format!("{pp}.type 只能是 peaking|low_shelf|high_shelf"));
             }
-            // 与板端 tspi-channelmap（唯一权威）一致（裁决 5）：
+            // 与板端 khaen-channelmap（唯一权威）一致（裁决 5）：
             // peaking 的 q ∈ [0.1, 10]；shelf 的 q 是 RBJ slope S，必须 ∈ [0.1, 1.0]
             // （CamillaDSP slope=12*S，check_slope 拒绝 slope>12）。
             let shelf = matches!(ty, "low_shelf" | "high_shelf");
@@ -939,7 +939,7 @@ pub fn local_validate(
                 }
             } else if !p.q.is_finite() || !(0.1..=10.0).contains(&p.q) {
                 errors.push(format!(
-                    "{pp}.q 必须在 [0.1, 10]（与板端 tspi-channelmap 一致）"
+                    "{pp}.q 必须在 [0.1, 10]（与板端 khaen-channelmap 一致）"
                 ));
             }
             if !(-24.0..=24.0).contains(&p.gain_db) {
@@ -1338,7 +1338,7 @@ pub fn build_input_mode_view(
     }
     if !view.state_available {
         view.notes.push(
-            "未检测到 tspi-upmix 输入内容检测器（daemon 未运行）：content_mode 按覆盖值/auto，auto 默认直通"
+            "未检测到 khaen-upmix 输入内容检测器（daemon 未运行）：content_mode 按覆盖值/auto，auto 默认直通"
                 .into(),
         );
     }
@@ -1462,7 +1462,7 @@ impl ChannelMapService {
             .ok()
     }
 
-    /// probe：优先 tspi-channelmap probe --json；失败回退 ALSA stream0。
+    /// probe：优先 khaen-channelmap probe --json；失败回退 ALSA stream0。
     pub async fn probe(&self, alsa: &dyn AlsaBackend, doc: Option<&ChannelMap>) -> ProbeInfo {
         if self.mock {
             let store = self.mock_store.lock().unwrap();
@@ -1579,9 +1579,9 @@ impl ChannelMapService {
         })
     }
 
-    /// 校验：板端 `tspi-channelmap validate` 是唯一权威（2026-11-16 裁决 3）。
+    /// 校验：板端 `khaen-channelmap validate` 是唯一权威（2026-11-16 裁决 3）。
     ///
-    /// - mock（测试/演示，`TSPI_MOCK=1`）：用 `local_validate`，规则与板端 Python 对齐
+    /// - mock（测试/演示，`KHAEN_MOCK=1`）：用 `local_validate`，规则与板端 Python 对齐
     ///   （`peq.type` 白名单、peaking q ∈ [0.1, 10]、shelf q ∈ [0.1, 1.0]）；
     /// - 真机：必须委托 CLI；CLI 不存在/不可执行/输出无法解析时返回明确错误，
     ///   **不得**回退本地规则放行（否则会出现「Web 说合法、板端 apply 失败」）。
@@ -1608,12 +1608,12 @@ impl ChannelMapService {
         }
         if !self.cli_available().await {
             return Err(AppError::unavailable(format!(
-                "tspi-channelmap 不可用，无法校验（{} 不存在或不可执行）",
+                "khaen-channelmap 不可用，无法校验（{} 不存在或不可执行）",
                 self.cfg.cli_bin
             )));
         }
         let path = std::env::temp_dir().join(format!(
-            "tspi-channelmap-{}-{}.yml",
+            "khaen-channelmap-{}-{}.yml",
             std::process::id(),
             util::now_unix()
         ));
@@ -1647,7 +1647,7 @@ impl ChannelMapService {
         let _ = tokio::fs::remove_file(&path).await;
         let out = out.ok_or_else(|| {
             AppError::unavailable(format!(
-                "tspi-channelmap 不可用，无法校验（执行 {} 失败）",
+                "khaen-channelmap 不可用，无法校验（执行 {} 失败）",
                 self.cfg.cli_bin
             ))
         })?;
@@ -1659,7 +1659,7 @@ impl ChannelMapService {
                 .find(|l| !l.trim().is_empty())
                 .unwrap_or("无输出");
             AppError::unavailable(format!(
-                "tspi-channelmap 校验输出无法解析（exit={:?}）：{detail}",
+                "khaen-channelmap 校验输出无法解析（exit={:?}）：{detail}",
                 out.status
             ))
         })
@@ -1722,7 +1722,7 @@ impl ChannelMapService {
         out
     }
 
-    /// 输入内容模式：读 /run/tspi/input-content.json + /etc/tspi-audio/input-mode.json。
+    /// 输入内容模式：读 /run/khaen/input-content.json + /etc/khaen-audio/input-mode.json。
     pub async fn input_mode(&self) -> InputModeView {
         let state_path = &self.cfg.input_state_file;
         let mode_path = &self.cfg.input_mode_file;
@@ -1754,7 +1754,7 @@ impl ChannelMapService {
         )
     }
 
-    /// 写覆盖模式：mock 内存；真机优先 tspi-upmix input-mode set，失败/不存在则直接写覆盖文件。
+    /// 写覆盖模式：mock 内存；真机优先 khaen-upmix input-mode set，失败/不存在则直接写覆盖文件。
     pub async fn set_input_mode(&self, raw: &str) -> AppResult<InputModeView> {
         let mode = normalize_input_mode(raw).ok_or_else(|| {
             AppError::bad_request("mode 必须是 auto|stereo|multichannel（兼容 force-* 别名）")
@@ -1784,7 +1784,7 @@ impl ChannelMapService {
                 .map_err(|e| AppError::internal(format!("创建目录失败: {e}")))?;
         }
         let payload = serde_json::json!({
-            "schema": "tspi-input-mode/v1",
+            "schema": "khaen-input-mode/v1",
             "mode": mode,
             "updated_unix": util::now_unix(),
             "updated_by": "webui",
@@ -1990,7 +1990,7 @@ impl ChannelMapService {
         })
     }
 
-    /// 应用：保存 active 后调 tspi-channelmap apply（mode off 时只校验/渲染/持久化）。
+    /// 应用：保存 active 后调 khaen-channelmap apply（mode off 时只校验/渲染/持久化）。
     pub async fn apply(
         &self,
         mode: crate::config::RunMode,
@@ -2018,7 +2018,7 @@ impl ChannelMapService {
             let store = store.as_mut().unwrap();
             if store.apply_fails {
                 return Err(AppError::unavailable(
-                    "mock 注入：tspi-channelmap apply 失败（已回滚 last-good）",
+                    "mock 注入：khaen-channelmap apply 失败（已回滚 last-good）",
                 ));
             }
             store.applied.push(format!("apply@{}", util::now_unix()));
@@ -2026,7 +2026,7 @@ impl ChannelMapService {
                 saved: true,
                 applied: !off,
                 saved_only: off,
-                via: "mock-tspi-channelmap".into(),
+                via: "mock-khaen-channelmap".into(),
                 message: if off {
                     "mock：已保存并渲染；模式 off，未启动 CamillaDSP".into()
                 } else {
@@ -2038,7 +2038,7 @@ impl ChannelMapService {
         }
         if !self.cli_available().await {
             return Err(AppError::unavailable(format!(
-                "tspi-channelmap 不存在（{}），配置已保存但未应用",
+                "khaen-channelmap 不存在（{}），配置已保存但未应用",
                 self.cfg.cli_bin
             )));
         }
@@ -2085,16 +2085,16 @@ impl ChannelMapService {
                 .filter(|l| !l.is_empty())
                 .unwrap_or("无错误输出");
             return Err(AppError::unavailable(format!(
-                "tspi-channelmap apply 失败（退出码 {code}：{meaning}）：{detail}"
+                "khaen-channelmap apply 失败（退出码 {code}：{meaning}）：{detail}"
             )));
         }
         Ok(ApplyOutcome {
             saved: true,
             applied: !off,
             saved_only: off,
-            via: "tspi-channelmap apply".into(),
+            via: "khaen-channelmap apply".into(),
             message: if off {
-                "已保存并渲染到 /run/tspi/camilladsp.yml；模式 off，未启动 CamillaDSP".into()
+                "已保存并渲染到 /run/khaen/camilladsp.yml；模式 off，未启动 CamillaDSP".into()
             } else {
                 "channelmap 已应用（校验→渲染→重启 CamillaDSP）".into()
             },
@@ -2117,14 +2117,14 @@ impl ChannelMapService {
                 applied: mode != crate::config::RunMode::Off,
                 saved_only: mode == crate::config::RunMode::Off,
                 rolled_back: true,
-                via: "mock-tspi-channelmap".into(),
+                via: "mock-khaen-channelmap".into(),
                 message: "mock：已回滚 last-good（未执行真实命令）".into(),
                 ..Default::default()
             });
         }
         if !self.cli_available().await {
             return Err(AppError::unavailable(format!(
-                "tspi-channelmap 不存在（{}），无法 rollback",
+                "khaen-channelmap 不存在（{}），无法 rollback",
                 self.cfg.cli_bin
             )));
         }
@@ -2137,11 +2137,11 @@ impl ChannelMapService {
                 &self.cfg.presets_file,
             ])
             .await
-            .ok_or_else(|| AppError::unavailable("执行 tspi-channelmap rollback 失败"))?;
+            .ok_or_else(|| AppError::unavailable("执行 khaen-channelmap rollback 失败"))?;
         if !out.success {
             let code = out.status.unwrap_or(-1);
             return Err(AppError::unavailable(format!(
-                "tspi-channelmap rollback 失败（退出码 {code}）：{}",
+                "khaen-channelmap rollback 失败（退出码 {code}）：{}",
                 out.stderr.trim().lines().next().unwrap_or("无错误输出")
             )));
         }
@@ -2150,14 +2150,14 @@ impl ChannelMapService {
             applied: mode != crate::config::RunMode::Off,
             saved_only: mode == crate::config::RunMode::Off,
             rolled_back: true,
-            via: "tspi-channelmap rollback".into(),
+            via: "khaen-channelmap rollback".into(),
             message: "已回滚到 last-good".into(),
             exit_code: out.status,
             ..Default::default()
         })
     }
 
-    /// 渲染配置文本：真机委托 `tspi-channelmap render`（唯一权威）；mock 读渲染文件做展示。
+    /// 渲染配置文本：真机委托 `khaen-channelmap render`（唯一权威）；mock 读渲染文件做展示。
     ///
     /// CLI 不存在/不可执行/渲染失败时返回明确错误，不静默回退旧文件（2026-11-16 裁决 3）。
     pub async fn render_text(&self, probe: &ProbeInfo) -> AppResult<Option<String>> {
@@ -2172,7 +2172,7 @@ impl ChannelMapService {
         }
         if !self.cli_available().await {
             return Err(AppError::unavailable(format!(
-                "tspi-channelmap 不可用，无法渲染（{} 不存在或不可执行）",
+                "khaen-channelmap 不可用，无法渲染（{} 不存在或不可执行）",
                 self.cfg.cli_bin
             )));
         }
@@ -2197,7 +2197,7 @@ impl ChannelMapService {
         }
         let out = self.run_cli(&args).await.ok_or_else(|| {
             AppError::unavailable(format!(
-                "tspi-channelmap 不可用，无法渲染（执行 {} 失败）",
+                "khaen-channelmap 不可用，无法渲染（执行 {} 失败）",
                 self.cfg.cli_bin
             ))
         })?;
@@ -2209,13 +2209,13 @@ impl ChannelMapService {
                 .find(|l| !l.trim().is_empty())
                 .unwrap_or("无输出");
             return Err(AppError::unavailable(format!(
-                "tspi-channelmap render 失败（exit={:?}）：{detail}",
+                "khaen-channelmap render 失败（exit={:?}）：{detail}",
                 out.status
             )));
         }
         if out.stdout.trim().is_empty() {
             return Err(AppError::unavailable(
-                "tspi-channelmap render 无输出，无法展示渲染配置",
+                "khaen-channelmap render 无输出，无法展示渲染配置",
             ));
         }
         Ok(Some(out.stdout))
@@ -2494,7 +2494,7 @@ mod tests {
         // task-15：RZ50 布局集（4.0/4.1/4.1.2/5.1.4/7.1.2/7.2）保留为独立布局；
         // 用户口径暂不做跨布局 remap/upmix，因此只允许同布局 remap preset。
         assert_eq!(p.output_layouts["4.1.2"].roles.len(), 7);
-        // 板端部署真相（audio/overlay/etc/tspi-audio/layout-presets.yml）：
+        // 板端部署真相（audio/overlay/etc/khaen-audio/layout-presets.yml）：
         // FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7（ch6 空；MOTU Line Out 1-6,8，SUB=Line Out 8）。
         assert_eq!(p.output_layouts["4.1.2"].roles[4].id, "HFL");
         assert_eq!(p.output_layouts["4.1.2"].roles[4].outputs, vec![4]);
@@ -2520,7 +2520,7 @@ mod tests {
 
     #[test]
     fn four_one_two_layout_matches_deployed_motu_mapping() {
-        // 板端部署文件 audio/overlay/etc/tspi-audio/layout-presets.yml（真相）：
+        // 板端部署文件 audio/overlay/etc/khaen-audio/layout-presets.yml（真相）：
         // FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7，ch6 空（MOTU Line Out 1-6,8；SUB=Line Out 8）。
         // 按旧表（SUB1=4/HFL5/HFR6）接线会把 20–300 Hz 打进 8010 高度箱、SUB 静音。
         let p = presets();
@@ -2639,7 +2639,7 @@ mod tests {
 
     #[test]
     fn local_validation_mirrors_board_peq_rules() {
-        // mock/测试用本地规则必须镜像板端 tspi-channelmap：type 白名单 + 按 type 分流的 q 界限。
+        // mock/测试用本地规则必须镜像板端 khaen-channelmap：type 白名单 + 按 type 分流的 q 界限。
         let p = presets();
         let mut doc = draft_document("h16-5.1.2", "5.1.2", "t", &p, Some(8), Some(8));
         doc.output.roles[0].peq.push(PeqBand {
@@ -2685,7 +2685,7 @@ mod tests {
     async fn validate_errors_when_cli_missing_in_real_mode() {
         use crate::cmd::RealCommandRunner;
         let mut cfg = ChannelmapConfig::default();
-        cfg.cli_bin = "/definitely/not/exist/tspi-channelmap".into();
+        cfg.cli_bin = "/definitely/not/exist/khaen-channelmap".into();
         let svc = ChannelMapService::new(
             cfg,
             Arc::new(RealCommandRunner::new(Duration::from_secs(2))),
@@ -2697,7 +2697,7 @@ mod tests {
             .validate(&doc, &ProbeInfo::default(), 48_000)
             .await
             .expect_err("CLI 缺失时真机模式必须报错，不得回退本地规则");
-        assert!(err.message().contains("tspi-channelmap 不可用"), "{err}");
+        assert!(err.message().contains("khaen-channelmap 不可用"), "{err}");
     }
 
     #[test]
@@ -2718,7 +2718,7 @@ mod tests {
 
     fn cli_out(status: i32, success: bool, stdout: &str, stderr: &str) -> CommandOutput {
         CommandOutput {
-            program: "tspi-channelmap".into(),
+            program: "khaen-channelmap".into(),
             args: Vec::new(),
             status: Some(status),
             success,
@@ -2735,7 +2735,7 @@ mod tests {
             2,
             false,
             "",
-            "tspi-channelmap: 需要 python3-yaml（Debian 包 python3-yaml）",
+            "khaen-channelmap: 需要 python3-yaml（Debian 包 python3-yaml）",
         );
         assert!(parse_validate_output(&out).is_none());
     }
@@ -2775,7 +2775,7 @@ mod tests {
     #[test]
     fn input_mode_view_merges_state_and_override() {
         let state = serde_json::json!({
-            "schema": "tspi-input-content/v1",
+            "schema": "khaen-input-content/v1",
             "content_mode": "auto",
             "detected": "stereo",
             "confidence": 0.91,
@@ -2792,8 +2792,8 @@ mod tests {
         let view = build_input_mode_view(
             Some(&state),
             Some("auto".to_string()),
-            "/run/tspi/input-content.json",
-            "/etc/tspi-audio/input-mode.json",
+            "/run/khaen/input-content.json",
+            "/etc/khaen-audio/input-mode.json",
             1005,
         );
         assert!(view.state_available);
@@ -2835,7 +2835,7 @@ mod tests {
     fn input_mode_view_accepts_upmix_daemon_sample() {
         // upmix-dev 可联调版样例（multichannel，h16-7.1.4 容器；LFE 不参与判定）
         let state = serde_json::json!({
-            "schema": "tspi-input-content/v1",
+            "schema": "khaen-input-content/v1",
             "content_mode": "multichannel",
             "detected": "multichannel",
             "override": null,
@@ -2853,8 +2853,8 @@ mod tests {
         let view = build_input_mode_view(
             Some(&state),
             None,
-            "/run/tspi/input-content.json",
-            "/etc/tspi-audio/input-mode.json",
+            "/run/khaen/input-content.json",
+            "/etc/khaen-audio/input-mode.json",
             1794725400,
         );
         assert!(view.state_available);

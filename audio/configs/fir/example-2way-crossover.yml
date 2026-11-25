@@ -1,7 +1,7 @@
 ---
 # example-2way-crossover.yml — 2 分频（4 路输出）示例；系数需先按模式采样率生成（见 README）
-# 用途：验收矩阵“中/高 FIR”档、以及演示 MOTU 22ch 映射；不是 tspi-mode 的默认模板。
-# 手工调试：复制本文件替换令牌（或用 tspi-mode 渲染后手工改 pipeline），camilladsp --check 后启动。
+# 用途：验收矩阵“中/高 FIR”档、以及演示 MOTU 22ch 映射；不是 khaen-mode 的默认模板。
+# 手工调试：复制本文件替换令牌（或用 khaen-mode 渲染后手工改 pipeline），camilladsp --check 后启动。
 devices:
   samplerate: 48000            # AES67=48000；Dante 改 96000 并重新生成系数
   chunksize: 128

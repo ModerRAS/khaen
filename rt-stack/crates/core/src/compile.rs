@@ -31,8 +31,8 @@
 //!   **不是实测**，仅作 T56/报告参考；选择口径固定为 direct MAC/sample。
 //!
 //! 本模块是 **NONRT** 编译/设计期代码（可分配、可 Drop，不是 RT-MODULE）：结果经 T26/T66 打包成
-//! plan（`TspiPathV1`/`TspiDiagFirV1`）；本模块不写 ABI 字节、不碰 RT 状态。当前 `abi.rs` 仍是
-//! v1.0 scaffold（`TspiPathV1` 无 `delay_q16` 字段、无 A 阶段表），plan 打包与 ABI v1.1 对齐归
+//! plan（`KhaenPathV1`/`KhaenDiagFirV1`）；本模块不写 ABI 字节、不碰 RT 状态。当前 `abi.rs` 仍是
+//! v1.0 scaffold（`KhaenPathV1` 无 `delay_q16` 字段、无 A 阶段表），plan 打包与 ABI v1.1 对齐归
 //! integrator/T26（见 evidence/T12/manifest.md 的契约说明）。
 //!
 //! 半整数/分数 D：T04 允许的设计 D 由 [design_delay_to_plan] 拆成 `delay_samples + delay_q16`
@@ -56,19 +56,19 @@ use crate::rt::{
 /// `src_of_role` 的“本角色无节目输入”哨兵（A_map 整行为 0，输出必须逐样本零填）。
 pub const COMPILE_NO_SOURCE: u16 = u16::MAX;
 
-/// `TspiPathV1.flags` bit0：本路径系数含 `delta_D` 对角 baseline（core-v1 §11.10）。
+/// `KhaenPathV1.flags` bit0：本路径系数含 `delta_D` 对角 baseline（core-v1 §11.10）。
 pub const PATH_FLAG_DIAG_BASELINE_INCLUDED: u8 = 1 << 0;
-/// `TspiPathV1.flags` bit1：本路径是 G/P 融合结果（factorized 图里无此位）。
+/// `KhaenPathV1.flags` bit1：本路径是 G/P 融合结果（factorized 图里无此位）。
 pub const PATH_FLAG_FUSED: u8 = 1 << 1;
-/// `TspiPathV1.flags` bit2：系数按 zero-padding 线性卷积生成（禁止短 FFT 循环混叠）。
+/// `KhaenPathV1.flags` bit2：系数按 zero-padding 线性卷积生成（禁止短 FFT 循环混叠）。
 pub const PATH_FLAG_ZERO_PAD_LINEAR_CONV: u8 = 1 << 2;
-/// `TspiPathV1.flags` bit3：输入侧 delay/polarity 已编码进系数（A_i 列语义）。
+/// `KhaenPathV1.flags` bit3：输入侧 delay/polarity 已编码进系数（A_i 列语义）。
 pub const PATH_FLAG_INPUT_SIDE_DELAY: u8 = 1 << 3;
 
 /// 默认 f32 系数预算（4 MiB；调用方可按 profile 收紧/放宽）。
 pub const COMPILE_DEFAULT_COEFF_BUDGET_BYTES: u64 = 4 * 1024 * 1024;
 
-/// 编译输出必须打包进 plan 的 f32 系数区（`TspiPlanHeaderV1.total_coeff_bytes: u32`）。
+/// 编译输出必须打包进 plan 的 f32 系数区（`KhaenPlanHeaderV1.total_coeff_bytes: u32`）。
 const PLAN_COEFF_BYTES_MAX: u64 = u32::MAX as u64;
 
 const _: () = {
@@ -630,7 +630,7 @@ impl CompiledPlans {
     }
 }
 
-/// fused 路径的 plan 投影（字段对齐 `TspiPathV1` 语义；打包/ABI 对齐归 T26）。
+/// fused 路径的 plan 投影（字段对齐 `KhaenPathV1` 语义；打包/ABI 对齐归 T26）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct FusedPathPlan {
     /// 输入源通道（< N）。
@@ -645,7 +645,7 @@ pub struct FusedPathPlan {
     pub delay_q16: u32,
     /// 系数外的极性乘子；融合图恒为 1（输出极性已折入系数，避免双乘）。
     pub polarity: i8,
-    /// `TspiPathV1.flags` 子集（见 PATH_FLAG_*）。
+    /// `KhaenPathV1.flags` 子集（见 PATH_FLAG_*）。
     pub flags: u8,
     /// f32 系数（plan arena 形态）。
     pub coeffs_f32: Vec<f32>,

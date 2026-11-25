@@ -559,7 +559,7 @@ function scriptStatusBlock(st) {
     .filter((k) => st[k] != null)
     .map((k) => el('pre', {}, k + ':\n' + JSON.stringify(st[k], null, 2)));
   return el('details', { style: 'margin-top:12px' },
-    el('summary', {}, 'audio-stack 脚本状态（tspi-mode status --json，schema=tspi-audio/v1）'),
+    el('summary', {}, 'audio-stack 脚本状态（khaen-mode status --json，schema=khaen-audio/v1）'),
     kv([
       ['schema', st.schema],
       ['mode', st.mode],
@@ -611,7 +611,7 @@ async function loadMode() {
         el('div', { class: 'mode-name' }, status.mode_label),
         el('div', { class: 'mode-sub' },
           '状态：', modeBadgeFor(status.state, !!status.last_error),
-          ' · 切换策略：' + (status.strategy === 'script' ? 'audio-stack 脚本（tspi-mode）' : '内置编排'),
+          ' · 切换策略：' + (status.strategy === 'script' ? 'audio-stack 脚本（khaen-mode）' : '内置编排'),
           ' · 启动自动恢复：' + (status.restore_on_start ? '开' : '关（D4 默认）')),
         status.persisted ? el('div', { class: 'muted', style: 'font-size:12.5px;margin-top:6px' },
           '上次持久化模式：' + (status.persisted.mode_label || status.persisted.mode) +
@@ -638,14 +638,14 @@ async function loadMode() {
         try {
           const result = await api('/api/mode/script-status');
           if (!result.available) {
-            toast(result.message || 'tspi-mode 脚本不可用', 'warn');
+            toast(result.message || 'khaen-mode 脚本不可用', 'warn');
           } else {
-            toast('已读取 tspi-mode status（schema=' + (result.script && result.script.schema || '?') + '）', 'ok');
+            toast('已读取 khaen-mode status（schema=' + (result.script && result.script.schema || '?') + '）', 'ok');
             await loadMode();
           }
         } catch (e) { toast(e.message, 'error'); }
       },
-    }, '读取 tspi-mode 状态')],
+    }, '读取 khaen-mode 状态')],
   });
 
   const targets = card('手动切换', [
@@ -653,7 +653,7 @@ async function loadMode() {
       modeTargetCard(profileByMode.dante || {}, current, busy, enabled, fast ? () => doSwitch('dante', 'Dante') : null),
       modeTargetCard(profileByMode.aes67 || {}, current, busy, enabled, () => doSwitch('aes67', 'AES67')),
       offModeCard(current, busy, enabled, () => doSwitch('off', '关闭（off）'))),
-    alertBox('info', 'D4：开机默认音频 off，不自动调用 tspi-mode 恢复上次模式；需要时由用户手动切换。切换失败自动回滚，并记录到 state.json。'),
+    alertBox('info', 'D4：开机默认音频 off，不自动调用 khaen-mode 恢复上次模式；需要时由用户手动切换。切换失败自动回滚，并记录到 state.json。'),
     !enabled ? alertBox('warn', '运行模式切换已在配置中关闭（[mode] enabled = false）') : null,
   ]);
 
@@ -1384,8 +1384,8 @@ async function loadSystem() {
 
   const authCard = card('认证与安全', [
     alertBox('info', '除 /healthz 外，所有 API 都需要 token 认证；浏览器会话写操作需要 CSRF token。'),
-    el('p', {}, '修改 token：编辑设备上的 ', el('code', {}, '/etc/tspi-audio-web/config.toml'), ' 中 token 行，然后：'),
-    el('pre', {}, 'sudo systemctl restart tspi-audio-web\n# 查看当前 token：\nsudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token'),
+    el('p', {}, '修改 token：编辑设备上的 ', el('code', {}, '/etc/khaen-audio-web/config.toml'), ' 中 token 行，然后：'),
+    el('pre', {}, 'sudo systemctl restart khaen-audio-web\n# 查看当前 token：\nsudo khaen-audio-web --config /etc/khaen-audio-web/config.toml --print-token'),
     el('p', { class: 'muted' }, '建议仅在内网/可信网络使用；如需 HTTPS，请在前置反向代理终结 TLS 并在配置中开启 cookie_secure = true。'),
   ]);
 
@@ -1541,7 +1541,7 @@ function renderChannelmapWizard() {
       ['声卡', (probe.cards || []).join('；') || '—'],
     ]),
     probe.notes && probe.notes.length ? warnList(probe.notes) : null,
-    el('p', { class: 'muted', style: 'font-size:12px' }, 'probe 来自 tspi-channelmap probe --json（aplay/arecord --dump-hw-params）；失败时可手动填通道数。'),
+    el('p', { class: 'muted', style: 'font-size:12px' }, 'probe 来自 khaen-channelmap probe --json（aplay/arecord --dump-hw-params）；失败时可手动填通道数。'),
   ]);
   const layoutCard = card('② 选择输入 / 输出布局', [
     el('div', { class: 'split-two' },
@@ -1874,7 +1874,7 @@ function renderChannelmap() {
       el('button', { class: 'btn small', onclick: cmValidate }, '校验'),
       el('button', { class: 'btn small primary', onclick: function () { cmSave(false); } }, '保存 active'),
       el('button', { class: 'btn small ghost', onclick: function () { cmSave(true); } }, '强制保存草稿'),
-      el('button', { class: 'btn small ok', onclick: cmApply }, '保存并应用（tspi-channelmap apply）'),
+      el('button', { class: 'btn small ok', onclick: cmApply }, '保存并应用（khaen-channelmap apply）'),
       el('button', { class: 'btn small danger', onclick: cmRollback }, '回滚 last-good'),
       el('a', { class: 'btn small ghost', href: '/api/channelmap/export', target: '_blank' }, '导出 YAML'),
       el('button', { class: 'btn small ghost', onclick: cmResetWizard }, '重新向导')),
@@ -2131,7 +2131,7 @@ function cmRenderFirCard() {
         f.group_delay_ms == null ? '—' : f.group_delay_ms.toFixed(2) + ' ms',
         el('span', { class: f.level === 'long' ? 'danger-tag' : f.level === 'experimental' ? 'warn-tag' : 'muted' }, f.level)];
     })),
-    (CM.view && CM.view.renderText) ? el('details', { open: true }, el('summary', {}, '渲染配置（/run/tspi/camilladsp.yml）'), el('pre', {}, CM.view.renderText)) : null,
+    (CM.view && CM.view.renderText) ? el('details', { open: true }, el('summary', {}, '渲染配置（/run/khaen/camilladsp.yml）'), el('pre', {}, CM.view.renderText)) : null,
   ], { className: 'wide' });
 }
 
@@ -2148,7 +2148,7 @@ function cmRenderProfileCard() {
           el('button', { class: 'btn small danger', onclick: function () { cmDeleteProfile(p.name); } }, '删除'))];
     })),
     el('details', { style: 'margin-top:8px' }, el('summary', {}, '导入 YAML'),
-      el('textarea', { id: 'cm-import-yaml', rows: '6', placeholder: '粘贴 tspi-channelmap/v2 YAML', style: 'width:100%;margin:6px 0' }),
+      el('textarea', { id: 'cm-import-yaml', rows: '6', placeholder: '粘贴 khaen-channelmap/v2 YAML', style: 'width:100%;margin:6px 0' }),
       el('button', { class: 'btn small', onclick: cmImportYaml }, '导入（存为 profile）')),
   ], { className: 'wide' });
 }
@@ -2163,7 +2163,7 @@ function cmRenderInputModeCard() {
   const im = CM.inputMode;
   if (!im) {
     return card('输入内容检测（auto / 2.0 / multichannel）', [
-      el('p', { class: 'muted' }, '正在读取 /run/tspi/input-content.json…'),
+      el('p', { class: 'muted' }, '正在读取 /run/khaen/input-content.json…'),
     ], { className: 'wide' });
   }
   const modeSel = el('select', { id: 'cm-input-mode-select' },
@@ -2200,7 +2200,7 @@ function cmRenderInputModeCard() {
       el('button', { class: 'btn small primary', onclick: cmSaveInputMode }, '保存覆盖'),
       el('button', { class: 'btn small ghost', onclick: function () { cmLoadInputMode(true); } }, '刷新状态')),
     el('p', { class: 'muted', style: 'font-size:11.5px' },
-      '优先级：用户覆盖 > 检测器 > auto。auto 默认直通；检测到 2.0（仅 FL/FR 有能量）才走上混。H16 Pure/Pass-through 时板端上混；H16 已内部上混或多声道内容时禁止二次上混。文件与字段由 tspi-upmix/audio-stack 提供，本页只读运行态、写覆盖文件，不改 channelmap schema。'),
+      '优先级：用户覆盖 > 检测器 > auto。auto 默认直通；检测到 2.0（仅 FL/FR 有能量）才走上混。H16 Pure/Pass-through 时板端上混；H16 已内部上混或多声道内容时禁止二次上混。文件与字段由 khaen-upmix/audio-stack 提供，本页只读运行态、写覆盖文件，不改 channelmap schema。'),
   ], { className: 'wide' });
 }
 async function cmLoadInputMode(force) {
@@ -2304,7 +2304,7 @@ async function cmApply() {
     title: '保存并应用 channelmap？',
     message: CM.view && CM.view.mode_off
       ? '当前模式 off：将校验/渲染/持久化，不启动 CamillaDSP。'
-      : '将调用 tspi-channelmap apply：校验→渲染→重启 CamillaDSP；失败（exit 9）回滚 last-good 并显示错误。',
+      : '将调用 khaen-channelmap apply：校验→渲染→重启 CamillaDSP；失败（exit 9）回滚 last-good 并显示错误。',
     confirmLabel: '保存并应用',
     danger: false,
   });
@@ -2324,7 +2324,7 @@ async function cmApply() {
   }
 }
 async function cmRollback() {
-  const answer = await confirmDialog({ title: '回滚 last-good？', message: '调用 tspi-channelmap rollback 恢复到上一次成功应用；mode active 时会重启 CamillaDSP。', confirmLabel: '回滚', danger: true });
+  const answer = await confirmDialog({ title: '回滚 last-good？', message: '调用 khaen-channelmap rollback 恢复到上一次成功应用；mode active 时会重启 CamillaDSP。', confirmLabel: '回滚', danger: true });
   if (!answer.ok) return;
   try {
     const result = await api('/api/channelmap/rollback', { method: 'POST', body: {} });

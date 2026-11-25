@@ -1,0 +1,37 @@
+[Unit]
+Description=泰山派音频设备 Web 管理服务 (khaen-audio-web)
+Documentation=file:/usr/local/share/doc/khaen-audio-web/README.md
+# Web 管理服务常开，与音频运行模式（dante/aes67/off）解耦；
+# 音频服务由用户通过 Web 的「运行模式」手动切换（D4：开机默认 audio off）。
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 需要 root 才能通过 systemctl/journalctl 管理 camilladsp/ptp4l/aes67-daemon/inferno 等单元，
+# 以及读写 /etc/camilladsp、/etc/ptp4l.conf、/etc/khaen-audio-web。
+User=root
+Group=root
+Environment=KHAEN_CONFIG=/etc/khaen-audio-web/config.toml
+ExecStart=/usr/local/bin/khaen-audio-web --config /etc/khaen-audio-web/config.toml
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+# 日志写 journald：journalctl -u khaen-audio-web -f
+StandardOutput=journal
+StandardError=journal
+
+# 基础加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# 说明：不使用 ProtectSystem=strict，因为本服务需要写 /etc/camilladsp、/etc/ptp4l.conf、
+# /etc/khaen-audio-web（配置备份、模式持久化、PTP 配置修改）。
+
+[Install]
+WantedBy=multi-user.target

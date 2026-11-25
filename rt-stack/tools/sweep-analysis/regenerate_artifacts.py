@@ -8,7 +8,7 @@ SUPERSEDED/ 并保留 sha256；FR/RT/CSD/IR-wav/SVG 必须与旧产物逐字节�
 脚本会逐文件核对并写报告。
 
 用法：
-  python regenerate_artifacts.py --repo-root <tspi-audio-dsp> \
+  python regenerate_artifacts.py --repo-root <khaen-audio-dsp> \
       [--work-dir <dir>] [--report-out <dir>] [--skip-snapshot] [--sums-only]
 退出码 0 = 成功（含核对全通过）；1 = 有核对失败。
 """
@@ -22,7 +22,7 @@ import sys
 
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 REL_EVIDENCE = os.path.join("rt-stack", "evidence", "board-window-20261118-sweep")
-REL_ARTIFACT = os.path.join("artifacts", "tspi-audio", "sweep-verification-20261118")
+REL_ARTIFACT = os.path.join("artifacts", "khaen-audio", "sweep-verification-20261118")
 REL_REPORT = os.path.join("rt-stack", "evidence", "cursor-fix-ir-distance", "regen")
 
 # 重生成时允许变化的文件（IR 语义/报告）；其余分析产物必须逐字节一致。

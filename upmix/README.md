@@ -1,4 +1,4 @@
-# 2.0 立体声上混（4.1.2 / 5.3.2）—— tspi-upmix
+# 2.0 立体声上混（4.1.2 / 5.3.2）—— khaen-upmix
 
 > 泰山派 3M（RK3576）/ Debian12 / 6.1.99-rt36 · CamillaDSP 4.1.3 · channelmap v2
 > 任务：2.0（2ch）上混到用户当前/常用布局 **4.1.2** 与 **5.3.2**；不做 16ch 扩展、不做跨布局 remap。
@@ -6,14 +6,14 @@
 ## 1. 交付内容
 
 ```
-projects/tspi-audio-dsp/upmix/
-├── tspi-upmix                 # 生成器（Python3 + PyYAML；板端可直接运行）
+projects/khaen-audio-dsp/upmix/
+├── khaen-upmix                 # 生成器（Python3 + PyYAML；板端可直接运行）
 ├── presets/upmix-presets.yml  # 预设参数（音乐/电影/宽场 × 4.1.2/5.3.2）
 ├── examples/                  # 生成的示例（12 个 channelmap profile + 6 个 CamillaDSP 配置 + manifest；
 │                              #  container/ 另有 8 个 H16 容器 profile + 6 个双路径配置）
 ├── deploy/install-upmix.sh    # 板端热部署：备份 + 安装 + 校验 + 自动回滚（不启动/不重启服务）
 ├── tests/                     # 信号生成/文件后端运行/分析/板端计时
-├── patches/                   # 发现并由 audio-stack 合入的 tspi-channelmap 修复（存档）
+├── patches/                   # 发现并由 audio-stack 合入的 khaen-channelmap 修复（存档）
 ├── docs/                      # 算法、WebUI 对接、测试方法
 └── REPORT.md                  # 简短报告（含测试数据）
 ```
@@ -22,31 +22,31 @@ projects/tspi-audio-dsp/upmix/
 
 | 路径 | 依赖 | 适合 |
 | --- | --- | --- |
-| **A. channelmap profile + WebUI** | 修复后的 tspi-channelmap（OEM v5 已含） | 日常使用：WebUI 里选预设 → 加载 → 应用；参数可用现有角色校准 UI 微调 |
+| **A. channelmap profile + WebUI** | 修复后的 khaen-channelmap（OEM v5 已含） | 日常使用：WebUI 里选预设 → 加载 → 应用；参数可用现有角色校准 UI 微调 |
 | **B. 独立 CamillaDSP 配置** | 只要 camilladsp | 不依赖 channelmap 渲染器；SSH 热部署 / 文件后端测试 / 直连 CamillaDSP |
 
 ## 2. 快速开始（开发机）
 
 ```bash
 # 1) 列出/查看预设
-python3 tspi-upmix list
-python3 tspi-upmix show upmix-4.1.2-music
+python3 khaen-upmix list
+python3 khaen-upmix show upmix-4.1.2-music
 
-# 2) 自检（含真实 tspi-channelmap 校验，若 PATH 里能找到）
-python3 tspi-upmix check upmix-4.1.2-music
+# 2) 自检（含真实 khaen-channelmap 校验，若 PATH 里能找到）
+python3 khaen-upmix check upmix-4.1.2-music
 
 # 3) 生成全部示例（必须给 layout-presets；缺省时生成器拒绝用内置映射，
 #    仅本机临时调试可加 --allow-builtin）
-python3 tspi-upmix --layout-presets /etc/tspi-audio/layout-presets.yml \
+python3 khaen-upmix --layout-presets /etc/khaen-audio/layout-presets.yml \
   all -o examples --playback-channels 22
 
 # 4) 文件后端测试（本机 CamillaDSP 4.1.3）
 python3 tests/gen_signals.py --out /tmp/upmix-signals
 python3 tests/run_file_backend.py --workdir /tmp/upmix-run \
   --signals /tmp/upmix-signals --camilladsp /path/to/camilladsp \
-  --tspi-upmix ./tspi-upmix \
-  --layout-presets /etc/tspi-audio/layout-presets.yml \
-  --channelmap /usr/local/bin/tspi-channelmap \
+  --khaen-upmix ./khaen-upmix \
+  --layout-presets /etc/khaen-audio/layout-presets.yml \
+  --channelmap /usr/local/bin/khaen-channelmap \
   --variants standalone,renderer \
   --presets upmix-4.1.2-music,upmix-5.3.2-music
 python3 tests/analyze.py --workdir /tmp/upmix-run --report /tmp/upmix-run/report.md
@@ -56,7 +56,7 @@ python3 tests/analyze.py --workdir /tmp/upmix-run --report /tmp/upmix-run/report
 
 ```bash
 # 开发机：生成 dist（见 deploy/README.md 的目录结构）并 scp 到板子
-python3 tspi-upmix --layout-presets /etc/tspi-audio/layout-presets.yml \
+python3 khaen-upmix --layout-presets /etc/khaen-audio/layout-presets.yml \
   all -o /tmp/upmix-examples
 # 板端：
 cd /tmp/upmix-dist && bash install-upmix.sh --dry-run   # 先看计划
@@ -66,10 +66,10 @@ bash /tmp/upmix-dist/install-upmix.sh --rollback        # 回滚安装
 
 安装内容（**只写文件，不 systemctl start/restart，不打开声卡**）：
 
-- /usr/local/bin/tspi-upmix
-- /etc/tspi-audio/upmix/presets.yml + camilladsp-examples/
-- /etc/tspi-audio/profiles/upmix-*.yml（12 个：6 预设 × 完整/safe）
-- /etc/tspi-audio/profiles/*-from-h16-*.yml（8 个容器输入 profile）+ passthrough-*.yml（2 个跨布局下混）
+- /usr/local/bin/khaen-upmix
+- /etc/khaen-audio/upmix/presets.yml + camilladsp-examples/
+- /etc/khaen-audio/profiles/upmix-*.yml（12 个：6 预设 × 完整/safe）
+- /etc/khaen-audio/profiles/*-from-h16-*.yml（8 个容器输入 profile）+ passthrough-*.yml（2 个跨布局下混）
 - 首次安装时快照当前 active 为 upmix-off-restore.yml（用于关闭上混）
 
 ## 4. 启用/关闭上混
@@ -83,20 +83,20 @@ bash /tmp/upmix-dist/install-upmix.sh --rollback        # 回滚安装
 4. 微调：加载后可在现有 UI 里改每角色增益/延迟/极性/高通/低通/PEQ（上混参数与这些字段一一对应，见
    docs/WEBUI-INTEGRATION.md）。
 
-> 注意：`*-safe` 变体只去掉 `sources[].inverted`（源反相）依赖，**不能绕过旧渲染器 bug A**——bug A 影响所有带 per-role 分频/PEQ/FIR/gain/delay 的 profile（Filter step 的 channels/names 配对错）。旧镜像（<OEM v5）唯一可用路径 = 独立 CamillaDSP 配置（`tspi-upmix apply`）或先打 `patches/` 补丁；旧渲染器上 FL 1 kHz 约 −42 dB 是 bug A 特征（C-04）。
+> 注意：`*-safe` 变体只去掉 `sources[].inverted`（源反相）依赖，**不能绕过旧渲染器 bug A**——bug A 影响所有带 per-role 分频/PEQ/FIR/gain/delay 的 profile（Filter step 的 channels/names 配对错）。旧镜像（<OEM v5）唯一可用路径 = 独立 CamillaDSP 配置（`khaen-upmix apply`）或先打 `patches/` 补丁；旧渲染器上 FL 1 kHz 约 −42 dB 是 bug A 特征（C-04）。
 
 ### B. 独立配置（SSH / 无 WebUI）
 
 ```bash
-tspi-upmix apply upmix-4.1.2-music --dry-run     # 预览：显示 capture/playback/设备与配置头
-tspi-upmix apply upmix-4.1.2-music               # 模式 off：只渲染+校验+写 /run/tspi/camilladsp.yml
-tspi-upmix apply upmix-5.3.2-movie --mode dante  # 96k/Dante（inferno capture）
-tspi-upmix rollback                              # 回滚最近一次 apply（备份校验，失败恢复）
+khaen-upmix apply upmix-4.1.2-music --dry-run     # 预览：显示 capture/playback/设备与配置头
+khaen-upmix apply upmix-4.1.2-music               # 模式 off：只渲染+校验+写 /run/khaen/camilladsp.yml
+khaen-upmix apply upmix-5.3.2-movie --mode dante  # 96k/Dante（inferno capture）
+khaen-upmix rollback                              # 回滚最近一次 apply（备份校验，失败恢复）
 ```
 
-`apply` 的默认目标是 `/run/tspi/camilladsp.yml`（与 tspi-mode/channelmap 同一运行期路径），备份在
-`/var/lib/tspi/upmix/backups/`，state 在 `/var/lib/tspi/upmix/state.json`。模式非 off 且未传
-`--no-restart` 时会重启 `tspi-camilladsp.service`；失败自动恢复备份。
+`apply` 的默认目标是 `/run/khaen/camilladsp.yml`（与 khaen-mode/channelmap 同一运行期路径），备份在
+`/var/lib/khaen/upmix/backups/`，state 在 `/var/lib/khaen/upmix/state.json`。模式非 off 且未传
+`--no-restart` 时会重启 `khaen-camilladsp.service`；失败自动恢复备份。
 
 ## 5. 预设
 
@@ -118,7 +118,7 @@ tspi-upmix rollback                              # 回滚最近一次 apply（�
 - 4.1.2（MOTU 48k 22ch 映射）：FL=0、FR=1、SL=2、SR=3、HFL=4、HFR=5、**SUB1=7**（ch6 空；8 个逻辑槽位，设备仍 22ch）。
   ch6 保留/SUB=7 的来源是板端部署表（task-19 裁决），文档不另做推导；运行时必须解析 layout-presets 并校验设备宽度（A-P1-16）。
 - 5.3.2：FL=0、FR=1、C=2、SL=3、SR=4、SUB1=5、SUB2=6、SUB3=7、HFL=8、HFR=9。
-- 以上来自 `/etc/tspi-audio/layout-presets.yml`（audio-stack 维护）；生成器读取该文件，**唯一真相**。
+- 以上来自 `/etc/khaen-audio/layout-presets.yml`（audio-stack 维护）；生成器读取该文件，**唯一真相**。
   内置表仅用于 `check` 对照/极端兜底：`all`/`install` 在缺 layout-presets 时直接报错退出
   （除非显式 `--allow-builtin`），避免用错的内置映射生成配置；`check` 会逐项断言内置表与
   layout-presets 一致（4.1.2 内置已按板端修正为 FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7）。
@@ -127,11 +127,11 @@ tspi-upmix rollback                              # 回滚最近一次 apply（�
 
 | 路径 | 内容 |
 | --- | --- |
-| /etc/tspi-audio/profiles/upmix-*.yml | channelmap v2 profile（WebUI 可见） |
-| /etc/tspi-audio/upmix/presets.yml | 参数预设（再生成用） |
-| /etc/tspi-audio/upmix/camilladsp-examples/ | 独立 CamillaDSP ALSA 示例 |
-| /run/tspi/camilladsp.yml | apply 后的运行期配置（与现有约定一致） |
-| /var/lib/tspi/upmix/ | apply 备份/状态、install 备份 |
+| /etc/khaen-audio/profiles/upmix-*.yml | channelmap v2 profile（WebUI 可见） |
+| /etc/khaen-audio/upmix/presets.yml | 参数预设（再生成用） |
+| /etc/khaen-audio/upmix/camilladsp-examples/ | 独立 CamillaDSP ALSA 示例 |
+| /run/khaen/camilladsp.yml | apply 后的运行期配置（与现有约定一致） |
+| /var/lib/khaen/upmix/ | apply 备份/状态、install 备份 |
 
 ## 8. 测试结果摘要
 
@@ -159,7 +159,7 @@ tspi-upmix rollback                              # 回滚最近一次 apply（�
 - docs/TESTING.md —— 本地/板端测试步骤与判定标准
 - docs/PEQ-TYPE.md —— peq[].type（peaking/low_shelf/high_shelf）语义、shelf slope=12q 映射与 CamillaDSP 边界
 - deploy/README.md —— 热部署与回滚
-- patches/ —— tspi-channelmap 三处修复（已由 audio-stack 合入）
+- patches/ —— khaen-channelmap 三处修复（已由 audio-stack 合入）
 
 
 ## 11. 输入内容模式：7.1.4 容器里只有 2.0（task-19）
@@ -170,23 +170,23 @@ DTS Neural:X）。板端要自动判断：只有 FL/FR 有能量 → 上混；C/
 
 ```bash
 # 双路径配置（一个 CamillaDSP 配置里同时有上混/直通，daemon 用 Aux1/Aux2 切换，无重启）
-tspi-upmix autodetect-config upmix-4.1.2-music -o /tmp/auto.yml \
+khaen-upmix autodetect-config upmix-4.1.2-music -o /tmp/auto.yml \
   --input-layout h16-7.1.4 --content-mode auto      # stereo|multichannel 可固定单路径
 
 # 离线检测容器 WAV（H16 12ch）；输出与运行态同字段 JSON
-tspi-upmix detect --wav /tmp/container714.wav --input-layout h16-7.1.4
+khaen-upmix detect --wav /tmp/container714.wav --input-layout h16-7.1.4
 
 # 手动覆盖：auto / 强制 2.0 / 强制多声道（force-* 别名也接受）
-tspi-upmix input-mode set stereo
-tspi-upmix input-mode get
+khaen-upmix input-mode set stereo
+khaen-upmix input-mode get
 
-# daemon：读 CamillaDSP websocket 的 GetCaptureSignalRms → 写 /run/tspi/input-content.json + 切 fader
-tspi-upmix autodetect --input-layout h16-7.1.4
+# daemon：读 CamillaDSP websocket 的 GetCaptureSignalRms → 写 /run/khaen/input-content.json + 切 fader
+khaen-upmix autodetect --input-layout h16-7.1.4
 ```
 
-- 运行态：`/run/tspi/input-content.json`（schema `tspi-input-content/v1`，WebUI 只读）。
-- 覆盖持久化：`/etc/tspi-audio/input-mode.json`（mode: auto|stereo|multichannel）。
+- 运行态：`/run/khaen/input-content.json`（schema `khaen-input-content/v1`，WebUI 只读）。
+- 覆盖持久化：`/etc/khaen-audio/input-mode.json`（mode: auto|stereo|multichannel）。
 - 判断只用 C/SL/SR/height，**LFE 不作判据**；窗口 2.5s + 迟滞 6dB + 启动冻结 2.5s；auto 默认直通。
-- 安装包含 `tspi-upmix-autodetect.service.example`（默认不启用，不启停音频服务）。
+- 安装包含 `khaen-upmix-autodetect.service.example`（默认不启用，不启停音频服务）。
 - 容器 profile / autodetect 配置示例：`examples/container/`。
 

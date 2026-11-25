@@ -744,7 +744,7 @@ def run(out_dir=None):
         pass
     passed = sum(1 for case in cases if case.ok)
     report = {
-        "schema": "tspi-h-diag-selftest/v1",
+        "schema": "khaen-h-diag-selftest/v1",
         "tool": {"name": G.TOOL_NAME, "version": G.TOOL_VERSION,
                  "generated_utc": G.utc_now()},
         "synthetic_only": True,

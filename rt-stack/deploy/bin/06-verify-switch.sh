@@ -3,12 +3,12 @@
 #
 # 硬门（任一 FAIL -> exit 5）：
 #   V1 khaen-rt-host.service active（--require-daemon 时 daemon 也 active）
-#   V2 旧 C 退役保持：C unit 无 enabled/active、入口文件不存在、无 camilladsp/tspi-upmix 进程
+#   V2 旧 C 退役保持：C unit 无 enabled/active、入口文件不存在、无 camilladsp/khaen-upmix 进程
 #   V3 保留 AoIP/PTP unit inactive（audio-off；--allow-retained-active 可放宽并记 WARN）
 #   V4 新 host 进程存活；/dev/snd 仅由新 host 持有（无其它音频 owner）
 #   V5 旧控制面端口：1234 无监听；80 若被监听不得属于旧 web/camilladsp（新 daemon 监听 80 是合法的）
 #   V6 进程在 --settle-secs 后仍存活（无启动即崩）
-#   V10 IRQ 亲和持久化（task-192）：irqbalance 未 enabled/active；tspi-irq-affinity.service active；
+#   V10 IRQ 亲和持久化（task-192）：irqbalance 未 enabled/active；khaen-irq-affinity.service active；
 #       IRQ58/56/57 effective 仍在 A53（1/2/3）且 T45 IRQ 放置前置 PASS（host 启动后复验）
 #       B1（2026-11-20 板窗）：V10.bootwait 已装 oneshot 含 ExecStartPre=irq-affinity-pin wait；
 #       V10.legacy-dropin 无遗留 live-only drop-in（开机 IRQ56/57 晚到 → host 不启动的回归门）
@@ -24,7 +24,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/../lib/common.sh"
 . "$HERE/../config/old-c-units.conf"
 
-TIMEOUT="${TSPI_TIMEOUT_SECS:-120}"
+TIMEOUT="${KHAEN_TIMEOUT_SECS:-120}"
 REQUIRE_DAEMON=0
 REQUIRE_RT=0
 REQUIRE_HEALTH=0
@@ -78,14 +78,14 @@ else
 fi
 MISSING_CFG=""
 for f in rt-host.toml rt-daemon.toml; do
-  [ -f "$(p "$TSPI_ETC/$f")" ] || MISSING_CFG="$MISSING_CFG $TSPI_ETC/$f"
+  [ -f "$(p "$KHAEN_ETC/$f")" ] || MISSING_CFG="$MISSING_CFG $KHAEN_ETC/$f"
 done
-if [ -z "$MISSING_CFG" ]; then add_check V1.config PASS "/etc/tspi-rt-stack/{rt-host,rt-daemon}.toml 已安装"
+if [ -z "$MISSING_CFG" ]; then add_check V1.config PASS "/etc/khaen-rt-stack/{rt-host,rt-daemon}.toml 已安装"
 else add_check V1.config FAIL "缺新栈配置文件（04 未安装 toml）:$MISSING_CFG"; fi
 if [ "$REQUIRE_DAEMON" = "1" ]; then
-  if wait_unit_active tspi-rt-daemon.service "$TIMEOUT"; then add_check V1.unit.daemon PASS "tspi-rt-daemon.service active"; else add_check V1.unit.daemon FAIL "daemon 未 active"; fi
+  if wait_unit_active khaen-rt-daemon.service "$TIMEOUT"; then add_check V1.unit.daemon PASS "khaen-rt-daemon.service active"; else add_check V1.unit.daemon FAIL "daemon 未 active"; fi
 else
-  if sunit_active tspi-rt-daemon.service; then add_check V1.unit.daemon PASS "daemon active"; else add_check V1.unit.daemon NOT_VERIFIED "daemon inactive（本批 NOT_BUILT；--require-daemon 才是硬门）"; fi
+  if sunit_active khaen-rt-daemon.service; then add_check V1.unit.daemon PASS "daemon active"; else add_check V1.unit.daemon NOT_VERIFIED "daemon inactive（本批 NOT_BUILT；--require-daemon 才是硬门）"; fi
 fi
 
 # V2 C retired
@@ -132,7 +132,7 @@ else add_check V5.ports.1234 FAIL "1234 仍有监听: $LISTEN"; fi
 L80="$(ss -ltnp 2>/dev/null | grep -E ':80\\b' || true)"
 if [ -z "$L80" ]; then
   add_check V5.ports.80 PASS "80 无监听"
-elif printf '%s' "$L80" | grep -Eqi 'khaen-audio-web|camilladsp|tspi-upmix'; then
+elif printf '%s' "$L80" | grep -Eqi 'khaen-audio-web|camilladsp|khaen-upmix'; then
   add_check V5.ports.80 FAIL "80 仍被旧控制面进程监听: $L80"
 else
   add_check V5.ports.80 PASS "80 由新 daemon/系统进程监听（非旧 C）: $(printf '%s' "$L80" | head -n 1)"
@@ -148,38 +148,38 @@ else
 fi
 
 # V9 MOTU 48k keeper（D8/用户禁止 192k；boot+timer+udev 兜底）
-if sunit_exists tspi-motu-48k-keeper.timer; then
-  KSTATE="$(sunit_enabled_state tspi-motu-48k-keeper.timer)"
+if sunit_exists khaen-motu-48k-keeper.timer; then
+  KSTATE="$(sunit_enabled_state khaen-motu-48k-keeper.timer)"
   case "$KSTATE" in
-    enabled|enabled-runtime) add_check V9.keeper.timer PASS "tspi-motu-48k-keeper.timer enabled（boot/timer/udev 兜底）" ;;
+    enabled|enabled-runtime) add_check V9.keeper.timer PASS "khaen-motu-48k-keeper.timer enabled（boot/timer/udev 兜底）" ;;
     *) add_check V9.keeper.timer FAIL "keeper timer 未 enabled（state=${KSTATE:-unknown}）" ;;
   esac
 else
-  add_check V9.keeper.timer FAIL "tspi-motu-48k-keeper.timer 未安装"
+  add_check V9.keeper.timer FAIL "khaen-motu-48k-keeper.timer 未安装"
 fi
-if [ -x "$(p /usr/local/lib/tspi/motu-48k-keeper)" ]; then
-  add_check V9.keeper.script PASS "/usr/local/lib/tspi/motu-48k-keeper 可执行"
+if [ -x "$(p /usr/local/lib/khaen/motu-48k-keeper)" ]; then
+  add_check V9.keeper.script PASS "/usr/local/lib/khaen/motu-48k-keeper 可执行"
 else
   add_check V9.keeper.script FAIL "缺少 48k keeper 脚本"
 fi
 # keeper 必须"确实在跑"，不是"装了没跑"（2026-11-20 实况：unit inactive/dead + 日志不存在，
 # 当天 06 只在 V9.keeper.run 给了 NOT_VERIFIED，等于防线形同虚设）
-KPERIOD="$(systemctl show -p OnUnitActiveSec --value tspi-motu-48k-keeper.timer 2>/dev/null || true)"
+KPERIOD="$(systemctl show -p OnUnitActiveSec --value khaen-motu-48k-keeper.timer 2>/dev/null || true)"
 case "$KPERIOD" in
   ''|infinity) add_check V9.keeper.period FAIL "keeper timer 无周期（OnUnitActiveSec 空/infinity）" ;;
   *) if [ "${KPERIOD%min}" != "$KPERIOD" ]; then KP=9999; else KP="${KPERIOD%s}"; fi
      if [ "$KP" -le 120 ] 2>/dev/null; then add_check V9.keeper.period PASS "keeper 周期 ${KPERIOD}（<=120s）"
      else add_check V9.keeper.period FAIL "keeper 周期 ${KPERIOD} 过长（要求 <=120s，192k 漂移窗口靠它兜）"; fi ;;
 esac
-KLOGF="$(p /var/log/tspi/motu-48k-keeper.log)"
-KJ="$(journalctl -t tspi-motu-48k-keeper --since '-5 min' --no-pager 2>/dev/null | grep -c 'stageB cuemix\|stageA\|done' || true)"
+KLOGF="$(p /var/log/khaen/motu-48k-keeper.log)"
+KJ="$(journalctl -t khaen-motu-48k-keeper --since '-5 min' --no-pager 2>/dev/null | grep -c 'stageB cuemix\|stageA\|done' || true)"
 KF="$( [ -f "$KLOGF" ] && find "$KLOGF" -mmin -5 2>/dev/null | wc -l || echo 0 )"
 if [ "${KJ:-0}" -ge 1 ] || [ "${KF:-0}" -ge 1 ]; then
   add_check V9.keeper.run PASS "近 5min 有 keeper 活动记录（journal=${KJ:-0} file=${KF:-0}）"
 else
-  add_check V9.keeper.run FAIL "近 5min 无任何 keeper 活动（journal=${KJ:-0} file=${KF:-0}）→ 48k 防线未生效，先 systemctl start tspi-motu-48k-keeper.service 再看日志"
+  add_check V9.keeper.run FAIL "近 5min 无任何 keeper 活动（journal=${KJ:-0} file=${KF:-0}）→ 48k 防线未生效，先 systemctl start khaen-motu-48k-keeper.service 再看日志"
 fi
-KRATE="$(journalctl -t tspi-motu-48k-keeper --since '-10 min' --no-pager 2>/dev/null | grep -o 'device_rate=[0-9]*' | tail -n 1 | cut -d= -f2)"
+KRATE="$(journalctl -t khaen-motu-48k-keeper --since '-10 min' --no-pager 2>/dev/null | grep -o 'device_rate=[0-9]*' | tail -n 1 | cut -d= -f2)"
 [ -z "$KRATE" ] && [ -f "$KLOGF" ] && KRATE="$(grep -o 'device_rate=[0-9]*' "$KLOGF" 2>/dev/null | tail -n 1 | cut -d= -f2)"
 case "$KRATE" in
   48000) add_check V9.device.rate PASS "CueMix 报设备速率 48000" ;;
@@ -190,7 +190,7 @@ esac
 # V11 板级韧性（2026-11-21）：watchdog / panic-on-lockup / pstore 归档 / 温度日志
 WD_US="$(systemctl show -p RuntimeWatchdogUSec --value 2>/dev/null | tr -d ' ')"
 case "$WD_US" in
-  ''|0|0s|infinity) add_check V11.watchdog FAIL "systemd RuntimeWatchdogSec 未生效（RuntimeWatchdogUSec=${WD_US:-empty}）→ 挂死就要等人拔电；查 /dev/watchdog 是否存在 + system.conf.d/10-tspi-watchdog.conf" ;;
+  ''|0|0s|infinity) add_check V11.watchdog FAIL "systemd RuntimeWatchdogSec 未生效（RuntimeWatchdogUSec=${WD_US:-empty}）→ 挂死就要等人拔电；查 /dev/watchdog 是否存在 + system.conf.d/10-khaen-watchdog.conf" ;;
   *) add_check V11.watchdog PASS "systemd 看门狗生效（RuntimeWatchdogUSec=$WD_US）" ;;
 esac
 POO="$(cat /proc/sys/kernel/panic_on_oops 2>/dev/null)"
@@ -201,21 +201,21 @@ else
   add_check V11.panic FAIL "panic_on_oops=${POO:-?} hardlockup_panic=${HLP:-?}（要求都为 1；否则挂死时什么都不留）"
 fi
 PARCH=""
-[ -f "$(p /var/log/tspi/pstore)/INDEX.txt" ] && PARCH="$(ls -d "$(p /var/log/tspi/pstore)"/*/ 2>/dev/null | wc -l)"
-if [ -x "$(p /usr/local/lib/tspi/pstore-archive)" ]; then
-  if sunit_exists tspi-pstore-archive.service; then
+[ -f "$(p /var/log/khaen/pstore)/INDEX.txt" ] && PARCH="$(ls -d "$(p /var/log/khaen/pstore)"/*/ 2>/dev/null | wc -l)"
+if [ -x "$(p /usr/local/lib/khaen/pstore-archive)" ]; then
+  if sunit_exists khaen-pstore-archive.service; then
     add_check V11.pstore PASS "pstore 归档已安装（已归档目录数=${PARCH:-0}；空的也要有 INDEX.txt 记录）"
   else
     add_check V11.pstore FAIL "pstore-archive 脚本在但 unit 未安装"
   fi
 else
-  add_check V11.pstore FAIL "缺 /usr/local/lib/tspi/pstore-archive（崩溃证据无法落盘）"
+  add_check V11.pstore FAIL "缺 /usr/local/lib/khaen/pstore-archive（崩溃证据无法落盘）"
 fi
-TLOG="$(p /var/log/tspi/thermal.log)"
+TLOG="$(p /var/log/khaen/thermal.log)"
 if [ -f "$TLOG" ] && [ -n "$(find "$TLOG" -mmin -5 2>/dev/null)" ]; then
   add_check V11.thermal PASS "thermal.log 近 5min 有记录（温度/负载历史可回溯）"
 else
-  add_check V11.thermal FAIL "thermal.log 缺失或超过 5min 未更新（tspi-thermal-log.timer 没跑？）"
+  add_check V11.thermal FAIL "thermal.log 缺失或超过 5min 未更新（khaen-thermal-log.timer 没跑？）"
 fi
 
 # V10 IRQ 亲和持久化（task-192；task-189 实测 irqbalance 会把 IRQ58/56/57 搬回 A72）
@@ -234,24 +234,24 @@ if sunit_exists "$IRQ_BALANCE_UNIT"; then
 else
   add_check V10.irqbalance PASS "$IRQ_BALANCE_UNIT 未安装（无自动均衡；oneshot 仍钉核）"
 fi
-if sunit_exists tspi-irq-affinity.service; then
-  if sunit_active tspi-irq-affinity.service; then
-    add_check V10.unit PASS "tspi-irq-affinity.service active（host 启动前钉核 oneshot 已执行）"
+if sunit_exists khaen-irq-affinity.service; then
+  if sunit_active khaen-irq-affinity.service; then
+    add_check V10.unit PASS "khaen-irq-affinity.service active（host 启动前钉核 oneshot 已执行）"
   else
-    add_check V10.unit FAIL "tspi-irq-affinity.service 未 active（host 启动前钉核未执行/失败）"
+    add_check V10.unit FAIL "khaen-irq-affinity.service 未 active（host 启动前钉核未执行/失败）"
   fi
 else
-  add_check V10.unit FAIL "tspi-irq-affinity.service 未安装（无法证明 pin 在 host 之前生效）"
+  add_check V10.unit FAIL "khaen-irq-affinity.service 未安装（无法证明 pin 在 host 之前生效）"
 fi
 # B1（2026-11-20 板窗）：oneshot 必须有开机等待前置；否则重启时 IRQ56/57 节点晚于 oneshot 就绪，
 # apply fail-closed → host 因 Requires= 不启动（v11 首启 FAIL 的根因）。
-BOOTWAIT_UNIT="$(p "$TSPI_SYSTEMD_DIR/tspi-irq-affinity.service")"
-if [ -f "$BOOTWAIT_UNIT" ] && grep -q '^ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait' "$BOOTWAIT_UNIT"; then
-  add_check V10.bootwait PASS "tspi-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait（B1 开机等 IRQ 节点）"
+BOOTWAIT_UNIT="$(p "$KHAEN_SYSTEMD_DIR/khaen-irq-affinity.service")"
+if [ -f "$BOOTWAIT_UNIT" ] && grep -q '^ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait' "$BOOTWAIT_UNIT"; then
+  add_check V10.bootwait PASS "khaen-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait（B1 开机等 IRQ 节点）"
 else
-  add_check V10.bootwait FAIL "tspi-irq-affinity.service 缺 ExecStartPre=irq-affinity-pin wait（重启持久性无保证：IRQ56/57 晚到会使 host 不启动；重打 bundle 并重跑 04）"
+  add_check V10.bootwait FAIL "khaen-irq-affinity.service 缺 ExecStartPre=irq-affinity-pin wait（重启持久性无保证：IRQ56/57 晚到会使 host 不启动；重打 bundle 并重跑 04）"
 fi
-LEGACY_DROPIN="$(p "$TSPI_SYSTEMD_DIR/tspi-irq-affinity.service.d/10-wait-irq.conf")"
+LEGACY_DROPIN="$(p "$KHAEN_SYSTEMD_DIR/khaen-irq-affinity.service.d/10-wait-irq.conf")"
 if [ -e "$LEGACY_DROPIN" ]; then
   add_check V10.legacy-dropin FAIL "遗留 B1 live-only drop-in 仍存在：$LEGACY_DROPIN（语义已并入 unit；重跑 04 会迁移到 evidence/migrated-dropins/）"
 else
@@ -291,7 +291,7 @@ else
 fi
 
 {
-  printf '{\n "schema": "tspi-rt-stack/verify-report/v1",\n'
+  printf '{\n "schema": "khaen-rt-stack/verify-report/v1",\n'
   printf ' "checked_at": "%s",\n "host_pid": "%s",\n "fails": %s,\n "soft": %s,\n "checks": [' "$(now_iso)" "${HOST_PID:-}" "$FAILS" "$SOFT"
   printf '%s' "${checks%,}"
   printf '\n ]\n}\n'

@@ -66,15 +66,15 @@ pub struct OverviewResponse {
 
 /// OEM v2 实际音频单元（按显示顺序）。
 pub const ACTUAL_AUDIO_UNITS: &[&str] = &[
-    "tspi-camilladsp.service",
-    "tspi-ptp4l-master.service",
-    "tspi-phc2sys.service",
-    "tspi-statime-inferno.service",
-    "tspi-aes67-daemon.service",
-    "tspi-ravenna-lkm.service",
+    "khaen-camilladsp.service",
+    "khaen-ptp4l-master.service",
+    "khaen-phc2sys.service",
+    "khaen-statime-inferno.service",
+    "khaen-aes67-daemon.service",
+    "khaen-ravenna-lkm.service",
 ];
 
-/// 服务状态页单元：真机用 systemctl list-unit-files 'tspi-*.service' 自动发现（避免
+/// 服务状态页单元：真机用 systemctl list-unit-files 'khaen-*.service' 自动发现（避免
 /// config 里旧名字 not-found 误导）；mock 返回 OEM v2 固定清单；失败回退配置。
 async fn service_units(state: &AppState) -> Vec<String> {
     if state.mock {
@@ -89,7 +89,7 @@ async fn service_units(state: &AppState) -> Vec<String> {
             "systemctl",
             &[
                 "list-unit-files",
-                "tspi-*.service",
+                "khaen-*.service",
                 "--no-pager",
                 "--no-legend",
             ],
@@ -160,7 +160,7 @@ pub async fn overview(State(state): State<AppState>) -> AppResult<Json<OverviewR
         },
         services,
         service_notes: vec![
-            "Inferno 是 ALSA 插件（libasound_module_pcm_inferno），无独立 systemd 服务；Dante 的 PTPv1 从时钟由 tspi-statime-inferno.service 提供。"
+            "Inferno 是 ALSA 插件（libasound_module_pcm_inferno），无独立 systemd 服务；Dante 的 PTPv1 从时钟由 khaen-statime-inferno.service 提供。"
                 .into(),
         ],
         camilla: CamillaOverview {

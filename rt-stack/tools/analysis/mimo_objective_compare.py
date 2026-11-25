@@ -148,7 +148,7 @@ def main():
         for row in rows:
             w.writerow(row)
     summary = {
-        'format': 'tspi-mimo-objective-comparison/v1',
+        'format': 'khaen-mimo-objective-comparison/v1',
         'source': 'SIMULATED',
         'honesty_status': 'UNPROVEN',
         'tags': ['v1-emodal'] + sorted(new),

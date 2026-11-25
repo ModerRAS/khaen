@@ -89,7 +89,7 @@ def normalise_session_meta(meta, source_path=None):
     starts = _starts_matrix(meta, roles)
     sched_in = dict(meta.get("schedule") or {})
     out = {
-        "schema": "tspi-planrt-session/v2",
+        "schema": "khaen-planrt-session/v2",
         "kit": KIT_VERSION,
         "fs": int(meta.get("fs", 48000)),
         "channels": int(meta.get("channels", 8)),
@@ -126,7 +126,7 @@ def extract_arm(work, ev, arm, render=None, *, backend="aplay-direct-alsa",
     if not os.path.isfile(umik):
         raise IOError("missing UMIK capture %s" % umik)
 
-    result = {"schema": "tspi-planrt-extract/v2", "kit": KIT_VERSION, "arm": arm, "out": out,
+    result = {"schema": "khaen-planrt-extract/v2", "kit": KIT_VERSION, "arm": arm, "out": out,
               "motu_channels": motu_channels, "ma1_ch": ma1_ch, "arc_ch": arc_ch}
     dst_umik = os.path.join(out, "capture.raw")
     if os.path.islink(dst_umik) or os.path.exists(dst_umik):
@@ -172,7 +172,7 @@ def extract_arm(work, ev, arm, render=None, *, backend="aplay-direct-alsa",
                                   "roles": norm["roles"], "role_slots": norm["role_slots"]}
 
     marker = {
-        "schema": "tspi-planrt-playback/v2",
+        "schema": "khaen-planrt-playback/v2",
         "kit": KIT_VERSION,
         "arm": arm,
         "path": render_path or "aplay -D hw:UltraLitemk5,0 (8ch render expanded to 22ch S24_3LE 48k) -> MOTU line outs",

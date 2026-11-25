@@ -1,12 +1,12 @@
-# TSPI RT-first DSP core/host 接口与 RT 禁止行为规范（core-v1 / v1.1.3）
+# KHAEN RT-first DSP core/host 接口与 RT 禁止行为规范（core-v1 / v1.1.3）
 
 | 项 | 内容 |
 |---|---|
-| 文档 | projects/tspi-audio-dsp/rt-stack/spec/core-v1.md |
+| 文档 | projects/khaen-audio-dsp/rt-stack/spec/core-v1.md |
 | 版本 | **1.1.3（2026-11-17，errata E1/E2/E3/E4：E3 把 I01 delay_q16 回退为 RESERVED-0（以实现为准），E4 统一 plan flags 位表 bit5..7=0；ABI size 不变、139 项检查表不变）；v1.1.3 errata E5（2026-11-18，P3 收口，N-09）：`rt-host/src/swap.rs` 的 `PLAN_FLAG_MASK` 已 0x1F，删除文档「0x3F 待对齐」旧述，不改 ABI** |
 | 任务 | WBS T02（api-designer）；本文件是 T02 的唯一写域产物 |
 | 状态 | P0 设计规范 v1.1.3 DESIGN-REVIEW（T02-review 15 项 CLOSED；T02-rereview N1–N8 CLOSED；**errata E1/E2 已按 T105 实现对齐；E3/E4 已按 Cursor 终审 F-10/F-11 以实现为准回退/统一**；独立 targeted 复审 PASS（task-80 后仍待签）；**E5 文档对齐：swap 掩码 0x1F 已按 task-207/E4 收窄，0x3F 仅为历史快照**）；未实现代码/未编译/未跑 cargo/未上板；代码级验证延后 T06/T16/T20/T21/T26，不冒充已测；证据 evidence/T02/ |
-| 上游权威 | WBS T02 行与 §1/§7；DSP-HOST-DECISION §0/§1/§3/§4/§5/§6/§7/§8；DSP-HOST-CPU-BUDGET §2/§4/§5/§10；calibration-spec/CONTRACT.md v1/v1.1；audio/overlay/etc/tspi-audio/layout-presets.yml；web/docs/API.md |
+| 上游权威 | WBS T02 行与 §1/§7；DSP-HOST-DECISION §0/§1/§3/§4/§5/§6/§7/§8；DSP-HOST-CPU-BUDGET §2/§4/§5/§10；calibration-spec/CONTRACT.md v1/v1.1；audio/overlay/etc/khaen-audio/layout-presets.yml；web/docs/API.md |
 | 下游消费者 | T06（crate stub/lint/rt-check）、T07/T08/T09（direct/partitioned/workers）、T12/T23（compile/nodes）、T13/T25/T57（compat/roles/channel_map）、T16（spsc）、T17（alsa）、T18（admission）、T19（clock）、T20（swap）、T21（fault）、T22（format）、T24/T42/T44/T60/T61/T62/T66/T70（control/calibration/Web）、T26（主机集成）、T45/T47/T56（调度/bench/plan）、T14（file runner） |
 | 证据 | 附录 A manifest；evidence/T02/manifest.json（17 inputs/hash、命令、exit code、post-fill 数字、未测项）；evidence/T02/{abi_vectors.py,check_core_spec.py} 为**文件外**可执行自检（I10；checker 已按 N7 收紧） |
 
@@ -34,11 +34,11 @@
 | 评审 ID | 严重度 | v1.1 处置 | 落点 |
 |---|---|---|---|
 | I01 分数/半整数 D 无 ABI 映射 | P1 | **NOT-LANDED（v1.1.3 errata E3，以实现为准）**：ABI v1 的 Path/Diag/Role 无 `delay_q16` 槽（偏移 28/28/24 为 `reserved1`/`reserved1`/`reserved3`，必须 0，与 `abi.rs` 一致）；v1.1 原 FIXED 处置作废。分数/半整数 D 只能由 T12 在打包前折入 P/A 系数或取整（T66 GAP-T66-2 对非零 q16 返回 `E_CA_DELAY_Q16_ABI`）；`total_delay_q16` 仅保留为内部/报告口径（ABI 下低 16 位恒 0）。未来在 ABI 承载分数 D 必须升 ABI 版本 | §3.4、§11.10（errata E3）、§12.3、§15.1、A.7 |
-| I02 RT 共享结构无 ABI | P1 | **FIXED**：新增 §11.13 `TspiRtControlV1/TspiSwapAckV1/TspiEventRingLaneV1/TspiWorkerRegsV1/TspiMasterRegsV1/TspiCrossfadeBudgetV1/TspiWorkerAffinityV1`（repr(C,align64)、偏移/原子语义/needs_drop=false）；§13.2 清单补齐；B-13..B-19 静态断言 | §11.13、§11.12、§12.3、§13.2 |
+| I02 RT 共享结构无 ABI | P1 | **FIXED**：新增 §11.13 `KhaenRtControlV1/KhaenSwapAckV1/KhaenEventRingLaneV1/KhaenWorkerRegsV1/KhaenMasterRegsV1/KhaenCrossfadeBudgetV1/KhaenWorkerAffinityV1`（repr(C,align64)、偏移/原子语义/needs_drop=false）；§13.2 清单补齐；B-13..B-19 静态断言 | §11.13、§11.12、§12.3、§13.2 |
 | I03 2 核 ack 与 0xF 矛盾 | P1 | **FIXED**：ACK 掩码参数化 `ack_mask(expected)=(1u32<<expected)-1`；0xF 仅 expected=4；§7.3 真值表/§11.6 按 expected；Q-03 关闭（2 核=独立 plan/epoch，expected=2，位 0..1） | §3.4、§7.3、§11.6、§15.2 |
 | I04 tick 预算矛盾 | P1 | **FIXED**：`TICK_READS_PER_BLOCK_MAX=3`（B1 进入 1；spin 耗尽后 hard_cutoff 判定可选 1；B3 退出 1）；无第三次则不读；compute_ticks=t_exit−t_entry；§6.4/§7.3/§11.13 一致 | §3.4、§6.4、§7.3 |
 | I05 block 启动/唤醒原语缺失 | P1 | **FIXED**：`RtControl.block_start_seq`（AtomicU64）+ block_start_epoch/plan_version/frame 字段；master 先写字段后 Release fetch_add(seq)，worker Acquire 等 seq 变化；spin_max_iters/cutoff_drain_iters 入 WorkerRegs/AdmissionReport；§7.7 伪代码同步 | §6.4、§7.3、§11.13、§12.3 |
-| I06 crossfade 双图预算 | P2 | **FIXED**：`TspiCrossfadeBudgetV1`（双图/双历史字节、D_total_q16、峰值 CPU/RAM、可用量、接受位）；只允许同总 D；不足则 `ERR_CROSSFADE_BUDGET` 拒绝并硬切/静音；T20 测试范围写明 | §5.3、§7.4、§9.2、§11.13 |
+| I06 crossfade 双图预算 | P2 | **FIXED**：`KhaenCrossfadeBudgetV1`（双图/双历史字节、D_total_q16、峰值 CPU/RAM、可用量、接受位）；只允许同总 D；不足则 `ERR_CROSSFADE_BUDGET` 拒绝并硬切/静音；T20 测试范围写明 | §5.3、§7.4、§9.2、§11.13 |
 | I07 状态机闭合缺口 | P2 | **FIXED**：定义 `PlanAborted`/`EpochAborted`；补 SafetyMute/Draining→Faulted、Starting 事件 `EV_STARTING`；事件幂等/去重规则；capture-full slot 中止路径 | §5.1–§5.3、§6.5、§8.2–§8.3 |
 | I08 ack 槽耗尽/旧槽检测 | P2 | **FIXED**：ack 槽 4 个带 (epoch,block_seq,plan_version) 标签；槽不可用即不得启动 block→`RT_E_ACK_SLOT_EXHAUSTED`→SafetyMute；迟到 worker 先比对标签，不写坏当前槽；quarantine/ack 失联终态写死 | §7.3、§7.6、§9.2 |
 | I09 D/F 可自动检查过度声明 | P2 | **FIXED**：D/F 每行加规则 ID+工具/测试+失败判据+豁免；D-20 fixture 扩到 8 类；新增 §13.7 审计证据模板与豁免流程；如实标注“仅审查”项 | §10.2、§10.3、§13.5、§13.6、§13.7 |
@@ -47,7 +47,7 @@
 | I12 输入 hash 漂移/A.7 结论过期 | P2 | **FIXED**：A.2/A.7 按当前文件重算 hash（API.md/MIMO/T04/T05/CONTRACT/ACCEPTANCE）；重做 T02↔T03/T04/T05 交叉核对：block256 由 Q-11 决议、半整数 D 由折入系数解决（ABI v1 无 delay_q16，E3）、T04 新 fs/2 与 T05 快照分歧登记 | §15.2、A.2、A.7 |
 | I13 block 256 三方不一致 | P2 | **FIXED**：Q-11 决议：runtime 仅 {64,128}；T03/T04 的 256 是参考/测试口径；T05 REST 对非 64/128 显式 400/unsupported；T17 actual period 不匹配→`ERR_DEVICE_PARAMS` | §3.2、§9.2、§15.2、A.7 |
 | I14 命令/证据小错 | P3 | **FIXED**：A.4 CMD-ABI 指向 B.5；CMD-SCOPE 用真实输出；A.5/C.3 补 post-fill 行数/字节/hash 与 exit code | A.4、A.5、C.3 |
-| I15 T45 接口覆盖不足 | P2 | **FIXED**：新增 `TspiWorkerAffinityV1` 与 PlanHeader affinity 表；AdmissionEnv/Report 增 cpu_set_mask/actual_cpu[4]/priority[4]/irq_dependency_mask/expected_workers/ack_mask/crossfade 字段；T45 只消费不自动写内核 | §11.10、§11.13、§12.3、§15.1 |
+| I15 T45 接口覆盖不足 | P2 | **FIXED**：新增 `KhaenWorkerAffinityV1` 与 PlanHeader affinity 表；AdmissionEnv/Report 增 cpu_set_mask/actual_cpu[4]/priority[4]/irq_dependency_mask/expected_workers/ack_mask/crossfade 字段；T45 只消费不自动写内核 | §11.10、§11.13、§12.3、§15.1 |
 
 > P1 5/5、P2 9/9、P3 1/1 = **15/15 FIXED，0 DECLINED**（v1.1 历史处置；**I01 经 v1.1.3 errata E3 回退为 NOT-LANDED**，见下）；复审由独立 reviewer 做（作者不自审）。v1.1 只增补/澄清，不删除 v1 语义；ABI 大小不变（reserved 字段复用），ABI_VERSION 维持 1（additive），若 T06 需要真正 breaking 变更必须升 1.1 规范版本并重新冻结。
 
@@ -59,7 +59,7 @@
 | N1 | **FIXED**：T04 v1.2-draft 已落 Lead fs/2 裁决（magnitude-only ≤fs/2；带 phase <fs/2，=fs/2→E_TGT_PHASE_REAL；>fs/2→E_TGT_FREQ_RANGE）；Q-12 标 RESOLVED，A.2 T04 hash 更新 86fb97fd（97,033 B），A.7 重写 | §15.2 Q-12、A.2 #14、A.7 |
 | N2 | **CLOSED**：T03 SPEC:148 已改“参考/测试候选 64/128/256；runtime 仅 {64,128}”；**T04 v1.2 errata A 已改 §7.3/§7.1 措辞**（生产候选仅 64/128，256 仅参考/测试附加块长）；原 A.7 旧句已删 | §3.2/Q-11、A.7 |
 | N3 | **FIXED**：新增 T02→T03 oracle 映射规则——T12/T15 在 T03 reference 对拍前必须把全部分数/非整数 D 折入 P/A 系数（对拍图 q16=0；ABI v1 无 `delay_q16` 槽，E3）或声明 T03 schema 扩展；T03:70 已注 reference 只验证整数 D | §15.1 T12/T15、A.7 |
-| N4 | **FIXED**：§11.13 intro 改为“除 TspiWorkerAffinityV1（32B/align8，plan 内 POD 表项）外均 align64”；B-18/B.4 标注 align=8 例外 | §11.13、§11.12 B-18、B.4 |
+| N4 | **FIXED**：§11.13 intro 改为“除 KhaenWorkerAffinityV1（32B/align8，plan 内 POD 表项）外均 align64”；B-18/B.4 标注 align=8 例外 | §11.13、§11.12 B-18、B.4 |
 | N5 | **FIXED**：§3.4 WORKER_BITS 行参数化：“仅 expected_workers=4 时 all-ack=0xF；通用 ACK_MASK(expected)”；expected=2 时 0x3 | §3.4 |
 | N6 | **FIXED**：A.2 补 T01 baseline/T73 当前 hash 并更新 T03/T04/T05 hash（17 输入）；A.7 增 T73/T01 行与 T05 现状 | A.2、A.7 |
 | N7 | **FIXED**：check_core_spec.py 的 v1_1_fixed 改为“行含 FIXED 且落点列含 §/evidence”，并新增 N1–N6 回归断言（Q-12 RESOLVED/T04 hash/work值的参数化/align 例外/T03 折入/T73） | evidence/T02/check_core_spec.py |
@@ -71,7 +71,7 @@
 
 | ID | 处置 | 落点 |
 |---|---|---|
-| E3 | **FIXED（规格回退一致；F-10 P0）**：ABI v1 的 `TspiPathV1`/`TspiDiagFirV1` 偏移 28、`TspiRoleV1` 偏移 24 保持 `reserved1`/`reserved1`/`reserved3`（必须 0），删除 v1.1 误写的 `delay_q16` ABI 字段名；I01 回退为 **NOT-LANDED**；分数/半整数 D 由 T12 在打包前折入 P/A 系数（T66 GAP-T66-2 按 `E_CA_DELAY_Q16_ABI` 拒收非零 q16）；`total_delay_q16` 仅内部/报告口径（ABI 下低 16 位恒 0，crossfade D 对齐等价整数 D 相等）。**§11.10/B.4 不得再写 delay_q16 ABI 槽。** | §0.1 I01/I12、§3.4、§5.3、§7.4、§9.2、§11.10、§11.12 B-07、§11.13 CrossfadeBudget 注、§12.3、§14.2 A-21、§15.1 T12/T15、A.7 N3、B.3、B.4 |
+| E3 | **FIXED（规格回退一致；F-10 P0）**：ABI v1 的 `KhaenPathV1`/`KhaenDiagFirV1` 偏移 28、`KhaenRoleV1` 偏移 24 保持 `reserved1`/`reserved1`/`reserved3`（必须 0），删除 v1.1 误写的 `delay_q16` ABI 字段名；I01 回退为 **NOT-LANDED**；分数/半整数 D 由 T12 在打包前折入 P/A 系数（T66 GAP-T66-2 按 `E_CA_DELAY_Q16_ABI` 拒收非零 q16）；`total_delay_q16` 仅内部/报告口径（ABI 下低 16 位恒 0，crossfade D 对齐等价整数 D 相等）。**§11.10/B.4 不得再写 delay_q16 ABI 槽。** | §0.1 I01/I12、§3.4、§5.3、§7.4、§9.2、§11.10、§11.12 B-07、§11.13 CrossfadeBudget 注、§12.3、§14.2 A-21、§15.1 T12/T15、A.7 N3、B.3、B.4 |
 | E4 | **FIXED（位表统一；F-11 P1）**：plan flags 统一为 bit0 stereo_strict、bit1 modal_support_to_other_outputs、bit2 crossfade、bit3 extended_taps_admitted、bit4 fallback_graph、**bit5..7=0（reserved）**；v1.1 的 bit5 affinity 表存在位未在实现消费（`abi.rs` 结构注释 bit5..7=0），取消该位义；affinity 表存在性改按 `affinity_table_offset != 0 / affinity_count > 0` 判定。`rt-host/src/swap.rs` 的 `PLAN_FLAG_MASK` 已在 task-207 **收窄为 0x1F**（bit0..bit4；bit5..7 置位即 `ERR_BAD_LAYOUT`，T20 `t20_admit_plan_flags_e4_rejects_bits5_to_7` 钉死），与 `abi.rs`/T66 一致；**0x3F 仅为 task-207 之前的历史快照**（v1.1.3 errata E5 收口，见 evidence/T02/ERRATA-v1.1.4.md）。 | §11.10 flags 表/语义/表顺序规则 3 |
 
 > v1.1.3 只做 E3/E4 两处 errata + 引用条目；其余语义、ABI size/offset/align、139 项检查表不变。旧 core-v1 hash 引用待刷新清单见 `evidence/T02/ERRATA-v1.1.3.md`（本任务不改他人 evidence）。
@@ -112,7 +112,7 @@
 
 ### 1.3 写域与变更纪律（WBS §1/§7 摘录，本任务照做）
 
-- 本任务唯一写域：`projects/tspi-audio-dsp/rt-stack/spec/core-v1.md`；本 agent 未创建 Cargo 根、未改任何生产代码/文档、未 git commit、未碰板/ALSA/CueMix/服务。
+- 本任务唯一写域：`projects/khaen-audio-dsp/rt-stack/spec/core-v1.md`；本 agent 未创建 Cargo 根、未改任何生产代码/文档、未 git commit、未碰板/ALSA/CueMix/服务。
 - 本文是 v1 契约：语义冻结；T06–T70 实现不得静默偏离。编辑性澄清可升 `1.0.x`（只改文字，不改字段/状态/常量）；任何字段语义、容量、状态迁移、错误码、ABI 布局变化必须升 `1.1` 并在 §15 记录，由 lead/integrator 裁决。
 - 公共文件（Cargo.toml/Cargo.lock/lib.rs/mod.rs/CLI 注册/README/CI）只由 integrator 在 T06/T26/T32 写；本文只给拟建接口，不建文件。
 
@@ -204,7 +204,7 @@
 | `PLAN_VERSION_WRAP_BOUND` | u32 | 2^32 次 commit；实际每秒 <<1，不可回绕；回绕即 fault 并拒绝。 |
 | `GRAPH_ID_BYTES` | 32 | SHA-256 原始 32 字节；不得截断到 64 bit 后仍称“完整 hash”。 |
 | `ABI_VERSION` | 1 | ABI 结构/语义版本；不兼容改变必须 +1。 |
-| `TSPI_PLAN_MAGIC` | 0x54535031 | ASCII "TSP1"（LE u32）。 |
+| `KHAEN_PLAN_MAGIC` | 0x54535031 | ASCII "TSP1"（LE u32）。 |
 | `TICK_READS_PER_BLOCK_MAX` | 3 | master 每 block 最多 3 次预算内 tick：**B1 进入 1 次**；**仅当 spin 耗尽后**为 hard_cutoff 判定可选 1 次（正常不读）；**B3 退出 1 次**。compute_ticks=t_exit−t_entry；§6.4/§7.3/§11.13 三处一致。纯 worker 0 次。 |
 | `ACK_MASK(expected)` | (1 << expected) − 1 | expected∈{2,4}（4=生产，2=独立降级 profile）；位 k=worker k。真值表/完成判定必须按本式。 |
 | `ACK_SLOTS` | 4 | 固定 ack 槽数（与 playback ring 对齐）；槽生命周期/耗尽策略见 §7.3/§7.6。 |
@@ -330,7 +330,7 @@ block_compute_ns(b) = master_tick_exit(b) - master_tick_entry(b)  # 2 次预算�
 | `PlanRetired` | retire gate 全过，control 已释放 | 终态 | `EV_PLAN_RETIRED` |
 
 **规则**：`PlanCommitted` 前不得改变音频输出内容；主动失败（校验/apply/ack 超时）必须回到 last-good 或 SafetyMute，且保留旧 plan 与证据；REST/WS 的 “applied” 只能在实际 plan_version 已出现在至少 1 个完整 block 的 BlockDesc 且 4 worker all-ack 后返回（T24/T42/T70 消费本条）。
-**Crossfade（I06）**：仅当 plan flags bit2=1 **且** admission 已按 §11.13 `TspiCrossfadeBudgetV1` 校验通过时允许；要求新旧 plan 的 `total_delay_q16`（§11.10；ABI v1 下 = `delay_samples << 16`，低 16 位恒 0，故等价于整数 D 相等）严格相等（不等则禁止，必须硬切+安全静音）；峰值双 CPU/RAM 必须 ≤ 可用量，否则 `ERR_CROSSFADE_BUDGET` 拒绝。跨 rate/N/O/B 变化一律禁止 crossfade（必须停流新 epoch）。
+**Crossfade（I06）**：仅当 plan flags bit2=1 **且** admission 已按 §11.13 `KhaenCrossfadeBudgetV1` 校验通过时允许；要求新旧 plan 的 `total_delay_q16`（§11.10；ABI v1 下 = `delay_samples << 16`，低 16 位恒 0，故等价于整数 D 相等）严格相等（不等则禁止，必须硬切+安全静音）；峰值双 CPU/RAM 必须 ≤ 可用量，否则 `ERR_CROSSFADE_BUDGET` 拒绝。跨 rate/N/O/B 变化一律禁止 crossfade（必须停流新 epoch）。
 **PlanAborted/EpochAborted**：v1.1 新增定义，旧文引用补齐；abort 只允许由 control 线程在非 RT 上下文发起；RT 只能请求（safety/abort_request 位）。
 
 ### 5.4 DeviceOwner（音频设备唯一 owner）
@@ -358,7 +358,7 @@ block_compute_ns(b) = master_tick_exit(b) - master_tick_entry(b)  # 2 次预算�
 
 ### 6.1 Block 身份与字段语义
 
-`TspiBlockDescV1`（布局见 §11.3）是 block 的唯一身份；RT 每条路径必须只通过它判断 epoch/version/边界，禁止依赖“全局当前状态”隐式推断。
+`KhaenBlockDescV1`（布局见 §11.3）是 block 的唯一身份；RT 每条路径必须只通过它判断 epoch/version/边界，禁止依赖“全局当前状态”隐式推断。
 
 | 字段 | 语义 | 约束 |
 |---|---|---|
@@ -393,7 +393,7 @@ block_compute_ns(b) = master_tick_exit(b) - master_tick_entry(b)  # 2 次预算�
 
 ### 6.3 SPSC 环协议（capture→DSP、DSP→playback）
 
-**结构**：固定容量 4 槽的 `TspiSpscHeaderV1`（§11.7）+ 4 个 payload 槽（RtArena 内）。每槽 = B 帧 × N 或 O × f32；payload 地址在 admission 时固定。环只存 `TspiBlockDescV1` 值，不存指针。
+**结构**：固定容量 4 槽的 `KhaenSpscHeaderV1`（§11.7）+ 4 个 payload 槽（RtArena 内）。每槽 = B 帧 × N 或 O × f32；payload 地址在 admission 时固定。环只存 `KhaenBlockDescV1` 值，不存指针。
 
 **发布-消费配方（必须逐字实现）**：
 
@@ -432,7 +432,7 @@ consumer(slot q):
 - **Block 启动原语（I05/v1.1）**：master 在 block 边界依次写 `RtControl.block_start_epoch / block_start_frame / block_start_plan_version / block_start_slot`（普通存储），随后 `block_start_seq.fetch_add(1, Release)`；worker 用 `Acquire` 读 `block_start_seq`，发现相对本地值 +1（或首次）后读取上述描述并开始本 block。禁止 worker 读 capture ring 或由 master 直接写每 worker 私有标志（除 ack 槽/phase 位）。`block_start_seq` 回绕/跳变 = fault；每个 seq 只能被每个 worker 消费一次（本地缓存 last_seq）。
 - capture 发布时写 `mono_publish_ns`；playback 的硬截止取 `play_deadline_ns`（由 latency budget 与队列水位决定；具体由 T17/T19 定，本规范只要求单调、可审计、不倒退）。
 - **tick 预算（I04/v1.1，三处一致）**：master 每 block 最多 `TICK_READS_PER_BLOCK_MAX=3` 次预算内 tick：B1 进入 1 次（t_entry）；**仅当** spin 预算耗尽、需要判定 hard_cutoff 时最多 1 次（t_cut）；B3 退出 1 次（t_exit）。正常路径只读 2 次。`compute_ticks=t_exit−t_entry`；不得用“spin 次数猜时间”代替 t_cut，也不得超 3 次。
-- **spin/cutoff 参数来源**：`spin_max_iters / cutoff_drain_iters` 由 T18 admission 按目标核标定后写入 `TspiWorkerRegsV1`（§11.13）与 `AdmissionReport`；plan 只携带 profile 标识，不携带未标定值；标定值必须记录在 admission 证据中。
+- **spin/cutoff 参数来源**：`spin_max_iters / cutoff_drain_iters` 由 T18 admission 按目标核标定后写入 `KhaenWorkerRegsV1`（§11.13）与 `AdmissionReport`；plan 只携带 profile 标识，不携带未标定值；标定值必须记录在 admission 证据中。
 - gate/hard cutoff 公式与判定见 §3.5；deadline 触发动作见 §9.2。
 - 96k 的 gate 按 T_block/2 缩放，不得沿用 48k 常量；不同 fs/B 的统计必须分表导出（T47/T30）。
 
@@ -472,7 +472,7 @@ consumer(slot q):
 
 **约束**：phase 内任务数不足 4 时如实串行（记录 serial_fraction），不得 spin 凑忙；禁止一个 phase 内偷读未就绪的输入/频谱；FFT 的每个 input/bin tile 的依赖发布必须先于消费（不得只设一个总 barrier 后读未完成谱）。B1/B2/B3 的边界与数据依赖必须全部落进 plan 的静态 DAG。
 
-### 7.3 worker-ack 协议（`TspiBlockAckV1`，布局 §11.6；expected 参数化）
+### 7.3 worker-ack 协议（`KhaenBlockAckV1`，布局 §11.6；expected 参数化）
 
 - **expected_workers / ack_mask（I03）**：生产 4（expected=4，ack_mask=0xF）；2 核降级是**独立 plan/epoch**（expected=2，ack_mask=0x3，只用位 0..1）。所有“all-ack”判据必须用 `ACK_MASK(expected)`，禁止硬写 0xF；位图在 §11.6 的 `@phase_done` 中按 expected 有效位判定，其余位必须为 0。
 - 每 block 一个 ack 槽（容量 `ACK_SLOTS=4` 与 playback ring 对齐），由 master 在 block 开始时初始化：`block_seq/epoch_id/plan_version/expected_workers/cutoff=0/deadline_mono_ns`；初始化必须先于 Release `block_start_seq`。ack 槽带标签，仅当标签匹配本块时才允许 worker 写位。
@@ -487,7 +487,7 @@ consumer(slot q):
 
 - 4-worker 任务表是 declared load 的一部分（plan hash 覆盖）；2 核降级是**独立 plan**：停旧 epoch 提交→4 worker ack/撤销→非 RT 编译+admit 2 核 plan（内存/clock/输出保护/时限检查）→新 epoch；未过则 mute/last-good。禁止失核后剩两核播放半图。
 - 1/2/4 worker benchmark 必须同 kernel/precision/coeff/input/fs/B/编译/ISA/频率/热身，只改 worker 数（T46）；本规范只固定“worker 数进 plan/epoch，不运行期变”。
-- **Crossfade（I06/v1.1）**：仅当 plan flags bit2=1 且 admission 写入的 `TspiCrossfadeBudgetV1` 校验通过（新旧 total_delay_q16 相等——ABI v1 下低 16 位恒 0，即整数 D 相等；双图/双历史 RAM、峰值双 CPU 均 ≤ 可用量）才允许。不足则 `ERR_CROSSFADE_BUDGET` 拒绝并只允许硬切+安全静音；跨 rate/N/O/B 变化禁止 crossfade。T20 必须覆盖“双图峰值超限→拒绝/静音”负向测试与 D 对齐断言（D_total_q16 相等）。
+- **Crossfade（I06/v1.1）**：仅当 plan flags bit2=1 且 admission 写入的 `KhaenCrossfadeBudgetV1` 校验通过（新旧 total_delay_q16 相等——ABI v1 下低 16 位恒 0，即整数 D 相等；双图/双历史 RAM、峰值双 CPU 均 ≤ 可用量）才允许。不足则 `ERR_CROSSFADE_BUDGET` 拒绝并只允许硬切+安全静音；跨 rate/N/O/B 变化禁止 crossfade。T20 必须覆盖“双图峰值超限→拒绝/静音”负向测试与 D 对齐断言（D_total_q16 相等）。
 
 ### 7.5 Swap / retire gate（与 §4.4/§5.3 一致）
 
@@ -551,7 +551,7 @@ consumer(slot q):
 
 ## 8. 事件、计数与有界直方图
 
-### 8.1 Event 记录（`TspiEventV1`，布局 §11.5）
+### 8.1 Event 记录（`KhaenEventV1`，布局 §11.5）
 
 | 字段 | 语义 |
 |---|---|
@@ -634,7 +634,7 @@ consumer(slot q):
 | `clipped_samples` | u64 | 全局 | 输出保护/格式转换 clip 的样本数。 |
 | `quarantine_entries` / `retained` | u64 | 全局 | 进入/仍保留的隔离块数。 |
 | `swap_count` / `retire_count` | u64 | 全局 | 成功 swap/retire 计数。 |
-| `worker_stats` | `TspiWorkerStatsV1[4]` | per-worker | busy/spin/max_block_ticks/blocks/late/invalid/flags（布局 §11.8）。 |
+| `worker_stats` | `KhaenWorkerStatsV1[4]` | per-worker | busy/spin/max_block_ticks/blocks/late/invalid/flags（布局 §11.8）。 |
 | `hist[metric][worker][32]` | u32 | 固定数组 | 6 个 metric（block_ticks、spin_ticks、io_read_ticks、io_write_ticks、queue_depth、phase_gap_ticks）×4 worker×32 桶；桶边界由 prepare 写死；溢出桶为第 32 桶。 |
 
 **导出规则**：非 RT 线程以 Acquire 读取快照（允许轻微不一致），导出必须带 `graph_id/plan_version/epoch_id` 与采样窗口；不得从 RT 内写文件/网络；直方图边界与单位（ticks，及换算后的 ns）必须写入报告，避免“每秒/每块”混用。
@@ -835,12 +835,12 @@ consumer(slot q):
 | 项 | 值 |
 |---|---|
 | `ABI_VERSION` | 1 |
-| `TSPI_PLAN_MAGIC` | 0x54535031（"TSP1"） |
-| `TSPI_RING_MAGIC` | 0x54535052（"TSPR"） |
-| `GRAPH_HASH_DOMAIN` | 字符串 `tspi-plan/v1` + 1 个 0x00 字节 |
+| `KHAEN_PLAN_MAGIC` | 0x54535031（"TSP1"） |
+| `KHAEN_RING_MAGIC` | 0x54535052（"TSPR"） |
+| `GRAPH_HASH_DOMAIN` | 字符串 `khaen-plan/v1` + 1 个 0x00 字节 |
 | 结构 hash/校验 | `header_crc32c` = CRC-32C（Castagnoli，反射 0x82F63B78）覆盖 header 且自身字段置 0；`graph_id` 用 SHA-256（FIPS 180-4） |
 
-| `PLAN_HEADER_SIZE` | 128 | TspiPlanHeaderV1 size（errata E1 后不变） |
+| `PLAN_HEADER_SIZE` | 128 | KhaenPlanHeaderV1 size（errata E1 后不变） |
 | `PLAN_HEADER_ALIGN` | 64 | repr(C,align(64)) |
 | `PLAN_HEADER_OFFSET_RESERVED1` | 94 | E1 显式 padding（u16） |
 | `PLAN_HEADER_OFFSET_AFFINITY_TABLE` | 96 | affinity_table_offset（u32） |
@@ -852,7 +852,7 @@ consumer(slot q):
 | `PLAN_HEADER_OFFSET_CRC` | 124 | header_crc32c（u32） |
 | `RT_CHECK_ABI_LAYOUT_SCANNED` | 120 | T06 rt-check abi-layout 现行期望 scanned 数（旧 109，+11；task-105 实测）；105 是任务号，不是期望值 |
 
-### 11.3 `TspiBlockDescV1`（64 B，align 64）
+### 11.3 `KhaenBlockDescV1`（64 B，align 64）
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -871,7 +871,7 @@ consumer(slot q):
 | 56 | `play_deadline_ns` | u64 | 播放硬截止 |
 | **64** | （大小） | | `size_of == 64`、`align_of == 64` |
 
-### 11.4 `TspiEpochInfoV1`（64 B，align 64）
+### 11.4 `KhaenEpochInfoV1`（64 B，align 64）
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -887,7 +887,7 @@ consumer(slot q):
 | 40 | `reserved` | [u64;3] | 必须 0 |
 | **64** | （大小） | | `size_of == 64`、`align_of == 64` |
 
-### 11.5 `TspiEventV1`（64 B，align 64）
+### 11.5 `KhaenEventV1`（64 B，align 64）
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -904,7 +904,7 @@ consumer(slot q):
 | 48 | `payload` | [u64;2] | kind 语义；未用 0 |
 | **64** | （大小） | | `size_of == 64`、`align_of == 64` |
 
-### 11.6 `TspiBlockAckV1`（64 B，align 64）
+### 11.6 `KhaenBlockAckV1`（64 B，align 64）
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -925,11 +925,11 @@ consumer(slot q):
 
 **v1.1/I03 注**：`expected_workers` ∈ {2,4}；phase 完成判定一律用 `ACK_MASK(expected)=(1<<expected)-1`（expected=4→0xF，expected=2→0x3）；位 0..expected-1 有效、其余必须 0。ack 槽带 (block_seq,epoch_id,plan_version) 标签；worker 写位前必须比对标签（I08，§7.3）。
 
-### 11.7 `TspiSpscHeaderV1`（64 B，align 64）
+### 11.7 `KhaenSpscHeaderV1`（64 B，align 64）
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
-| 0 | `magic` | u32 | `TSPI_RING_MAGIC` |
+| 0 | `magic` | u32 | `KHAEN_RING_MAGIC` |
 | 4 | `abi_version` | u16 | =1 |
 | 6 | `entry_bytes` | u16 | 64（BlockDesc 大小） |
 | 8 | `capacity` | u32 | 4 |
@@ -941,7 +941,7 @@ consumer(slot q):
 | 48 | `reserved` | [u64;2] | 0 |
 | **64** | （大小） | | `size_of == 64`、`align_of == 64` |
 
-### 11.8 `TspiWorkerStatsV1`（64 B，align 64）
+### 11.8 `KhaenWorkerStatsV1`（64 B，align 64）
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -955,7 +955,7 @@ consumer(slot q):
 | 56 | `flags` | u64 | bit0=alive、bit1=last_block_late、bit2=cutoff_seen、其余 0 |
 | **64** | （大小） | | `size_of == 64`、`align_of == 64` |
 
-### 11.9 `TspiHwParamsV1`（64 B，align 64）与格式语义
+### 11.9 `KhaenHwParamsV1`（64 B，align 64）与格式语义
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -987,11 +987,11 @@ consumer(slot q):
 
 **B 来源链（I11/v1.1，强制）**：`period_frames` 必须等于 T17 协商出的 **actual period**，且 ∈ {64,128}；不等于 64/128 时 T17 必须拒绝启动/重开设备并返回 `ERR_DEVICE_PARAMS`（不得静默夹取或内部拆分）；REST/T05 必须返回 supported 列表并对非 64/128 显式 400/unsupported。buffer_frames≥period_frames，实际值由 T17 记录；任何 period/rate/channel 变化必须新 epoch（§5.2）。
 
-### 11.10 `TspiPlanHeaderV1`（128 B，align 64）与表
+### 11.10 `KhaenPlanHeaderV1`（128 B，align 64）与表
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
-| 0 | `magic` | u32 | `TSPI_PLAN_MAGIC` |
+| 0 | `magic` | u32 | `KHAEN_PLAN_MAGIC` |
 | 4 | `abi_version` | u16 | =1（v1.1 additive，字段复用不得改 size；breaking 变更加 §11.11） |
 | 6 | `header_size` | u16 | 128 |
 | 8 | `plan_version` | u32 | 提交计数（不参与 graph_id） |
@@ -1016,7 +1016,7 @@ consumer(slot q):
 | 88 | `role_table_offset` | u32 | Role 表偏移 |
 | 92 | `role_table_count` | u16 | role 数（≤16） |
 | 94 | `reserved1` | u16 | 0（**errata E1 显式 padding**：把 u32 对齐到 96） |
-| 96 | `affinity_table_offset` | u32 | **v1.1/I15 + E1**：`TspiWorkerAffinityV1` 表偏移（0=无） |
+| 96 | `affinity_table_offset` | u32 | **v1.1/I15 + E1**：`KhaenWorkerAffinityV1` 表偏移（0=无） |
 | 100 | `affinity_count` | u16 | **v1.1/I15 + E1**：affinity 条目数（≤4） |
 | 102 | `reserved2` | u16 | 0（**errata E1 显式 padding**：把 u32 对齐到 104） |
 | 104 | `ctl_meta_offset` | u32 | role 名等 CTL 元数据偏移（E1：102→104） |
@@ -1029,7 +1029,7 @@ consumer(slot q):
 >
 > **errata E3/E4（v1.1.3，以实现为准）**：Path/Diag 偏移 28 与 Role 偏移 24 **仍为 reserved**（`reserved1`/`reserved1`/`reserved3`，必须 0；`delay_q16` 未落地，见 §0.1 E3）；**plan flags bit5..7=0**（`affinity_table_present` 位义取消，affinity 表存在性按 `affinity_table_offset`/`affinity_count` 判定，见 §0.1 E4）；`swap.rs` 的 `PLAN_FLAG_MASK` 已在 task-207 收窄为 **0x1F**（bit5..7 置位拒收，见 §0.1 errata E5）。
 
-**`TspiPathV1`（32 B，align 8）**：
+**`KhaenPathV1`（32 B，align 8）**：
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1045,7 +1045,7 @@ consumer(slot q):
 | 28 | `reserved1` | u32 | **0（v1.1.3 errata E3：`delay_q16` 未落地，与 `abi.rs` reserved1 一致；ABI v1 不承载次采样 D）** |
 | **32** | （大小） | | `size_of == 32`、`align_of == 8` |
 
-**`TspiDiagFirV1`（32 B，align 8）**：
+**`KhaenDiagFirV1`（32 B，align 8）**：
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1059,7 +1059,7 @@ consumer(slot q):
 | 28 | `reserved1` | u32 | **0（v1.1.3 errata E3：同 Path，`delay_q16` 未落地）** |
 | **32** | （大小） | | `size_of == 32`、`align_of == 8` |
 
-**`TspiRoleV1`（32 B，align 8）**：
+**`KhaenRoleV1`（32 B，align 8）**：
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1087,7 +1087,7 @@ consumer(slot q):
 5. 任何 P/G/role/fs/B/D/taps/系数/worker 数/stereo mask/affinity 变化都会改变 graph_id（D 只取整数 `delay_samples`；Path/Diag/Role 的 reserved 槽必须 0，不承载语义）；stale 判定比较 graph_id（或 graph_id+plan_version），不得只比 plan_version。
 6. **总时延口径（I01；v1.1.3 errata E3 以实现为准）**：`total_delay_q16(path/role) = delay_samples*65536 + delay_q16` 是内部/报告口径（见 §12.3）。**ABI v1 的 Path/Diag/Role 无 `delay_q16` 槽**（28/28/24 为 reserved，必须 0）；T12 编译 T04 半整数/分数 D 时必须在打包 ABI 前把分数部分折入 P/A 系数（或取整），`delay_samples` 只承载整数部分；T66 对非零 q16 按 `E_CA_DELAY_Q16_ABI` 拒收（GAP-T66-2）。crossfade D 对齐与 T20/报告一律用 total_delay_q16，ABI v1 下低 16 位恒 0（等价于整数 D 相等）。
 
-**plan flags 语义（v1.1 增补；v1.1.3 errata E4 统一位表）**：bit0 stereo_strict、bit1 modal_support_to_other_outputs（默认 0）、bit2 crossfade（必须配 TspiCrossfadeBudgetV1 且 admission 通过；否则 ERR_CROSSFADE_BUDGET）、bit3 extended_taps_admitted、bit4 fallback_graph、**bit5..7=0（reserved；E4 取消该位的 affinity 表存在性语义）**。A_map/禁止上混下混规则不变（Path 表即非零路径集合；未声明输出必须零填）。
+**plan flags 语义（v1.1 增补；v1.1.3 errata E4 统一位表）**：bit0 stereo_strict、bit1 modal_support_to_other_outputs（默认 0）、bit2 crossfade（必须配 KhaenCrossfadeBudgetV1 且 admission 通过；否则 ERR_CROSSFADE_BUDGET）、bit3 extended_taps_admitted、bit4 fallback_graph、**bit5..7=0（reserved；E4 取消该位的 affinity 表存在性语义）**。A_map/禁止上混下混规则不变（Path 表即非零路径集合；未声明输出必须零填）。
 
 ### 11.11 ABI 兼容、版本与 FFI
 
@@ -1111,23 +1111,23 @@ consumer(slot q):
 | B-10 | ABI 不匹配拒绝策略（非 RT/RT 两路） | PASS-DESIGN | §9.2/§11.11 |
 | B-11 | sample_format 枚举与 runtime 准入固定 | PASS-DESIGN | §11.9 |
 | B-12 | T06 静态断言清单（size/offset/needs_drop/align） | DEFERRED-CODE | T06；本文件给出期望值（A/B.4） |
-| B-13 | `TspiRtControlV1` 128B/offset/原子语义/block_start_seq 协议 | PASS-DESIGN | §11.13 |
-| B-14 | `TspiSwapAckV1` 64B/swap ack all-worker 语义 | PASS-DESIGN | §11.13 |
-| B-15 | `TspiEventRingLaneV1` 64B/lane 单写者/seq 发布 | PASS-DESIGN | §11.13 |
-| B-16 | `TspiWorkerRegsV1/TspiMasterRegsV1` 128B/RT 入口参数布局 | PASS-DESIGN | §11.13 |
-| B-17 | `TspiCrossfadeBudgetV1` 64B/D 对齐与双峰值预算字段 | PASS-DESIGN | §11.13 |
-| B-18 | `TspiWorkerAffinityV1` 32B/align 8（**align 例外，plan POD 表项**）+ PlanHeader affinity 字段（I15/T45） | PASS-DESIGN | §11.10/§11.13 |
+| B-13 | `KhaenRtControlV1` 128B/offset/原子语义/block_start_seq 协议 | PASS-DESIGN | §11.13 |
+| B-14 | `KhaenSwapAckV1` 64B/swap ack all-worker 语义 | PASS-DESIGN | §11.13 |
+| B-15 | `KhaenEventRingLaneV1` 64B/lane 单写者/seq 发布 | PASS-DESIGN | §11.13 |
+| B-16 | `KhaenWorkerRegsV1/KhaenMasterRegsV1` 128B/RT 入口参数布局 | PASS-DESIGN | §11.13 |
+| B-17 | `KhaenCrossfadeBudgetV1` 64B/D 对齐与双峰值预算字段 | PASS-DESIGN | §11.13 |
+| B-18 | `KhaenWorkerAffinityV1` 32B/align 8（**align 例外，plan POD 表项**）+ PlanHeader affinity 字段（I15/T45） | PASS-DESIGN | §11.10/§11.13 |
 | B-19 | ack 参数化静态断言：expected∈{2,4} 时 `ACK_MASK` 与位图常量一致；禁止硬写 0xF | PASS-DESIGN | §3.4/§7.3/§11.6 |
 
-### 11.13 RT 共享控制结构（v1.1.1/I02/I05/I06/I15；除 `TspiWorkerAffinityV1` 32B/align8 外均 repr(C,align(64))、needs_drop=false）
+### 11.13 RT 共享控制结构（v1.1.1/I02/I05/I06/I15；除 `KhaenWorkerAffinityV1` 32B/align8 外均 repr(C,align(64))、needs_drop=false）
 
 > 以下结构跨 master/worker/CTL 共享，但**不是拥有型句柄**：无 Drop、无指针语义（除明确说明的 arena 偏移）；RT 只读写原子字段或按 §7.3 配方读写普通字段。所有 reserved 必须写 0；越界/非 0 = `RT_E_ABI_RUNTIME`（RT）/`ERR_BAD_LAYOUT`（非 RT）。
 
-**`TspiRtControlV1`（128 B，align 64）**
+**`KhaenRtControlV1`（128 B，align 64）**
 
 | 偏移 | 字段 | 类型 | 语义/内存序 |
 |---:|---|---|---|
-| 0 | `magic` | u32 | `TSPI_RING_MAGIC`（复用，区分 ring） |
+| 0 | `magic` | u32 | `KHAEN_RING_MAGIC`（复用，区分 ring） |
 | 4 | `abi_version` | u16 | =1 |
 | 6 | `size` | u16 | 128 |
 | 8 | `block_start_seq` | AtomicU64 | master 每 block 结束描述写入后 Release fetch_add；worker Acquire 读 |
@@ -1153,7 +1153,7 @@ consumer(slot q):
 | 120 | `reserved` | u64 | 0 |
 | **128** | （大小） | | `size_of == 128`/`align_of == 64` |
 
-**`TspiSwapAckV1`（64 B，align 64）**
+**`KhaenSwapAckV1`（64 B，align 64）**
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1172,7 +1172,7 @@ consumer(slot q):
 | 56 | `reserved4` | u64 | 0 |
 | **64** | （大小） | | `size_of == 64`/`align_of == 64` |
 
-**`TspiEventRingLaneV1`（64 B，align 64）**
+**`KhaenEventRingLaneV1`（64 B，align 64）**
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1190,7 +1190,7 @@ consumer(slot q):
 | 56 | `reserved3` | u64 | 0 |
 | **64** | （大小） | | `size_of == 64`/`align_of == 64` |
 
-**`TspiWorkerRegsV1`（128 B，align 64，每 worker 一份）**
+**`KhaenWorkerRegsV1`（128 B，align 64，每 worker 一份）**
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1202,10 +1202,10 @@ consumer(slot q):
 | 12 | `sched_priority` | u32 | FIFO 优先级（初值 70，T45 校正） |
 | 16 | `spin_max_iters` | u32 | 标定值 |
 | 20 | `cutoff_drain_iters` | u32 | 标定值 |
-| 24 | `rt_control_ptr` | u64 | `TspiRtControlV1` 基址 |
+| 24 | `rt_control_ptr` | u64 | `KhaenRtControlV1` 基址 |
 | 32 | `plan_arena_base` | u64 | 当前/待用 plan arena 基址 |
 | 40 | `ack_slots_offset` | u64 | RtArena ack 槽数组偏移 |
-| 48 | `stats_offset` | u64 | `TspiWorkerStatsV1` 偏移 |
+| 48 | `stats_offset` | u64 | `KhaenWorkerStatsV1` 偏移 |
 | 56 | `event_lane_offset` | u64 | lane header 偏移 |
 | 64 | `required_ack_mask` | u32 | ACK_MASK(expected) |
 | 68 | `reserved1` | u32 | 0 |
@@ -1216,11 +1216,11 @@ consumer(slot q):
 | 96..128 | reserved3..6 | [u64;4] | 0 |
 | **128** | （大小） | | `size_of == 128`/`align_of == 64` |
 
-**`TspiMasterRegsV1`（128 B，align 64）**
+**`KhaenMasterRegsV1`（128 B，align 64）**
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
-| 0 | `rt_control_ptr` | u64 | `TspiRtControlV1` |
+| 0 | `rt_control_ptr` | u64 | `KhaenRtControlV1` |
 | 8 | `capture_ring_offset` | u64 | capture ring header 偏移 |
 | 16 | `playback_ring_offset` | u64 | playback ring header 偏移 |
 | 24 | `plan_registry_ptr` | u64 | CTL PlanRegistry 句柄（仅事件/诊断用，RT 不得解引用为 Drop 类型） |
@@ -1228,7 +1228,7 @@ consumer(slot q):
 | 40 | `stats_offset` | u64 | stats 数组 |
 | 48 | `event_lane_offset` | u64 | lane 0..7 header 基址 |
 | 56 | `worker_regs_offset` | u64 | WorkerRegs 数组 |
-| 64 | `crossfade_budget_offset` | u64 | `TspiCrossfadeBudgetV1` 偏移（0=无） |
+| 64 | `crossfade_budget_offset` | u64 | `KhaenCrossfadeBudgetV1` 偏移（0=无） |
 | 72 | `tick_freq_hz` | u32 | 标定 |
 | 76 | `tick_read_budget` | u32 | ≤3 |
 | 80 | `expected_workers` | u8 | 2/4 |
@@ -1238,7 +1238,7 @@ consumer(slot q):
 | 88..128 | reserved2..6 | [u64;5] | 0 |
 | **128** | （大小） | | `size_of == 128`/`align_of == 64` |
 
-**`TspiCrossfadeBudgetV1`（64 B，align 64，I06）**
+**`KhaenCrossfadeBudgetV1`（64 B，align 64，I06）**
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1257,7 +1257,7 @@ consumer(slot q):
 
 > **errata E3 注（v1.1.3）**：`old/new_total_delay_q16` 字段名与布局不变（与实现 `rt-host/src/swap.rs` 一致），但 ABI v1 的 Path/Diag/Role 无 `delay_q16` 槽（reserved=0），故该值 = `整数总延迟 D << 16`（低 16 位恒 0）；未来若引入分数 D 必须升 ABI 版本并同步改本表。
 
-**`TspiWorkerAffinityV1`（32 B，align 8，I15/T45；N4 align 例外）**
+**`KhaenWorkerAffinityV1`（32 B，align 8，I15/T45；N4 align 例外）**
 
 | 偏移 | 字段 | 类型 | 语义 |
 |---:|---|---|---|
@@ -1271,11 +1271,11 @@ consumer(slot q):
 | 24 | `reserved2` | u64 | 0 |
 | **32** | （大小） | | `size_of == 32`/`align_of == 8` |
 
-> **align 例外（v1.1.1/N4）**：`TspiWorkerAffinityV1` 是 plan 内 POD affinity 表项，固定 **32 B / align 8**（不是跨线程共享原子结构）；T06 B-18 静态断言必须期望 `size_of=32 / align_of=8`，不得按 §11.13 标题的 align64 误期。其余 6 个共享结构按 align(64)。
+> **align 例外（v1.1.1/N4）**：`KhaenWorkerAffinityV1` 是 plan 内 POD affinity 表项，固定 **32 B / align 8**（不是跨线程共享原子结构）；T06 B-18 静态断言必须期望 `size_of=32 / align_of=8`，不得按 §11.13 标题的 align64 误期。其余 6 个共享结构按 align(64)。
 
 **一致性与生命周期规则**：RtControl/SwapAck/EventRingLane/WorkerRegs/MasterRegs/CrossfadeBudget/WorkerAffinity 全部在 admission 时一次性分配并 mlock；地址稳定到进程退出；RT 内不得分配/释放/替换；无 Drop；只允许 §11 说明的字段读写。**align 例外**：WorkerAffinity 为 32B/align8（plan POD 表项），其余共享结构 align64（N4）。block_start 配方、ack 标签、事件 seq 发布顺序见 §6.4/§7.3/§8.3。这些结构纳入 §13.2 needs_drop=false 清单与 B-13..B-19 静态断言。
 
-> **errata E1 后 ABI 期望**：TspiPlanHeaderV1 128/64，关键偏移 role_off=88、role_count=92、reserved1=94、affinity_off=96、affinity_count=100、reserved2=102、ctl_meta_off=104、ctl_meta_len=108、reserved3=112、crc=124；T06 rt-check abi-layout scanned=120（旧 109，+11）。详见 §11.10/B.4。
+> **errata E1 后 ABI 期望**：KhaenPlanHeaderV1 128/64，关键偏移 role_off=88、role_count=92、reserved1=94、affinity_off=96、affinity_count=100、reserved2=102、ctl_meta_off=104、ctl_meta_len=108、reserved3=112、crc=124；T06 rt-check abi-layout scanned=120（旧 109，+11）。详见 §11.10/B.4。
 
 ## 12. Rust API 表面（拟建，future；T06 必须以此建 stub 与 lint）
 
@@ -1356,7 +1356,7 @@ pub struct PlanView<'a> {
 
 #[derive(Clone, Copy)]
 pub struct BlockIo<'a> {
-    pub desc: &'a TspiBlockDescV1,
+    pub desc: &'a KhaenBlockDescV1,
     pub input: &'a [f32],                  // planar, in_stride
     pub output: &'a mut [f32],             // planar, out_stride
     pub in_stride: u32,
@@ -1366,26 +1366,26 @@ pub struct BlockIo<'a> {
 #[derive(Clone, Copy)]
 pub struct WorkerRtCtx<'a> {
     pub worker: WorkerId,
-    pub ack: &'a TspiBlockAckV1,           // 原子字段在内部，不拥有
-    pub stats: &'a mut TspiWorkerStatsV1,
+    pub ack: &'a KhaenBlockAckV1,           // 原子字段在内部，不拥有
+    pub stats: &'a mut KhaenWorkerStatsV1,
 }
 
 // [RT] 主入口：worker/master 的 block 处理
 pub fn worker_block(k: WorkerId, plan: PlanRef, io: BlockIo<'_>, ctx: &mut WorkerRtCtx<'_>) -> RtStatus;
-pub fn master_block(plan: PlanRef, io: BlockIo<'_>, ctl: &TspiRtControlV1, ack: &TspiBlockAckV1) -> RtStatus;
+pub fn master_block(plan: PlanRef, io: BlockIo<'_>, ctl: &KhaenRtControlV1, ack: &KhaenBlockAckV1) -> RtStatus;
 pub fn kernel_direct(plan: PlanRef, io: &BlockIo<'_>) -> RtStatus;      // T07
 pub fn kernel_partitioned(plan: PlanRef, io: &BlockIo<'_>) -> RtStatus; // T08
 ~~~
 
 ~~~text
 // khaen-rt-host::spsc  [RT] 纯无锁、固定容量、无分配
-pub struct Producer<'a> { /* &'a TspiSpscHeaderV1 + &'a [TspiBlockDescV1] + &'a mut [BlockPayload] */ }
+pub struct Producer<'a> { /* &'a KhaenSpscHeaderV1 + &'a [KhaenBlockDescV1] + &'a mut [BlockPayload] */ }
 pub struct Consumer<'a> { /* 同上只读位 */ }
 impl<'a> Producer<'a> {
-    pub fn try_push(&mut self, desc: TspiBlockDescV1) -> Result<(), RtStatus>; // Full -> RT_E_QUEUE_OVERRUN
+    pub fn try_push(&mut self, desc: KhaenBlockDescV1) -> Result<(), RtStatus>; // Full -> RT_E_QUEUE_OVERRUN
 }
 impl<'a> Consumer<'a> {
-    pub fn try_pop(&mut self) -> Option<TspiBlockDescV1>;
+    pub fn try_pop(&mut self) -> Option<KhaenBlockDescV1>;
 }
 
 // khaen-rt-host::swap  [NONRT] plan 注册/切换/退役（Drop 只在这里）
@@ -1414,11 +1414,11 @@ pub fn admit(plan: &PlanView<'_>, env: &AdmissionEnv) -> Result<AdmissionReport,
 
 // khaen-rt-host::clock
 pub fn mono_now_ns() -> u64;                  // [IO]/[NONRT]
-pub fn rt_tick_budgeted(ctl: &TspiRtControlV1) -> u64;     // [RT] 仅 master，≤3 次/block
+pub fn rt_tick_budgeted(ctl: &KhaenRtControlV1) -> u64;     // [RT] 仅 master，≤3 次/block
 pub fn ticks_to_ns(ticks: u64) -> u64;        // [NONRT] admission 标定的频率换算
 
 // khaen-rt-host::format  [IO]
-pub struct FormatConfig { pub hw: TspiHwParamsV1, pub dither: DitherCfg }
+pub struct FormatConfig { pub hw: KhaenHwParamsV1, pub dither: DitherCfg }
 pub struct FormatStats { pub nonfinite_in: u64, pub clipped: u64, pub nonfinite_out: u64 }
 pub fn convert_capture(cfg: &FormatConfig, src: &[u8], dst: &mut [f32]) -> Result<FormatStats, RtStatus>;
 pub fn convert_playback(cfg: &FormatConfig, src: &[f32], dst: &mut [u8]) -> Result<FormatStats, RtStatus>;
@@ -1426,7 +1426,7 @@ pub fn convert_playback(cfg: &FormatConfig, src: &[f32], dst: &mut [u8]) -> Resu
 // khaen-rt-host::fault  [WD]/[NONRT]
 pub struct Watchdog { /* 观测 heartbeat/epoch/worker stats，只置位 */ }
 impl Watchdog {
-    pub fn observe(&mut self, ctl: &TspiRtControlV1, swap: &TspiSwapAckV1) -> WatchdogAction; // None | RequestMute | Fault
+    pub fn observe(&mut self, ctl: &KhaenRtControlV1, swap: &KhaenSwapAckV1) -> WatchdogAction; // None | RequestMute | Fault
 }
 ~~~
 
@@ -1435,11 +1435,11 @@ impl Watchdog {
 pub struct PlanBuf { /* 拥有 plan 字节；Drop 只在 CTL */ }
 pub fn validate_plan(bytes: &[u8]) -> Result<PlanBuf, RtStatus>;
 pub fn recompute_graph_id(bytes: &[u8]) -> Result<[u8; 32], RtStatus>;
-pub fn pack_plan(header: &TspiPlanHeaderV1, tables: &PlanTables, coeffs: &[f32]) -> Result<Vec<u8>, RtStatus>;
+pub fn pack_plan(header: &KhaenPlanHeaderV1, tables: &PlanTables, coeffs: &[f32]) -> Result<Vec<u8>, RtStatus>;
 
 // khaen-core::workers  [RT] 线程入口
-pub fn run_worker(k: WorkerId, regs: &TspiWorkerRegsV1) -> !;
-pub fn run_master(regs: &TspiMasterRegsV1, ctl: &TspiRtControlV1) -> !;
+pub fn run_worker(k: WorkerId, regs: &KhaenWorkerRegsV1) -> !;
+pub fn run_master(regs: &KhaenMasterRegsV1, ctl: &KhaenRtControlV1) -> !;
 ~~~
 
 ~~~text
@@ -1448,22 +1448,22 @@ pub const ACK_MASK_ALL: u32 = 0xF;                       // 仅 expected=4；运
 pub const fn ack_mask(expected_workers: u8) -> u32 { (1u32 << expected_workers) - 1 }
 pub const fn total_delay_q16(int_part: u32, frac_q16: u32) -> u64 { ((int_part as u64) << 16) | frac_q16 as u64 }  // 内部/报告口径；ABI v1 下 frac_q16 恒 0（E3）
 
-#[RT] pub fn wait_block_start(ctl: &TspiRtControlV1, last_seq: u64) -> Result<u64, RtStatus>; // Acquire; Err=cutoff/timeout
-#[RT] pub fn read_block_desc(ctl: &TspiRtControlV1) -> TspiBlockDescV1;                        // 仅在 seq 递增后
-#[RT] pub fn publish_block_start(ctl: &TspiRtControlV1, desc: &TspiBlockDescV1) -> RtStatus;    // 写普通字段后 Release fetch_add
-#[RT] pub fn ack_phase(ack: &TspiBlockAckV1, worker: WorkerId, phase: u8) -> RtStatus;          // 先校验 ack 槽标签
-#[RT] pub fn wait_phases(ack: &TspiBlockAckV1, expected: u8, spin_max_iters: u32) -> RtStatus;  // ACK_MASK(expected)
+#[RT] pub fn wait_block_start(ctl: &KhaenRtControlV1, last_seq: u64) -> Result<u64, RtStatus>; // Acquire; Err=cutoff/timeout
+#[RT] pub fn read_block_desc(ctl: &KhaenRtControlV1) -> KhaenBlockDescV1;                        // 仅在 seq 递增后
+#[RT] pub fn publish_block_start(ctl: &KhaenRtControlV1, desc: &KhaenBlockDescV1) -> RtStatus;    // 写普通字段后 Release fetch_add
+#[RT] pub fn ack_phase(ack: &KhaenBlockAckV1, worker: WorkerId, phase: u8) -> RtStatus;          // 先校验 ack 槽标签
+#[RT] pub fn wait_phases(ack: &KhaenBlockAckV1, expected: u8, spin_max_iters: u32) -> RtStatus;  // ACK_MASK(expected)
 
 // khaen-core::rt::swap / plan  [NONRT]
 impl PlanRegistry {
-    pub fn admit_crossfade(&mut self, old: PlanVersion, new: PlanToken, budget: &TspiCrossfadeBudgetV1) -> Result<PlanVersion, RtStatus>;
-    pub fn poll_retire(&mut self, ctl: &TspiRtControlV1, ack: &TspiSwapAckV1) -> Option<PlanVersion>; // Some 才允许 drop/unmap
+    pub fn admit_crossfade(&mut self, old: PlanVersion, new: PlanToken, budget: &KhaenCrossfadeBudgetV1) -> Result<PlanVersion, RtStatus>;
+    pub fn poll_retire(&mut self, ctl: &KhaenRtControlV1, ack: &KhaenSwapAckV1) -> Option<PlanVersion>; // Some 才允许 drop/unmap
 }
 // T04 半整数/分数 D → 内部 plan 整数+Q16（I01）；残留 <1/65536 sample
 // v1.1.3 E3：ABI v1 无 delay_q16 槽；打包前必须把 q16 折入 P/A 系数或取整（T66 GAP-T66-2）
 pub fn design_delay_to_plan(total_delay_samples: f64) -> Result<(u32, u32), RtStatus>; // (delay_samples, delay_q16)；仅内部模型
 // T45 参数化计划（不自动写内核）：只读拓扑/IRQ 建议，生成 affinity 表
-pub fn plan_affinity(env: &AdmissionEnv) -> Result<[TspiWorkerAffinityV1; 4], RtStatus>;
+pub fn plan_affinity(env: &AdmissionEnv) -> Result<[KhaenWorkerAffinityV1; 4], RtStatus>;
 ~~~
 
 **API 冻结/演进规则**：
@@ -1495,19 +1495,19 @@ T06 必须为上述类型/函数建 stub 并满足：`cargo test -p khaen-rt-hos
 |---|---|:---:|:---:|---|---|
 | `RtStatus` | core::rt | 是 | 是 | false | `repr(transparent) u32`；错误只用码。 |
 | `WorkerId` / `PlanVersion` / `FrameIndex` / `Tick` | core::rt | 是 | 是 | false | 整数别名。 |
-| `TspiBlockDescV1` | core::abi | 是 | 是 | false | POD（§11.3）。 |
-| `TspiEpochInfoV1` / `TspiHwParamsV1` | core::abi | 是 | 是 | false | POD（§11.4/§11.9）。 |
-| `TspiEventV1` | core::abi | 是 | 是 | false | POD（§11.5）。 |
-| `TspiPathV1` / `TspiDiagFirV1` / `TspiRoleV1` | core::abi | 是 | 是 | false | POD（§11.10）。 |
-| `TspiPlanHeaderV1` / `TspiWorkerStatsV1` | core::abi | 是 | 是 | false | POD/原子字段（§11.8/§11.10）。 |
-| `TspiBlockAckV1` | core::abi | 是 | 否 | false | 含 AtomicU32/U64；原子类型无 Drop。 |
-| `TspiSpscHeaderV1` | rt-host::spsc | 是 | 否 | false | 原子字段，无 Drop。 |
-| `TspiRtControlV1` | core::abi（§11.13） | 是 | 否 | false | 原子字段+固定数组；I02 新增。 |
-| `TspiSwapAckV1` | core::abi（§11.13） | 是 | 否 | false | swap all-worker ack；I02 新增。 |
-| `TspiEventRingLaneV1` | core::abi（§11.13） | 是 | 否 | false | lane 单写者+seq；I02 新增。 |
-| `TspiWorkerRegsV1` / `TspiMasterRegsV1` | core::abi（§11.13） | 是 | 否 | false | RT 入口参数；I02/I05/I15 新增。 |
-| `TspiCrossfadeBudgetV1` | core::abi（§11.13） | 是 | 否 | false | 双图预算；I06 新增。 |
-| `TspiWorkerAffinityV1` | core::abi（§11.13） | 是 | 是 | false | POD affinity；I15 新增。 |
+| `KhaenBlockDescV1` | core::abi | 是 | 是 | false | POD（§11.3）。 |
+| `KhaenEpochInfoV1` / `KhaenHwParamsV1` | core::abi | 是 | 是 | false | POD（§11.4/§11.9）。 |
+| `KhaenEventV1` | core::abi | 是 | 是 | false | POD（§11.5）。 |
+| `KhaenPathV1` / `KhaenDiagFirV1` / `KhaenRoleV1` | core::abi | 是 | 是 | false | POD（§11.10）。 |
+| `KhaenPlanHeaderV1` / `KhaenWorkerStatsV1` | core::abi | 是 | 是 | false | POD/原子字段（§11.8/§11.10）。 |
+| `KhaenBlockAckV1` | core::abi | 是 | 否 | false | 含 AtomicU32/U64；原子类型无 Drop。 |
+| `KhaenSpscHeaderV1` | rt-host::spsc | 是 | 否 | false | 原子字段，无 Drop。 |
+| `KhaenRtControlV1` | core::abi（§11.13） | 是 | 否 | false | 原子字段+固定数组；I02 新增。 |
+| `KhaenSwapAckV1` | core::abi（§11.13） | 是 | 否 | false | swap all-worker ack；I02 新增。 |
+| `KhaenEventRingLaneV1` | core::abi（§11.13） | 是 | 否 | false | lane 单写者+seq；I02 新增。 |
+| `KhaenWorkerRegsV1` / `KhaenMasterRegsV1` | core::abi（§11.13） | 是 | 否 | false | RT 入口参数；I02/I05/I15 新增。 |
+| `KhaenCrossfadeBudgetV1` | core::abi（§11.13） | 是 | 否 | false | 双图预算；I06 新增。 |
+| `KhaenWorkerAffinityV1` | core::abi（§11.13） | 是 | 是 | false | POD affinity；I15 新增。 |
 | `PlanRef` | core::rt | 是 | 是 | false | NonNull+u32；非拥有、无 Drop。 |
 | `PlanView<'a>` / `BlockIo<'a>` / `WorkerRtCtx<'a>` | core::rt | 是 | 是 | false | 只含引用/Copy 值；引用无 Drop。 |
 | `SafetyAction` / `DitherCfg` | core::rt / rt-host::format | 是 | 是 | false | `repr(u8)/POD`，无 payload/Drop。 |
@@ -1803,7 +1803,7 @@ const _: () = assert!(core::mem::size_of::<T>() == 期望字节数);
 | WBS 任务 | T02（api-designer）；**v1.1 修复任务 task-44**（按 T02-review 15 项） |
 | 执行 agent | rt-api（作者；v1.1 自评不等于独立复审） |
 | 日期（本地） | v1.0 2026-11-16；**v1.1 2026-11-17** |
-| 产物 | 本文件（`projects/tspi-audio-dsp/rt-stack/spec/core-v1.md`）+ `rt-stack/evidence/T02/`（abi_vectors.py、check_core_spec.py、manifest.json、结果日志） |
+| 产物 | 本文件（`projects/khaen-audio-dsp/rt-stack/spec/core-v1.md`）+ `rt-stack/evidence/T02/`（abi_vectors.py、check_core_spec.py、manifest.json、结果日志） |
 | 工作方式 | 只读输入 + 外部脚本验证；未创建 Cargo 根、未改其他生产代码、未 git commit、未碰板/ALSA/CueMix/服务 |
 | 证据类型 | P0 人工检查表 + 手算/ABI 解析验证（**脚本在文件外**，I10）+ 输入 hash；无代码/无运行测试（本任务不产代码） |
 
@@ -1811,18 +1811,18 @@ const _: () = assert!(core::mem::size_of::<T>() == 期望字节数);
 
 | # | 文件 | 字节 | SHA-256 |
 |---:|---|---:|---|
-| 1 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/scratch/lead/planner/TSPI-RT-STACK-WBS.md | 35728 | ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9 |
-| 2 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/scratch/lead/planner/DSP-HOST-DECISION.md | 27951 | ab1056477d8e1c01dbe61df6f2d15c4bb0cca6b05f9177ef51559df3e2d25ded |
-| 3 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/scratch/lead/planner/DSP-HOST-CPU-BUDGET.md | 18859 | 5954bfa2c64210e1dd4c75268aa674976c3f67fa35c2000363cc6dc5e25a2aa1 |
-| 4 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/scratch/lead/planner/DSP-HOST-CPU-MODEL.json | 26674 | ffeaf8a8941ca211efcff1ad8a8b9bc3537997b215fae483b511ffa2a1d23d0e |
-| 5 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/calibration-spec/CONTRACT.md（task-118 刷新） | 25438 | bec362671d645c27731eec2254b5aad1e3526e788fafbca1a0e5eb12b3dd77af |
-| 6 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/calibration-spec/ACCEPTANCE.md（task-118 刷新） | 30222 | c83671a3e0f36ea6b945497744e916f2b7d1e4c2b53055a44c2afb8a744d6ffb |
-| 7 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/web/docs/API.md | 26056 | ffcd0898f98ba317ab836918d7fc61fcf15f8a540ae639382c0e97b842ac6f08 |
-| 8 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/audio/overlay/etc/tspi-audio/layout-presets.yml | 11228 | 4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da |
-| 9 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/upmix/examples/profiles/upmix-5.3.2-music.yml | 4842 | 14c00f949ad8c2952d42bc473edb13476370ce57af5356e5e1924e59de77d973 |
-| 10 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/docs/MIMO-COEFF-PLAN.md | 45259 | fc832832487e73182787ad19e4fb3639edb3355584a33a5f9a4d707f539c3f30 |
-| 11 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/audio/tools/mimo-engine/src/main.rs（只读原型事实） | 25273 | cf44c1e65b15fce87e3fe6b0432f72f741ae86070bcda5662cfc13a3d99d0eaa |
-| 12 | C:/WorkSpace/Claw/projects/tspi-audio-dsp/scratch/lead/rt-reviews/T02-review.md（评审输入） | 36578 | ae440b999f31374ac6aba00e952ded2017d107a1bdd338e45cd940251603bc11 |
+| 1 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/scratch/lead/planner/KHAEN-RT-STACK-WBS.md | 35728 | ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9 |
+| 2 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/scratch/lead/planner/DSP-HOST-DECISION.md | 27951 | ab1056477d8e1c01dbe61df6f2d15c4bb0cca6b05f9177ef51559df3e2d25ded |
+| 3 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/scratch/lead/planner/DSP-HOST-CPU-BUDGET.md | 18859 | 5954bfa2c64210e1dd4c75268aa674976c3f67fa35c2000363cc6dc5e25a2aa1 |
+| 4 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/scratch/lead/planner/DSP-HOST-CPU-MODEL.json | 26674 | ffeaf8a8941ca211efcff1ad8a8b9bc3537997b215fae483b511ffa2a1d23d0e |
+| 5 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/calibration-spec/CONTRACT.md（task-118 刷新） | 25438 | bec362671d645c27731eec2254b5aad1e3526e788fafbca1a0e5eb12b3dd77af |
+| 6 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/calibration-spec/ACCEPTANCE.md（task-118 刷新） | 30222 | c83671a3e0f36ea6b945497744e916f2b7d1e4c2b53055a44c2afb8a744d6ffb |
+| 7 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/web/docs/API.md | 26056 | ffcd0898f98ba317ab836918d7fc61fcf15f8a540ae639382c0e97b842ac6f08 |
+| 8 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/audio/overlay/etc/khaen-audio/layout-presets.yml | 11228 | 4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da |
+| 9 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/upmix/examples/profiles/upmix-5.3.2-music.yml | 4842 | 14c00f949ad8c2952d42bc473edb13476370ce57af5356e5e1924e59de77d973 |
+| 10 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/docs/MIMO-COEFF-PLAN.md | 45259 | fc832832487e73182787ad19e4fb3639edb3355584a33a5f9a4d707f539c3f30 |
+| 11 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/audio/tools/mimo-engine/src/main.rs（只读原型事实） | 25273 | cf44c1e65b15fce87e3fe6b0432f72f741ae86070bcda5662cfc13a3d99d0eaa |
+| 12 | C:/WorkSpace/Claw/projects/khaen-audio-dsp/scratch/lead/rt-reviews/T02-review.md（评审输入） | 36578 | ae440b999f31374ac6aba00e952ded2017d107a1bdd338e45cd940251603bc11 |
 | 13 | rt-stack/reference/SPEC.md（T03 当前；N2/N3 已由其作者更新） | 22843 | f7f1a5337216138b1cffbf10f4a8652bb173f49108256d62790e0050e1b6962f |
 | 14 | rt-stack/spec/fir-toolbox.md（T04 **v1.2-draft** 含 fs/2 裁决+errata A；N1/N2/N8） | 97033 | 86fb97fdd7dbbffda8207d49de0c4150e1b131fe470b7939a32b6900b777b6a5 |
 | 15 | rt-stack/spec/compat-matrix.md（T05 当前；K34/R13 已修，Q-13） | 99248 | 1a46b4f86af9f38ebcd62a2f61a2929cdaf88e88cbdfbcc1a737f76e5ee0a1c1 |
@@ -1877,7 +1877,7 @@ const _: () = assert!(core::mem::size_of::<T>() == 期望字节数);
 
 ### A.4 生成/验证命令与 exit code
 
-| 命令 ID | 命令（PowerShell，工作目录 C:/WorkSpace/Claw/projects/tspi-audio-dsp） | 期望/实际 |
+| 命令 ID | 命令（PowerShell，工作目录 C:/WorkSpace/Claw/projects/khaen-audio-dsp） | 期望/实际 |
 |---|---|---|
 | CMD-HASH | `Get-FileHash -Algorithm SHA256 -LiteralPath <A.2 的 17 个文件>` + `Get-Item .Length` | exit 0；结果=A.2 |
 | CMD-ABI | `python rt-stack/evidence/T02/abi_vectors.py` | **exit 0**；`ABI_TIMING_SUMMARY fails=0`（18 结构 size/offset + timing/GD/回绕/容量） |
@@ -1977,31 +1977,31 @@ const _: () = assert!(core::mem::size_of::<T>() == 期望字节数);
 
 | 结构 | 大小 B | align（Rust） | 关键偏移 |
 |---|---:|---:|---|
-| TspiBlockDescV1 | 64 | 64 | epoch=8, block_seq=16, frame=24, plan_version=32, flags=36, valid=40, slot=44, publish=48, deadline=56 |
-| TspiEpochInfoV1 | 64 | 64 | plan_version=8, fs=12, B=16, n_in=18, n_out=20, mode=22, flags=24, start=32 |
-| TspiHwParamsV1 | 64 | 64 | sample_format=2, n_in=4, n_out=6, fs=8, period=12, buffer=16, in_stride=20, out_stride=24, flags=28 |
-| TspiPlanHeaderV1 | 128 | 64 | graph_id=36, total_coeff=68, path_off=72, diag_off=76, in_stride=80, out_stride=84, role_off=88, role_count=92, **reserved1=94, affinity_off=96, affinity_count=100, reserved2=102, ctl_off=104, ctl_len=108, reserved3=112**, crc=124 |
-| TspiEventV1 | 64 | 64 | mono=8, epoch=16, block_seq=24, kind=32, lane=34, severity=35, value_a=36, value_b=40, payload=48 |
-| TspiBlockAckV1 | 64 | 64 | phase_done0=16,1=20,2=24, cutoff=28, plan_version=32, expected=36, flags=37, deadline=40, compute=48 |
-| TspiSpscHeaderV1 | 64 | 64 | capacity=8, entry_stride=12, write=16, read=24, dropped=32, epoch=40 |
-| TspiWorkerStatsV1 | 64 | 64 | 8×u64 连续 |
-| TspiPathV1 | 32 | 8 | in=0,out=2,taps=4,delay=8,polarity=12,flags=13,coeff_off=16,coeff_len=24,**reserved1=28（必须 0；E3）** |
-| TspiDiagFirV1 | 32 | 8 | out=0,flags=2,taps=4,delay=8,res0=12,coeff_off=16,coeff_len=24,**reserved1=28（必须 0；E3）** |
-| TspiRoleV1 | 32 | 8 | role=0,out=2,flags=4,delay=8,gain=12,polarity=14,peq=16,name_hash=20,**reserved3=24（必须 0；E3）** |
+| KhaenBlockDescV1 | 64 | 64 | epoch=8, block_seq=16, frame=24, plan_version=32, flags=36, valid=40, slot=44, publish=48, deadline=56 |
+| KhaenEpochInfoV1 | 64 | 64 | plan_version=8, fs=12, B=16, n_in=18, n_out=20, mode=22, flags=24, start=32 |
+| KhaenHwParamsV1 | 64 | 64 | sample_format=2, n_in=4, n_out=6, fs=8, period=12, buffer=16, in_stride=20, out_stride=24, flags=28 |
+| KhaenPlanHeaderV1 | 128 | 64 | graph_id=36, total_coeff=68, path_off=72, diag_off=76, in_stride=80, out_stride=84, role_off=88, role_count=92, **reserved1=94, affinity_off=96, affinity_count=100, reserved2=102, ctl_off=104, ctl_len=108, reserved3=112**, crc=124 |
+| KhaenEventV1 | 64 | 64 | mono=8, epoch=16, block_seq=24, kind=32, lane=34, severity=35, value_a=36, value_b=40, payload=48 |
+| KhaenBlockAckV1 | 64 | 64 | phase_done0=16,1=20,2=24, cutoff=28, plan_version=32, expected=36, flags=37, deadline=40, compute=48 |
+| KhaenSpscHeaderV1 | 64 | 64 | capacity=8, entry_stride=12, write=16, read=24, dropped=32, epoch=40 |
+| KhaenWorkerStatsV1 | 64 | 64 | 8×u64 连续 |
+| KhaenPathV1 | 32 | 8 | in=0,out=2,taps=4,delay=8,polarity=12,flags=13,coeff_off=16,coeff_len=24,**reserved1=28（必须 0；E3）** |
+| KhaenDiagFirV1 | 32 | 8 | out=0,flags=2,taps=4,delay=8,res0=12,coeff_off=16,coeff_len=24,**reserved1=28（必须 0；E3）** |
+| KhaenRoleV1 | 32 | 8 | role=0,out=2,flags=4,delay=8,gain=12,polarity=14,peq=16,name_hash=20,**reserved3=24（必须 0；E3）** |
 
 **v1.1 新增共享结构（7 个）**
 
 | 结构 | 大小 B | align（Rust） | 关键偏移 |
 |---|---:|---:|---|
-| TspiRtControlV1 | 128 | 64 | block_start_seq=8, block_start_epoch=16, block_start_frame=24, plan_version=32, slot=36, current_ptr=40, switch_state=64, safety_request=68, heartbeat=80, spin=88, drain=92, tick_freq=96, tick_budget=100, capture_ring=104, playback_ring=112 |
-| TspiSwapAckV1 | 64 | 64 | ack_mask=8, retire_ready=12, retire_epoch=16, next_plan=24, old_plan_ptr=32 |
-| TspiEventRingLaneV1 | 64 | 64 | write_seq=0, read_seq=8, dropped=16, overflow=24, records_offset=32, capacity=36, lane=40 |
-| TspiWorkerRegsV1 | 128 | 64 | cpu_index=8, sched_priority=12, spin=16, drain=20, rt_control=24, plan_arena=32, ack_slots=40, stats=48, event_lane=56, required_ack_mask=64, scratch=72, affinity_index=88 |
-| TspiMasterRegsV1 | 128 | 64 | rt_control=0, capture=8, playback=16, registry=24, ack_base=32, stats=40, event_lane=48, worker_regs=56, crossfade_budget=64, tick_freq=72, tick_budget=76, expected=80 |
-| TspiCrossfadeBudgetV1 | 64 | 64 | old_ver=0, new_ver=4, old_delay_q16=8, new_delay_q16=12, frames=16, flags=20, peak_cpu=24, peak_ram=32, avail_cpu=40, avail_ram=48 |
-| TspiWorkerAffinityV1 | 32 | 8 | worker_id=0, sched_priority=1, flags=2, cpu_index=4, irq_mask=8 |
+| KhaenRtControlV1 | 128 | 64 | block_start_seq=8, block_start_epoch=16, block_start_frame=24, plan_version=32, slot=36, current_ptr=40, switch_state=64, safety_request=68, heartbeat=80, spin=88, drain=92, tick_freq=96, tick_budget=100, capture_ring=104, playback_ring=112 |
+| KhaenSwapAckV1 | 64 | 64 | ack_mask=8, retire_ready=12, retire_epoch=16, next_plan=24, old_plan_ptr=32 |
+| KhaenEventRingLaneV1 | 64 | 64 | write_seq=0, read_seq=8, dropped=16, overflow=24, records_offset=32, capacity=36, lane=40 |
+| KhaenWorkerRegsV1 | 128 | 64 | cpu_index=8, sched_priority=12, spin=16, drain=20, rt_control=24, plan_arena=32, ack_slots=40, stats=48, event_lane=56, required_ack_mask=64, scratch=72, affinity_index=88 |
+| KhaenMasterRegsV1 | 128 | 64 | rt_control=0, capture=8, playback=16, registry=24, ack_base=32, stats=40, event_lane=48, worker_regs=56, crossfade_budget=64, tick_freq=72, tick_budget=76, expected=80 |
+| KhaenCrossfadeBudgetV1 | 64 | 64 | old_ver=0, new_ver=4, old_delay_q16=8, new_delay_q16=12, frames=16, flags=20, peak_cpu=24, peak_ram=32, avail_cpu=40, avail_ram=48 |
+| KhaenWorkerAffinityV1 | 32 | 8 | worker_id=0, sched_priority=1, flags=2, cpu_index=4, irq_mask=8 |
 
-> Python `struct` 只验证无隐式 padding 的字节布局；Rust `repr(C,align(64))` 的 align/size 必须由 T06 静态断言验证（B-12/B-19）。本表是 T06 的期望输入。**align 例外（N4）**：`TspiWorkerAffinityV1` 固定 32B/align8（§11.13），其余 6 个共享结构 align64——T06 B-18 必须按 8 断言，不得按 intro 误期 64。
+> Python `struct` 只验证无隐式 padding 的字节布局；Rust `repr(C,align(64))` 的 align/size 必须由 T06 静态断言验证（B-12/B-19）。本表是 T06 的期望输入。**align 例外（N4）**：`KhaenWorkerAffinityV1` 固定 32B/align8（§11.13），其余 6 个共享结构 align64——T06 B-18 必须按 8 断言，不得按 intro 误期 64。
 
 ### B.5 外部复算脚本（I10 移出正文）
 
@@ -2048,7 +2048,7 @@ const _: () = assert!(core::mem::size_of::<T>() == 期望字节数);
 
 **task-118 终修复**：A.2 #5 CONTRACT 25,438/`bec36267…`、#6 ACCEPTANCE 30,222/`c83671a3…` 刷新；A.2.1 历史 provenance 标 non-active（不参与 fresh 判定）；abi/check 重跑 exit0，manifest 更新。
 
-**v1.1.3 errata E3/E4 后重跑**：ABI/DOC 均 exit 0；`TspiPathV1/TspiDiagFirV1` reserved1@28、`TspiRoleV1` reserved3@24（size/对齐/其余偏移不变）；plan flags bit5..7=0；I01 NOT-LANDED；139 项检查表不变；manifest/ERRATA-v1.1.3 更新。
+**v1.1.3 errata E3/E4 后重跑**：ABI/DOC 均 exit 0；`KhaenPathV1/KhaenDiagFirV1` reserved1@28、`KhaenRoleV1` reserved3@24（size/对齐/其余偏移不变）；plan flags bit5..7=0；I01 NOT-LANDED；139 项检查表不变；manifest/ERRATA-v1.1.3 更新。
 
 **v1.1.3 errata E5 后重跑（2026-11-18，N-09）**：ABI/DOC 均 exit 0；E4 行当前事实改为 `PLAN_FLAG_MASK=0x1F`（0x3F 仅历史快照）；139 项检查表不变；manifest/ERRATA-v1.1.4 更新。
 

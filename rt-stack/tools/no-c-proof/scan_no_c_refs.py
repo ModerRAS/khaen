@@ -5,7 +5,7 @@
 用途（WBS T72 / DSP-HOST-DECISION §7 G-no-C）
 ------------------------------------------------
 扫描 new-stack 可部署域（conf/service）、旧 overlay、旧 web、deploy 工装中的
-CamillaDSP / 旧 DSP 进程（tspi-upmix / 旧 web shim / tspi-mode）引用，输出：
+CamillaDSP / 旧 DSP 进程（khaen-upmix / 旧 web shim / khaen-mode）引用，输出：
   1. refs.json  机器可读：逐文件命中 + 分类（runtime_dependency / historical_only / to_delete）
                 + 新栈载荷（bundle units + 安装模板）逐行审计；
   2. REFS.md    人类可读清单（分类表 + 证据片段 + 扫描命令/哈希）。
@@ -59,19 +59,19 @@ BINARY_EXTS = {
 LINE_PATTERNS = [
     ("c_engine", re.compile(r"camilla[-_ ]?dsp", re.I)),
     ("c_token", re.compile(r"\bcamilla\b", re.I)),
-    ("old_unit", re.compile(r"tspi-(?:camilladsp|upmix-autodetect|audio-web|audio\.target|boot-mode)\b", re.I)),
-    ("old_dsp_tool", re.compile(r"\btspi-(?:upmix|mode|channelmap)\b", re.I)),
-    ("c_path", re.compile(r"/etc/camilladsp\b|/run/tspi/camilladsp\b|/usr/local/bin/camilladsp\b", re.I)),
-    ("c_ws", re.compile(r"ws://[^\s\"']*:1234\b|127\.0\.0\.1:1234|localhost:1234|TSPI_CAMILLADSP_(?:PORT|BIND)", re.I)),
+    ("old_unit", re.compile(r"khaen-(?:camilladsp|upmix-autodetect|audio-web|audio\.target|boot-mode)\b", re.I)),
+    ("old_dsp_tool", re.compile(r"\bkhaen-(?:upmix|mode|channelmap)\b", re.I)),
+    ("c_path", re.compile(r"/etc/camilladsp\b|/run/khaen/camilladsp\b|/usr/local/bin/camilladsp\b", re.I)),
+    ("c_ws", re.compile(r"ws://[^\s\"']*:1234\b|127\.0\.0\.1:1234|localhost:1234|KHAEN_CAMILLADSP_(?:PORT|BIND)", re.I)),
     ("sox", re.compile(r"\bsox(?:i)?\b", re.I)),
-    ("socket_pipe", re.compile(r"(?:sock(?:et)?|fifo|mkfifo|pipe)[^\n]{0,80}(?:camilla|tspi-camilladsp|tspi-upmix)", re.I)),
+    ("socket_pipe", re.compile(r"(?:sock(?:et)?|fifo|mkfifo|pipe)[^\n]{0,80}(?:camilla|khaen-camilladsp|khaen-upmix)", re.I)),
 ]
-FILENAME_PATTERN = re.compile(r"camilla|old[-_]?c|tspi-(?:mode|channelmap|upmix)", re.I)
+FILENAME_PATTERN = re.compile(r"camilla|old[-_]?c|khaen-(?:mode|channelmap|upmix)", re.I)
 
 PORT_CONTEXT = {
     1234: re.compile(
         r"(?:port\s*[=:]\s*[\"']?1234\b|-p\s+1234\b|(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1?\])\s*:\s*1234\b"
-        r"|ws://[^\s\"']*:1234\b|TSPI_CAMILLADSP_PORT[^\n]{0,20}1234\b)",
+        r"|ws://[^\s\"']*:1234\b|KHAEN_CAMILLADSP_PORT[^\n]{0,20}1234\b)",
         re.I,
     ),
     18080: re.compile(r"\b18080\b"),
@@ -91,45 +91,45 @@ def port_line_hits(line):
 RULES = [
     # ---------- overlay：旧 C 引擎/依赖 unit ----------
     dict(id="OV-C-UNIT",
-         globs=["audio/overlay/etc/systemd/system/tspi-camilladsp.service",
-                "audio/overlay/etc/systemd/system/tspi-upmix-autodetect.service"],
+         globs=["audio/overlay/etc/systemd/system/khaen-camilladsp.service",
+                "audio/overlay/etc/systemd/system/khaen-upmix-autodetect.service"],
          category="to_delete", role="旧C引擎/旧C依赖daemon unit（RETIRE_C）",
          reason="停止+disable+mask 后保留审计；不得随镜像/部署再启用",
          old_c_disposition="RETIRE_C_PROCESS"),
     dict(id="OV-C-CONF",
          globs=["audio/overlay/etc/camilladsp/*"],
          category="to_delete", role="旧C渲染配置/系数（RETIRE_C）",
-         reason="T71 03-retire 删除 /run/tspi/camilladsp.yml 后不再被读取；历史文件保留审计",
+         reason="T71 03-retire 删除 /run/khaen/camilladsp.yml 后不再被读取；历史文件保留审计",
          old_c_disposition="RETIRE_C_PROCESS"),
     dict(id="OV-ENTRY-UNIT",
-         globs=["audio/overlay/etc/systemd/system/tspi-audio.target",
-                "audio/overlay/etc/systemd/system/tspi-boot-mode.service"],
+         globs=["audio/overlay/etc/systemd/system/khaen-audio.target",
+                "audio/overlay/etc/systemd/system/khaen-boot-mode.service"],
          category="to_delete", role="旧编排/开机恢复入口（REPLACE_SHIM）",
-         reason="tspi-mode 写 marker 后拉起 C；03-retire 必须 disable(+mask boot-mode)",
+         reason="khaen-mode 写 marker 后拉起 C；03-retire 必须 disable(+mask boot-mode)",
          old_c_disposition="REPLACE_SHIM"),
     dict(id="OV-ENTRY-BIN",
-         globs=["audio/overlay/usr/local/bin/tspi-mode",
-                "audio/overlay/usr/local/bin/tspi-upmix",
-                "audio/overlay/usr/local/bin/tspi-channelmap"],
+         globs=["audio/overlay/usr/local/bin/khaen-mode",
+                "audio/overlay/usr/local/bin/khaen-upmix",
+                "audio/overlay/usr/local/bin/khaen-channelmap"],
          category="to_delete", role="旧C编排/控制可执行（REPLACE_SHIM）",
-         reason="会 systemctl start/restart tspi-camilladsp 或写 /run/tspi/camilladsp.yml",
+         reason="会 systemctl start/restart khaen-camilladsp 或写 /run/khaen/camilladsp.yml",
          old_c_disposition="REPLACE_SHIM"),
     # ---------- overlay：保留数据 / AoIP ----------
     dict(id="OV-RETAIN-UNIT",
-         globs=["audio/overlay/etc/systemd/system/tspi-statime-inferno.service",
-                "audio/overlay/etc/systemd/system/tspi-aes67-daemon.service",
-                "audio/overlay/etc/systemd/system/tspi-ravenna-lkm.service",
-                "audio/overlay/etc/systemd/system/tspi-ptp4l-master.service",
-                "audio/overlay/etc/systemd/system/tspi-phc2sys.service"],
+         globs=["audio/overlay/etc/systemd/system/khaen-statime-inferno.service",
+                "audio/overlay/etc/systemd/system/khaen-aes67-daemon.service",
+                "audio/overlay/etc/systemd/system/khaen-ravenna-lkm.service",
+                "audio/overlay/etc/systemd/system/khaen-ptp4l-master.service",
+                "audio/overlay/etc/systemd/system/khaen-phc2sys.service"],
          category="historical_only", role="保留 AoIP/PTP unit（RETAIN_AOIP）",
-         reason="P1 保留；After/PartOf 引用已 disabled 的 tspi-audio.target（排序引用，非激活依赖）",
+         reason="P1 保留；After/PartOf 引用已 disabled 的 khaen-audio.target（排序引用，非激活依赖）",
          old_c_disposition="RETAIN_AOIP"),
     dict(id="OV-RETAIN-LIB",
-         globs=["audio/overlay/usr/local/lib/tspi/lib.sh",
-                "audio/overlay/usr/local/lib/tspi/ptp-status-hook",
-                "audio/overlay/usr/local/bin/tspi-ptp-status"],
+         globs=["audio/overlay/usr/local/lib/khaen/lib.sh",
+                "audio/overlay/usr/local/lib/khaen/ptp-status-hook",
+                "audio/overlay/usr/local/bin/khaen-ptp-status"],
          category="historical_only", role="保留 AoIP 工具库/状态脚本（RETAIN_AOIP）",
-         reason="lib.sh 残留 TSPI_CAMILLADSP_PORT=1234 默认变量但新栈不读；ptp-status 的 1234 为示例 offset",
+         reason="lib.sh 残留 KHAEN_CAMILLADSP_PORT=1234 默认变量但新栈不读；ptp-status 的 1234 为示例 offset",
          old_c_disposition="RETAIN_AOIP"),
     dict(id="OV-RETAIN-ASOUND",
          globs=["audio/overlay/etc/asound.conf"],
@@ -137,7 +137,7 @@ RULES = [
          reason="仅注释提及 camilladsp.env；pcm.inferno 由 AoIP 使用，与 C 无运行依赖",
          old_c_disposition="RETAIN_AOIP"),
     dict(id="OV-KEEP",
-         globs=["audio/overlay/etc/default/tspi-audio",
+         globs=["audio/overlay/etc/default/khaen-audio",
                 "audio/overlay/etc/modprobe.d/*",
                 "audio/overlay/etc/udev/rules.d/*",
                 "audio/overlay/etc/statime/*",
@@ -147,8 +147,8 @@ RULES = [
                 "audio/overlay/usr/share/alsa/ucm2/*/*/*",
                 "audio/overlay/usr/share/alsa/ucm2/*/*/*/*",
                 "audio/overlay/usr/share/alsa/ucm2/*/*/*/*/*",
-                "audio/overlay/etc/tspi-audio/*",
-                "audio/overlay/etc/tspi-audio/*/*",
+                "audio/overlay/etc/khaen-audio/*",
+                "audio/overlay/etc/khaen-audio/*/*",
                 "audio/overlay/usr/local/bin/README.md"],
          category="historical_only", role="保留数据/环境/注释（KEEP_DATA）",
          reason="T71/T72 保留；仅注释、示例数字（aes67 syslog:1234）或旧栈变量残留，无运行依赖",
@@ -157,12 +157,12 @@ RULES = [
     dict(id="WEB-SRC",
          globs=["web/src/*", "web/src/*/*", "web/src/*/*/*", "web/tests/*", "web/tests/*/*"],
          category="to_delete", role="旧 Web shim 源码/测试（REPLACE_SHIM）",
-         reason="后端是 CamillaDSP WS(1234) 并 systemctl 管理 tspi-camilladsp；由新 daemon Web 替代",
+         reason="后端是 CamillaDSP WS(1234) 并 systemctl 管理 khaen-camilladsp；由新 daemon Web 替代",
          old_c_disposition="REPLACE_SHIM"),
     dict(id="WEB-DEPLOY",
          globs=["web/deploy/khaen-audio-web.service", "web/deploy/config.toml.example"],
          category="to_delete", role="旧 Web unit/配置模板（REPLACE_SHIM）",
-         reason="[camilladsp] ws_url=ws://127.0.0.1:1234、service=tspi-camilladsp.service；不得再部署",
+         reason="[camilladsp] ws_url=ws://127.0.0.1:1234、service=khaen-camilladsp.service；不得再部署",
          old_c_disposition="REPLACE_SHIM"),
     dict(id="WEB-UI",
          globs=["web/assets/*", "web/dist/*"],
@@ -194,13 +194,13 @@ RULES = [
          reason="仅注释/纪律行提及 CamillaDSP（禁止使用）；无运行引用",
          old_c_disposition=""),
     dict(id="DEP-CONF-KEEPER",
-         globs=["rt-stack/deploy/config/tspi-motu-48k-keeper.service"],
+         globs=["rt-stack/deploy/config/khaen-motu-48k-keeper.service"],
          category="to_delete", role="新栈 keeper unit 内 Before= 旧 unit 名残留（非激活依赖）",
          reason="Before= 仅排序、无 Wants/Requires 不拉起 C；但按 G-no-C '其它 unit 不再依赖 C' 应清理为 Before=khaen-rt-host.service",
          old_c_disposition=""),
     dict(id="DEP-KEEPER-DATA",
-         globs=["rt-stack/deploy/config/tspi-motu-48k-keeper.timer",
-                "rt-stack/deploy/config/95-tspi-motu-48k-keeper.rules",
+         globs=["rt-stack/deploy/config/khaen-motu-48k-keeper.timer",
+                "rt-stack/deploy/config/95-khaen-motu-48k-keeper.rules",
                 "rt-stack/deploy/config/motu-48k-keeper",
                 "rt-stack/deploy/config/switch-window.example.json"],
          category="historical_only", role="新栈 keeper/窗口配套（无 C 引用）",
@@ -230,7 +230,7 @@ RULES = [
     dict(id="SVC-UNIT",
          globs=["rt-stack/service/*.service", "rt-stack/service/*.target"],
          category="historical_only", role="新栈 systemd unit（仅负向防误启守卫）",
-         reason="Camilla 仅出现于 ConditionPathExists=!/run/tspi/camilladsp.yml（防双 owner 守卫）；无 Wants/Requires/Exec 引用",
+         reason="Camilla 仅出现于 ConditionPathExists=!/run/khaen/camilladsp.yml（防双 owner 守卫）；无 Wants/Requires/Exec 引用",
          old_c_disposition=""),
     dict(id="SVC-README",
          globs=["rt-stack/service/README.md"],
@@ -240,7 +240,7 @@ RULES = [
     dict(id="SVC-DROPIN",
          globs=["rt-stack/service/*.d/*", "rt-stack/service/*.d/*/*"],
          category="historical_only", role="新栈 unit drop-in/env 模板（仅纪律注释）",
-         reason="如 90-safe-mute.env.example：仅注释提及 G-no-C 禁止 C 回退；EnvironmentFile 变量为 TSPI_HOST_SAFE_MODE=mute",
+         reason="如 90-safe-mute.env.example：仅注释提及 G-no-C 禁止 C 回退；EnvironmentFile 变量为 KHAEN_HOST_SAFE_MODE=mute",
          old_c_disposition=""),
     dict(id="DEP-NOTES",
          globs=["rt-stack/deploy/*.md"],
@@ -264,7 +264,7 @@ RULES = [
     dict(id="SUP-IMAGE",
          globs=["audio/install-into-image.sh", "firmware/oem/install-oem.sh"],
          category="to_delete", role="镜像构建链仍安装/启用旧 C 与旧 Web（域外，G-no-C 耐久性风险）",
-         reason="install-into-image 复制 camilladsp 二进制并 enable tspi-camilladsp/tspi-audio.target；install-oem 安装旧 web 并 enable、sed 映射 tspi-camilladsp.service —— 重新刷机/OTA 会把已退役入口放回，需 T31/T32 或镜像更新时清理",
+         reason="install-into-image 复制 camilladsp 二进制并 enable khaen-camilladsp/khaen-audio.target；install-oem 安装旧 web 并 enable、sed 映射 khaen-camilladsp.service —— 重新刷机/OTA 会把已退役入口放回，需 T31/T32 或镜像更新时清理",
          old_c_disposition="REPLACE_SHIM"),
 ]
 
@@ -276,9 +276,9 @@ PAYLOAD_GLOBS = [
     "rt-stack/deploy/config/rt-host.env.example",
     "rt-stack/deploy/config/rt-daemon.toml.example",
     "rt-stack/deploy/config/rt-daemon.env.example",
-    "rt-stack/deploy/config/tspi-motu-48k-keeper.service",
-    "rt-stack/deploy/config/tspi-motu-48k-keeper.timer",
-    "rt-stack/deploy/config/95-tspi-motu-48k-keeper.rules",
+    "rt-stack/deploy/config/khaen-motu-48k-keeper.service",
+    "rt-stack/deploy/config/khaen-motu-48k-keeper.timer",
+    "rt-stack/deploy/config/95-khaen-motu-48k-keeper.rules",
 ]
 POSITIVE_KEYS = {"Wants", "Requires", "Requisite", "BindsTo", "PartOf", "ExecStart",
                  "ExecStartPre", "ExecStartPost", "ExecStop", "EnvironmentFile",
@@ -473,10 +473,10 @@ def render_md(doc):
         lines.append("%-8s %s" % (cat, ", ".join(roots)))
     lines.append(TICK*3)
     lines.append("")
-    lines.append("- 匹配模式：%scamilla[-_ ]?dsp%s、%s\\bcamilla\\b%s、旧 unit 名（tspi-camilladsp / tspi-upmix-autodetect / "
-                 "khaen-audio-web / tspi-audio.target / tspi-boot-mode）、旧 DSP 工具（tspi-upmix / tspi-mode / "
-                 "tspi-channelmap）、C 路径（/etc/camilladsp、/run/tspi/camilladsp.*、/usr/local/bin/camilladsp）、"
-                 "C WS（ws://...:1234、TSPI_CAMILLADSP_PORT）、%s\\bsox\\b%s、C socket/pipe 行、1234/18080 端口"
+    lines.append("- 匹配模式：%scamilla[-_ ]?dsp%s、%s\\bcamilla\\b%s、旧 unit 名（khaen-camilladsp / khaen-upmix-autodetect / "
+                 "khaen-audio-web / khaen-audio.target / khaen-boot-mode）、旧 DSP 工具（khaen-upmix / khaen-mode / "
+                 "khaen-channelmap）、C 路径（/etc/camilladsp、/run/khaen/camilladsp.*、/usr/local/bin/camilladsp）、"
+                 "C WS（ws://...:1234、KHAEN_CAMILLADSP_PORT）、%s\\bsox\\b%s、C socket/pipe 行、1234/18080 端口"
                  "（带上下文判定，排除 offset_ns:1234、255.255.255.254:1234 等误报）。"
                  % (TICK, TICK, TICK, TICK, TICK, TICK))
     lines.append("- 输入指纹：%sinputs_sha256=%s%s（逐命中文件 sha256 聚合）" % (TICK, doc["inputs_sha256"], TICK))
@@ -562,9 +562,9 @@ def render_md(doc):
     lines.append("- %s18080%s 在本仓库五域内**零真实引用**（仅 2 处为数值巧合的浮点小数）；板端检查脚本仍把它列为"
                  "禁用端口，默认期望无监听。" % (TICK, TICK))
     lines.append("- %ssox%s 在五域内零引用；板端检查脚本仍按旧 DSP 进程模式检查（防历史残留）。" % (TICK, TICK))
-    lines.append("- %sweb/%s 整体为旧 Web shim（CamillaDSP WS 客户端 + systemctl 控制 C），由新 %stspi-rt-daemon%s Web 替代；"
+    lines.append("- %sweb/%s 整体为旧 Web shim（CamillaDSP WS 客户端 + systemctl 控制 C），由新 %skhaen-rt-daemon%s Web 替代；"
                  "其文档保留为历史，源码/产物/部署脚本按待删处理。" % (TICK, TICK, TICK, TICK))
-    lines.append("- overlay 中保留 AoIP/PTP unit 仍 %sAfter=/PartOf=tspi-audio.target%s（该 target disabled；仅排序引用，"
+    lines.append("- overlay 中保留 AoIP/PTP unit 仍 %sAfter=/PartOf=khaen-audio.target%s（该 target disabled；仅排序引用，"
                  "不激活 C）；T71 后建议将 %sAfter=%s 指向新 target 或去掉。" % (TICK, TICK, TICK, TICK))
     lines.append("")
     lines.append("## 8. 复现命令")
@@ -640,7 +640,7 @@ def main(argv=None):
            "--out-dir rt-stack/evidence/no-c-proof/scan")
     pa = payload_audit(project_root, set(seen))
     doc = {
-        "schema": "tspi-rt-stack/no-c-proof-scan/v1",
+        "schema": "khaen-rt-stack/no-c-proof-scan/v1",
         "task": "T72",
         "generated_at": now_iso(),
         "project_root": project_root,

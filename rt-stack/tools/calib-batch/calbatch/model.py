@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环：离线合成房间/应用模型（fake transport 专用）。
+"""KHAEN 校准批量闭环：离线合成房间/应用模型（fake transport 专用）。
 
 诚实性边界（写进证据，别混用）：
 - 本模型只用于**离线自测**：证明批量编排、采集布局、反卷积、瀑布/RT/前后对比/问题定位
@@ -203,7 +203,7 @@ def _band_factor(damp: dict, freq: float) -> float:
 
 
 def _peq_fit_reference(plan: dict, fs: int, irs_by_point: dict) -> dict:
-    """用 design 点平均 FR 拟合每通道 PEQ（demo 算法；真实算法以 tspi-peq-fit T64 为准）。"""
+    """用 design 点平均 FR 拟合每通道 PEQ（demo 算法；真实算法以 khaen-peq-fit T64 为准）。"""
     peq = {}
     band_lo = float(plan.get("analysis", {}).get("peq_fit_band_hz", [60.0, 8000.0])[0])
     band_hi = float(plan.get("analysis", {}).get("peq_fit_band_hz", [60.0, 8000.0])[1])
@@ -287,7 +287,7 @@ def derive_compensation(plan: dict, scenario: str, baseline_irs: dict, fs: int) 
             # 反号需要重建系数
             peq[name] = [dsp.peaking_biquad(bq["freq_hz"], -bq["gain_db"], bq["q"], fs) for bq in peq[name]]
     state = {
-        "schema": "tspi-cal-batch-fake-applied/v1",
+        "schema": "khaen-cal-batch-fake-applied/v1",
         "scenario": scenario,
         "fitted_from_design_points": design_ids,
         "holdout_points_used": [],

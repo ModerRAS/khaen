@@ -75,7 +75,7 @@ let fetched = khaen_aoip_aes67::http_sdp::http_get_sdp(
 )?;
 
 // 3) mDNS/DNS-SD：通告（真实组播用 MdnsEndpoint::default_v4()；单测可改单播）
-let host = DnsName::from_str("tspi-aes67-1.local.")?;
+let host = DnsName::from_str("khaen-aes67-1.local.")?;
 let node = ravenna_node_service(
     "My-Corp devicex 1234-5678", RavennaNodeService::Rtsp, host.clone(), 8854,
     Ipv4Addr::new(192, 168, 63, 222),
@@ -120,7 +120,7 @@ mDNS 名字压缩/指针环防护、已知报文向量字段、RAVENNA 记录构
 - **NOT_RUN（P1）**：真实组播网络（224.0.0.251:5353 跨主机/跨交换机）、与第三方 RAVENNA
   控制器/设备（Lawo/Merging/DirectOut 等）或 ffprobe/ffmpeg 的 RTSP+DNS-SD 互通、
   5353 与系统 mDNS 守护共存（Windows 多进程监听、Android 系统占用）、ANNOUNCE 推送、
-  板端（TSPI/N150）长稳/资源。离线上限止于本机 loopback（RTSP/HTTP TCP、mDNS 单播注入）。
+  板端（KHAEN/N150）长稳/资源。离线上限止于本机 loopback（RTSP/HTTP TCP、mDNS 单播注入）。
 - **NOT_WIRED**：RTSP SETUP 不分配 RTP/RTCP 端口（控制面；组播回显 SDP 的
   destination/port/ttl，单播回显 client_port + SDP 发送端口）；mDNS 多网卡严格出接口
   （IP_MULTICAST_IF）未接（std UdpSocket 无跨平台 API）。

@@ -46,7 +46,7 @@
 use std::fmt;
 use std::fmt::Write as _;
 
-use khaen_core::abi::{TspiBlockDescV1, ABI_VERSION};
+use khaen_core::abi::{KhaenBlockDescV1, ABI_VERSION};
 use khaen_core::rt::{
     BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, SAMPLE_RATES_HZ,
 };
@@ -58,7 +58,7 @@ use crate::job::{CancelToken, StageFailure};
 // ---------------------------------------------------------------------------
 
 /// 扫频 session/timeline schema（本文件产物；T48/T49 消费的 stimulus/diag 子集）。
-pub const SWEEP_SCHEMA: &str = "tspi-sweep-timeline/v1";
+pub const SWEEP_SCHEMA: &str = "khaen-sweep-timeline/v1";
 
 /// T1 电学环回固定驱动电平（ACCEPTANCE §0.4.1，不得再用 −30 dBFS）。
 pub const T1_LOOPBACK_LEVEL_DBFS: f64 = -12.0;
@@ -1201,7 +1201,7 @@ fn is_speaker_name(name: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SweepBlockInfo {
     /// core-v1 §11.3 block 描述。
-    pub desc: TspiBlockDescV1,
+    pub desc: KhaenBlockDescV1,
     /// 段序号（SweepTimeline.segments 下标）。
     pub segment_index: u32,
     /// 段类型。
@@ -1519,7 +1519,7 @@ impl SweepPlayer {
         })?;
         planar.fill(0.0);
         let mut info = SweepBlockInfo {
-            desc: TspiBlockDescV1::ZERO,
+            desc: KhaenBlockDescV1::ZERO,
             segment_index: location.segment.index,
             segment_kind: location.segment.kind,
             output_index: location.segment.output_index,
@@ -1580,13 +1580,13 @@ impl SweepPlayer {
         })
     }
 
-    fn build_desc(&self, block_seq: u64, valid_frames: u32, flags: u32) -> TspiBlockDescV1 {
+    fn build_desc(&self, block_seq: u64, valid_frames: u32, flags: u32) -> KhaenBlockDescV1 {
         let frame_index = block_seq * self.timeline.block_frames as u64;
         let publish = self
             .timeline
             .epoch_start_mono_ns
             .saturating_add(frames_to_ns(frame_index, self.timeline.sample_rate));
-        TspiBlockDescV1 {
+        KhaenBlockDescV1 {
             abi_version: ABI_VERSION,
             block_size: self.timeline.block_frames,
             n_in: self.timeline.n_in,
@@ -2521,7 +2521,7 @@ mod tests {
         assert_eq!(timeline, again);
         let json = timeline.to_json();
         assert_eq!(json, again.to_json());
-        assert!(json.contains("\"schema\":\"tspi-sweep-timeline/v1\""));
+        assert!(json.contains("\"schema\":\"khaen-sweep-timeline/v1\""));
         assert!(json.contains("\"kind\":\"log_sweep\""));
         assert!(json.contains("\"drive_level_dbfs\":-12"));
         assert!(json.contains("\"k_main_trim_db\":0"));

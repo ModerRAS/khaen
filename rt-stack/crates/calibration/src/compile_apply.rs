@@ -5,7 +5,7 @@
 //!
 //! 1. **P/G 每 path FIR 编译**：把 T54 每 path G 修正系数（f32 WAV + manifest，不含 delta_D
 //!    baseline）与 T64 目标 FIR（P_post 基线形状）/ T65 整数 delay+polarity 编译成
-//!    TspiPlanHeaderV1/TspiPathV1/TspiDiagFirV1/TspiRoleV1 + 系数 blob 的可准入 plan 字节；
+//!    KhaenPlanHeaderV1/KhaenPathV1/KhaenDiagFirV1/KhaenRoleV1 + 系数 blob 的可准入 plan 字节；
 //!    factorized（G path + P diag）与 fused（F_ji = p_j * G_ji，zero-pad 线性卷积）两种形态
 //!    都由 T12 khaen_core::compile 生成，本模块按 T12 成本报告（或显式 force）选择并打包，
 //!    禁止静默截尾。plan 字节布局与 T20 rt-host::swap::parse_plan_arena 完全对齐
@@ -28,7 +28,7 @@
 //!    last-good 或 SafetyMute 由宿主保留。plan 由 T20 PlanRegistry::admit_with 登记并分配版本。
 //! 5. **version apply ack（§5.3）**：stage → arm（写 pending + ARMED）→ [RT] master block 边界
 //!    commit（T20 commit_swap_at_block_boundary）→ complete_swap（RG-1）→ 新版本 all-ack block
-//!    （TspiSwapAckV1::note_block_all_ack，RG-2）。**只有** retire_ready=1 且 ack_mask 达到
+//!    （KhaenSwapAckV1::note_block_all_ack，RG-2）。**只有** retire_ready=1 且 ack_mask 达到
 //!    ACK_MASK(expected) 才允许把 actual_version 视为 applied（T24/T42/T70 消费本条）；未 ack
 //!    的 commit 不构成 applied。
 //! 6. **拒坏图**：打包后自校验（magic/abi/header/表排序/系数区间/taps/role 范围/CRC-32C/graph_id
@@ -63,14 +63,14 @@
 //! - GAP-T66-1：core::plan::pack_plan/validate_plan/recompute_graph_id 仍是 T06 scaffold
 //!   （ERR_UNSUPPORTED）；本 leaf 按 core-v1 §11.10 自建打包/校验（布局与 T20 parse 对齐），
 //!   待 integrator/T26 统一后本模块改为调用 core::plan。
-//! - GAP-T66-2：ABI v1.0 的 TspiPathV1/TspiDiagFirV1 无 delay_q16 字段（§11.10 v1.1 才有，
+//! - GAP-T66-2：ABI v1.0 的 KhaenPathV1/KhaenDiagFirV1 无 delay_q16 字段（§11.10 v1.1 才有，
 //!   现为 reserved1 必须为 0）；本模块要求输入 delay_q16==0，非零 = E_CA_DELAY_Q16_ABI 拒收
 //!   （T65 op 是整数 sample，不丢精度；T12 分数 D 需先折入系数）。
 //! - GAP-T66-3：plan ABI v1.0 无 role IIR/节点系数区（core-v1 §15.2 Q-06 未决，归 T23/T41）；
 //!   本模块 peq_count>0 一律拒收（E_CA_PEQ_ABI），禁止静默丢弃 PEQ；**残差 FIR 不能单独代表 P
 //!   （H_eff≠Hraw·P）**，IIR/节点区落地前可部署部分只能由 T64 目标 FIR 承载（F-37）；入口
 //!   compile_plan 与自校验 CompiledPlan::verify 使用同一 peq_count>0 拒收规则（F-38）。
-//! - GAP-T66-4：TspiRoleV1.gain_q15 只能表示 ≤1.0 线性增益（0 dB 最大）；正 trim 需增益节点
+//! - GAP-T66-4：KhaenRoleV1.gain_q15 只能表示 ≤1.0 线性增益（0 dB 最大）；正 trim 需增益节点
 //!   （T23）或折入 P FIR；本模块拒绝 role gain_db > 0（E_CA_GAIN_RANGE）。
 //! - GAP-T66-5：graph_id 规范化在 §11.10 规则 4（header 含 plan_version）与注 5（plan_version
 //!   不参与）之间字面冲突；本模块按「不含 plan_version」实现并在 verify 中固定该口径。
@@ -99,10 +99,10 @@ use std::sync::atomic::Ordering;
 
 use khaen_compat::ws::{json_parse, JsonValue};
 use khaen_core::abi::{
-    plan_abi_supported, TspiBlockAckV1, TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1,
-    TspiPlanIirHeaderV2, TspiRoleIirV2, TspiRoleV1, PLAN_IIR_ENTRY_BYTES,
-    PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1,
-    TSPI_PLAN_ABI_V2, TSPI_PLAN_IIR_MAGIC, TSPI_PLAN_IIR_VERSION, TSPI_PLAN_MAGIC,
+    plan_abi_supported, KhaenBlockAckV1, KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1,
+    KhaenPlanIirHeaderV2, KhaenRoleIirV2, KhaenRoleV1, KHAEN_PLAN_ABI_V1, KHAEN_PLAN_ABI_V2,
+    KHAEN_PLAN_IIR_MAGIC, KHAEN_PLAN_IIR_VERSION, KHAEN_PLAN_MAGIC, PLAN_IIR_ENTRY_BYTES,
+    PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS,
 };
 use khaen_core::compile::{
     compile, CompileInput, CompileOptions, CompiledPlans, FusionForm, SelectionReason,
@@ -120,7 +120,7 @@ use khaen_core::rt::{
     MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, RT_WORKERS, SAMPLE_RATES_HZ, TAPS_EXTENDED_MAX,
     TAPS_NORMAL_MAX,
 };
-use khaen_core::workers::{ack_mask, TspiRtControlV1};
+use khaen_core::workers::{ack_mask, KhaenRtControlV1};
 use khaen_designer::modal_peq::{freq_upper_hz, log_frequency_grid};
 use khaen_designer::phase::{design_integer, IntegerDelaySpec, Polarity as PhasePolarity};
 use khaen_modal_design::artifact::{
@@ -130,7 +130,7 @@ use khaen_modal_design::artifact::{
 use khaen_rt_host::admission::{
     plan_memory, validate as admission_validate, AdmissionEnv, MemoryBackend,
 };
-use khaen_rt_host::swap::{commit_swap_at_block_boundary, PlanRegistry, TspiSwapAckV1};
+use khaen_rt_host::swap::{commit_swap_at_block_boundary, KhaenSwapAckV1, PlanRegistry};
 
 use crate::job::{sha256_hex, ArtifactKind, ArtifactRecord, StageCtx, StageFailure};
 use crate::peq_fit::{FIT_FREQ_MIN_HZ, REFERENCE_FREQ_HZ, REPORT_GRID_OCTAVE};
@@ -142,13 +142,13 @@ use crate::phase_fit::{PhaseChannelOp, PhaseFitChecks};
 // ---------------------------------------------------------------------------
 
 /// 编译报告 schema。
-pub const COMPILE_APPLY_SCHEMA: &str = "tspi-cal-compile-apply/v1";
+pub const COMPILE_APPLY_SCHEMA: &str = "khaen-cal-compile-apply/v1";
 /// apply ack 报告 schema。
-pub const APPLY_ACK_SCHEMA: &str = "tspi-cal-apply-ack/v1";
+pub const APPLY_ACK_SCHEMA: &str = "khaen-cal-apply-ack/v1";
 /// T3 应用后复测证据 schema（本模块只校验，不产生实测）。
-pub const T3_RETEST_SCHEMA: &str = "tspi-cal-t3-retest/v1";
+pub const T3_RETEST_SCHEMA: &str = "khaen-cal-t3-retest/v1";
 /// 工具名。
-pub const COMPILE_APPLY_TOOL_NAME: &str = "tspi-cal-compile-apply";
+pub const COMPILE_APPLY_TOOL_NAME: &str = "khaen-cal-compile-apply";
 /// 工具版本。
 pub const COMPILE_APPLY_TOOL_VERSION: &str = "t66-1";
 /// 编译报告 artifact 相对路径（job artifacts_dir 下）。
@@ -158,20 +158,20 @@ pub const PLAN_ARTIFACT_PATH: &str = "compile/plan.bin";
 /// apply ack artifact 相对路径。
 pub const APPLY_ACK_ARTIFACT_PATH: &str = "apply/apply-ack.json";
 /// 编译报告 canonical hash 域。
-pub const COMPILE_REPORT_HASH_DOMAIN: &str = "tspi-cal-compile-apply-canonical-v1";
+pub const COMPILE_REPORT_HASH_DOMAIN: &str = "khaen-cal-compile-apply-canonical-v1";
 /// plan graph_id 规范化域（core-v1 §11.2 GRAPH_HASH_DOMAIN 字符串 + 0x00）。
-pub const GRAPH_HASH_DOMAIN: &[u8] = b"tspi-plan/v1\0";
+pub const GRAPH_HASH_DOMAIN: &[u8] = b"khaen-plan/v1\0";
 /// 编译期 plan_version（未准入；由 T20 registry 分配）。
 pub const PLAN_VERSION_UNASSIGNED: u32 = 0;
 
 /// T54 artifact schema（G 系数产物）。
-pub const ARTIFACT_SCHEMA: &str = "tspi-modal-artifact/v1";
+pub const ARTIFACT_SCHEMA: &str = "khaen-modal-artifact/v1";
 /// T65 phase fit schema。
-pub const PHASE_FIT_SCHEMA: &str = "tspi-phase-fit/v1";
+pub const PHASE_FIT_SCHEMA: &str = "khaen-phase-fit/v1";
 /// crossover 接线证据 schema（T39 设计 + 合并平坦 + 每 role 卷积后 P 行预测）。
-pub const CROSSOVER_EVIDENCE_SCHEMA: &str = "tspi-cal-crossover-evidence/v1";
+pub const CROSSOVER_EVIDENCE_SCHEMA: &str = "khaen-cal-crossover-evidence/v1";
 /// T64 peq fit schema（D7 headroom 证据来源）。
-pub const PEQ_FIT_SCHEMA: &str = "tspi-peq-fit/v1";
+pub const PEQ_FIT_SCHEMA: &str = "khaen-peq-fit/v1";
 /// T65 FIR 执行残余容差（ACCEPTANCE §5 T3 残余延迟 ≤0.5 sample）。
 pub const PHASE_EXECUTION_TOLERANCE_SAMPLES: f64 = 0.5;
 /// 契约延迟上限（CONTRACT §3.1：floor(0.2·fs) ms 对应 200 ms）。
@@ -1023,7 +1023,7 @@ impl MappingBinding {
     /// mapping canonical 文本（确定性；进编译报告 hash）。
     pub fn canonical(&self) -> String {
         let mut text = String::new();
-        text.push_str("tspi-cal-mapping/v1\n");
+        text.push_str("khaen-cal-mapping/v1\n");
         let _ = writeln!(text, "layout_id={}", self.layout_id);
         let _ = writeln!(text, "overlay_source_sha256={}", self.overlay_source_sha256);
         let _ = writeln!(text, "binding_hash={}", self.binding_hash);
@@ -1102,7 +1102,7 @@ pub struct PhaseChannelEvidence {
 /// T65 phase fit 证据（计划/方向/残余/参考通道 + 逐 channel ops）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhaseEvidence {
-    /// 报告 schema（必须 = tspi-phase-fit/v1）。
+    /// 报告 schema（必须 = khaen-phase-fit/v1）。
     pub schema: String,
     /// phase ops canonical SHA-256（角色->整数 delay/polarity）。
     pub ops_sha256: String,
@@ -1335,7 +1335,7 @@ impl PhaseEvidence {
     /// phase canonical 文本（确定性）。
     pub fn canonical(&self) -> String {
         let mut text = String::new();
-        text.push_str("tspi-cal-phase-evidence/v1\n");
+        text.push_str("khaen-cal-phase-evidence/v1\n");
         let _ = writeln!(text, "schema={}", self.schema);
         let _ = writeln!(text, "ops_sha256={}", self.ops_sha256);
         let _ = writeln!(text, "design_report_sha256={}", self.design_report_sha256);
@@ -1437,7 +1437,7 @@ impl RoleBoostRecord {
 /// [`verify_d7_from_encoded_p_rows`]）。禁止只交申报数字与 64-hex hash。
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeadroomEvidence {
-    /// T64 report schema（必须 = tspi-peq-fit/v1）。
+    /// T64 report schema（必须 = khaen-peq-fit/v1）。
     pub schema: String,
     /// T64 fit report SHA-256。
     pub report_sha256: String,
@@ -1627,7 +1627,7 @@ impl HeadroomEvidence {
     /// headroom canonical 文本（确定性）。
     pub fn canonical(&self) -> String {
         let mut text = String::new();
-        text.push_str("tspi-cal-headroom-evidence/v1\n");
+        text.push_str("khaen-cal-headroom-evidence/v1\n");
         let _ = writeln!(text, "schema={}", self.schema);
         let _ = writeln!(text, "report_sha256={}", self.report_sha256);
         match self.measured_peak_dbfs {
@@ -1859,7 +1859,7 @@ impl CrossoverEvidence {
     /// 证据 canonical 文本（确定性；报告 hash 绑定）。
     pub fn canonical(&self) -> String {
         let mut text = String::new();
-        text.push_str("tspi-cal-crossover-evidence/v1\n");
+        text.push_str("khaen-cal-crossover-evidence/v1\n");
         let _ = writeln!(text, "schema={}", self.schema);
         let _ = writeln!(
             text,
@@ -2139,7 +2139,7 @@ struct T64Band {
     a: [f64; 3],
 }
 
-/// T64 fit report 里与 D7 重算相关的逐通道子集（只读消费 `tspi-peq-fit/v1`）。
+/// T64 fit report 里与 D7 重算相关的逐通道子集（只读消费 `khaen-peq-fit/v1`）。
 #[derive(Clone, Debug)]
 struct T64ChannelHeadroom {
     name: String,
@@ -2268,7 +2268,7 @@ fn report_f64_array3(value: &JsonValue, field: &str, path: &str) -> CaResult<[f6
     Ok(out)
 }
 
-/// 解析 T64 fit report 字节（`tspi-peq-fit/v1`；F-35：sha256 已绑定后的原始字节）。
+/// 解析 T64 fit report 字节（`khaen-peq-fit/v1`；F-35：sha256 已绑定后的原始字节）。
 fn parse_t64_fit_report(bytes: &[u8]) -> CaResult<T64FitReportView> {
     let text = std::str::from_utf8(bytes).map_err(|error| {
         ca_err(
@@ -2523,8 +2523,10 @@ fn verify_d7_from_encoded_p_rows(
             let section_peak_limit_db = D7_SINGLE_BOOST_CAP_DB + PEQ_SECTION_PEAK_TOL_DB;
             let section_grid =
                 log_frequency_grid(FIT_FREQ_MIN_HZ, freq_upper_hz(fs), REPORT_GRID_OCTAVE);
-            for (index, (section, band)) in
-                planned_sections.iter().zip(channel.bands.iter()).enumerate()
+            for (index, (section, band)) in planned_sections
+                .iter()
+                .zip(channel.bands.iter())
+                .enumerate()
             {
                 let encoded = peq_section_coeffs_f32(section);
                 let expected = [band.b[0], band.b[1], band.b[2], band.a[1], band.a[2]];
@@ -2657,7 +2659,8 @@ fn verify_d7_from_encoded_p_rows(
             for freq in &combined_grid {
                 let mut value = fir_magnitude_db_at(&encoded, fs, *freq);
                 for section in planned_sections {
-                    value += encoded_section_response_db(&peq_section_coeffs_f32(section), fs, *freq);
+                    value +=
+                        encoded_section_response_db(&peq_section_coeffs_f32(section), fs, *freq);
                 }
                 absolute_peak = absolute_peak.max(value);
                 response.push(value);
@@ -2788,7 +2791,7 @@ pub struct GPathInput {
     pub out_dense: u16,
     /// 输入 dense（G 列）。
     pub in_dense: u16,
-    /// A_map 选中的源通道（TspiPathV1.in_index）；COMPILE_NO_SOURCE = 该列零填。
+    /// A_map 选中的源通道（KhaenPathV1.in_index）；COMPILE_NO_SOURCE = 该列零填。
     pub in_source: u16,
     /// g cell 系数（f64；**不含** delta_D baseline；长度 = L_G）。
     pub coeffs: Vec<f64>,
@@ -2993,7 +2996,7 @@ impl GPathInput {
     /// f32 系数 canonical sha256（GAP：T54 f64 canonical 口径不同，这里只做报告绑定）。
     pub fn coeffs_f32_sha256(&self) -> CaResult<String> {
         let mut canonical = String::with_capacity(self.coeffs.len() * 26 + 64);
-        canonical.push_str("tspi-plan-path-coeffs/v1\n");
+        canonical.push_str("khaen-plan-path-coeffs/v1\n");
         for value in self.coeffs_f32()? {
             let _ = writeln!(canonical, "{value:e}");
         }
@@ -3299,7 +3302,7 @@ impl RoleCompileInput {
 /// T54 artifact 绑定（hash 链 + 状态 + stale 判定输入）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArtifactBinding {
-    /// artifact schema（必须 = tspi-modal-artifact/v1）。
+    /// artifact schema（必须 = khaen-modal-artifact/v1）。
     pub artifact_schema: String,
     /// artifact 内容 hash（canonical sha256）。
     pub artifact_hash: String,
@@ -3486,7 +3489,7 @@ impl ArtifactBinding {
     /// canonical 文本（确定性）。
     pub fn canonical(&self) -> String {
         let mut text = String::new();
-        text.push_str("tspi-cal-artifact-binding/v1\n");
+        text.push_str("khaen-cal-artifact-binding/v1\n");
         let _ = writeln!(text, "schema={}", self.artifact_schema);
         let _ = writeln!(text, "status={}", self.status);
         let _ = writeln!(text, "artifact_hash={}", self.artifact_hash);
@@ -3581,7 +3584,7 @@ pub const EXPERIMENT_SCOPE_MULTIPOINT_PILOT: &str = "MULTIPOINT_PILOT_NOT_CERTIF
 /// 实验 envelope artifact 相对路径。
 pub const EXPERIMENT_ENVELOPE_ARTIFACT_PATH: &str = "compile/experiment-envelope.json";
 /// 实验 envelope schema。
-pub const EXPERIMENT_SCHEMA: &str = "tspi-cal-experiment/v1";
+pub const EXPERIMENT_SCHEMA: &str = "khaen-cal-experiment/v1";
 /// 实验模式组合非法。
 pub const E_CA_EXPERIMENT: &str = "E_CA_EXPERIMENT";
 
@@ -4859,7 +4862,7 @@ impl CompileReport {
         // plan ABI v2 IIR 摘要：仅在有 T64 PEQ 段时出现（无 PEQ 的 JSON 字节与历史一致）。
         if let Some(iir) = self.iir.as_ref() {
             text.push_str("  \"iir\": {\n");
-            let _ = writeln!(text, "    \"schema\": \"tspi-plan-iir/v2\",");
+            let _ = writeln!(text, "    \"schema\": \"khaen-plan-iir/v2\",");
             let _ = writeln!(text, "    \"abi_version\": {},", iir.abi_version);
             let _ = writeln!(text, "    \"role_count\": {},", iir.role_count);
             let _ = writeln!(text, "    \"section_count\": {},", iir.section_count);
@@ -4956,17 +4959,17 @@ impl CompileReport {
 #[derive(Clone, Debug)]
 pub struct CompiledPlan {
     /// plan 头（plan_version=0，等 T20 registry 分配）。
-    pub header: TspiPlanHeaderV1,
+    pub header: KhaenPlanHeaderV1,
     /// 规范化 graph_id（SHA-256）。
     pub graph_id: [u8; 32],
     /// 完整 plan 字节（T20 parse 可直接吃）。
     pub plan_bytes: Vec<u8>,
     /// path 表（按 (out_index,in_index) 升序）。
-    pub paths: Vec<TspiPathV1>,
+    pub paths: Vec<KhaenPathV1>,
     /// diag 表（按 out_index 升序；fused 形态为空）。
-    pub diags: Vec<TspiDiagFirV1>,
+    pub diags: Vec<KhaenDiagFirV1>,
     /// role 表（按 role_id 升序）。
-    pub roles: Vec<TspiRoleV1>,
+    pub roles: Vec<KhaenRoleV1>,
     /// 系数区（含 64B 对齐零填充；总字节 = header.total_coeff_bytes）。
     pub coeffs: Vec<u8>,
     /// ctl_meta（role 名区；graph_id 哈希输入）。
@@ -4974,7 +4977,7 @@ pub struct CompiledPlan {
     /// 系数 blob（按表顺序拼接，不含 64B padding；graph_id 哈希输入）。
     pub coeff_blobs: Vec<Vec<u8>>,
     /// plan ABI v2 per-role IIR 表项（按 role_id 升序；空 = v1 plan）。
-    pub iir_entries: Vec<TspiRoleIirV2>,
+    pub iir_entries: Vec<KhaenRoleIirV2>,
     /// plan ABI v2 IIR 表字节（16 B 表头 + 表项；空 = 无 IIR）。
     pub iir_table: Vec<u8>,
     /// IIR 系数 blob（按表项顺序；graph_id / 表 CRC 输入）。
@@ -5679,16 +5682,16 @@ struct RawDiag {
 
 /// 打包结果（表 + 系数区 + 报告记录 + plan ABI v2 IIR 表）。
 struct PackedTables {
-    paths: Vec<TspiPathV1>,
-    diags: Vec<TspiDiagFirV1>,
-    roles: Vec<TspiRoleV1>,
+    paths: Vec<KhaenPathV1>,
+    diags: Vec<KhaenDiagFirV1>,
+    roles: Vec<KhaenRoleV1>,
     coeff_region: Vec<u8>,
     coeff_blobs: Vec<Vec<u8>>,
     path_records: Vec<CompiledPathRecord>,
     role_records: Vec<CompiledRoleRecord>,
     max_taps: u32,
     /// plan ABI v2 IIR 表项（按 role_id 升序；空 = v1 plan，字节与历史一致）。
-    iir_entries: Vec<TspiRoleIirV2>,
+    iir_entries: Vec<KhaenRoleIirV2>,
     /// 每 IIR 表项的 f32 系数 blob（与 iir_entries 同序；graph_id/表 CRC 输入）。
     iir_blobs: Vec<Vec<u8>>,
     /// 序列化后的 IIR 表（16 B 表头 + 表项；空 = 无 IIR）。
@@ -5710,7 +5713,7 @@ pub(crate) fn build_ctl_meta(roles: &[RoleCompileInput]) -> Vec<u8> {
 
 fn path_coeff_sha256(coeffs: &[f32]) -> String {
     let mut canonical = String::with_capacity(coeffs.len() * 18 + 32);
-    canonical.push_str("tspi-plan-path-coeffs/v1\n");
+    canonical.push_str("khaen-plan-path-coeffs/v1\n");
     for value in coeffs {
         let _ = writeln!(canonical, "{value:e}");
     }
@@ -5923,14 +5926,14 @@ fn pack_tables(
     }
 
     // role 表（按 role_id 严格升序；接口要求）。
-    let mut roles: Vec<TspiRoleV1> = Vec::with_capacity(req.roles.len());
+    let mut roles: Vec<KhaenRoleV1> = Vec::with_capacity(req.roles.len());
     for role in req.roles {
         let flags = if role.source_channel.is_some() {
             ROLE_FLAG_ENABLED
         } else {
             ROLE_FLAG_ENABLED | ROLE_FLAG_ZERO_FILL
         };
-        roles.push(TspiRoleV1 {
+        roles.push(KhaenRoleV1 {
             role_id: role.role_index,
             out_index: role.out_channel,
             flags,
@@ -5996,9 +5999,7 @@ fn pack_tables(
         if input.peq_sections.is_empty() {
             continue;
         }
-        let mut bytes = Vec::with_capacity(
-            input.peq_sections.len() * PLAN_IIR_SECTION_COEFFS * 4,
-        );
+        let mut bytes = Vec::with_capacity(input.peq_sections.len() * PLAN_IIR_SECTION_COEFFS * 4);
         for section in &input.peq_sections {
             for value in peq_section_coeffs_f32(section) {
                 bytes.extend_from_slice(&value.to_le_bytes());
@@ -6026,7 +6027,7 @@ fn pack_tables(
     let mut path_records = Vec::with_capacity(raw_paths.len());
     for (index, path) in raw_paths.iter().enumerate() {
         let coeff_offset = offsets[index];
-        paths.push(TspiPathV1 {
+        paths.push(KhaenPathV1 {
             in_index: path.in_index,
             out_index: path.out_index,
             taps: path.taps,
@@ -6072,7 +6073,7 @@ fn pack_tables(
     let mut diags = Vec::with_capacity(raw_diags.len());
     for (index, diag) in raw_diags.iter().enumerate() {
         let coeff_offset = offsets[raw_paths.len() + index];
-        diags.push(TspiDiagFirV1 {
+        diags.push(KhaenDiagFirV1 {
             out_index: diag.out_index,
             flags: diag.flags,
             taps: diag.taps,
@@ -6097,10 +6098,10 @@ fn pack_tables(
         .unwrap_or(1);
     // plan ABI v2 IIR 表项：系数偏移相对系数区起点（64 B 对齐；append 在 path/diag blob 之后）。
     let iir_base = raw_paths.len() + raw_diags.len();
-    let mut iir_entries: Vec<TspiRoleIirV2> = Vec::with_capacity(iir_role_sections.len());
+    let mut iir_entries: Vec<KhaenRoleIirV2> = Vec::with_capacity(iir_role_sections.len());
     for (index, (role_id, section_count)) in iir_role_sections.iter().enumerate() {
         let coeff_offset = offsets[iir_base + index];
-        iir_entries.push(TspiRoleIirV2 {
+        iir_entries.push(KhaenRoleIirV2 {
             role_id: *role_id,
             order: 2,
             section_count: *section_count,
@@ -6173,7 +6174,7 @@ fn hex_nibble(byte: u8) -> CaResult<u8> {
 }
 
 /// plan header 序列化（128 B；与 tests/T20/swap_models.rs 的 header_bytes 逐字节一致）。
-pub(crate) fn header_bytes(header: &TspiPlanHeaderV1) -> [u8; PLAN_HEADER_BYTES] {
+pub(crate) fn header_bytes(header: &KhaenPlanHeaderV1) -> [u8; PLAN_HEADER_BYTES] {
     let mut out: Vec<u8> = Vec::with_capacity(PLAN_HEADER_BYTES);
     out.extend_from_slice(&header.magic.to_le_bytes());
     out.extend_from_slice(&header.abi_version.to_le_bytes());
@@ -6214,7 +6215,7 @@ pub(crate) fn header_bytes(header: &TspiPlanHeaderV1) -> [u8; PLAN_HEADER_BYTES]
     bytes
 }
 
-pub(crate) fn path_table_bytes(paths: &[TspiPathV1]) -> Vec<u8> {
+pub(crate) fn path_table_bytes(paths: &[KhaenPathV1]) -> Vec<u8> {
     let mut out = Vec::with_capacity(paths.len() * PATH_ENTRY_BYTES);
     for path in paths {
         out.extend_from_slice(&path.in_index.to_le_bytes());
@@ -6231,7 +6232,7 @@ pub(crate) fn path_table_bytes(paths: &[TspiPathV1]) -> Vec<u8> {
     out
 }
 
-pub(crate) fn diag_table_bytes(diags: &[TspiDiagFirV1]) -> Vec<u8> {
+pub(crate) fn diag_table_bytes(diags: &[KhaenDiagFirV1]) -> Vec<u8> {
     let mut out = Vec::with_capacity(diags.len() * DIAG_ENTRY_BYTES);
     for diag in diags {
         out.extend_from_slice(&diag.out_index.to_le_bytes());
@@ -6246,7 +6247,7 @@ pub(crate) fn diag_table_bytes(diags: &[TspiDiagFirV1]) -> Vec<u8> {
     out
 }
 
-pub(crate) fn role_table_bytes(roles: &[TspiRoleV1]) -> Vec<u8> {
+pub(crate) fn role_table_bytes(roles: &[KhaenRoleV1]) -> Vec<u8> {
     let mut out = Vec::with_capacity(roles.len() * ROLE_ENTRY_BYTES);
     for role in roles {
         out.extend_from_slice(&role.role_id.to_le_bytes());
@@ -6286,7 +6287,7 @@ pub(crate) fn peq_section_coeffs_f32(section: &PeqBiquad) -> [f32; PLAN_IIR_SECT
 }
 
 /// plan ABI v2 IIR 表头序列化（16 B；table_crc32c 由 [`iir_table_bytes`] 回填）。
-fn iir_header_bytes(header: &TspiPlanIirHeaderV2) -> [u8; PLAN_IIR_HEADER_BYTES] {
+fn iir_header_bytes(header: &KhaenPlanIirHeaderV2) -> [u8; PLAN_IIR_HEADER_BYTES] {
     let mut out = [0u8; PLAN_IIR_HEADER_BYTES];
     out[0..4].copy_from_slice(&header.magic.to_le_bytes());
     out[4..6].copy_from_slice(&header.version.to_le_bytes());
@@ -6298,7 +6299,7 @@ fn iir_header_bytes(header: &TspiPlanIirHeaderV2) -> [u8; PLAN_IIR_HEADER_BYTES]
 }
 
 /// plan ABI v2 每 role IIR 表项序列化（32 B）。
-pub(crate) fn iir_entry_bytes(entry: &TspiRoleIirV2) -> [u8; PLAN_IIR_ENTRY_BYTES] {
+pub(crate) fn iir_entry_bytes(entry: &KhaenRoleIirV2) -> [u8; PLAN_IIR_ENTRY_BYTES] {
     let mut out = [0u8; PLAN_IIR_ENTRY_BYTES];
     out[0..2].copy_from_slice(&entry.role_id.to_le_bytes());
     out[2..4].copy_from_slice(&entry.order.to_le_bytes());
@@ -6317,7 +6318,7 @@ pub(crate) fn iir_entry_bytes(entry: &TspiRoleIirV2) -> [u8; PLAN_IIR_ENTRY_BYTE
 /// 表布局位于 ctl_meta 之后、系数区之前；[table_crc32c] 覆盖表头（本字段置 0）+ 表项 +
 /// 按 entry 顺序的系数 blob 原始字节（GAP-T66-3；防系数被替换而 graph_id 校验缺失的洞）。
 pub(crate) fn iir_table_bytes(
-    entries: &[TspiRoleIirV2],
+    entries: &[KhaenRoleIirV2],
     iir_blobs: &[Vec<u8>],
 ) -> CaResult<Vec<u8>> {
     if entries.len() != iir_blobs.len() {
@@ -6327,9 +6328,9 @@ pub(crate) fn iir_table_bytes(
             "IIR 表项数与系数 blob 数不一致（内部错误）",
         ));
     }
-    let header = TspiPlanIirHeaderV2 {
-        magic: TSPI_PLAN_IIR_MAGIC,
-        version: TSPI_PLAN_IIR_VERSION,
+    let header = KhaenPlanIirHeaderV2 {
+        magic: KHAEN_PLAN_IIR_MAGIC,
+        version: KHAEN_PLAN_IIR_VERSION,
         entry_bytes: PLAN_IIR_ENTRY_BYTES as u16,
         entry_count: entries.len() as u16,
         reserved0: 0,
@@ -6358,7 +6359,11 @@ fn parse_encoded_peq_sections(
     len: u32,
 ) -> CaResult<Vec<[f32; PLAN_IIR_SECTION_COEFFS]>> {
     if offset % COEFF_ALIGN_BYTES as u64 != 0 {
-        return Err(ca_err(code, "iir.coeff_offset_bytes", "IIR 系数偏移未 64B 对齐"));
+        return Err(ca_err(
+            code,
+            "iir.coeff_offset_bytes",
+            "IIR 系数偏移未 64B 对齐",
+        ));
     }
     let start = offset as usize;
     let end = start
@@ -6381,7 +6386,8 @@ fn parse_encoded_peq_sections(
         let mut section = [0.0f32; PLAN_IIR_SECTION_COEFFS];
         for (index, value) in section.iter_mut().enumerate() {
             let at = base + index * 4;
-            *value = f32::from_le_bytes([coeffs[at], coeffs[at + 1], coeffs[at + 2], coeffs[at + 3]]);
+            *value =
+                f32::from_le_bytes([coeffs[at], coeffs[at + 1], coeffs[at + 2], coeffs[at + 3]]);
             if !value.is_finite() {
                 return Err(ca_err(code, "iir.coeff", "IIR 系数含 NaN/Inf"));
             }
@@ -6423,10 +6429,10 @@ fn encoded_section_response_db(
 /// （core-v1 §11.10 规则 4/注 5；v2 additive 段见 GAP-T66-3）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_graph_id(
-    header: &TspiPlanHeaderV1,
-    paths: &[TspiPathV1],
-    diags: &[TspiDiagFirV1],
-    roles: &[TspiRoleV1],
+    header: &KhaenPlanHeaderV1,
+    paths: &[KhaenPathV1],
+    diags: &[KhaenDiagFirV1],
+    roles: &[KhaenRoleV1],
     affinity: &[u8],
     ctl_meta: &[u8],
     coeff_blobs: &[Vec<u8>],
@@ -6486,7 +6492,7 @@ fn pack_plan_header(
     req: &CompileApplyRequest<'_>,
     packed: &PackedTables,
     m: usize,
-) -> CaResult<(TspiPlanHeaderV1, [u8; 32])> {
+) -> CaResult<(KhaenPlanHeaderV1, [u8; 32])> {
     let path_table_offset = PLAN_HEADER_BYTES as u32;
     let diag_table_offset = path_table_offset
         .checked_add((packed.paths.len() * PATH_ENTRY_BYTES) as u32)
@@ -6506,9 +6512,9 @@ fn pack_plan_header(
         align8_checked(ctl_meta_offset as usize + ctl_meta.len())? as u32
     };
     let abi_version = if packed.iir_entries.is_empty() {
-        TSPI_PLAN_ABI_V1
+        KHAEN_PLAN_ABI_V1
     } else {
-        TSPI_PLAN_ABI_V2
+        KHAEN_PLAN_ABI_V2
     };
     let total_coeff_bytes = packed.coeff_region.len() as u32;
     let mut flags = 0u8;
@@ -6518,8 +6524,8 @@ fn pack_plan_header(
     if packed.max_taps > TAPS_NORMAL_MAX {
         flags |= PLAN_FLAG_EXTENDED_TAPS_ADMITTED;
     }
-    let header = TspiPlanHeaderV1 {
-        magic: TSPI_PLAN_MAGIC,
+    let header = KhaenPlanHeaderV1 {
+        magic: KHAEN_PLAN_MAGIC,
         abi_version,
         header_size: PLAN_HEADER_BYTES as u16,
         plan_version: PLAN_VERSION_UNASSIGNED,
@@ -6573,7 +6579,7 @@ fn pack_plan_header(
 fn pack_plan_bytes(
     req: &CompileApplyRequest<'_>,
     packed: &PackedTables,
-    header: &mut TspiPlanHeaderV1,
+    header: &mut KhaenPlanHeaderV1,
     graph_id: &[u8; 32],
 ) -> CaResult<Vec<u8>> {
     let ctl_meta = build_ctl_meta(req.roles);
@@ -6605,11 +6611,11 @@ impl CompiledPlan {
     /// 任一项不成立 = 拒绝（E_CA_PLAN_VERIFY），不进入 prepare。
     pub fn verify(&self) -> CaResult<()> {
         let header = &self.header;
-        if header.magic != TSPI_PLAN_MAGIC {
+        if header.magic != KHAEN_PLAN_MAGIC {
             return Err(ca_err(
                 E_CA_PLAN_VERIFY,
                 "header.magic",
-                format!("magic={:#010x} 不是 TSPI_PLAN_MAGIC", header.magic),
+                format!("magic={:#010x} 不是 KHAEN_PLAN_MAGIC", header.magic),
             ));
         }
         if !plan_abi_supported(header.abi_version) {
@@ -6623,14 +6629,14 @@ impl CompiledPlan {
             ));
         }
         // abi_version 与 IIR 表存在性一致：有 IIR 表必须 v2；v1 必须无 reserved3/无 IIR。
-        if !self.iir_entries.is_empty() && header.abi_version != TSPI_PLAN_ABI_V2 {
+        if !self.iir_entries.is_empty() && header.abi_version != KHAEN_PLAN_ABI_V2 {
             return Err(ca_err(
                 E_CA_PLAN_VERIFY,
                 "header.abi_version",
                 "plan 含 IIR 表项但 abi_version != 2",
             ));
         }
-        if header.abi_version == TSPI_PLAN_ABI_V1 && header.reserved3 != [0u32; 3] {
+        if header.abi_version == KHAEN_PLAN_ABI_V1 && header.reserved3 != [0u32; 3] {
             return Err(ca_err(
                 E_CA_PLAN_VERIFY,
                 "header.reserved3",
@@ -6771,13 +6777,7 @@ impl CompiledPlan {
             }
         } else {
             let expected_iir_off = align8_checked(tables_end)?;
-            if header.reserved3
-                != [
-                    expected_iir_off as u32,
-                    self.iir_entries.len() as u32,
-                    0,
-                ]
-            {
+            if header.reserved3 != [expected_iir_off as u32, self.iir_entries.len() as u32, 0] {
                 return Err(ca_err(
                     E_CA_PLAN_VERIFY,
                     "header.reserved3",
@@ -7127,8 +7127,7 @@ impl CompiledPlan {
                         "order 必须 2（biquad）且 flags/reserved 必须 0",
                     ));
                 }
-                if entry.section_count == 0
-                    || entry.section_count as usize > PLAN_IIR_MAX_SECTIONS
+                if entry.section_count == 0 || entry.section_count as usize > PLAN_IIR_MAX_SECTIONS
                 {
                     return Err(ca_err(
                         E_CA_PLAN_VERIFY,
@@ -7136,8 +7135,7 @@ impl CompiledPlan {
                         "IIR 段数必须在 1..=32",
                     ));
                 }
-                let expected_len =
-                    entry.section_count as u64 * 4 * PLAN_IIR_SECTION_COEFFS as u64;
+                let expected_len = entry.section_count as u64 * 4 * PLAN_IIR_SECTION_COEFFS as u64;
                 if entry.coeff_len_bytes as u64 != expected_len {
                     return Err(ca_err(
                         E_CA_PLAN_VERIFY,
@@ -7146,8 +7144,7 @@ impl CompiledPlan {
                     ));
                 }
                 if entry.coeff_offset_bytes % COEFF_ALIGN_BYTES as u64 != 0
-                    || entry.coeff_offset_bytes + entry.coeff_len_bytes as u64
-                        > total_coeff as u64
+                    || entry.coeff_offset_bytes + entry.coeff_len_bytes as u64 > total_coeff as u64
                 {
                     return Err(ca_err(
                         E_CA_PLAN_VERIFY,
@@ -7272,7 +7269,7 @@ fn build_compile_report(
     plans: &CompiledPlans,
     chosen: FusionForm,
     packed: &PackedTables,
-    header: &TspiPlanHeaderV1,
+    header: &KhaenPlanHeaderV1,
     graph_id: &[u8; 32],
     plan_bytes: &[u8],
 ) -> CaResult<CompileReport> {
@@ -7534,7 +7531,7 @@ pub struct CommitReceipt {
 /// T3 应用后复测证据（ACCEPTANCE §5 / K4；measured only，禁止 predicted 冒充）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct T3RetestEvidence {
-    /// schema（必须 = tspi-cal-t3-retest/v1）。
+    /// schema（必须 = khaen-cal-t3-retest/v1）。
     pub schema: String,
     /// 复测 run id。
     pub run_id: String,
@@ -7807,8 +7804,8 @@ pub struct ApplySession {
     epoch_id: u64,
     block_seq: u64,
     registry: PlanRegistry,
-    ctl: TspiRtControlV1,
-    swap_ack: TspiSwapAckV1,
+    ctl: KhaenRtControlV1,
+    swap_ack: KhaenSwapAckV1,
     prepared: Option<PreparedState>,
     pending: Option<PendingCommit>,
     effective: Option<AppliedPlan>,
@@ -7831,8 +7828,8 @@ impl ApplySession {
             epoch_id: 1,
             block_seq: 0,
             registry: PlanRegistry::new(),
-            ctl: TspiRtControlV1::new(),
-            swap_ack: TspiSwapAckV1::new(),
+            ctl: KhaenRtControlV1::new(),
+            swap_ack: KhaenSwapAckV1::new(),
             prepared: None,
             pending: None,
             effective: None,
@@ -8078,7 +8075,7 @@ impl ApplySession {
     }
 
     /// master 侧喂入一个新版本 block ack（T09/T20 语义）：all-ack 且 retire_ready 才 applied。
-    pub fn note_block_ack(&mut self, block: &TspiBlockAckV1) -> CaResult<Option<ApplyAck>> {
+    pub fn note_block_ack(&mut self, block: &KhaenBlockAckV1) -> CaResult<Option<ApplyAck>> {
         if self.state != APPLY_STATE_AWAITING_ACK {
             return Err(ca_err(
                 E_CA_STATE,
@@ -8165,8 +8162,8 @@ impl ApplySession {
         &self,
         plan_version: PlanVersion,
         expected_workers: u8,
-    ) -> TspiBlockAckV1 {
-        let block = TspiBlockAckV1::new(
+    ) -> KhaenBlockAckV1 {
+        let block = KhaenBlockAckV1::new(
             self.block_seq,
             self.epoch_id,
             plan_version,
@@ -8294,8 +8291,8 @@ impl ApplySession {
                 );
                 self.registry.shutdown();
                 self.registry = PlanRegistry::new();
-                self.ctl = TspiRtControlV1::new();
-                self.swap_ack = TspiSwapAckV1::new();
+                self.ctl = KhaenRtControlV1::new();
+                self.swap_ack = KhaenSwapAckV1::new();
                 self.epoch_id = self.epoch_id.wrapping_add(1);
                 self.block_seq = 0;
                 self.prepared = None;

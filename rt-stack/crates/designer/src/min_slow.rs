@@ -5,7 +5,7 @@
 //! - 同文件 §1.2/§1.3/§1.4/§1.5/§1.6、§2.2/§2.4、§3.8（家族互斥）与 §9 V17（可复现参考构造）；
 //! - 同文件 §3.2 判据 2/3（min_* 共用的最小相位 M2 与延迟报告口径）；
 //! - rt-stack/evidence/T04/recompute-vectors.mjs V17 与 vector-results.json（可复现参考值）；
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T34 行与 §1/§7（写域/证据纪律）。
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T34 行与 §1/§7（写域/证据纪律）。
 //!
 //! 与 min_fast（T33）的家族区别（spec §3.3 判据 6 / §3.8）：
 //! 1. min_slow **没有独立阻带边 f_s**：幅度在 [20, f_p] 内为 1，从 f_p 到 fs/2 用升余弦平滑
@@ -35,7 +35,7 @@ pub const FAMILY: &str = "min_slow";
 /// 家族中文名（spec §1.7）。
 pub const FAMILY_CN: &str = "最小相位慢滚降";
 /// 系数产物 schema（本 leaf 不落盘，仅报告该常量供 T55 使用；spec §2.2）。
-pub const FIR_SCHEMA: &str = "tspi-fir/v1";
+pub const FIR_SCHEMA: &str = "khaen-fir/v1";
 
 /// 契约默认采样率（spec §2.2：manifest fs 只允许 48000/96000）。
 pub const DEFAULT_FS: f64 = 48_000.0;

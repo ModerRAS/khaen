@@ -389,5 +389,5 @@ fn meas_fix_snr_gate_report_freezes_estimator_and_gate_value() {
     assert!(json.contains("\"gate_min_snr_db\":15"));
     assert!(json.contains("\"mode\":\"robust-broadband\""));
     assert!(json.contains("\"onset_source\":\"detected\""));
-    assert!(json.contains("\"schema\":\"tspi-robust-snr/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-robust-snr/v1\""));
 }

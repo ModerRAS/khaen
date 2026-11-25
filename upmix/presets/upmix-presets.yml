@@ -1,19 +1,19 @@
-# tspi-upmix 预设 v1 —— 2.0 立体声上混参数（用户当前/常用布局：4.1.2、5.3.2）
+# khaen-upmix 预设 v1 —— 2.0 立体声上混参数（用户当前/常用布局：4.1.2、5.3.2）
 #
 # 用法：
-#   tspi-upmix list                        列出预设
-#   tspi-upmix show upmix-4.1.2-music      查看解析后的每角色矩阵/滤波/延迟
-#   tspi-upmix profile <id> -o profiles/upmix-xxx.yml
-#   tspi-upmix camilla <id> -o camilladsp/upmix-xxx.yml
-#   tspi-upmix all -o dist/
+#   khaen-upmix list                        列出预设
+#   khaen-upmix show upmix-4.1.2-music      查看解析后的每角色矩阵/滤波/延迟
+#   khaen-upmix profile <id> -o profiles/upmix-xxx.yml
+#   khaen-upmix camilla <id> -o camilladsp/upmix-xxx.yml
+#   khaen-upmix all -o dist/
 #
 # 参数含义见 docs/ALGORITHM.md。所有增益单位 dB、延迟 ms、频率 Hz。
 # 天空声道策略（用户裁决 2026-11-16）：HFL/HFR 按普通全频声道处理，不做高通/低通、
 #   不做人工去相关延迟（height.delay_ms=0、mode=broadband）。需要带限时必须在预设里显式写
 #   mode: bandlimited + highpass/lowpass，默认不启用。
-# 约束（与 tspi-channelmap v2 校验一致）：source/role gain ∈ [-60,12]；delay ∈ [0,200]ms；
+# 约束（与 khaen-channelmap v2 校验一致）：source/role gain ∈ [-60,12]；delay ∈ [0,200]ms；
 #   LinkwitzRiley 分频 order ∈ {2,4,6,8}，freq ∈ [20, 24000)。
-schema: tspi-upmix/v1
+schema: khaen-upmix/v1
 version: 1
 
 defaults:
@@ -23,7 +23,7 @@ defaults:
   adjust_period: 10
   # layout-presets 是布局唯一真相；未找到时 all/install 拒绝生成（check 断言失败），
   # 仅 --allow-builtin 可临时放行（内置表仅作对照/兜底，不作为交付依据）。
-  layout_presets: /etc/tspi-audio/layout-presets.yml
+  layout_presets: /etc/khaen-audio/layout-presets.yml
 
 presets:
   # ===== 4.1.2（地面 4 + 1 低音 + 2 高度；无中置） =====

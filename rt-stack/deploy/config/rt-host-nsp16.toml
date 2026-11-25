@@ -1,4 +1,4 @@
-# 2026-11-23 从 dsp-host 只读抄下的 /etc/tspi-rt-stack/rt-host-nsp16.toml。
+# 2026-11-23 从 dsp-host 只读抄下的 /etc/khaen-rt-stack/rt-host-nsp16.toml。
 # 16 声道播放仍用这份。通用模板 rt-host.toml.example 没有这些播放项。
 # 服务名下次安装用 khaen-rt-host；这份配置文件名先保持 nsp16，避免把正在播的链换成通用立体声模板。
 # khaen-rt-host 16ch AES67 (NSP 16ch = 2x8 flow, H16 container 8+8) -> plan-arena -> MOTU
@@ -36,8 +36,8 @@ url = "http://127.0.0.1:8090"
 config = ""
 
 [paths]
-last_good = "/var/lib/tspi-rt-stack/last-good-nsp16.json"
-plan = "/var/lib/tspi-rt-stack/plans/plan-h16-16in-identity.bin"
+last_good = "/var/lib/khaen-rt-stack/last-good-nsp16.json"
+plan = "/var/lib/khaen-rt-stack/plans/plan-h16-16in-identity.bin"
 
 [run]
 max_blocks = 0
@@ -47,7 +47,7 @@ duration_ms = 0
 source = "aes67"
 mode = "aes67"
 aes67_transport = "userspace"
-aes67_sdp = "/var/lib/tspi-rt-stack/nsp16-aes67.sdp"
+aes67_sdp = "/var/lib/khaen-rt-stack/nsp16-aes67.sdp"
 aes67_iface = "192.0.2.222"
 # task-320（可选；保持注释 = 旧行为）：
 # - 多网卡/多接口（组播每个接口一条显式 join；单播只允许 1 个接口）：

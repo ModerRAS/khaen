@@ -1,5 +1,5 @@
 param(
-  [string]$Out = 'C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack\evidence\aes67-tx-win',
+  [string]$Out = 'C:\WorkSpace\Claw\projects\khaen-audio-dsp\rt-stack\evidence\aes67-tx-win',
   [string]$McastIface = '192.168.56.1'
 )
 $ErrorActionPreference = 'Stop'
@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 [Environment]::SetEnvironmentVariable('no_proxy',$null,'Process')
 [Environment]::SetEnvironmentVariable('http_proxy',$null,'Process')
 [Environment]::SetEnvironmentVariable('https_proxy',$null,'Process')
-$Crate = 'C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack\tools\aes67-sender'
+$Crate = 'C:\WorkSpace\Claw\projects\khaen-audio-dsp\rt-stack\tools\aes67-sender'
 Set-Location $Crate
 $env:CARGO_NET_OFFLINE='true'
 $Run = Join-Path $Out 'runs'

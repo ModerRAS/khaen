@@ -16,7 +16,7 @@
 
 ## UMIK-1（miniDSP，serial 718-7696）
 
-- 校准文件（本目录 calibration-spec/mics/；来自板端 /var/lib/tspi-calib/umik/，2026-11-15 下载，2026-11-17 归档）：
+- 校准文件（本目录 calibration-spec/mics/；来自板端 /var/lib/khaen-calib/umik/，2026-11-15 下载，2026-11-17 归档）：
   - umik1_718-7696_90deg.txt，10,215 B，sha256 49482D8773AC5809B07D4A00B027058876AE6F6E3BB821532C483B2CD5588130（板端 7187696_90deg.txt 同 sha）
   - umik1_718-7696_0deg.txt，9,990 B，sha256 2C154823C88560309395983E011E5F4119D09328F5D22141F9CA4B5E07B1805B（板端 7187696_0deg.txt 同 sha）
 - 格式：首行 Sens Factor=…dB / SERNO: 7187696 + Auto-generated 90-degree/0-degree calibration file；随后为 Hz<TAB>dB 两列。

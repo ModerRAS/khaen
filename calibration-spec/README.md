@@ -1,6 +1,6 @@
 # 校准规范（设计侧）—— khaen-calibration/v1 / v1.1
 
-> 维护：upmix-dev（设计/契约/验收）；实现：audio-stack（projects/tspi-audio-dsp/calibrate/，Rust）。
+> 维护：upmix-dev（设计/契约/验收）；实现：audio-stack（projects/khaen-audio-dsp/calibrate/，Rust）。
 > Lead 要求：本 task 只出**规范和 review**，不改 calibrate/ 代码。
 > 版本：v1（2026-11-15 初稿）+ v1.1（2026-11-16 Rust 已实现；v1 文件继续按 v1 规则校验，差异见 CONTRACT.md §10）。
 
@@ -27,7 +27,7 @@ khaen-calibrate validate calibration.yml
 
 # 独立复核（Python）
 python3 tools/validate_calibration.py calibration.yml \
-  --layout-presets /etc/tspi-audio/layout-presets.yml
+  --layout-presets /etc/khaen-audio/layout-presets.yml
 ```
 
 退出码：0 合法（可带 warning）、1 不合法、2 用法/依赖/读取错误；`--strict` 把 warning 视为失败，
@@ -42,7 +42,7 @@ v1.1 的 q 按 type 分流（裁决 5）：peaking 为有限数且 ≥0.1（窄�
 退出码同样是 0 / 1 / 2。`--dry-run` 只打印差异。
 
 ```bash
-# 模式 1：channelmap v2（板端 T3/T4 先走这条；输出可直接 tspi-channelmap apply）
+# 模式 1：channelmap v2（板端 T3/T4 先走这条；输出可直接 khaen-channelmap apply）
 python3 tools/apply_calibration.py \
   --channelmap ../upmix/examples/profiles/upmix-4.1.2-movie.yml \
   --calibration examples/calibration-v11-highshelf.example.yml \
@@ -55,7 +55,7 @@ python3 tools/apply_calibration.py \
   --out /tmp/camilladsp.cal.yml
 ```
 
-模式 1 默认跑 `tspi-channelmap validate`。模式 2 默认跑 `camilladsp --check`；
+模式 1 默认跑 `khaen-channelmap validate`。模式 2 默认跑 `camilladsp --check`；
 可执行文件不在 PATH 时 WARN 并仍返回 0。片段里的 `schema`/`note`/`channelmap_roles` 不会写进完整配置。
 
 离线示例（peaking）在 `../calibrate/examples/offline/calibration.yml`（及同名 `.camilladsp.yml`）。

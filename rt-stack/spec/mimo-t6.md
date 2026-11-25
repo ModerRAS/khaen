@@ -1,9 +1,9 @@
 # MIMO-T6 校准实际验收规格 — 低频 MIMO 应用后实测 / 独立 holdout / 两轮复现
 
-> 2026-11-16 · rt-acceptance（WBS **T73** / team task-29） · 文档 schema **tspi-mimo-t6/v1** · 报告 schema **tspi-mimo-t6-report/v1**
+> 2026-11-16 · rt-acceptance（WBS **T73** / team task-29） · 文档 schema **khaen-mimo-t6/v1** · 报告 schema **khaen-mimo-t6-report/v1**
 > **命名（2026-11-17 修 I01）**：本文件定义 **MIMO-T6（记 T6-M）**，是 B2 `calibration-spec/ACCEPTANCE.md` §5.2 的普通校准 holdout 验证（记 **T6-cal**）之上的 **MIMO 专项实测门**。两者**都须独立 PASS**（T31 签收需双证据）；T6-M 不替代、不合并、不 supersede T6-cal；报告必须用 `t6_kind` 与 `t6_cal` 字段区分。
 > 状态：**SPEC-ONLY（v1.2，2026-11-17 按 Cursor v0.9 终审 F-19 修：I_use ≥3.0 dB 与 T20 下降 ≥15% 改为预声明工程观察项，不参与 PASS/FAIL）**。本文件只冻结验收规格：未实现校验器、未测量、未上板、未应用校准、未跑 holdout、未 git commit。门阈值是**工程起始值**（WBS §5 / DEC §2.8 授权的默认值），不是已实测结果或物理保证；其中 I/T20 改善只是**工程观察目标**（§8.2.1），不决定验收 PASS/FAIL。评审/终审修复记录见 `evidence/T73/REVIEW-FIXES.md`。
-> 写域：projects/tspi-audio-dsp/rt-stack/spec/mimo-t6.md + rt-stack/evidence/T73/。不改 calibration-spec/**（旧 CONTRACT/ACCEPTANCE 只读参考），不改 rt-stack 其它文件。
+> 写域：projects/khaen-audio-dsp/rt-stack/spec/mimo-t6.md + rt-stack/evidence/T73/。不改 calibration-spec/**（旧 CONTRACT/ACCEPTANCE 只读参考），不改 rt-stack 其它文件。
 > 正确性声明：本规范**独立于旧 calibration-spec 契约**：不复用其字段名、报告 schema、T0–T5 判定结构或阈值表；旧契约只作为 T0–T4/T1partial 的**证据口径参考**（见 §1.2）。任何冲突按 §0.3 权威链裁决。
 
 ---
@@ -36,7 +36,7 @@ T6-M 是 P1 门 G-cal/G-real 中"MIMO 实测"部分的可判规格（WBS §5、�
 
 1. 用户最新明确要求（含 2026-11-17 对 Cursor v0.9 终审 F-19 的裁决：**I_use ≥3.0 dB 与 T20 下降 ≥15% 只是工程观察，不得决定验收 PASS/FAIL**；落地见 §8.2.1）；
 2. `scratch/lead/planner/DSP-HOST-DECISION.md`（下称 DEC）；
-3. `scratch/lead/planner/TSPI-RT-STACK-WBS.md`（下称 WBS）；
+3. `scratch/lead/planner/KHAEN-RT-STACK-WBS.md`（下称 WBS）；
 4. **本文件**（T6 专用验收字段/阈值/失败规则）；
 5. 旧 `calibration-spec/CONTRACT.md`、`ACCEPTANCE.md`（只读参考；其 T0–T5 证据口径按 §1.2 引用）。
 
@@ -47,7 +47,7 @@ T6-M 是 P1 门 G-cal/G-real 中"MIMO 实测"部分的可判规格（WBS §5、�
 | 项 | 处理 |
 |---|---|
 | `calibration-spec/CONTRACT.md`、`ACCEPTANCE.md` | **T73 未写入**（写域只有本文件 + `evidence/T73/`）。只读引用其 T0–T4/T1partial 证据口径（§1.2）。T73 读取时 hash 在 `evidence/T73/READONLY-BEFORE.sha256`；**执行期间并发 B2 任务（task-33 spec-checker）修订了这两个文件**，T73 不依赖其当前内容，before/after 与归属记录见 `evidence/T73/CONCURRENT-CHANGES.md`。 |
-| 旧 `khaen-calibration-report/v1` schema | **不复用**。T6 使用独立 `tspi-mimo-t6-report/v1`（§9），字段与语义由本文件定义。 |
+| 旧 `khaen-calibration-report/v1` schema | **不复用**。T6 使用独立 `khaen-mimo-t6-report/v1`（§9），字段与语义由本文件定义。 |
 | 旧 T5（64/128 帧 0 xrun） | **T6-M 测量窗口内必须 0 xrun/deadline miss/clip**，否则该窗口无效；正式 64/128 长窗口/1h soak 属 P2，不作 T6-M 门。 |
 | 旧 T1 partial | 引用其报告字段与"partial 不等于 PASS"精神（`ACCEPTANCE.md` §3.1）；T6 另有声学输出身份门，partial 不豁免（§1.3）。 |
 | 旧 T3（应用后逐通道复测） | 每轮 T6-M 必须附 T3-equivalent 复测证据；旧阈值只作参考，T6-M 声学 I/T20 为**预声明工程观察项（不参与 PASS/FAIL，§8.2.1）**。 |
@@ -116,7 +116,7 @@ T6 的判定对象是**证据完整性、holdout 隔离与保护/guard 门**，�
 
 ## 2. 冻结测量条件（FC-01..FC-16）
 
-以下条件必须在第一轮任何测量开始前写入 `tspi-mimo-t6-frozen/v1` 冻结清单（§2.1），hash 后冻结（`frozen_id`）。两轮共用同一冻结清单；任何一项变化 → 该轮测量无效（重测）或 T6 INCOMPLETE。
+以下条件必须在第一轮任何测量开始前写入 `khaen-mimo-t6-frozen/v1` 冻结清单（§2.1），hash 后冻结（`frozen_id`）。两轮共用同一冻结清单；任何一项变化 → 该轮测量无效（重测）或 T6 INCOMPLETE。
 
 | ID | 冻结项 | 冻结/可判要求 | 违反判定 |
 |---|---|---|---|
@@ -137,13 +137,13 @@ T6 的判定对象是**证据完整性、holdout 隔离与保护/guard 门**，�
 | FC-15 | 测量窗口有效性 | 每个测量文件（字段见 §2.1 `measurement_validity`）：无 xrun/deadline miss/失锁/丢块；ADC 峰值 ≤ -1 dBFS；**SNR 双门**：B2 全带 200 Hz–8 kHz ≥25 dB（带限用自身通带）+ T6-M 低带 63–250 Hz ≥25 dB；**off/design 重复 ≥3 次**（与 B2 T2 对齐），on 重复 ≥2 次；否则该文件无效并重测 | 有 xrun/削波/SNR 不足/重复不足未重测 → I-06/I-07 |
 | FC-16 | 禁止事后改动 | 冻结后禁止改 target/D0/positions/quality mask/analysis script/checker/thresholds；任何改动必须新建冻结版本并重测全部轮次（旧数据不得复用） | 事后改参数 → FAIL-07 |
 
-### 2.1 冻结条件清单 schema（tspi-mimo-t6-frozen/v1）
+### 2.1 冻结条件清单 schema（khaen-mimo-t6-frozen/v1）
 
 必填字段（机器可判，缺失 → I-02）：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| schema | string | 必须 = `tspi-mimo-t6-frozen/v1` |
+| schema | string | 必须 = `khaen-mimo-t6-frozen/v1` |
 | frozen_id | string | 唯一冻结 id（进入所有测量文件与报告） |
 | created_utc / frozen_at_utc | string(ISO8601) | 生成/冻结时刻；冻结时刻必须早于 holdout 首采 |
 | scope | object | layout/participants/dense_to_dac/fs_hz/block/chunksize |
@@ -586,11 +586,11 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 
 ## 9. 报告与证据格式
 
-### 9.1 机器可读 schema（tspi-mimo-t6-report/v1）必填字段
+### 9.1 机器可读 schema（khaen-mimo-t6-report/v1）必填字段
 
 | 字段 | 类型 | 必填 | 约束/说明 |
 |---|---|---|---|
-| schema | string | 是 | 必须 = `tspi-mimo-t6-report/v1` |
+| schema | string | 是 | 必须 = `khaen-mimo-t6-report/v1` |
 | report_id | string | 是 | 唯一；示例报告必须含 `example:true` |
 | example | bool | 否 | true 表示示例，禁止作为验收报告 |
 | spec | object | 是 | path/version/sha256（本规范） |
@@ -630,10 +630,10 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 
 ~~~json t6-report
 {
-  "schema": "tspi-mimo-t6-report/v1",
+  "schema": "khaen-mimo-t6-report/v1",
   "report_id": "EXAMPLE-T6-DO-NOT-USE-20261116-A",
   "example": true,
-  "spec": {"path": "rt-stack/spec/mimo-t6.md", "version": "tspi-mimo-t6/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+  "spec": {"path": "rt-stack/spec/mimo-t6.md", "version": "khaen-mimo-t6/v1", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
   "t6_kind": "MIMO-T6",
   "t6_cal": {"status": "pass", "n_points": 3, "positions": ["P1", "P2", "P3"], "design_points": ["D1", "D2", "D3", "D4", "D5", "D6"], "residual_mean_db": 1.1, "residual_max_db": 2.6, "passed": true, "report_sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
   "authority": {"wbs_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "decision_sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
@@ -733,7 +733,7 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 | T6-C02 | 旧契约未被 T73 修改 | T73 写域 = 本 spec + `evidence/T73/`；旧契约无 T73 写入记录。若并发任务修改，`evidence/T73/CONCURRENT-CHANGES.md` 记录 before/after + 归属；T6 引用以 T73 快照为准 | 机/D | §0.4 |
 | T6-C03 | 范围与非目标明确 | 4.1.2 主范围、5.3.2/AoIP 未测声明、无上混/下混、无性能门混入；**T6-cal 仍独立必须、T6-M 不替代** | 人/D | §0.2/§0.4 |
 | T6-C04 | T0–T4/T6-cal/T1partial 引用可回溯 | 每个前置证据有来源路径/章节/报告 hash；**同轮 T6-cal 报告（n_points/positions/design/residual/passed）存在**；缺任一 → I-01 | 机/I | §1.2/§1.5 |
-| T6-C05 | T6 独立 schema | 报告使用 `tspi-mimo-t6-report/v1`，无旧 `khaen-calibration-report/v1` 字段冒充 | 机/I | §0.4/§9.1 |
+| T6-C05 | T6 独立 schema | 报告使用 `khaen-mimo-t6-report/v1`，无旧 `khaen-calibration-report/v1` 字段冒充 | 机/I | §0.4/§9.1 |
 | T6-C06 | T1 partial 字段齐全 | loopback_map/covered/uncovered/cuemix_routing/final_insert/mitigation/claim 全存在（若 partial） | 机/I | §1.3 |
 | T6-C07 | T1 partial 不豁免声学覆盖 | 每个参与输出有 T4 FR 或 **§3.8 T6-AID 声学身份检查**（逐输出激励+UMIK 能量/onset+slot→role→DAC 反查）证据；缺 → I-08，错配 → F-10 | 机/R | §1.3/§3.8 |
 | T6-C08 | 预测/实测分离 | predicted 文件 hash 绑定；报告 I 为实测 checker 值；预测冒充实测 → FAIL-08 | 机/I | §1.4/§9.6 |
@@ -742,7 +742,7 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 
 | ID | 检查项 | 通过判据 | 类型/状态 | 条款 |
 |---|---|---|---|---|
-| T6-C09 | 冻结清单存在且 hash 一致 | `tspi-mimo-t6-frozen/v1` 必填字段齐全，**FC-05/06/09/10/14/15 字段（timeline/clock/cuemix/temperature/seal/measurement_validity）逐个存在**；frozen sha256 与报告一致 | 机/I | §2.1 |
+| T6-C09 | 冻结清单存在且 hash 一致 | `khaen-mimo-t6-frozen/v1` 必填字段齐全，**FC-05/06/09/10/14/15 字段（timeline/clock/cuemix/temperature/seal/measurement_validity）逐个存在**；frozen sha256 与报告一致 | 机/I | §2.1 |
 | T6-C10 | 房间/摆位/温度记录 | FC-01/FC-10 记录齐全；两轮 |ΔT| ≤2 K；无移动未记录 | 人/R | FC-01/FC-10 |
 | T6-C11 | profile/布局/映射 hash | FC-02 overlay 解析 hash + 设备宽度校验 + dense_to_dac/scatter 一致 | 机/R | FC-02 |
 | T6-C12 | baseline/on 仅 g 差异 | FC-03 diff_summary 只含 g；graph_id/plan hash 记录；无未声明差异；**FC-16 冻结后未改图/参数** | 机/I | FC-03/FC-16 |
@@ -811,7 +811,7 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 |---|---|---|---|---|
 | T6-C56 | PASS 条件完整 | P-01..P-11 全部有证据（含 T6-cal、跨轮预注册、predicted vs measured）；§8.2.1 观察项不参与；缺一 → 非 PASS | 机/I | §8.2/§1.5 |
 | T6-C57 | FAIL/INCOMPLETE 码与优先级 | F-01..F-10、I-01..I-12 可判（F-05 含跨轮污染；I-08 含 T1 partial 身份；改善观察不产生 F 码）；FAIL > INCOMPLETE > NOT_RUN | 机/I | §8.3–§8.5 |
-| T6-C58 | report schema 可解析 | 报告通过 `tspi-mimo-t6-report/v1` 结构校验；示例标注 example:true | 机/I | §9.1/§9.2 |
+| T6-C58 | report schema 可解析 | 报告通过 `khaen-mimo-t6-report/v1` 结构校验；示例标注 example:true | 机/I | §9.1/§9.2 |
 | T6-C59 | raw→analysis→report hash 链 | 每个 raw/analysis/report 有 sha256；抽查可复算 I/T20 | 机/I | §9.4/§9.6 |
 | T6-C60 | claims/limits/untested 与 checker 独立 | 范围声明诚实（含 T6-cal/MIMO-T6 双证据、T1 partial）；checker 非 producer 聚合；不确定度/两轮 spread/predicted_vs_measured 已报告 | 人+机/I | §9.3/§9.5/§9.7 |
 
@@ -846,7 +846,7 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 
 | 输入 | sha256（T73 读取时） |
 |---|---|
-| scratch/lead/planner/TSPI-RT-STACK-WBS.md | `ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9` |
+| scratch/lead/planner/KHAEN-RT-STACK-WBS.md | `ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9` |
 | scratch/lead/planner/DSP-HOST-DECISION.md | `ab1056477d8e1c01dbe61df6f2d15c4bb0cca6b05f9177ef51559df3e2d25ded` |
 | rt-stack/reference/SPEC.md | `f7f1a5337216138b1cffbf10f4a8652bb173f49108256d62790e0050e1b6962f`（22,843 B；task-145） |
 | rt-stack/reference/HAND-CALC.md | `36ca46eb597f462a16ba0d43fb2b8d8477e8fe7c5b31e5293f00e684f0403ce0` |
@@ -857,10 +857,10 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 
 注：`calibration-spec/CONTRACT.md`、`ACCEPTANCE.md` 两行为 T73 读取时快照（13569/17376 B）；**task-145 冻结刷新后当前值**见上表与 manifest（`sha256_at_start` 保留 T73 读取时旧值）。T73 执行期间并发 B2 任务（task-33 spec-checker）修订了旧文件；T73 未写该目录。B2 最终观测值：ACCEPTANCE `cbca5543ef7bd36f70161d7e71bb1b266361e9a81af8acff89267a8433381698`（28744 B，含 T6-cal §5.2）、CONTRACT `1664028e34823a08500c46416941aae584ba8ac8edc2cf0dbf99e205bd02726b`（22329 B）；T05 由 task-38 修至 `4ba2d005...`。全部 before/after 与归属见 `evidence/T73/CONCURRENT-CHANGES.md`；manifest 把这些项标 `volatile` 并归因，不再以 T73 快照断言当前文件。
 
-### 11.3 复核命令（在 `projects/tspi-audio-dsp` 下运行）
+### 11.3 复核命令（在 `projects/khaen-audio-dsp` 下运行）
 
 ~~~powershell
-cd C:\WorkSpace\Claw\projects\tspi-audio-dsp
+cd C:\WorkSpace\Claw\projects\khaen-audio-dsp
 # 1) 规范结构/ID/示例 JSON/checklist 自检
 python rt-stack\evidence\T73\check_spec.py --spec rt-stack\spec\mimo-t6.md
 # 2) manifest 全部输入/输出 hash 复核（含旧契约只读断言）
@@ -886,7 +886,7 @@ Get-FileHash rt-stack\spec\mimo-t6.md,calibration-spec\ACCEPTANCE.md,calibration
 
 ### 11.5 版本与变更规则
 
-- 本文件 schema 固定 `tspi-mimo-t6/v1`；阈值/公式/字段/判定状态改变（含 §8.2.1 观察目标数值变更）→ 升 `v2` 并保留 v1；
+- 本文件 schema 固定 `khaen-mimo-t6/v1`；阈值/公式/字段/判定状态改变（含 §8.2.1 观察目标数值变更）→ 升 `v2` 并保留 v1；
 - 不得在正式测量后放宽阈值/删除点/改质量掩码；变更必须在新版中预声明并**重测全部轮次**；
 - 旧契约（calibration-spec/**）的修改属其他 owner 的 B2 批次，本文件不跟踪其变更；引用以 READONLY 快照为准（T73 期间已观察到 B2 并发修订，见 `evidence/T73/CONCURRENT-CHANGES.md`）；
 - 复核：`evidence/T73/manifest.json` 记录输入 hash、输出 hash、复核命令、checklist 计数与未测项；

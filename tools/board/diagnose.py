@@ -3,7 +3,7 @@
 
 Examples:
   python diagnose.py
-  python diagnose.py --ssh-board "systemctl is-active tspi-soak12.service"
+  python diagnose.py --ssh-board "systemctl is-active khaen-soak12.service"
   python diagnose.py --ssh-remote "adb devices -l"
   python diagnose.py --ssh-remote "adb shell 'ip -br addr; uptime'"
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 import paramiko
 
 ROOT = Path(__file__).resolve().parents[2]
-KEY = ROOT / "deploy" / "ssh" / "tspi_audio_ed25519"
+KEY = ROOT / "deploy" / "ssh" / "khaen_audio_ed25519"
 BOARD = ("192.0.2.215", "root")
 REMOTE = ("192.0.2.63", "adqew")
 GATEWAY = "192.0.2.1"
@@ -94,7 +94,7 @@ def main() -> int:
 
     print("\n== board SSH ==")
     try:
-        rc, out, err = ssh_exec(*BOARD, "hostname; date; uptime; systemctl is-active tspi-soak12.service 2>&1; tail -n 2 /var/lib/tspi-soak/status.csv 2>&1", 10)
+        rc, out, err = ssh_exec(*BOARD, "hostname; date; uptime; systemctl is-active khaen-soak12.service 2>&1; tail -n 2 /var/lib/khaen-soak/status.csv 2>&1", 10)
         print(out.rstrip() or err.rstrip() or f"(rc={rc})")
     except Exception as exc:
         print(f"FAIL {exc}")

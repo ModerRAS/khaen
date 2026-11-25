@@ -700,7 +700,7 @@ fn t38_manifest_declaration_fields() {
     assert_eq!(
         m,
         NosManifestDeclaration {
-            schema: "tspi-fir/v1",
+            schema: "khaen-fir/v1",
             family: "nos",
             taps: 1,
             delay_samples: 0.0,
@@ -712,7 +712,7 @@ fn t38_manifest_declaration_fields() {
         }
     );
     assert_eq!(m, manifest_declaration(&d));
-    assert_eq!(m.schema, "tspi-fir/v1");
+    assert_eq!(m.schema, "khaen-fir/v1");
     assert_eq!(m.family, FAMILY);
     assert_eq!(m.taps, d.taps());
     assert_eq!(m.filtering, FILTERING_NONE);

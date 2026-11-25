@@ -7,7 +7,7 @@
 // 离线：只用 FakeBackend，不打开 /dev/snd，不需要声卡。
 
 use super::*;
-use khaen_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
+use khaen_core::abi::{sample_format, KhaenHwParamsV1, ABI_VERSION};
 use khaen_core::rt::RtStatus;
 
 const S24: u16 = sample_format::S24_3LE_INTERLEAVED;
@@ -105,8 +105,8 @@ fn pb_buf(actual: &DuplexActual) -> Vec<u8> {
     vec![0u8; actual.period_bytes(StreamDirection::Playback).unwrap()]
 }
 
-fn cal_hw() -> TspiHwParamsV1 {
-    TspiHwParamsV1 {
+fn cal_hw() -> KhaenHwParamsV1 {
+    KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: S24,
         n_in: 20,
@@ -1531,7 +1531,7 @@ fn t17_motu_baseline_full_duplex_matches_t01_evidence() {
     let actual = session
         .start_with_width(&motu_sel(), CARDS_MOTU, &RequiredDeviceWidth::toslink_412())
         .expect("width-validated start");
-    let expected = TspiHwParamsV1 {
+    let expected = KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: S24,
         n_in: 20,

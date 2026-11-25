@@ -8,8 +8,8 @@
 #   → 01 preflight（完整 A–I；校验真实安装的 manifest/arch/toml）
 #   → 03 retire-c（停/禁/mask 旧 C；从这里起不可回 C）
 #   → 02 device 独占（只读）
-#   → start MOTU 48k keeper → start tspi-irq-affinity.service（task-192：host 启动前钉 T45 依赖
-#     IRQ58/56/57→A53；失败=host 不启动）→ enable/start tspi-rt-stack.target（Wants host+daemon；逐个等 active）
+#   → start MOTU 48k keeper → start khaen-irq-affinity.service（task-192：host 启动前钉 T45 依赖
+#     IRQ58/56/57→A53；失败=host 不启动）→ enable/start khaen-rt-stack.target（Wants host+daemon；逐个等 active）
 #   → 06 verify → 07 mark-last-good
 # 失败策略（硬约束）：
 #   * install 之前的任何失败：exit 3，**完全零变更**（旧 C 原状，release/current 未动）
@@ -21,7 +21,7 @@
 #   * 已通过验证但 last-good 写失败：exit 8（RUNNING_NO_LAST_GOOD，不中断播放，人工补记；F-41 独立码）
 #
 # 用法:
-#   sudo ./05-atomic-switch.sh --live --authorize WINDOW.json --bundle /var/tmp/tspi-rt-stack-release-<id> \
+#   sudo ./05-atomic-switch.sh --live --authorize WINDOW.json --bundle /var/tmp/khaen-rt-stack-release-<id> \
 #        [--allow-first-switch] [--require-daemon] [--require-health --health-url URL] [--timeout 120]
 #   ./05-atomic-switch.sh --dry-run ...      # 默认；只打印计划，不调用任何变更命令
 # 退出码：0 成功；2 用法；3 前置/安装失败（音频零变更）；4 授权；5 切换失败已回滚；6 失败且静音/停止；
@@ -32,7 +32,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/../config/old-c-units.conf"
 
 BUNDLE=""
-TIMEOUT="${TSPI_TIMEOUT_SECS:-120}"
+TIMEOUT="${KHAEN_TIMEOUT_SECS:-120}"
 ALLOW_FIRST=0
 REQUIRE_DAEMON=0
 REQUIRE_RT=0
@@ -59,7 +59,7 @@ while [ $# -gt 0 ]; do
 done
 
 # 子脚本通过环境继承 staging root（本地夹具/预演不得落到真实 /）
-export TSPI_DEPLOY_ROOT="$ROOT"
+export KHAEN_DEPLOY_ROOT="$ROOT"
 AUTH_ARGS=()
 [ -n "$AUTHORIZE_FILE" ] && AUTH_ARGS=(--authorize "$AUTHORIZE_FILE")
 FIRST_ARGS=()
@@ -73,7 +73,7 @@ if [ "$DRY_RUN" = "1" ]; then
   log " 4) 01-preflight-switch.sh --live ${AUTH_ARGS[*]} ${FIRST_ARGS[*]}（完整 A–I：manifest/arch/unit/toml/192k/keeper）"
   log " 5) 03-retire-c.sh --live ${AUTH_ARGS[*]} --evidence <evidence>/retire（从这里起不可回 C）"
   log " 6) 02-check-device-exclusive.sh --live（retire 后确认设备独占）"
-  log " 7) systemctl start tspi-motu-48k-keeper.service（静音 1s 48k，禁止 192k）→ systemctl start tspi-irq-affinity.service（task-192：钉 IRQ58/56/57→A53 并回读）→ enable/start tspi-rt-stack.target（Wants host+daemon；逐个等 active <= ${TIMEOUT}s）"
+  log " 7) systemctl start khaen-motu-48k-keeper.service（静音 1s 48k，禁止 192k）→ systemctl start khaen-irq-affinity.service（task-192：钉 IRQ58/56/57→A53 并回读）→ enable/start khaen-rt-stack.target（Wants host+daemon；逐个等 active <= ${TIMEOUT}s）"
   log " 8) 06-verify-switch.sh --live ... --evidence <evidence>/verify"
   log " 9) 07-mark-last-good.sh --live ${AUTH_ARGS[*]} --verify-report <evidence>/verify/verify-report.json"
   log " 失败：install 前=完全零变更；install 后/retire 前=音频零变更（release 已落盘）；retire 后只 08-rollback.sh（last-good 或 mute，绝不 C）。"
@@ -101,13 +101,13 @@ stage() {  # name command...
 }
 write_result() {  # 统一写 result.json
   cat > "$EVIDENCE_DIR/result.json" <<JSON
-{"schema":"tspi-rt-stack/switch-result/v1","final_state":"$FINAL","exit":$EXIT_CODE,"at":"$(now_iso)","stages":"stages.log"}
+{"schema":"khaen-rt-stack/switch-result/v1","final_state":"$FINAL","exit":$EXIT_CODE,"at":"$(now_iso)","stages":"stages.log"}
 JSON
 }
 rollback_after_retire() {  # memo: 已 retire，只允许 last-good/mute
   local rb_args=(--live --evidence "$EVIDENCE_DIR/rollback")
   [ -n "$AUTHORIZE_FILE" ] && rb_args+=(--authorize "$AUTHORIZE_FILE")
-  if [ "$ALLOW_FIRST" = "1" ] || [ ! -f "$(p "$TSPI_STATE_DIR/last-good.json")" ]; then rb_args+=(--mute); fi
+  if [ "$ALLOW_FIRST" = "1" ] || [ ! -f "$(p "$KHAEN_STATE_DIR/last-good.json")" ]; then rb_args+=(--mute); fi
   if stage 10-rollback "$HERE/08-rollback.sh" "${rb_args[@]}"; then
     FINAL="ROLLED_BACK_LAST_GOOD"; EXIT_CODE=5
   else
@@ -158,14 +158,14 @@ fi
 
 # ---- 7 启动（enable 放在 retire 之后，避免重启窗口双栈；F-18 校验 host+daemon active） --
 START_FAIL=0
-if ! stage 7-start bash -c "\"$TSPI_SYSTEMCTL\" daemon-reload && \"$TSPI_SYSTEMCTL\" enable tspi-rt-stack.target && \"$TSPI_SYSTEMCTL\" start tspi-motu-48k-keeper.service && \"$TSPI_SYSTEMCTL\" start tspi-irq-affinity.service && \"$TSPI_SYSTEMCTL\" start tspi-rt-stack.target"; then
-  warn "启动 tspi-rt-stack.target 失败：进入回滚（last-good/mute）"
+if ! stage 7-start bash -c "\"$KHAEN_SYSTEMCTL\" daemon-reload && \"$KHAEN_SYSTEMCTL\" enable khaen-rt-stack.target && \"$KHAEN_SYSTEMCTL\" start khaen-motu-48k-keeper.service && \"$KHAEN_SYSTEMCTL\" start khaen-irq-affinity.service && \"$KHAEN_SYSTEMCTL\" start khaen-rt-stack.target"; then
+  warn "启动 khaen-rt-stack.target 失败：进入回滚（last-good/mute）"
   FINAL="START_FAILED"; EXIT_CODE=5; START_FAIL=1
 elif ! wait_unit_active khaen-rt-host.service "$TIMEOUT"; then
   warn "khaen-rt-host ${TIMEOUT}s 内未 active（target Wants=未生效或 host 启动失败）：进入回滚"
   FINAL="START_TIMEOUT_HOST"; EXIT_CODE=5; START_FAIL=1
-elif ! wait_unit_active tspi-rt-daemon.service "$TIMEOUT"; then
-  warn "tspi-rt-daemon ${TIMEOUT}s 内未 active（T28-P0-a 要求 host+daemon 都 active）：进入回滚"
+elif ! wait_unit_active khaen-rt-daemon.service "$TIMEOUT"; then
+  warn "khaen-rt-daemon ${TIMEOUT}s 内未 active（T28-P0-a 要求 host+daemon 都 active）：进入回滚"
   FINAL="START_TIMEOUT_DAEMON"; EXIT_CODE=5; START_FAIL=1
 fi
 if [ "$START_FAIL" = "1" ]; then

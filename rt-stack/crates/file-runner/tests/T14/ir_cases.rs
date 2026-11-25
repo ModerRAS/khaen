@@ -1,4 +1,4 @@
-//! `tspi-cal-ir-draft/v1` 校准 IR 草案：解析/绑定/stale 六原因/P 与 D/polarity 应用（对齐 T13）。
+//! `khaen-cal-ir-draft/v1` 校准 IR 草案：解析/绑定/stale 六原因/P 与 D/polarity 应用（对齐 T13）。
 
 use khaen_file_runner::ir::{
     binding_json, parse_ir, IrCurrent, Polarity, PostEncoding, StaleReason, IR_HASH_ALGO,
@@ -83,7 +83,7 @@ fn ir_rejects_structural_errors() {
     let mut bad = valid.clone();
     map_mut(&mut bad).insert(
         "schema".to_string(),
-        Json::String("tspi-cal-ir-draft/v2".to_string()),
+        Json::String("khaen-cal-ir-draft/v2".to_string()),
     );
     assert_eq!(parse_ir(&bad).expect_err("schema").code(), E_FILE_IR);
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""tspi-channelmap peq[].type 回归测试（离线；不连板、不启服务）。
+"""khaen-channelmap peq[].type 回归测试（离线；不连板、不启服务）。
 
 覆盖（Lead 裁决 2026-11-16，calibration-spec/review/V11-CONSUMER-DECISIONS-2026-11-16.md）：
   1. peaking 缺省/显式 type：渲染仍为 CamillaDSP Peaking{freq,q,gain}，不产生 type/slope 字段；
@@ -28,8 +28,8 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-CM = ROOT / "audio" / "overlay" / "usr" / "local" / "bin" / "tspi-channelmap"
-PRESETS = ROOT / "audio" / "overlay" / "etc" / "tspi-audio" / "layout-presets.yml"
+CM = ROOT / "audio" / "overlay" / "usr" / "local" / "bin" / "khaen-channelmap"
+PRESETS = ROOT / "audio" / "overlay" / "etc" / "khaen-audio" / "layout-presets.yml"
 BASE = ROOT / "upmix" / "examples" / "container" / "profiles" / "upmix-4.1.2-movie-from-h16-7.1.4.yml"
 
 CAP_CH = "12"
@@ -45,8 +45,8 @@ class ChannelmapPeqTypeTest(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="cm-peqtype-")
         cls.env = dict(os.environ)
         cls.env.update({
-            "TSPI_CHANNELMAP_RUN_DIR": os.path.join(cls.tmp, "run"),
-            "TSPI_CHANNELMAP_VAR_DIR": os.path.join(cls.tmp, "var"),
+            "KHAEN_CHANNELMAP_RUN_DIR": os.path.join(cls.tmp, "run"),
+            "KHAEN_CHANNELMAP_VAR_DIR": os.path.join(cls.tmp, "var"),
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUTF8": "1",
         })

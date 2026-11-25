@@ -1,6 +1,6 @@
 # 校准 YAML 契约 khaen-calibration/v1
 
-> 状态：**设计侧规范 v1（2026-11-15）/ v1.1（2026-11-16）/ B2 口径修订（2026-11-17）**，由 upmix-dev 维护；Rust 实现（khaen-calibrate，projects/tspi-audio-dsp/calibrate/）由 audio-stack 主写。
+> 状态：**设计侧规范 v1（2026-11-15）/ v1.1（2026-11-16）/ B2 口径修订（2026-11-17）**，由 upmix-dev 维护；Rust 实现（khaen-calibrate，projects/khaen-audio-dsp/calibrate/）由 audio-stack 主写。
 > 2026-11-17 B2 修订（依据 `scratch/lead/doc-audit/CONSOLIDATED.md` C-13/15/16/17/18 与 B2 组 P1/P2）：修正 delay_samples 方向、补充验收入口与 holdout、注明校验器覆盖差异；字段语义不变。
 > 本目录只放契约、验收口径、校验脚本与 review，不改 calibrate/ 代码。
 > 变更规则：字段名/语义一旦发布不再改；新增只能 optional 并升 minor（v1.1），破坏性变更升 v2。
@@ -154,7 +154,7 @@ channels:                        # 必填，非空；每个目标输出角色一
 
 ## 4. 消费方映射规则
 
-### 4.1 → channelmap v2 profile（WebUI / tspi-channelmap 渲染器）
+### 4.1 → channelmap v2 profile（WebUI / khaen-channelmap 渲染器）
 
 对每个 `channels[]`，找到同 `name` 的 `output.roles[]`：
 
@@ -171,13 +171,13 @@ role.peq        = render_role.peq + [{freq, q, gain_db, type?} for f in filters]
 - `name` 在 profile roles 中不存在 → 拒绝并报错（防止把 5.3.2 校准误用到 4.1.2）。
 - 不修改 input/remap/bass_management 等其它字段；不改 schema。
 - `type` 必须原样写入：缺省 `peaking` 可省略；`low_shelf`/`high_shelf` 不能丢（丢 type = 静默降级成 Peaking，最大误差 ~3 dB，禁止）。
-- 板端 `tspi-channelmap` 的 `peq` 支持 `type`（白名单 `peaking|low_shelf|high_shelf`，未知 type rc=2 拒绝整份 profile）。
+- 板端 `khaen-channelmap` 的 `peq` 支持 `type`（白名单 `peaking|low_shelf|high_shelf`，未知 type rc=2 拒绝整份 profile）。
   `q` 界限按 type 分流：peaking `[0.1, 10]`（channelmap 不接受 v1.1 契约里 peaking q>10，那种窄模态走 §4.2 片段）；
   shelf `[0.1, 1.0]`（越界 rc=3，不产文件）。渲染映射见 §4.2。
 - **q>10 的分裂（P2-8）**：v1.1 契约允许 peaking `q>10`，`khaen-calibrate validate` 会 PASS；但 channelmap 路线整份拒绝，
   该文件**只能走 §4.2 CamillaDSP 片段路径**。Python 校验器对 q>10 给 warning；报告必须写清消费路径。
 - `channels[].index` 是 MOTU 物理通道号（0-based），必须与本次运行态 mapping 一致；不是容器槽位号。
-- 渲染器验证：`tspi-channelmap validate/render` 必须通过。
+- 渲染器验证：`khaen-channelmap validate/render` 必须通过。
 
 ### 4.2 → 独立 CamillaDSP 配置
 
@@ -251,7 +251,7 @@ Mixer → [HP/LP 分频] → Peaking×N（按文件顺序）→ Gain(role_gain+g
 ## 7. 文件位置与生命周期（建议）
 
 ```text
-/etc/tspi-audio/calibration/
+/etc/khaen-audio/calibration/
 ├── 5.3.2-20261115-1800.yml     # 每次测量一个文件（只增不改）
 ├── 4.1.2-20261115-1810.yml
 └── current.yml -> 5.3.2-...yml # 可选：WebUI 当前选中的校准
@@ -271,7 +271,7 @@ Mixer → [HP/LP 分频] → Peaking×N（按文件顺序）→ Gain(role_gain+g
 khaen-calibrate validate examples/calibration-5.3.2.example.yml
 # 独立复核（Python）
 python3 tools/validate_calibration.py examples/calibration-5.3.2.example.yml \
-  --layout-presets /etc/tspi-audio/layout-presets.yml
+  --layout-presets /etc/khaen-audio/layout-presets.yml
 ```
 
 ## 9. 消费方实现清单（checklist）
@@ -279,7 +279,7 @@ python3 tools/validate_calibration.py examples/calibration-5.3.2.example.yml \
 - [ ] 只读 YAML，不改 producer 的原始文件。
 - [ ] 按 §5 校验；error 拒绝、warning 记录。
 - [ ] 按 §3/§4 合并到目标 profile 或 CamillaDSP 配置（XOR 极性、延迟相加、PEQ 追加、gain 相加）。
-- [ ] 应用前 camilladsp --check / tspi-channelmap validate+render。
+- [ ] 应用前 camilladsp --check / khaen-channelmap validate+render。
 - [ ] 应用后按 ACCEPTANCE.md **T3（必须，K4）**/T4 复测 + **T6 holdout**；negative_controls 5/5；保留应用前后曲线与报告。
 
 ## 10. v1.1（2026-11-16）
@@ -306,7 +306,7 @@ khaen-calibrate validate calibration.yml
 khaen-calibrate check-pair --dir results --calibration calibration.yml --pairs FL:SUB1:80
 # 独立复核（Python）
 python3 calibration-spec/tools/validate_calibration.py calibration.yml \
-  --layout-presets /etc/tspi-audio/layout-presets.yml
+  --layout-presets /etc/khaen-audio/layout-presets.yml
 ```
 
 CamillaDSP 片段把 type 写成 `Peaking` / `Lowshelf` / `Highshelf`。拟合目标是把实测校正到目标曲线，默认平坦。

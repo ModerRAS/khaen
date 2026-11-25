@@ -144,7 +144,10 @@ pub fn resolve_interface_name(name: &str) -> Result<Ipv4Addr, IfaceLookupError> 
         });
     }
     let mut found: Vec<Ipv4Addr> = Vec::new();
-    for interface in interfaces.iter().filter(|interface| interface.matches_name(name)) {
+    for interface in interfaces
+        .iter()
+        .filter(|interface| interface.matches_name(name))
+    {
         if !found.contains(&interface.address) {
             found.push(interface.address);
         }
@@ -485,9 +488,9 @@ mod tests {
 
     #[test]
     fn unknown_interface_name_is_rejected() {
-        match resolve_interface_name("tspi-no-such-nic-xyz") {
+        match resolve_interface_name("khaen-no-such-nic-xyz") {
             Err(IfaceLookupError::NoSuchName { name, .. }) => {
-                assert_eq!(name, "tspi-no-such-nic-xyz");
+                assert_eq!(name, "khaen-no-such-nic-xyz");
             }
             other => panic!("未知网卡名必须返回 NoSuchName，got {other:?}"),
         }
@@ -496,7 +499,9 @@ mod tests {
     #[test]
     fn local_interface_name_resolves_to_its_address() {
         let interfaces = list_ipv4_interfaces().expect("枚举本机 IPv4 网卡");
-        assert!(interfaces.iter().all(|interface| !interface.name.is_empty()));
+        assert!(interfaces
+            .iter()
+            .all(|interface| !interface.name.is_empty()));
         for interface in &interfaces {
             let same_name = interfaces
                 .iter()

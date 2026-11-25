@@ -1,6 +1,6 @@
 //! [NONRT] 校准 job 的 CalibrationPort 真实现（T60 JobManager -> T67 FitWiring -> T66 compile/apply）。
 //!
-//! 角色：tspi-rt-daemon（control/src/main.rs）在启动时构造本 port 并
+//! 角色：khaen-rt-daemon（control/src/main.rs）在启动时构造本 port 并
 //! RestService::with_calibration(..)，于是 T42 的 R48 端点
 //! （start/status/list/cancel/apply/retest/rollback）接到**真实的** T60 job 状态机：
 //! 单 job 互斥、stage 进度、checkpoint、协作式取消、prepared->apply、rollback last-good
@@ -13,7 +13,7 @@
 //!
 //! 因此本 port 的 engine_info().synthetic **恒为 true**（real_audio=false），REST 响应
 //! 必须原样带出 engine/synthetic，页面不得显示成板端 actual。真实 MOTU/UMIK 测量与板端
-//! apply 属板端窗口（NOT_WIRED）；daemon 的 TSPI_CAL_JOB_BACKEND=real 不挂本 port，
+//! apply 属板端窗口（NOT_WIRED）；daemon 的 KHAEN_CAL_JOB_BACKEND=real 不挂本 port，
 //! REST 显式 503，绝不冒充 actual。
 //!
 //! ## 语义要点
@@ -155,7 +155,7 @@ impl JobManagerPort {
         })
     }
 
-    /// CLI stage 后端 port（`TSPI_CAL_STAGE=cli`）：真实 MOTU/UMIK 测量 + file-backend apply。
+    /// CLI stage 后端 port（`KHAEN_CAL_STAGE=cli`）：真实 MOTU/UMIK 测量 + file-backend apply。
     ///
     /// 与 `synthetic_offline` 共用同一 T60 JobManager/REST 语义；区别只在
     /// backend（本机 calib-stage.sh）与 safety（systemctl stop/start khaen-rt-host）。
@@ -340,7 +340,9 @@ impl JobManagerPort {
     ) -> Result<CalJobView, CalPortError> {
         let mut request = self.request_for(kind, label, auto_apply, audio_authorized);
         request.expected_applied_version = expected_applied_version;
-        let backend = self.build_backend(label).map_err(CalPortError::Unavailable)?;
+        let backend = self
+            .build_backend(label)
+            .map_err(CalPortError::Unavailable)?;
         let job_id = self
             .manager
             .start(request, backend)
@@ -642,8 +644,8 @@ fn build_offline_backend(label: &str) -> Result<Box<dyn CalibrationJobBackend>, 
 
 /// 离线合成测量配置（Fake 引擎；不打开声卡/不出声）。
 fn offline_stage_config(label: &str) -> StageBackendConfig {
-    let graph_id = sha256_hex(b"tspi-rest-calibport/graph-v1");
-    let mic_cal = sha256_hex(b"tspi-rest-calibport/synthetic-umik-cal");
+    let graph_id = sha256_hex(b"khaen-rest-calibport/graph-v1");
+    let mic_cal = sha256_hex(b"khaen-rest-calibport/synthetic-umik-cal");
     let mut config = StageBackendConfig::default();
     config.mode = StageMeasurementMode::AcousticUmik;
     config.engine = EngineKind::Fake;

@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C01_identity_d0_1x1",
   "title": "1x1 identity: G=delta_0 I, P=delta, D=0 -> y == x",
   "tags": [

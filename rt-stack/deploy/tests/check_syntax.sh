@@ -11,14 +11,14 @@ for f in "$DEPLOY"/bin/*.sh "$DEPLOY"/lib/*.sh "$DEPLOY"/tools/*.sh "$DEPLOY"/te
          "$DEPLOY"/config/irq-affinity-pin; do
   [ -f "$f" ] || continue
   n=$((n+1))
-  if bash -n "$f" 2>/tmp/tspi-t28-bashn.err; then
+  if bash -n "$f" 2>/tmp/khaen-t28-bashn.err; then
     [ "$QUIET" = "1" ] || echo "OK   $(basename "$f")"
   else
-    echo "FAIL $(basename "$f")"; sed 's/^/     /' /tmp/tspi-t28-bashn.err
+    echo "FAIL $(basename "$f")"; sed 's/^/     /' /tmp/khaen-t28-bashn.err
     fail=$((fail+1))
   fi
 done
-rm -f /tmp/tspi-t28-bashn.err
+rm -f /tmp/khaen-t28-bashn.err
 echo "checked=$n failed=$fail"
 [ "$fail" -eq 0 ] || exit 3
 exit 0

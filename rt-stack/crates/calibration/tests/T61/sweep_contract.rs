@@ -75,7 +75,7 @@ fn public_api_loopback_sweep_matches_t1_contract() {
     let json = timeline.to_json();
     assert!(json.contains("\"drive_level_dbfs\":-12"));
     assert!(json.contains("\"k_main_trim_db\":0"));
-    assert!(json.contains("\"schema\":\"tspi-sweep-timeline/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-sweep-timeline/v1\""));
 
     let (report, sink, timeline) = run_complete(config);
     assert!(report.outcome.is_completed());

@@ -1,6 +1,6 @@
 # calibrate/ 草稿 review（设计侧，2026-11-15）
 
-> 对象：projects/tspi-audio-dsp/calibrate/（audio-stack 主写；本次 review 对应 2026-11-15 17:56 左右的版本）。
+> 对象：projects/khaen-audio-dsp/calibrate/（audio-stack 主写；本次 review 对应 2026-11-15 17:56 左右的版本）。
 > 方式：只读 + 用契约校验器/独立检查器验证示例产物；**未修改 calibrate/ 任何文件**。
 > 结论：**算法骨架与 YAML 契约已基本对齐**（7/7 单测通过、离线示例通过我的 v1 校验器），
 > 但距 ACCEPTANCE.md 的 T1–T5 验收仍有若干 P0 缺口，主要是**跨通道相位测量前提、64/128 帧、
@@ -40,7 +40,7 @@
 | P1-9 | @src/dsp.rs:171-173@（SNR） | SNR 用 IR 尾部粗估，未做带限（200 Hz–8 kHz）、未做重复统计 | 按 ACCEPTANCE T2 做带限 SNR + ≥3 次重复/中位数；SNR <25 dB 时拒绝该次测量 |
 | P1-10 | @src/model.rs:99-117@（ValidationReport） | 报告结构与 ACCEPTANCE §8 的 `khaen-calibration-report/v1` 不一致（无 pair 指标/负向用例/环境/文件哈希） | 统一报告 schema；至少含 pairs[]、metrics、thresholds、negative_controls、artifacts sha256 |
 | P1-11 | @src/main.rs:408-448@（simulate） | frac_delay 线性插值且截尾（丢掉末尾），仅作离线演示；不能作为 1:1 环回验证 | 明确 simulate≠T1；新增 1:1 电学环回测量/验证路径（play→capture 同一接口），用于 T1 映射/隔离/延迟/极性精度 |
-| P1-12 | @src/main.rs:130-149@ | 默认设备 `hw:4,0 / hw:3,0` 硬编码；板端 card 编号变化会错 | 从 tspi-mode/参数读取 device，或强制要求显式传入并打印核对 |
+| P1-12 | @src/main.rs:130-149@ | 默认设备 `hw:4,0 / hw:3,0` 硬编码；板端 card 编号变化会错 | 从 khaen-mode/参数读取 device，或强制要求显式传入并打印核对 |
 
 ## 3. P2（改进/文档）
 

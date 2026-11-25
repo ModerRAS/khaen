@@ -3,7 +3,7 @@
 """check_motu_guard.py — 离线静态校验 MOTU 48k 防线（不连板、不需要 bash）。
 
 校验项：
-  1. keeper 脚本存在、含 stageA/stageB、含 flock、日志路径 /var/log/tspi
+  1. keeper 脚本存在、含 stageA/stageB、含 flock、日志路径 /var/log/khaen
   2. keeper 的 WRITE_BACK 默认值为 0（写回未证，不允许默认开）
   3. timer 含 OnUnitActiveSec=60s（<=120s）
   4. 04-install-release.sh 会把 keeper/motu-rate-guard.env/cuemix_client.py 装到位
@@ -42,7 +42,7 @@ if k:
     for needle, label in [("stageA", "Stage A(ALSA 空闲兜底)"),
                           ("stageB", "Stage B(CueMix 只读速率)"),
                           ("flock", "flock 并发保护"),
-                          ("/var/log/tspi", "持久日志目录"),
+                          ("/var/log/khaen", "持久日志目录"),
                           ("aplay", "aplay 48k 静音流")]:
         ok(f"keeper 含 {label}") if needle in k else bad(f"keeper 缺 {label}('{needle}')")
     m = re.search(r"^WRITE_BACK=(\d+)", k, re.M)
@@ -57,14 +57,14 @@ if k:
         ok("keeper 写回受 WRITE_BACK 开关控制")
     else:
         bad("keeper 写回未被 WRITE_BACK 开关包住")
-    if "cuemix_client.py" in k and "/usr/local/lib/tspi/cuemix_client.py" in k:
+    if "cuemix_client.py" in k and "/usr/local/lib/khaen/cuemix_client.py" in k:
         ok("keeper 会优先用已安装的 cuemix_client.py")
     else:
-        bad("keeper 未解析 /usr/local/lib/tspi/cuemix_client.py")
+        bad("keeper 未解析 /usr/local/lib/khaen/cuemix_client.py")
 
 # 2 timer
 try:
-    t = read("config/tspi-motu-48k-keeper.timer")
+    t = read("config/khaen-motu-48k-keeper.timer")
     m = re.search(r"^OnUnitActiveSec=(\d+)s", t, re.M)
     if not m:
         bad("timer 缺 OnUnitActiveSec=<n>s")
@@ -73,7 +73,7 @@ try:
         ok(f"timer 周期 {n}s") if n <= 120 else bad(f"timer 周期 {n}s > 120s（192k 漂移窗口靠它兜）")
     ok("timer 有 OnBootSec") if "OnBootSec=" in t else bad("timer 缺 OnBootSec")
 except FileNotFoundError:
-    bad("config/tspi-motu-48k-keeper.timer 缺失")
+    bad("config/khaen-motu-48k-keeper.timer 缺失")
 
 # 3 env template
 try:
@@ -88,9 +88,9 @@ try:
     for needle, label in [("motu-rate-guard.env", "安装 motu-rate-guard.env"),
                           ("tools/cuemix_client.py", "安装 cuemix_client.py"),
                           ("config/motu-48k-keeper", "安装 keeper 脚本"),
-                          ("tspi-motu-48k-keeper.timer", "安装 timer")]:
+                          ("khaen-motu-48k-keeper.timer", "安装 timer")]:
         ok(f"04-install 含 {label}") if needle in i else bad(f"04-install 缺 {label}('{needle}')")
-    ok("04-install 不覆盖既有 rate-guard.env") if "不覆盖运维已调开关" in i else bad("04-install 会覆盖既有 /etc/tspi/motu-rate-guard.env？")
+    ok("04-install 不覆盖既有 rate-guard.env") if "不覆盖运维已调开关" in i else bad("04-install 会覆盖既有 /etc/khaen/motu-rate-guard.env？")
 except FileNotFoundError:
     bad("bin/04-install-release.sh 缺失")
 

@@ -32,7 +32,9 @@
 
 use core::fmt;
 
-use khaen_rt_host::scheduler::{SchedPlan, CPU_UNUSED, DSP_CPU_MAX, MAX_CPU, WORKER_AFFINITY_COUNT};
+use khaen_rt_host::scheduler::{
+    SchedPlan, CPU_UNUSED, DSP_CPU_MAX, MAX_CPU, WORKER_AFFINITY_COUNT,
+};
 
 /// 本 target 是否可执行真实 Linux 内核写入（仅 cfg(target_os = "linux")）。
 pub const LINUX_TARGET: bool = cfg!(target_os = "linux");

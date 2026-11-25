@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-upmix-container/v1",
+  "schema": "khaen-upmix-container/v1",
   "input_layout": "h16-7.1.4",
   "fs": 48000,
   "files": [

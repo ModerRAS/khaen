@@ -4,7 +4,7 @@
 
 不修改输入文件。退出码：0 成功（可有 WARN）；1 校验/合并失败；2 用法、依赖或读取错误。
 
-模式 1 — channelmap v2 profile（板端 T3/T4 先走这条；输出可直接交给 tspi-channelmap apply）：
+模式 1 — channelmap v2 profile（板端 T3/T4 先走这条；输出可直接交给 khaen-channelmap apply）：
 
     python3 tools/apply_calibration.py \\
         --channelmap PROFILE.yml --calibration CAL.yml --out NEW.yml \\
@@ -17,7 +17,7 @@
     gain_db  = 原 gain_db + 校准 gain_db                            # 结果必须在 -60..+12
     peq      = 原 peq + [{freq, q, gain_db, type?}]                 # 总数 ≤ 32；peaking 可省略 type
 
-默认接着跑 tspi-channelmap validate（--no-validate 关掉）。channelmap 的 peaking q 仍是
+默认接着跑 khaen-channelmap validate（--no-validate 关掉）。channelmap 的 peaking q 仍是
 [0.1, 10]；v1.1 里 q>10 的窄模态过不了这条路线，工具不会静默丢段。
 
 模式 2 — 把 producer 的 CamillaDSP 片段合并进一份完整配置：
@@ -57,8 +57,8 @@ if _HERE not in sys.path:
 
 import validate_calibration as vcal  # noqa: E402
 
-DEFAULT_CM = os.path.join(_REPO, "audio", "overlay", "usr", "local", "bin", "tspi-channelmap")
-DEFAULT_PRESETS = os.path.join(_REPO, "audio", "overlay", "etc", "tspi-audio", "layout-presets.yml")
+DEFAULT_CM = os.path.join(_REPO, "audio", "overlay", "usr", "local", "bin", "khaen-channelmap")
+DEFAULT_PRESETS = os.path.join(_REPO, "audio", "overlay", "etc", "khaen-audio", "layout-presets.yml")
 FRAGMENT_META = ("schema", "note", "channelmap_roles")
 
 
@@ -285,16 +285,16 @@ def resolve_channelmap(explicit):
     if explicit:
         if os.path.isfile(explicit):
             return explicit
-        raise OSError("找不到 tspi-channelmap：%s" % explicit)
-    env = os.environ.get("TSPI_CHANNELMAP")
+        raise OSError("找不到 khaen-channelmap：%s" % explicit)
+    env = os.environ.get("KHAEN_CHANNELMAP")
     if env and os.path.isfile(env):
         return env
     if os.path.isfile(DEFAULT_CM):
         return DEFAULT_CM
-    found = shutil.which("tspi-channelmap")
+    found = shutil.which("khaen-channelmap")
     if found:
         return found
-    raise OSError("找不到 tspi-channelmap（可用 --channelmap-bin 或 TSPI_CHANNELMAP）")
+    raise OSError("找不到 khaen-channelmap（可用 --channelmap-bin 或 KHAEN_CHANNELMAP）")
 
 
 def channelmap_validate(bin_path, profile_path, presets, sample_rate):
@@ -304,9 +304,9 @@ def channelmap_validate(bin_path, profile_path, presets, sample_rate):
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
-    work = tempfile.mkdtemp(prefix="tspi-apply-cm-")
-    env["TSPI_CHANNELMAP_RUN_DIR"] = os.path.join(work, "run")
-    env["TSPI_CHANNELMAP_VAR_DIR"] = os.path.join(work, "var")
+    work = tempfile.mkdtemp(prefix="khaen-apply-cm-")
+    env["KHAEN_CHANNELMAP_RUN_DIR"] = os.path.join(work, "run")
+    env["KHAEN_CHANNELMAP_VAR_DIR"] = os.path.join(work, "var")
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, cwd=work,
@@ -368,7 +368,7 @@ def run_channelmap_mode(args):
             rc, text = channelmap_validate(cm, tmp, args.presets, calibration.get("sample_rate") or 48000)
             if rc != 0:
                 discard(tmp)
-                sys.stderr.write("tspi-channelmap validate 失败（rc=%s）：\n%s\n" % (rc, text))
+                sys.stderr.write("khaen-channelmap validate 失败（rc=%s）：\n%s\n" % (rc, text))
                 return 1
             if text:
                 sys.stderr.write(text + "\n")
@@ -525,10 +525,10 @@ def main(argv=None):
     ap.add_argument("--calibration", help="模式 1：khaen-calibration/v1 或 v1.1 YAML")
     ap.add_argument("--layout-role-map", default="auto",
                     help="auto=通道名对 role id；或一个 {name: role_id} YAML")
-    ap.add_argument("--channelmap-bin", default=None, help="tspi-channelmap 路径（默认同仓库 overlay）")
+    ap.add_argument("--channelmap-bin", default=None, help="khaen-channelmap 路径（默认同仓库 overlay）")
     ap.add_argument("--presets", default=DEFAULT_PRESETS if os.path.isfile(DEFAULT_PRESETS) else None,
-                    help="layout-presets.yml，传给校验器与 tspi-channelmap")
-    ap.add_argument("--no-validate", action="store_true", help="模式 1 不跑 tspi-channelmap validate")
+                    help="layout-presets.yml，传给校验器与 khaen-channelmap")
+    ap.add_argument("--no-validate", action="store_true", help="模式 1 不跑 khaen-channelmap validate")
     ap.add_argument("--camilladsp", help="模式 2：完整 CamillaDSP 配置（必须含 devices）")
     ap.add_argument("--fragment", help="模式 2：producer 的 .camilladsp.yml 片段")
     ap.add_argument("--camilladsp-bin", default=None,

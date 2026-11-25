@@ -1,4 +1,4 @@
-# TSPI RT-first DSP stack — 唯一 Cargo workspace 根（WBS T06，integrator 独占写域）
+# KHAEN RT-first DSP stack — 唯一 Cargo workspace 根（WBS T06，integrator 独占写域）
 #
 # 写域纪律（WBS §1/§7）：
 # - 本文件、Cargo.lock、crates/*/Cargo.toml、公共 lib.rs/模块注册、README、ci/ 只由 integrator 在 T06/T26/T32 写。

@@ -277,28 +277,28 @@ fn default_units() -> HashMap<String, MockUnit> {
     );
     // OEM v2 实际单元（task-15）：服务状态页展示；旧名字保留给既有模式编排测试/兼容。
     m.insert(
-        "tspi-camilladsp.service".into(),
-        MockUnit::active("tspi-audio: CamillaDSP (DSP engine)"),
+        "khaen-camilladsp.service".into(),
+        MockUnit::active("khaen-audio: CamillaDSP (DSP engine)"),
     );
     m.insert(
-        "tspi-ptp4l-master.service".into(),
-        MockUnit::inactive("tspi-audio: ptp4l PTPv2 grandmaster (B2/B3 only)"),
+        "khaen-ptp4l-master.service".into(),
+        MockUnit::inactive("khaen-audio: ptp4l PTPv2 grandmaster (B2/B3 only)"),
     );
     m.insert(
-        "tspi-phc2sys.service".into(),
-        MockUnit::inactive("tspi-audio: phc2sys (NIC PHC sync)"),
+        "khaen-phc2sys.service".into(),
+        MockUnit::inactive("khaen-audio: phc2sys (NIC PHC sync)"),
     );
     m.insert(
-        "tspi-statime-inferno.service".into(),
-        MockUnit::inactive("tspi-audio: Statime PTPv1 follower (Inferno/Dante)"),
+        "khaen-statime-inferno.service".into(),
+        MockUnit::inactive("khaen-audio: Statime PTPv1 follower (Inferno/Dante)"),
     );
     m.insert(
-        "tspi-aes67-daemon.service".into(),
-        MockUnit::inactive("tspi-audio: AES67 Linux daemon (PTPv2 slave)"),
+        "khaen-aes67-daemon.service".into(),
+        MockUnit::inactive("khaen-audio: AES67 Linux daemon (PTPv2 slave)"),
     );
     m.insert(
-        "tspi-ravenna-lkm.service".into(),
-        MockUnit::inactive("tspi-audio: MergingRavennaALSA kernel module"),
+        "khaen-ravenna-lkm.service".into(),
+        MockUnit::inactive("khaen-audio: MergingRavennaALSA kernel module"),
     );
     m
 }
@@ -307,59 +307,59 @@ fn default_logs() -> HashMap<String, String> {
     let mut m = HashMap::new();
     m.insert(
         "camilladsp.service".into(),
-        "2026-11-15T09:00:01+08:00 tspi camilladsp[512]: CamillaDSP version 4.1.3
-2026-11-15T09:00:01+08:00 tspi camilladsp[512]: Read config file '/etc/camilladsp/config.yml'
-2026-11-15T09:00:02+08:00 tspi camilladsp[512]: Capture device: Alsa hw:Loopback,1,0
-2026-11-15T09:00:02+08:00 tspi camilladsp[512]: Playback device: Alsa hw:MOTU,0,0
-2026-11-15T09:00:02+08:00 tspi camilladsp[512]: Processing started, state Running
-2026-11-15T09:03:11+08:00 tspi camilladsp[512]: ALSA playback buffer underrun (xrun), recovering
-2026-11-15T09:05:40+08:00 tspi camilladsp[512]: signal range 1.91, state Running"
+        "2026-11-15T09:00:01+08:00 khaen camilladsp[512]: CamillaDSP version 4.1.3
+2026-11-15T09:00:01+08:00 khaen camilladsp[512]: Read config file '/etc/camilladsp/config.yml'
+2026-11-15T09:00:02+08:00 khaen camilladsp[512]: Capture device: Alsa hw:Loopback,1,0
+2026-11-15T09:00:02+08:00 khaen camilladsp[512]: Playback device: Alsa hw:MOTU,0,0
+2026-11-15T09:00:02+08:00 khaen camilladsp[512]: Processing started, state Running
+2026-11-15T09:03:11+08:00 khaen camilladsp[512]: ALSA playback buffer underrun (xrun), recovering
+2026-11-15T09:05:40+08:00 khaen camilladsp[512]: signal range 1.91, state Running"
             .into(),
     );
     // F-04：旧 C 在板端的实际 unit 名；legacy web 默认 read-only 展示它（日志/状态样本保持一致）。
     m.insert(
-        "tspi-camilladsp.service".into(),
-        "2026-11-15T09:00:01+08:00 tspi camilladsp[512]: CamillaDSP version 4.1.3
-2026-11-15T09:00:01+08:00 tspi camilladsp[512]: Read config file '/etc/camilladsp/config.yml'
-2026-11-15T09:00:02+08:00 tspi camilladsp[512]: Capture device: Alsa hw:Loopback,1,0
-2026-11-15T09:00:02+08:00 tspi camilladsp[512]: Playback device: Alsa hw:MOTU,0,0
-2026-11-15T09:00:02+08:00 tspi camilladsp[512]: Processing started, state Running
-2026-11-15T09:03:11+08:00 tspi camilladsp[512]: ALSA playback buffer underrun (xrun), recovering
-2026-11-15T09:05:40+08:00 tspi camilladsp[512]: signal range 1.91, state Running"
+        "khaen-camilladsp.service".into(),
+        "2026-11-15T09:00:01+08:00 khaen camilladsp[512]: CamillaDSP version 4.1.3
+2026-11-15T09:00:01+08:00 khaen camilladsp[512]: Read config file '/etc/camilladsp/config.yml'
+2026-11-15T09:00:02+08:00 khaen camilladsp[512]: Capture device: Alsa hw:Loopback,1,0
+2026-11-15T09:00:02+08:00 khaen camilladsp[512]: Playback device: Alsa hw:MOTU,0,0
+2026-11-15T09:00:02+08:00 khaen camilladsp[512]: Processing started, state Running
+2026-11-15T09:03:11+08:00 khaen camilladsp[512]: ALSA playback buffer underrun (xrun), recovering
+2026-11-15T09:05:40+08:00 khaen camilladsp[512]: signal range 1.91, state Running"
             .into(),
     );
     m.insert(
         "ptp4l.service".into(),
-        "2026-11-15T09:00:00+08:00 tspi ptp4l[401]: selected /dev/ptp0 as PTP clock
-2026-11-15T09:00:00+08:00 tspi ptp4l[401]: port 1: INITIALIZING to LISTENING on INIT_COMPLETE
-2026-11-15T09:00:01+08:00 tspi ptp4l[401]: port 1: LISTENING to SLAVE on MASTER_CLOCK_SELECTED
-2026-11-15T09:00:01+08:00 tspi ptp4l[401]: master offset  -37 s2 freq +1234 path delay  512"
+        "2026-11-15T09:00:00+08:00 khaen ptp4l[401]: selected /dev/ptp0 as PTP clock
+2026-11-15T09:00:00+08:00 khaen ptp4l[401]: port 1: INITIALIZING to LISTENING on INIT_COMPLETE
+2026-11-15T09:00:01+08:00 khaen ptp4l[401]: port 1: LISTENING to SLAVE on MASTER_CLOCK_SELECTED
+2026-11-15T09:00:01+08:00 khaen ptp4l[401]: master offset  -37 s2 freq +1234 path delay  512"
             .into(),
     );
     m.insert(
         "phc2sys.service".into(),
-        "2026-11-15T09:00:01+08:00 tspi phc2sys[420]: CLOCK_REALTIME phc offset  -12 s2 freq  -512 delay  502"
+        "2026-11-15T09:00:01+08:00 khaen phc2sys[420]: CLOCK_REALTIME phc offset  -12 s2 freq  -512 delay  502"
             .into(),
     );
     m.insert(
         "aes67-daemon.service".into(),
-        "2026-11-15T08:58:00+08:00 tspi systemd[1]: Starting AES67 daemon...
-2026-11-15T08:58:00+08:00 tspi aes67-daemon[700]: AES67 daemon starting, web UI on :8080
-2026-11-15T08:58:00+08:00 tspi systemd[1]: Started AES67 daemon."
+        "2026-11-15T08:58:00+08:00 khaen systemd[1]: Starting AES67 daemon...
+2026-11-15T08:58:00+08:00 khaen aes67-daemon[700]: AES67 daemon starting, web UI on :8080
+2026-11-15T08:58:00+08:00 khaen systemd[1]: Started AES67 daemon."
             .into(),
     );
     m.insert(
         "inferno.service".into(),
-        "2026-11-15T08:57:00+08:00 tspi systemd[1]: Starting Inferno (Dante/AoIP)...
-2026-11-15T08:57:01+08:00 tspi inferno_aoip[720]: device ID 00000a00020f0001, process ID 1
-2026-11-15T08:57:01+08:00 tspi systemd[1]: Started Inferno (Dante/AoIP)."
+        "2026-11-15T08:57:00+08:00 khaen systemd[1]: Starting Inferno (Dante/AoIP)...
+2026-11-15T08:57:01+08:00 khaen inferno_aoip[720]: device ID 00000a00020f0001, process ID 1
+2026-11-15T08:57:01+08:00 khaen systemd[1]: Started Inferno (Dante/AoIP)."
             .into(),
     );
     m.insert(
         "statime.service".into(),
-        "2026-11-15T08:57:00+08:00 tspi systemd[1]: Starting Statime (PTPv1)...
-2026-11-15T08:57:01+08:00 tspi statime[710]: configured domain 0, slave only
-2026-11-15T08:57:02+08:00 tspi statime[710]: clock synchronized, offset 42ns"
+        "2026-11-15T08:57:00+08:00 khaen systemd[1]: Starting Statime (PTPv1)...
+2026-11-15T08:57:01+08:00 khaen statime[710]: configured domain 0, slave only
+2026-11-15T08:57:02+08:00 khaen statime[710]: clock synchronized, offset 42ns"
             .into(),
     );
     m
@@ -395,7 +395,7 @@ impl MockServiceManager {
         }
     }
 
-    /// 从 TSPI_MOCK_FAIL_START / TSPI_MOCK_FAIL_RESTART 注入失败（演示回滚路径用）。
+    /// 从 KHAEN_MOCK_FAIL_START / KHAEN_MOCK_FAIL_RESTART 注入失败（演示回滚路径用）。
     pub fn from_env() -> Self {
         let split = |name: &str| -> Vec<String> {
             std::env::var(name)
@@ -409,9 +409,9 @@ impl MockServiceManager {
                 .unwrap_or_default()
         };
         Self::with_failures(
-            split("TSPI_MOCK_FAIL_START"),
-            split("TSPI_MOCK_FAIL_STOP"),
-            split("TSPI_MOCK_FAIL_RESTART"),
+            split("KHAEN_MOCK_FAIL_START"),
+            split("KHAEN_MOCK_FAIL_STOP"),
+            split("KHAEN_MOCK_FAIL_RESTART"),
         )
     }
 

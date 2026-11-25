@@ -1,0 +1,71 @@
+# T28/T155 —— khaen-rt-host.service（T155 生产 CLI 已 WIRED；真实 ALSA/播放仍 NOT_WIRED）
+#
+# 状态（2026-11-18 F3/F4 修复）：
+#   * F3：加 RuntimeDirectory/LogsDirectory=khaen-rt-stack。ProtectSystem=strict 下
+#     ReadWritePaths=/run/khaen-rt-stack 要求目录在 mount namespace 建立时已存在；单位没有创建者时
+#     host 启动即崩（板端 2026-11-18 实测：Failed to set up mount namespacing ... No such file or directory）。
+#   * F4：DeviceAllow 由 /dev/snd/* rw 改为 char-alsa rw。systemd 252 + cgroup v2 下设备白名单按
+#     设备节点路径匹配，/dev/snd/* 通配不生效（板端实测 controlC4/pcmC4D0{c,p}/timer 全 EPERM）；
+#     char-alsa 是 ALSA 节点组，保持「只放行 ALSA 设备」的原意。
+#
+# 状态（2026-11-17）：
+#   * T155 已构建 aarch64 gnu bin，并接线 run --config rt-host.toml（建图/fake ALSA owner 契约/
+#     4 worker DAG/T45 调度计划/T20 swap/T21 fault/优雅退出；真实 ALSA 播放 NOT_WIRED）。
+#   * /etc/khaen-rt-stack/rt-host.toml 由 deploy/bin/04-install-release.sh 从模板安装（不覆盖既有，T28-P0-2）；
+#     缺失时本 unit 会启动即退，01-preflight 与 06-verify 均把它当硬门。
+#   * 静音兜底：90-safe-mute.conf + /etc/khaen-rt-stack/90-safe-mute.env 写 KHAEN_HOST_SAFE_MODE=mute
+#     （EnvironmentFile 覆盖 rt-host.env 的 normal，见 drop-in 注释）。
+#   * 不得在 T71 授权窗口之前 install/start。
+#
+# 设计约束：唯一 ALSA/设备 owner；唯一 clock servo owner；单块失败只允许 last-good/mute，不启动旧 C。
+[Unit]
+Description=KHAEN RT-first DSP host (own engine; single ALSA owner)
+Documentation=file:///opt/khaen-rt-stack/current/README.deploy.md
+After=network-online.target khaen-irq-affinity.service
+Wants=network-online.target
+# task-192/T71：T45 admission 依赖 IRQ 必须已迁到 A53 且不落在 DSP_CPUS={4,5,6,7}；
+# Requires+After 保证钉核 oneshot（khaen-irq-affinity.service）先成功、再启动 host（失败则 host 不启动）。
+Requires=khaen-irq-affinity.service
+PartOf=khaen-rt-stack.target
+# 旧 C/旧编排入口未清理时拒绝启动（防止在未退役的板子上误拉起新栈造成双音频 owner）
+ConditionPathExists=!/run/khaen/camilladsp.yml
+ConditionPathExists=!/etc/khaen/last-mode
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/khaen-rt-stack/rt-host.env
+Environment=KHAEN_HOST_CONFIG=/etc/khaen-rt-stack/rt-host.toml
+ExecStart=/opt/khaen-rt-stack/current/bin/khaen-rt-host run --config ${KHAEN_HOST_CONFIG}
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=60
+TimeoutStopSec=20
+KillSignal=SIGTERM
+SendSIGKILL=yes
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+Nice=-10
+CapabilityBoundingSet=CAP_SYS_NICE CAP_IPC_LOCK CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_SYS_NICE CAP_IPC_LOCK
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=no
+# F3（2026-11-18）：/run 与 /var/log 目录必须由 systemd 在 namespace 建立前创建（ReadWritePaths 硬要求）。
+RuntimeDirectory=khaen-rt-stack
+RuntimeDirectoryMode=0755
+LogsDirectory=khaen-rt-stack
+LogsDirectoryMode=0755
+ReadWritePaths=/run/khaen-rt-stack /var/lib/khaen-rt-stack /var/log/khaen-rt-stack
+# F4（2026-11-18）：char-alsa = ALSA 设备组（controlC*/pcmC*/timer），勿改回 /dev/snd/* 通配
+# （systemd 252 + cgroup v2 下不生效，实测所有 ALSA 节点 EPERM）。
+DeviceAllow=char-alsa rw
+ProtectClock=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=khaen-rt-stack.target

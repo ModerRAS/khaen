@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环：分析（前后瀑布/RT/FR/MIMO/holdout + 问题定位 + 报告）。
+"""KHAEN 校准批量闭环：分析（前后瀑布/RT/FR/MIMO/holdout + 问题定位 + 报告）。
 
 诚实性边界：
 - 所有输出都是**观察量**；classification（IMPROVED/FLAT/WORSE/INSUFFICIENT）不是 PASS/FAIL，
@@ -19,7 +19,7 @@ from . import config as cfgmod
 from . import dsp
 from . import measure
 
-ANALYSIS_SCHEMA = "tspi-cal-batch-analysis/v1"
+ANALYSIS_SCHEMA = "khaen-cal-batch-analysis/v1"
 BT = chr(96)
 
 # 观察阈值（不是验收门；见 docs/METRICS-THRESHOLDS.md，变更需升版并标注）
@@ -584,7 +584,7 @@ class Analysis:
                 outputs.append({"path": os.path.relpath(p, self.outdir).replace("\\", "/"),
                                 "sha256": _sha(p), "bytes": os.path.getsize(p)})
         manifest = {
-            "schema": "tspi-cal-batch-manifest/v1",
+            "schema": "khaen-cal-batch-manifest/v1",
             "created_at": plan_now(),
             "workdir": self.workdir,
             "outdir": self.outdir,
@@ -593,9 +593,9 @@ class Analysis:
             "inputs": inputs,
             "outputs": outputs,
             "commands": {
-                "plan": "tspi_cal_batch.py plan --config <cfg> --round %s --out <plan_dir>" % self.plan["round"],
-                "run": "tspi_cal_batch.py run --plan <plan_dir>/plan.json --transport <cmd|fake> --work %s" % self.workdir,
-                "analyze": "tspi_cal_batch.py analyze --work %s --out %s" % (self.workdir, self.outdir),
+                "plan": "khaen_cal_batch.py plan --config <cfg> --round %s --out <plan_dir>" % self.plan["round"],
+                "run": "khaen_cal_batch.py run --plan <plan_dir>/plan.json --transport <cmd|fake> --work %s" % self.workdir,
+                "analyze": "khaen_cal_batch.py analyze --work %s --out %s" % (self.workdir, self.outdir),
             },
             "not_run": self.plan.get("not_run", []),
             "verdict_summary": comparison.get("verdict", {}).get("classification"),

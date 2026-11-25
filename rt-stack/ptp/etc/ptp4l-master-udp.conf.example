@@ -1,11 +1,11 @@
-# /etc/tspi-ptp/ptp4l-master.conf -- TSPI PTPv2 grandmaster, UDP/IPv4 profile (default).
+# /etc/khaen-ptp/ptp4l-master.conf -- KHAEN PTPv2 grandmaster, UDP/IPv4 profile (default).
 # Basis: AES67 interop profile (IEEE 1588-2008 default profile, TAI timescale, E2E delay).
 #   domain 0, announce 1/s, sync 4/s (logSyncInterval -2), delay req 1/s, DSCP 46, UDP TTL 16.
 # linuxptp config parser has no inline-comment support: keep every comment on its own line.
 # The interface is selected by the wrapper with "-i <iface>" (do NOT add [ethX] sections).
-# CLI options from tspi-ptp-master-start override the timestamping mode (hardware/software).
+# CLI options from khaen-ptp-master-start override the timestamping mode (hardware/software).
 #
-# Check: pmc -s /run/tspi-ptp/ptp4l.uds -u -b 0 'GET PORT_DATA_SET'
+# Check: pmc -s /run/khaen-ptp/ptp4l.uds -u -b 0 'GET PORT_DATA_SET'
 # Live check of the PHC:   phc_ctl /dev/ptp0 get   (should be ~37 s ahead of UTC system time)
 
 [global]
@@ -36,4 +36,4 @@ socket_priority             0
 tx_timestamp_timeout        10
 free_running                0
 kernel_leap                 1
-uds_address                 /run/tspi-ptp/ptp4l.uds
+uds_address                 /run/khaen-ptp/ptp4l.uds

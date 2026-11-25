@@ -1,4 +1,4 @@
-# TSPI 兼容适配层：calibration / WS / roles / channel-map（T06 scaffold；leaf T13/T24/T25/T57）
+# KHAEN 兼容适配层：calibration / WS / roles / channel-map（T06 scaffold；leaf T13/T24/T25/T57）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-compat"

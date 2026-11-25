@@ -104,7 +104,7 @@ fi
 log "bundle PASS：$(printf '%s' "$out" | tr '\n' ' ')"
 
 # ---- 2 staging -----------------------------------------------------------------------
-STAGE="$(mktemp -d "${TMPDIR:-/tmp}/tspi-deploy-package-XXXXXX")" || die "mktemp 失败" 7
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/khaen-deploy-package-XXXXXX")" || die "mktemp 失败" 7
 cleanup() { [ "$KEEP_STAGE" = "1" ] || rm -rf "$STAGE"; }
 trap cleanup EXIT
 mkdir -p "$STAGE/deploy" "$STAGE/service" "$STAGE/release-bundle" || die "创建 staging 失败: $STAGE" 7
@@ -140,7 +140,7 @@ log "包后校验 PASS：归档 exec 位（${#EXEC_PATTERNS[@]} 组 glob）+ SHA
 # ---- 5 Linux 解包再校验（sha256sum -c + test -x；Windows 只做归档模式断言） ----------
 EXTRACT_CHECK=0
 [ "$(uname -s 2>/dev/null || printf unknown)" = "Linux" ] && EXTRACT_CHECK=1
-[ "${TSPI_PKG_EXTRACT_CHECK:-0}" = "1" ] && EXTRACT_CHECK=1
+[ "${KHAEN_PKG_EXTRACT_CHECK:-0}" = "1" ] && EXTRACT_CHECK=1
 if [ "$EXTRACT_CHECK" = "1" ]; then
   XDIR="$STAGE.extract"
   rm -rf "$XDIR"; mkdir -p "$XDIR"

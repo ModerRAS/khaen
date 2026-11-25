@@ -105,7 +105,7 @@ fn not_implemented(kind: &str, owner: &str) -> ExitCode {
 
 fn print_help() {
     println!(
-        "rt-check {} — TSPI 离线契约检查（WBS T06 scaffold）",
+        "rt-check {} — KHAEN 离线契约检查（WBS T06 scaffold）",
         TOOL_VERSION
     );
     println!("用法:");

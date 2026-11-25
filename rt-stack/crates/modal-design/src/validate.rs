@@ -2,7 +2,7 @@
 //!
 //! ## 权威契约（只读输入，禁止在本文件改写）
 //!
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T53：设计内与未见 holdout 分开，独立 raw/IR
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T53：设计内与未见 holdout 分开，独立 raw/IR
 //!   预测校验工具与 T20 质量窗；门 3 dB/15% 预声明，不能替代后续实际复测。
 //! - scratch/lead/planner/DSP-HOST-DECISION.md §2.7/§2.8：应用后复测是 P1 必需；holdout 从未用于
 //!   调参；有效集 63–250 Hz 逐点/最差/每输入误差改善 ≥3 dB、有效 T20 下降 ≥15% 是**工程起始门**
@@ -136,13 +136,13 @@ use crate::timebase::ComplexPoint;
 // ===========================================================================
 
 /// 校验输入声明 schema（本文件输入契约；不是实测报告）。
-pub const VALIDATE_SCHEMA: &str = "tspi-modal-holdout/v1";
+pub const VALIDATE_SCHEMA: &str = "khaen-modal-holdout/v1";
 /// 校验报告 schema。
-pub const VALIDATE_REPORT_SCHEMA: &str = "tspi-modal-holdout-report/v1";
+pub const VALIDATE_REPORT_SCHEMA: &str = "khaen-modal-holdout-report/v1";
 /// 报告 hash domain（与 target/solve/regularize 域分离）。
-pub const VALIDATE_HASH_DOMAIN: &str = "tspi-modal-holdout/v1";
+pub const VALIDATE_HASH_DOMAIN: &str = "khaen-modal-holdout/v1";
 /// holdout label 清单 hash domain。
-pub const HOLDOUT_LABELS_HASH_DOMAIN: &str = "tspi-modal-holdout-labels/v1";
+pub const HOLDOUT_LABELS_HASH_DOMAIN: &str = "khaen-modal-holdout-labels/v1";
 
 /// 本文件固定 claim（诚实边界；测试逐字核验）。
 pub const VALIDATE_CLAIM: &str = "design-side predicted validation only; holdout data never used for tuning; not applied, not measured, not a substitute for post-apply real remeasurement; 3 dB / 15% are pre-declared engineering starting gates, not physical guarantees; missing noise/IR/holdout evidence yields INCOMPLETE or NOT_RUN";
@@ -3218,7 +3218,7 @@ pub fn validate_holdout(
 }
 
 fn solution_hash_hint(solution: &ModalMatrix) -> Option<String> {
-    let mut text = String::from("tspi-modal-holdout-solution-hint/v1\n");
+    let mut text = String::from("khaen-modal-holdout-solution-hint/v1\n");
     let _ = writeln!(text, "roles={}", solution.roles().join(","));
     let _ = writeln!(text, "grid_points={}", solution.grid_hz().len());
     for cell in solution.cells() {

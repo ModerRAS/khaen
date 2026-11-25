@@ -68,7 +68,7 @@ fn t70_write(dir: &Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
-/// 与旧工具同形的 analysis JSON（schema tspi-channel-measurement/v1；64 点 1/12 oct，
+/// 与旧工具同形的 analysis JSON（schema khaen-channel-measurement/v1；64 点 1/12 oct，
 /// 20..20000 Hz 全带，0 dB 幅度 + 线性相位；用于接通 measured 输入，不是真实测量）。
 fn t70_analysis_json(channel: u64, sr: u32, delay: f64) -> String {
     let mut fr = String::new();
@@ -89,7 +89,7 @@ fn t70_analysis_json(channel: u64, sr: u32, delay: f64) -> String {
         index += 1;
     }
     format!(
-        "{{\"schema\":\"tspi-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay:.6},\"snr_band_db\":18.0,\"polarity_confidence\":\"high\",\"meta\":{{\"sample_rate\":{sr},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
+        "{{\"schema\":\"khaen-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay:.6},\"snr_band_db\":18.0,\"polarity_confidence\":\"high\",\"meta\":{{\"sample_rate\":{sr},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
     )
 }
 
@@ -120,7 +120,7 @@ fn t70_spec_file(dir: &Path, layout: &str, crossover: Option<&str>) -> PathBuf {
         None => String::new(),
     };
     let body = format!(
-        "{{\n  \"schema\": \"tspi-cal-measured-design/v1\",\n  \"session_id\": \"t70-unit-test\",\n  \"layout\": \"{layout}\",\n  \"sample_rate_hz\": {T70_FS},\n  \"target\": \"flat\",\n  \"validation\": \"pilot_single_position_same_as_design_proxy\",\n  \"provenance\": \"t70_unit_test_fixture_only\",\n  \"design_position\": {{\n    \"label\": \"D1\",\n    \"mic_orientation\": \"90deg\",\n    \"channels\": [{}]\n  }},\n  \"dense_to_dac\": [0, 1, 2, 3, 7],\n  \"roles\": [{}],\n  \"container_channels\": 8,\n  \"unused_outputs\": [4, 5, 6],\n  \"compile\": {{\"block_size\": 128, \"n_in\": 5, \"container_channels\": 8, \"low_band_d\": 0, \"l_g\": 8, \"l_p\": 8}},\n  \"modal_artifact\": null,\n  \"fit_options\": {{\"low_band_trusted\": false}}{crossover_section}\n}}\n",
+        "{{\n  \"schema\": \"khaen-cal-measured-design/v1\",\n  \"session_id\": \"t70-unit-test\",\n  \"layout\": \"{layout}\",\n  \"sample_rate_hz\": {T70_FS},\n  \"target\": \"flat\",\n  \"validation\": \"pilot_single_position_same_as_design_proxy\",\n  \"provenance\": \"t70_unit_test_fixture_only\",\n  \"design_position\": {{\n    \"label\": \"D1\",\n    \"mic_orientation\": \"90deg\",\n    \"channels\": [{}]\n  }},\n  \"dense_to_dac\": [0, 1, 2, 3, 7],\n  \"roles\": [{}],\n  \"container_channels\": 8,\n  \"unused_outputs\": [4, 5, 6],\n  \"compile\": {{\"block_size\": 128, \"n_in\": 5, \"container_channels\": 8, \"low_band_d\": 0, \"l_g\": 8, \"l_p\": 8}},\n  \"modal_artifact\": null,\n  \"fit_options\": {{\"low_band_trusted\": false}}{crossover_section}\n}}\n",
         channels.join(","),
         roles.join(",")
     );

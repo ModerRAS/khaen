@@ -51,6 +51,6 @@ mod apodizing_tests {
 
 ## 明确未覆盖（NOT_RUN）
 
-- 不生成 WAV/manifest（tspi-fir/v1 与 20/20k Endpoint 落盘归 T55）；
+- 不生成 WAV/manifest（khaen-fir/v1 与 20/20k Endpoint 落盘归 T55）；
 - 不做 target 文件导入（T11）、不做 P/G 融合/运行准入（T12/T56）、不做 RT/板端；
 - 未与 T55 报告器集成（接口已按 spec 提供）。

@@ -116,7 +116,7 @@ pub fn human_size(bytes: u64) -> String {
 pub fn test_tempdir() -> tempfile::TempDir {
     let base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     tempfile::Builder::new()
-        .prefix(".tspi-test-")
+        .prefix(".khaen-test-")
         .tempdir_in(base)
         .expect("create test tempdir")
 }

@@ -48,7 +48,7 @@
 use core::fmt;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-pub use khaen_core::abi::TspiEventV1;
+pub use khaen_core::abi::KhaenEventV1;
 pub use khaen_core::events::{
     EV_ACK_SLOT_EXHAUSTED, EV_FALLBACK_ENTER, EV_FALLBACK_EXIT, EV_FAULT, EV_QUARANTINE_ENTER,
     EV_QUARANTINE_EXHAUSTED, EV_QUARANTINE_RELEASE, EV_SAFETY_MUTE_ENTER, EV_SAFETY_MUTE_EXIT,
@@ -62,7 +62,7 @@ pub use khaen_core::rt::{
     MAX_OUTPUT_CHANNELS, QUARANTINE_SLOTS, RT_WORKERS, RT_WORKERS_FALLBACK, SAMPLE_RATES_HZ,
     WATCHDOG_PERIOD_MS, WATCHDOG_STALE_BLOCKS,
 };
-use khaen_core::workers::{ack_mask, TspiRtControlV1, RT_E_ACK_SLOT_EXHAUSTED};
+use khaen_core::workers::{ack_mask, KhaenRtControlV1, RT_E_ACK_SLOT_EXHAUSTED};
 
 use crate::admission::{AdmissionEnv, AdmissionReport, MemoryPlan, PLAN_HEADER_BYTES};
 
@@ -303,7 +303,7 @@ pub struct EventRingLane {
     /// 丢事件计数。
     pub dropped: AtomicU64,
     /// 固定槽（RT 只做按值拷贝）。
-    pub slots: [TspiEventV1; EVENT_LANE_SLOTS],
+    pub slots: [KhaenEventV1; EVENT_LANE_SLOTS],
 }
 
 impl EventRingLane {
@@ -315,7 +315,7 @@ impl EventRingLane {
             write_seq: AtomicU64::new(0),
             read_seq: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
-            slots: [TspiEventV1::ZERO; EVENT_LANE_SLOTS],
+            slots: [KhaenEventV1::ZERO; EVENT_LANE_SLOTS],
         }
     }
 
@@ -334,7 +334,7 @@ impl EventRingLane {
     /// [RT/IO/WD] 写入一条事件（§8.3 配方：满则 dropped++ 并丢弃；先写记录后 Release 发布序号）。
     ///
     /// 返回 false 表示丢弃（满）。单写者：本方法独占 &mut self。
-    pub fn push(&mut self, event: &TspiEventV1) -> bool {
+    pub fn push(&mut self, event: &KhaenEventV1) -> bool {
         let seq = self.write_seq.load(Ordering::Relaxed);
         let read = self.read_seq.load(Ordering::Acquire);
         if seq.wrapping_sub(read) >= EVENT_LANE_SLOTS as u64 {
@@ -342,7 +342,7 @@ impl EventRingLane {
             return false;
         }
         let index = (seq as usize) % EVENT_LANE_SLOTS;
-        let record = TspiEventV1 {
+        let record = KhaenEventV1 {
             seq,
             lane: self.lane,
             ..*event
@@ -359,7 +359,7 @@ impl EventRingLane {
     }
 
     /// [NONRT] 读一条事件（Acquire 读 write_seq、Release 推进 read_seq；未读槽不会被写者复用）。
-    pub fn try_pop(&self) -> Option<TspiEventV1> {
+    pub fn try_pop(&self) -> Option<KhaenEventV1> {
         let write = self.write_seq.load(Ordering::Acquire);
         let read = self.read_seq.load(Ordering::Relaxed);
         if write.wrapping_sub(read) == 0 {
@@ -407,7 +407,7 @@ impl EventLanes {
     }
 
     /// [RT/IO/WD] 写一条事件到其 event.lane；返回 false=丢弃（lane 满/编号非法）。
-    pub fn push(&mut self, event: &TspiEventV1) -> bool {
+    pub fn push(&mut self, event: &KhaenEventV1) -> bool {
         match self.lane_mut(event.lane) {
             Some(lane) => lane.push(event),
             None => false,
@@ -443,7 +443,7 @@ impl<'a> EventLaneReader<'a> {
     }
 
     /// 读一条事件。
-    pub fn next(&self) -> Option<TspiEventV1> {
+    pub fn next(&self) -> Option<KhaenEventV1> {
         self.lane.try_pop()
     }
 
@@ -462,8 +462,8 @@ fn make_event(
     block_seq: u64,
     value_a: u32,
     value_b: u32,
-) -> TspiEventV1 {
-    let mut event = TspiEventV1::ZERO;
+) -> KhaenEventV1 {
+    let mut event = KhaenEventV1::ZERO;
     event.lane = lane;
     event.kind = kind;
     event.severity = severity;
@@ -1575,7 +1575,7 @@ impl Default for WatchdogConfig {
 
 /// watchdog 一次采样的观测输入（POD；由 T26 watchdog 线程从原子字段装配，安全）。
 ///
-/// 字段与 §11.13 TspiSwapAckV1/TspiWorkerStatsV1 对齐：expected_workers/ack_mask（all-ack 用
+/// 字段与 §11.13 KhaenSwapAckV1/KhaenWorkerStatsV1 对齐：expected_workers/ack_mask（all-ack 用
 /// ACK_MASK(expected)，禁止硬写 0xF）、worker alive 位、DSP 核丢失位、设备状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WatchdogSample {
@@ -1585,7 +1585,7 @@ pub struct WatchdogSample {
     pub epoch_id: u64,
     /// expected workers（2/4；2 核是独立 profile）。
     pub expected_workers: u8,
-    /// swap ack 位图（§11.13 TspiSwapAckV1.ack_mask）。
+    /// swap ack 位图（§11.13 KhaenSwapAckV1.ack_mask）。
     pub swap_ack_mask: u32,
     /// worker alive 位图（bit k = worker k 活着）。
     pub worker_alive_mask: u32,
@@ -1760,7 +1760,7 @@ impl Watchdog {
     }
 
     /// 内部：置位 mute（只升级，不覆盖 fault）。
-    fn latch_mute(&mut self, ctl: &TspiRtControlV1, reason: RtStatus) -> WatchdogAction {
+    fn latch_mute(&mut self, ctl: &KhaenRtControlV1, reason: RtStatus) -> WatchdogAction {
         if self.latched == 0 {
             self.latched = 1;
             self.latched_reason = reason.0;
@@ -1772,7 +1772,7 @@ impl Watchdog {
     }
 
     /// 内部：置位 fault（不可恢复；fetch_max 只升级）。
-    fn latch_fault(&mut self, ctl: &TspiRtControlV1, reason: RtStatus) -> WatchdogAction {
+    fn latch_fault(&mut self, ctl: &KhaenRtControlV1, reason: RtStatus) -> WatchdogAction {
         self.latched = 2;
         self.latched_reason = reason.0;
         let _ = ctl.safety_request.fetch_max(2, Ordering::Release);
@@ -1783,7 +1783,7 @@ impl Watchdog {
     /// [WD] 每 10 ms 采样一次 heartbeat/epoch（T06 scaffold 冻结签名保持）。
     ///
     /// 只置位安全请求，不做迁移/恢复；latch 后恒返回同一动作（不自动清除）。
-    pub fn observe(&mut self, ctl: &TspiRtControlV1) -> WatchdogAction {
+    pub fn observe(&mut self, ctl: &KhaenRtControlV1) -> WatchdogAction {
         if self.latched != 0 {
             return self.last_action;
         }
@@ -1803,7 +1803,7 @@ impl Watchdog {
     pub fn observe_sample(
         &mut self,
         sample: &WatchdogSample,
-        ctl: &TspiRtControlV1,
+        ctl: &KhaenRtControlV1,
     ) -> WatchdogAction {
         let validation = sample.validate();
         if !validation.is_ok() {
@@ -1850,7 +1850,7 @@ impl Watchdog {
     }
 
     /// [WD] 设备丢失单点（T17 状态机直接上报）。
-    pub fn observe_device_lost(&mut self, ctl: &TspiRtControlV1) -> WatchdogAction {
+    pub fn observe_device_lost(&mut self, ctl: &KhaenRtControlV1) -> WatchdogAction {
         if self.latched != 0 {
             return self.last_action;
         }
@@ -2381,7 +2381,7 @@ impl SafetyState {
     /// control 写；0 时按 406/403 兜底）。本方法必须在 control 线程调用。
     pub fn service_control_request(
         &mut self,
-        ctl: &TspiRtControlV1,
+        ctl: &KhaenRtControlV1,
         epoch_id: u64,
         plan_version: PlanVersion,
         context: SafetyContext,
@@ -2943,7 +2943,7 @@ impl FaultSupervisor {
     /// [NONRT control] 消费 ctl.safety_request（watchdog/master 置位，§11.13）。
     pub fn service_control_request(
         &mut self,
-        ctl: &TspiRtControlV1,
+        ctl: &KhaenRtControlV1,
         epoch_id: u64,
         plan_version: PlanVersion,
     ) -> RtStatus {
@@ -2971,7 +2971,7 @@ impl FaultSupervisor {
     // ---- [NONRT] 事件导出 / 指标导出 ---------------------------------------
 
     /// [NONRT] 按 lane 顺序排空最多 out.len() 条事件；返回实际条数。
-    pub fn drain_events(&self, out: &mut [TspiEventV1]) -> usize {
+    pub fn drain_events(&self, out: &mut [KhaenEventV1]) -> usize {
         let mut written = 0usize;
         let mut lane = 0u8;
         while lane < EVENT_LANES as u8 && written < out.len() {

@@ -1,7 +1,7 @@
 # sweep-analysis —— 扫频回放分析链（task-229 时基/距离口径修复版）
 
 本目录是从 rt-stack/evidence/board-window-20261118-sweep/scripts 的旧分析脚本派生的**修复版**，
-用于重生成 artifacts/tspi-audio/sweep-verification-20261118。旧脚本原样保留在交付目录
+用于重生成 artifacts/khaen-audio/sweep-verification-20261118。旧脚本原样保留在交付目录
 SUPERSEDED/old-scripts/（不作为可复跑入口）。
 
 ## 文件
@@ -37,7 +37,7 @@ SUPERSEDED/old-scripts/（不作为可复跑入口）。
     # 注意：source!=none 但缺 --t0-sample 时脚本直接报错，不降级输出距离。
 
     # 重生成交付产物 + 旧产物快照 + SHA256SUMS（会覆盖 artifacts/.../analysis 与 README 不改）
-    python rt-stack/tools/sweep-analysis/regenerate_artifacts.py --repo-root projects/tspi-audio-dsp
+    python rt-stack/tools/sweep-analysis/regenerate_artifacts.py --repo-root projects/khaen-audio-dsp
 
 ## 证据
 

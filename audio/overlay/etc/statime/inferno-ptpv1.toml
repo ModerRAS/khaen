@@ -1,5 +1,5 @@
 # /etc/statime/inferno-ptpv1.toml — teodly/statime fork（PTPv1 slave）模板
-# tspi-mode 会把 __IFACE__ 渲染为 /run/tspi/statime.toml 后启动；改动本文件即可持久化。
+# khaen-mode 会把 __IFACE__ 渲染为 /run/khaen/statime.toml 后启动；改动本文件即可持久化。
 # 依据：上游 inferno-ptpv1.toml + statime-linux config（kebab-case；deny_unknown_fields）。
 
 loglevel = "info"              # trace 用于排障（量大）
@@ -22,8 +22,8 @@ network-mode = "ipv4"          # 也可 ethernet
 hardware-clock = "auto"        # RK3576 GMAC 有 PHC 时自动用硬件时间戳
 protocol-version = "PTPv1"
 
-# 观测 socket：tspi-ptp-status / tspi-mode status 读这里的 JSON（含 current_ds.offset_from_master）
+# 观测 socket：khaen-ptp-status / khaen-mode status 读这里的 JSON（含 current_ds.offset_from_master）
 [observability]
-observation-path = "/run/tspi/statime-observe.sock"
+observation-path = "/run/khaen/statime-observe.sock"
 observation-permissions = 438   # 0o666 的十进制；root 写，web-manager 可读
 metrics-exporter-listen = "127.0.0.1:9975"

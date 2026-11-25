@@ -171,8 +171,8 @@ impl Mimo12kLayout {
         // T08 UPOLS：每低速率块 = M 次输入 FFT + 每路由 Q 个分区 * K 个复数 bin 的频域 MAC
         // + M 次 IFFT；复数 MAC = 4 乘 + 4 加 = 8 flops。
         let complex_macs = routes * parts * fft;
-        let conv_flops_per_block = (complex_macs * 8) as f64
-            + 2.0 * m as f64 * (fft as f64) * (fft as f64).log2() * 5.0;
+        let conv_flops_per_block =
+            (complex_macs * 8) as f64 + 2.0 * m as f64 * (fft as f64) * (fft as f64).log2() * 5.0;
         let low_blocks_per_sec = fs12 / low_block as f64;
         let conv_flops_per_sec = conv_flops_per_block * low_blocks_per_sec;
         let decim_macs_per_sec = m as f64 * resamp as f64 * fs12;
@@ -443,7 +443,8 @@ impl Mimo12kRuntime {
                 *out = acc;
             }
             // 滚动更新历史：new_hist = last hist_len of (old_hist ++ x)
-            let scratch = &mut self.decim_scratch[ch * (hist_len + block48)..(ch + 1) * (hist_len + block48)];
+            let scratch =
+                &mut self.decim_scratch[ch * (hist_len + block48)..(ch + 1) * (hist_len + block48)];
             scratch[..hist_len].copy_from_slice(hist);
             scratch[hist_len..].copy_from_slice(x);
             let start = hist_len + block48 - hist_len;
@@ -492,7 +493,8 @@ impl Mimo12kRuntime {
                 *sample = acc;
             }
             // 滚动更新插值历史：new_hist = last ihl of (old_hist ++ z)
-            let scratch = &mut self.interp_scratch[ch * (ihl + low_block)..(ch + 1) * (ihl + low_block)];
+            let scratch =
+                &mut self.interp_scratch[ch * (ihl + low_block)..(ch + 1) * (ihl + low_block)];
             scratch[..ihl].copy_from_slice(hist);
             scratch[ihl..].copy_from_slice(z);
             let start = ihl + low_block - ihl;
@@ -545,7 +547,8 @@ mod tests {
         assert_eq!(DIRECT_MAX_TAPS, 4096);
         assert_eq!(MIMO12K_MAX_TAPS, 24_000);
         for block in [64usize, 128] {
-            let layout = Mimo12kLayout::build(1, 24_000, block, 95, 120).expect("24000 点应能建布局");
+            let layout =
+                Mimo12kLayout::build(1, 24_000, block, 95, 120).expect("24000 点应能建布局");
             assert_eq!(layout.delay48(), 574, "块长 {block}");
             assert_eq!(layout.taps, 24_000);
         }

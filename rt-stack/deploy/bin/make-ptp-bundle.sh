@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# TSPI PTPv2 grandmaster add-on bundle packer (aarch64).
+# KHAEN PTPv2 grandmaster add-on bundle packer (aarch64).
 #
 # Packs the pinned linuxptp binaries + the PTP units/config/wrappers from rt-stack/ptp/ into a
 # release bundle that sits next to deploy/aarch64-20261122/ (base rt-stack release):
 #   <out>/bin/{ptp4l,phc2sys,pmc,phc_ctl}
 #   <out>/lib/{ptp-lib.sh,ptp-master-start,ptp-phc2sys-start}
-#   <out>/units/{tspi-ptp-master.service,tspi-ptp-phc2sys.service,tspi-ptp.target}
+#   <out>/units/{khaen-ptp-master.service,khaen-ptp-phc2sys.service,khaen-ptp.target}
 #   <out>/etc/{ptp-master.env.example,ptp4l-master-udp.conf.example,ptp4l-master-l2.conf.example}
 #   <out>/README.deploy.md, <out>/INSTALL-ROLLBACK.md, <out>/manifest.json, <out>/SHA256SUMS
 #   optional --tgz FILE (explicit member modes via lib/release_tar.py)
@@ -81,7 +81,7 @@ done
 install -m 0644 "$PTP_ROOT/INSTALL-ROLLBACK.md" "$OUT/INSTALL-ROLLBACK.md" || die "复制 INSTALL-ROLLBACK.md 失败" 7
 
 cat > "$OUT/README.deploy.md" <<MD
-# TSPI PTPv2 grandmaster add-on bundle (${RELEASE_ID})
+# KHAEN PTPv2 grandmaster add-on bundle (${RELEASE_ID})
 
 > 由 deploy/bin/make-ptp-bundle.sh 生成；安装/验证/回滚见同目录 INSTALL-ROLLBACK.md 与
 > rt-stack/ptp/README.md、docs/BOARD-PTP-MASTER.md。板端 install/start = NOT_RUN。
@@ -120,7 +120,7 @@ for n in ('README.deploy.md', 'INSTALL-ROLLBACK.md'):
     fp = os.path.join(out, n)
     if os.path.isfile(fp):
         files.append({'path': n, 'size': os.path.getsize(fp), 'sha256': sha(fp), 'kind': 'doc'})
-m = {'schema': 'tspi-rt-stack/release/v1', 'release_id': rid,
+m = {'schema': 'khaen-rt-stack/release/v1', 'release_id': rid,
      'built_at': datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec='seconds'),
      'target': 'aarch64-unknown-linux-gnu', 'files': files}
 open(os.path.join(out, 'manifest.json'), 'w', encoding='utf-8').write(json.dumps(m, ensure_ascii=False, indent=1) + '\n')

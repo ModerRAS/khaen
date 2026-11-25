@@ -3,7 +3,7 @@
 //! Reads a plain-text design input (exported by prep/dryrun/export_t66_input.py),
 //! builds the T66 CompileApplyRequest (G path FIRs from the MIMO design + identity
 //! P rows with T65/T64-shaped evidence) and calls the real T66 compiler
-//! (khaen_calibration::compile_apply::compile_plan) used by tspi-cal run.
+//! (khaen_calibration::compile_apply::compile_plan) used by khaen-cal run.
 //! Writes plan.bin + compile-report.json manifest accepted by khaen-rt-host
 //! plan-arena (plan_sha256 / host_graph_sha256 binding).
 //!
@@ -271,7 +271,7 @@ fn main_entry() -> Result<(), String> {
 
     let mut manifest = String::new();
     let _ = writeln!(manifest, "{{");
-    let _ = writeln!(manifest, "  \"schema\": \"tspi-cal-compile-apply/v1\",");
+    let _ = writeln!(manifest, "  \"schema\": \"khaen-cal-compile-apply/v1\",");
     let _ = writeln!(manifest, "  \"tool\": {{\"name\":\"khaen-mimo-t66-pack\",\"version\":\"task232-1\"}},");
     let _ = writeln!(manifest, "  \"t66_compiler_invoked\": true,");
     let _ = writeln!(manifest, "  \"pilot_3mic\": true,");

@@ -122,7 +122,7 @@ def design_reference(h, outdir, max_gain_db=6.0, delay=4096, taps=8192,
     h_info = (h.get("info") or {}) if isinstance(h, dict) else {}
     synthetic = bool(h_info.get("synthetic", False)) or os.path.normpath(
         str(h_info.get("arm") or h_info.get("session") or "")).replace("\\", "/").find("/prep/dryrun/") >= 0
-    diag = {"schema": "tspi-mimo-reference-design/v2", "synthetic": synthetic,
+    diag = {"schema": "khaen-mimo-reference-design/v2", "synthetic": synthetic,
             "claim": ("pilot_3mic reference design from a REAL remeasure identity arm; "
                       "NOT production design_g.py; no holdout; not T6/T67/T68/T69 acceptance"
                       if not synthetic else

@@ -1,4 +1,4 @@
-//! [NONRT] TSPI RT-first DSP 离线性能工装 —— WBS T29/T46/T30（team task-156）。
+//! [NONRT] KHAEN RT-first DSP 离线性能工装 —— WBS T29/T46/T30（team task-156）。
 //!
 //! 目的：在占用板端窗口之前把性能门禁"工装化"：
 //! 1. 用已合入的 core kernel/DAG（T07 direct / T08 partitioned / T09 workers）在本机
@@ -14,7 +14,7 @@
 //! 不改任何 crate/manifest/lib.rs。x86 结果是本机参考，不是板端门。
 //!
 //! 线程/DAG 复刻说明：真实线程循环由 T26 host 组合 worker_begin_block/worker_phase_b*/ack；
-//! 本工装用同一批 [RT] phase 函数 + TspiBlockAckV1 phase 位图 + wait_phase_done 有界 spin
+//! 本工装用同一批 [RT] phase 函数 + KhaenBlockAckV1 phase 位图 + wait_phase_done 有界 spin
 //! 复刻 block 边界；master 测"发布 block_start -> 各 worker B1/B2/B3 all-ack"的块完成时间
 //! （含 partials 清零等块内串行准备）。共享 arena（state/partials/input/output）用 raw
 //! pointer 在 worker 间传递，与真实 host 的固定 arena 同义：phase 之间由 ack 位图同步，
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use khaen_core::abi::TspiBlockAckV1;
+use khaen_core::abi::KhaenBlockAckV1;
 use khaen_core::compile::FusionForm;
 use khaen_core::direct::{
     direct_block_f32, direct_state_zero_f32, DirectCoeffsF32, DirectLayout, DirectTopology,
@@ -48,7 +48,7 @@ use khaen_core::workers::{
     WorkerDagPlan, WorkerPartials, WORKER_ACK_FLAG_VALID,
 };
 
-const HARNESS_VERSION: &str = "tspi-perf-harness/1";
+const HARNESS_VERSION: &str = "khaen-perf-harness/1";
 const GATE_48K_128_NS: u64 = 1_333_333; // T_block(128) 的 50% 门（DECISION §4 / WBS T30）
 const GATE_48K_64_NS: u64 = 666_666; //  T_block(64) 的 50% 门
 const MAX_WORKERS: usize = 4;
@@ -339,7 +339,7 @@ impl<T> RawBuf<T> {
 }
 
 struct SharedCtl {
-    acks: Vec<TspiBlockAckV1>,
+    acks: Vec<KhaenBlockAckV1>,
     current_block: AtomicU64,
     done: AtomicU32,
     failed: AtomicU32,
@@ -499,7 +499,7 @@ fn run_dag_rep(
     let expected = workers as u32;
     let mut acks = Vec::with_capacity(total_blocks);
     for index in 0..total_blocks {
-        let mut ack = TspiBlockAckV1::new(index as u64, 1, 1, workers);
+        let mut ack = KhaenBlockAckV1::new(index as u64, 1, 1, workers);
         ack.flags = WORKER_ACK_FLAG_VALID;
         acks.push(ack);
     }
@@ -1235,7 +1235,7 @@ fn main() {
         .map(|v| v.get())
         .unwrap_or(0);
     println!(
-        "TSPI perf harness {HARNESS_VERSION} | board=false | out={:?} | blocks={} warmup={} reps={} | avail_parallelism={}",
+        "KHAEN perf harness {HARNESS_VERSION} | board=false | out={:?} | blocks={} warmup={} reps={} | avail_parallelism={}",
         cfg.out_dir, cfg.blocks, cfg.warmup, cfg.reps, parallelism
     );
     if cfg.reps < 2 {

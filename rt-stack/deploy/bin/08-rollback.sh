@@ -2,13 +2,13 @@
 # T28 08-rollback.sh —— 切换失败/运行失败时的安全恢复（**只允许自研 last-good 或 mute；绝不回旧 C**）
 #
 # 模式：
-#   --to-last-good（默认）  切回 /var/lib/tspi-rt-stack/last-good.json 记录的 release；校验失败/启动失败→mute
+#   --to-last-good（默认）  切回 /var/lib/khaen-rt-stack/last-good.json 记录的 release；校验失败/启动失败→mute
 #   --to-previous           用 last-good.previous 记录的更早 release（仍为自研），失败→mute
 #   --mute                  不切 release：安装 safe-mute drop-in 并启动 host（保护静音）
 #
 # P1 硬约束：last-good 的 c_policy 必须是 never-camilladsp；C 永不作为回退目标。
 # 硬约束：
-#   * 启动前断言旧 C 已退役（unit 未 enabled/active、无 camilladsp/tspi-upmix 进程）；若发现 C 可能复活→exit 6，不动它；
+#   * 启动前断言旧 C 已退役（unit 未 enabled/active、无 camilladsp/khaen-upmix 进程）；若发现 C 可能复活→exit 6，不动它；
 #   * 本脚本从不 stop/start/enable/disable 任何旧 C unit，也不改旧 C 配置；
 #   * 最终状态：0=回到 last-good；10=降级 mute（服务在、静音）；6=静音/停止（C 保持 masked，需人工）。
 #
@@ -21,7 +21,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="last-good"
 MUTE_FALLBACK=1
-TIMEOUT="${TSPI_TIMEOUT_SECS:-120}"
+TIMEOUT="${KHAEN_TIMEOUT_SECS:-120}"
 usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -42,21 +42,21 @@ done
 
 require_authorization "rollback"
 [ "$DRY_RUN" = "0" ] && require_root_live
-export TSPI_DEPLOY_ROOT="$ROOT"
+export KHAEN_DEPLOY_ROOT="$ROOT"
 
 if [ "$DRY_RUN" = "1" ]; then
   log "[dry-run] 模式=$MODE：将停止新栈 → 断言 C 已退役 → 切换 release 或安装 safe-mute drop-in → 启动/验证"
-  log "[dry-run] 禁止动作：绝不 systemctl start/enable camilladsp 或 tspi-upmix-autodetect；绝不改旧 C 配置"
+  log "[dry-run] 禁止动作：绝不 systemctl start/enable camilladsp 或 khaen-upmix-autodetect；绝不改旧 C 配置"
   exit 0
 fi
 
 evidence_prepare "08-rollback"
-STACK_DIR="$(p "$TSPI_STACK_PREFIX")"
+STACK_DIR="$(p "$KHAEN_STACK_PREFIX")"
 CUR="$STACK_DIR/current"
-LG="$(p "$TSPI_STATE_DIR/last-good.json")"
-DROPIN_DIR="$(p "$TSPI_SYSTEMD_DIR")/khaen-rt-host.service.d"
+LG="$(p "$KHAEN_STATE_DIR/last-good.json")"
+DROPIN_DIR="$(p "$KHAEN_SYSTEMD_DIR")/khaen-rt-host.service.d"
 DROPIN="$DROPIN_DIR/90-safe-mute.conf"
-MUTE_ENV="$(p "$TSPI_ETC")/90-safe-mute.env"
+MUTE_ENV="$(p "$KHAEN_ETC")/90-safe-mute.env"
 # F-17：safe-mute 用 EnvironmentFile 覆盖 rt-host.env 的 normal（systemd.exec：EnvironmentFile 覆盖 Environment=），
 # 因此要同时安装 90-safe-mute.conf 与 90-safe-mute.env；两者都从 service/ 或已安装 release units 解析。
 # F5（2026-11-18）：mute 生效核对不再用 `systemctl show -p Environment`（不含 EnvironmentFile 内容，
@@ -65,7 +65,7 @@ resolve_dropin_src() {
   local name="$1" cand
   for cand in "$DEPLOY_ROOT/../service/khaen-rt-host.service.d/$name" \
               "$(current_release_dir 2>/dev/null || true)/units/$name" \
-              "$(p "$TSPI_STACK_PREFIX")/current/units/$name"; do
+              "$(p "$KHAEN_STACK_PREFIX")/current/units/$name"; do
     [ -n "$cand" ] && [ -f "$cand" ] && { printf "%s" "$cand"; return 0; }
   done
   return 1
@@ -82,7 +82,7 @@ log "== 08 rollback 模式=$MODE（DRY_RUN=0）"
 BAD="$(assert_c_retired || true)"
 if [ -n "$(printf '%s' "$BAD" | tr -d '[:space:]')" ]; then
   warn "检测到旧 C 可能被激活（$(printf '%s' "$BAD" | tr '\n' ' ')）：rollback 拒绝任何 start；保持现状并升级人工处理"
-  printf '{\n "schema":"tspi-rt-stack/rollback-report/v1",\n "final_state":"FORBIDDEN_C_STATE",\n "exit":6,\n "at":"%s",\n "detail":"%s"\n}\n' "$(now_iso)" "$(printf '%s' "$BAD" | tr '\n' ' ')" > "$EVIDENCE_DIR/rollback-report.json"
+  printf '{\n "schema":"khaen-rt-stack/rollback-report/v1",\n "final_state":"FORBIDDEN_C_STATE",\n "exit":6,\n "at":"%s",\n "detail":"%s"\n}\n' "$(now_iso)" "$(printf '%s' "$BAD" | tr '\n' ' ')" > "$EVIDENCE_DIR/rollback-report.json"
   exit 6
 fi
 ATTEMPTS+=("assert_c_retired: PASS（C 未 enabled/active、无 C 进程）")
@@ -90,8 +90,8 @@ ATTEMPTS+=("assert_c_retired: PASS（C 未 enabled/active、无 C 进程）")
 snapshot_state() { # 记录当前新栈状态
   {
     echo "current=$(readlink -f "$CUR" 2>/dev/null || echo none)"
-    for u in "${NEW_STACK_UNITS[@]}"; do echo "$u active=$("$TSPI_SYSTEMCTL" is-active "$u" 2>/dev/null || true) enabled=$(sunit_enabled_state "$u")"; done
-    pgrep -a -f 'tspi-rt-(host|daemon)' 2>/dev/null || true
+    for u in "${NEW_STACK_UNITS[@]}"; do echo "$u active=$("$KHAEN_SYSTEMCTL" is-active "$u" 2>/dev/null || true) enabled=$(sunit_enabled_state "$u")"; done
+    pgrep -a -f 'khaen-rt-(host|daemon)' 2>/dev/null || true
   } > "$EVIDENCE_DIR/pre-rollback-state.txt" 2>&1 || true
 }
 snapshot_state
@@ -99,18 +99,18 @@ snapshot_state
 # ---- 1 停止新栈（不能停就退出，避免双实例） -------------------------------------
 stop_new_stack() {
   local where="$1" u
-  for u in tspi-rt-daemon.service khaen-rt-host.service; do
+  for u in khaen-rt-daemon.service khaen-rt-host.service; do
     if sunit_active "$u"; then
-      if ! "$TSPI_SYSTEMCTL" stop "$u"; then ATTEMPTS+=("stop $u: FAIL"); return 1; fi
+      if ! "$KHAEN_SYSTEMCTL" stop "$u"; then ATTEMPTS+=("stop $u: FAIL"); return 1; fi
       ATTEMPTS+=("stop $u: OK")
     fi
   done
-  if sunit_active tspi-rt-stack.target; then "$TSPI_SYSTEMCTL" stop tspi-rt-stack.target >/dev/null 2>&1 || true; fi
+  if sunit_active khaen-rt-stack.target; then "$KHAEN_SYSTEMCTL" stop khaen-rt-stack.target >/dev/null 2>&1 || true; fi
   # 等待 inactive（daemon 不强制）
   local i=0
   while [ "$i" -lt "$TIMEOUT" ]; do
     sunit_active khaen-rt-host.service || return 0
-    sleep "${TSPI_POLL_SECS:-1}"; i=$((i+1))
+    sleep "${KHAEN_POLL_SECS:-1}"; i=$((i+1))
   done
   ATTEMPTS+=("wait inactive: TIMEOUT ($where)")
   return 1
@@ -118,7 +118,7 @@ stop_new_stack() {
 if ! stop_new_stack "rollback"; then
   warn "新栈无法停止：不启动第二个实例；保持现状（静音风险），升级人工处理"
   FINAL="STOP_FAILED_RUNNING"; 
-  printf '{\n "schema":"tspi-rt-stack/rollback-report/v1",\n "final_state":"%s",\n "exit":5,\n "at":"%s",\n "attempts":["%s"]\n}\n' "$FINAL" "$(now_iso)" "$(printf '%s' "${ATTEMPTS[*]}" | sed 's/"/\\"/g')" > "$EVIDENCE_DIR/rollback-report.json"
+  printf '{\n "schema":"khaen-rt-stack/rollback-report/v1",\n "final_state":"%s",\n "exit":5,\n "at":"%s",\n "attempts":["%s"]\n}\n' "$FINAL" "$(now_iso)" "$(printf '%s' "${ATTEMPTS[*]}" | sed 's/"/\\"/g')" > "$EVIDENCE_DIR/rollback-report.json"
   exit 5
 fi
 
@@ -132,7 +132,7 @@ install_mute_dropin() {
   if [ -n "$MUTE_ENV_SRC" ] && [ -f "$MUTE_ENV_SRC" ]; then
     install -m 0640 "$MUTE_ENV_SRC" "$MUTE_ENV" || return 1
   else
-    printf '# 08-rollback.sh --mute 生成（旧 bundle 无模板时的等价内容；F-17）\nTSPI_HOST_SAFE_MODE=mute\n' > "$MUTE_ENV" || return 1
+    printf '# 08-rollback.sh --mute 生成（旧 bundle 无模板时的等价内容；F-17）\nKHAEN_HOST_SAFE_MODE=mute\n' > "$MUTE_ENV" || return 1
   fi
   ATTEMPTS+=("install $MUTE_ENV")
   return 0
@@ -144,8 +144,8 @@ remove_mute_dropin() {
 }
 start_and_wait() { # unit
   local u="$1"
-  "$TSPI_SYSTEMCTL" daemon-reload || return 1
-  "$TSPI_SYSTEMCTL" start "$u" || return 1
+  "$KHAEN_SYSTEMCTL" daemon-reload || return 1
+  "$KHAEN_SYSTEMCTL" start "$u" || return 1
   wait_unit_active "$u" "$TIMEOUT"
 }
 switch_current() { # release dir
@@ -188,12 +188,12 @@ if [ "$MODE" != "mute" ] && [ -z "$FINAL" ] && [ -n "$TARGET_REL" ]; then
       ATTEMPTS+=("verify: PASS")
     else
       ATTEMPTS+=("verify: FAIL -> 降级 mute")
-      "$TSPI_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
+      "$KHAEN_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
       MODE="mute"
     fi
   else
     ATTEMPTS+=("release 回退启动失败 -> 降级 mute")
-    "$TSPI_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
+    "$KHAEN_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
     MODE="mute"
   fi
 fi
@@ -201,16 +201,16 @@ fi
 # ---- 4 mute 兜底 ---------------------------------------------------------------
 if [ "$MODE" = "mute" ] && [ -z "$FINAL" ]; then
   if install_mute_dropin && start_and_wait khaen-rt-host.service; then
-    if unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"; then
+    if unit_env_contains khaen-rt-host.service "KHAEN_HOST_SAFE_MODE=mute"; then
       ATTEMPTS+=("mute env: 已生效（核对 $(unit_env_verify_source khaen-rt-host.service)；EnvironmentFile 覆盖 rt-host.env 的 normal）")
     else
-      ATTEMPTS+=("mute env: NOT_APPLIED（MainPID /proc environ 与 EnvironmentFiles 均未含 TSPI_HOST_SAFE_MODE=mute；服务在=静音，需人工核对 drop-in/env）")
+      ATTEMPTS+=("mute env: NOT_APPLIED（MainPID /proc environ 与 EnvironmentFiles 均未含 KHAEN_HOST_SAFE_MODE=mute；服务在=静音，需人工核对 drop-in/env）")
     fi
     FINAL="DEGRADED_MUTE"; EXIT_CODE=10
   else
     ATTEMPTS+=("mute 启动失败 -> 停止新栈（静音）")
-    "$TSPI_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
-    "$TSPI_SYSTEMCTL" stop tspi-rt-stack.target >/dev/null 2>&1 || true
+    "$KHAEN_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
+    "$KHAEN_SYSTEMCTL" stop khaen-rt-stack.target >/dev/null 2>&1 || true
     FINAL="STOPPED_SILENT_C_MASKED"; EXIT_CODE=6
   fi
 fi
@@ -225,7 +225,7 @@ fi
 
 python_body=""
 {
-  printf '{\n "schema": "tspi-rt-stack/rollback-report/v1",\n'
+  printf '{\n "schema": "khaen-rt-stack/rollback-report/v1",\n'
   printf ' "mode": "%s",\n "final_state": "%s",\n "exit": %s,\n "at": "%s",\n' "$MODE" "$FINAL" "$EXIT_CODE" "$(now_iso)"
   printf ' "attempts": [\n'
   i=0

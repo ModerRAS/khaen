@@ -17,7 +17,7 @@ reference_index 应指向 delay=0 的通道（否则 warning）；v1.1 peaking q
 （producer 硬帽；Rust 主入口补齐前不阻断）；每通道正向总和沿用 >6 dB warning / >12 dB error（总增益帽）。
 
 用法：
-  python3 tools/validate_calibration.py FILE [--layout-presets /etc/tspi-audio/layout-presets.yml]
+  python3 tools/validate_calibration.py FILE [--layout-presets /etc/khaen-audio/layout-presets.yml]
                                    [--strict] [--json]
 退出码：0 合法（可能有 warning）；1 不合法；2 用法/依赖错误。
 """

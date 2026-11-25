@@ -12,12 +12,12 @@
 //!
 //! 权威契约：
 //! - rt-stack/spec/fir-toolbox.md v1.2-draft §3.7（nos 参数/判据/拒收）、§3.8（nos 恒等检查）、
-//!   §2.2（tspi-fir/v1 manifest 字段）、§2.4（20 Hz/20 kHz Endpoint 联合类型）、§2.5（E_FIR_* 失败码，
+//!   §2.2（khaen-fir/v1 manifest 字段）、§2.4（20 Hz/20 kHz Endpoint 联合类型）、§2.5（E_FIR_* 失败码，
 //!   含 E_FIR_NOS）、§1.2（响应测量程序）、§1.3（支撑/延迟）、§1.4（振铃排除窗口径）、
 //!   §1.5（参考归一化）、§5.1（P_post 规范链序）、§6.10（nos 目标可选、仅记录不参与设计）、
 //!   §7.2（运行准入 4096/8192/16384）、§9 V18（h=[1.0]、L=1、D=0、|H|=1、phase=0）；
 //! - scratch/lead/planner/DSP-HOST-DECISION.md §3：NOS 工具箱独立可验、不复刻专有 DAC、NOS 不是绕保护；
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T38 行：NOS=delta/明确旁路，仍保后置输出保护，
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T38 行：NOS=delta/明确旁路，仍保后置输出保护，
 //!   记录无重建 DAC 复刻承诺；
 //! - rt-stack/spec/compat-matrix.md P03/P06/P07：限幅不得被 bypass/identity 回退绕过、回退保最终保护。
 //!
@@ -38,7 +38,7 @@
 //!   target_participated_in_design 恒 false；设计系数逐位不随 target 变化（§6.10）。
 //!
 //! 登记（契约文字差异，不私自改 schema）：
-//! §3.7 要求 manifest 写 filtering: none，但 §2.2 的 tspi-fir/v1 规范字段表未列 filtering，
+//! §3.7 要求 manifest 写 filtering: none，但 §2.2 的 khaen-fir/v1 规范字段表未列 filtering，
 //! 且 §2.2 规则「未知字段：x_ 前缀允许，其它未知字段拒绝」。本模块提供 filtering 值与
 //! FILTERING_FIELD_NOTE；T55/Lead 落盘时须裁决写 filtering（先补 §2.2 字段）还是 x_filtering，
 //! 本模块不擅自扩张 schema。同理「无重建 DAC 复刻承诺」属**报告/design 段**声明，不新增顶层未知字段。
@@ -1401,10 +1401,10 @@ pub fn endpoints_for(fs: f64, coeffs: &[f64]) -> NosEndpoints {
 // 设计产物 / manifest 声明 / 报告
 // ---------------------------------------------------------------------------
 
-/// tspi-fir/v1 manifest 中 NOS 相关字段的声明（T55 落盘用；本模块不写文件）。
+/// khaen-fir/v1 manifest 中 NOS 相关字段的声明（T55 落盘用；本模块不写文件）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct NosManifestDeclaration {
-    /// schema 常量（tspi-fir/v1）。
+    /// schema 常量（khaen-fir/v1）。
     pub schema: &'static str,
     /// family 字段（nos）。
     pub family: &'static str,
@@ -1427,7 +1427,7 @@ pub struct NosManifestDeclaration {
 /// 生成 NOS 的 manifest 声明（T55 消费；filtering 字段差异见 FILTERING_FIELD_NOTE）。
 pub fn manifest_declaration(design: &NosDesign) -> NosManifestDeclaration {
     NosManifestDeclaration {
-        schema: "tspi-fir/v1",
+        schema: "khaen-fir/v1",
         family: FAMILY,
         taps: design.taps(),
         delay_samples: design.delay_samples,

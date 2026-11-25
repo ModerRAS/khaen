@@ -152,7 +152,7 @@ class TestExtract(unittest.TestCase):
             render = os.path.join(td, "render.raw")
             open(render, "wb").write(b"\x11" * 100)
             sess = os.path.join(td, "session.json")
-            json.dump({"schema": "tspi-planrt-session/v1", "fs": 48000, "channels": 8,
+            json.dump({"schema": "khaen-planrt-session/v1", "fs": 48000, "channels": 8,
                        "role_slots": {"FL": 0, "FR": 1, "SL": 2, "SR": 3, "SUB1": 7},
                        "schedule": {"sweep_seconds": 8.0, "repeats": 2, "pre": 1.5,
                                     "repeat_gap": 1.0, "slot_gap": 1.0},
@@ -178,7 +178,7 @@ class TestExtract(unittest.TestCase):
             self.assertEqual(marker["arm"], "g")
             self.assertEqual(json.load(open(os.path.join(d, "playback.json"))), marker)
             meta = json.load(open(os.path.join(d, "meta", "session.json")))
-            self.assertEqual(meta["schema"], "tspi-planrt-session/v2")
+            self.assertEqual(meta["schema"], "khaen-planrt-session/v2")
             self.assertEqual(meta["role_slots"]["SUB1"], 7)
             self.assertEqual(len(meta["starts"]), 5)
             self.assertEqual(len(meta["starts"][0]), 2)
@@ -226,7 +226,7 @@ def build_synthetic_arms(td, n_frames=None):
         analyze.write_s24(os.path.join(d, "capture.raw"), umik)
         analyze.write_s24(os.path.join(d, "MA1-mono.raw"), mono)
         analyze.write_s24(os.path.join(d, "ARC-mono.raw"), np.zeros(n_frames))
-        meta = {"schema": "tspi-planrt-session/v2", "roles": roles, "role_slots": slots,
+        meta = {"schema": "khaen-planrt-session/v2", "roles": roles, "role_slots": slots,
                 "starts": starts.tolist(),
                 "schedule": {k: params[k] for k in ("sweep_seconds", "repeats", "pre",
                                                     "repeat_gap", "slot_gap")},

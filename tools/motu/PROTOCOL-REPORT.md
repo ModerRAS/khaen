@@ -170,7 +170,7 @@ before.json 与 final.json 的 mixer 相关键（kiMix* / koBus* / kFPGAPatch / 
     python board.py run --cmd "/tmp/cuemix-probe/probe_plan.sh --rollback --from /tmp/cuemix-probe-YYYYmmdd-HHMMSS"
 
 安全设计：
-- **硬化门禁**：tspi-soak12.service active 时直接 exit 3（拒绝运行）。
+- **硬化门禁**：khaen-soak12.service active 时直接 exit 3（拒绝运行）。
 - 默认只读；写必须同时 --with-write --yes。
 - 临时地址在 trap 里删除；脚本中断会先尝试还原 mixer 快照。
 - 不动 NetworkManager 配置、不动 DHCP、不动 USB、不重启服务、不扫网段。
@@ -255,7 +255,7 @@ v1 只读 JS 就断定"控制走 USB-MIDI SysEx"。真机否定了它，证据�
     cd C:\WorkSpace\Claw\scratch\lead\cuemix-proto
     python client.py --selftest
     python verify_client.py
-    cd C:\WorkSpace\Claw\projects\tspi-audio-dsp\tools\board
+    cd C:\WorkSpace\Claw\projects\khaen-audio-dsp\tools\board
     python board.py put --local ...\client.py --remote /tmp/cuemix-probe/client.py
     python board.py put --local ...\probe_plan.sh --remote /tmp/cuemix-probe/probe_plan.sh
     python board.py run --cmd "/tmp/cuemix-probe/probe_plan.sh --read 15"

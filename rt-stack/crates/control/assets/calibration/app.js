@@ -1,5 +1,5 @@
 /* =========================================================
- * TSPI Audio · Dirac 式完整校准流程向导（演示）
+ * KHAEN Audio · Dirac 式完整校准流程向导（演示）
  * 11 步：设备检查 → 布局分配 → 麦克风/校准设置 → Level 对齐 →
  *        Delay 对齐 → Bass management → 测点 → 测量 → 分析 →
  *        设计（目标/低切/ART/MIMO） → 回顾/应用/回滚
@@ -126,7 +126,7 @@ const DEFAULT_STATE = () => ({
   },
 });
 // 正式页面：所有设置/测量/求解/复测都走 daemon 的 /api/calibration/*（不再有 ?live=1 演示分支）。
-const TSPI_LIVE = true;
+const KHAEN_LIVE = true;
 const CAL_LANES = ['FL', 'FR', 'SL', 'SR', 'HFL', 'HFR', 'SUB1'];
 const CAL_API = {
   settings: '/api/calibration/settings',
@@ -136,17 +136,17 @@ const CAL_API = {
   clear: '/api/calibration/clear',
   run: '/api/calibration/run',
 };
-let TSPI_CSRF = null;
-function tspiErrorText(error) {
+let KHAEN_CSRF = null;
+function khaenErrorText(error) {
   if (!error) return 'unknown error';
   if (error.code) return error.code + ': ' + error.message;
   if (error.message) return error.message;
   return String(error);
 }
-async function tspiApi(method, path, body) {
+async function khaenApi(method, path, body) {
   const headers = { Accept: 'application/json' };
   if (body !== undefined && body !== null) headers['Content-Type'] = 'application/json';
-  if (method !== 'GET' && TSPI_CSRF) headers['X-TSPI-CSRF'] = TSPI_CSRF;
+  if (method !== 'GET' && KHAEN_CSRF) headers['X-KHAEN-CSRF'] = KHAEN_CSRF;
   const response = await fetch(path, {
     method,
     headers,
@@ -166,16 +166,16 @@ async function tspiApi(method, path, body) {
   }
   return json;
 }
-async function tspiLoadSession() {
+async function khaenLoadSession() {
   try {
-    const session = await tspiApi('GET', '/api/auth/session');
-    TSPI_CSRF = session && session.csrf_token ? session.csrf_token : null;
+    const session = await khaenApi('GET', '/api/auth/session');
+    KHAEN_CSRF = session && session.csrf_token ? session.csrf_token : null;
     return true;
   } catch (error) {
     return false;
   }
 }
-function tspiJobBody(stage) {
+function khaenJobBody(stage) {
   const body = {
     kind: 'emperor',
     stage: stage,
@@ -191,18 +191,18 @@ function tspiJobBody(stage) {
   if (state.jobId) body.job_id = state.jobId;
   return body;
 }
-async function tspiPostJob(stage) {
-  const payload = await tspiApi('POST', CAL_API.jobs, tspiJobBody(stage));
+async function khaenPostJob(stage) {
+  const payload = await khaenApi('POST', CAL_API.jobs, khaenJobBody(stage));
   state.jobId = payload.job_id;
   state.lastJob = payload;
   return payload;
 }
 // 复用现有 job 状态机：轮询 GET /api/calibration/jobs/{id}（不另起一套 job/轮询机制）。
-function tspiPollJob(jobId, onUpdate) {
+function khaenPollJob(jobId, onUpdate) {
   let tries = 0;
   return new Promise(function (resolve, reject) {
     function tick() {
-      tspiApi('GET', CAL_API.jobs + '/' + encodeURIComponent(jobId)).then(function (job) {
+      khaenApi('GET', CAL_API.jobs + '/' + encodeURIComponent(jobId)).then(function (job) {
         if (onUpdate) onUpdate(job);
         const terminal = ['complete', 'failed', 'cancelled', 'rolled_back'].indexOf(job.state) >= 0;
         tries += 1;
@@ -424,7 +424,7 @@ function nextStep() {
     return false;
   }
   if (!state.completed.includes(state.step)) state.completed.push(state.step);
-  if (state.step === STEP.design) { tspiPostJob('solve').catch(() => {}); }
+  if (state.step === STEP.design) { khaenPostJob('solve').catch(() => {}); }
   if (state.step === STEP.review) { finishFlow(); renderRail(); return true; }
   goStep(state.step + 1);
   return true;
@@ -513,7 +513,7 @@ const CHECK_ITEMS = [
   { key: 'motu', icon: '▤', title: 'MOTU UltraLite-mk5', desc: 'USB 音频接口 · 22 输出 · 48 kHz', log: 'USB 设备枚举：UltraLite-mk5 · 22 输出 · 48 kHz · 时钟 internal', ok: '已连接 · 22ch / 48k' },
   { key: 'umik', icon: '◉', title: 'UMIK-1 测量麦克风', desc: '序列号 718-7696 · 90° 校准文件', log: 'UMIK-1 718-7696 · 校准文件 90deg 已加载 · 输入增益 +18 dB', ok: '已识别 · 90° 校准' },
   { key: 'wiring', icon: '⌁', title: '输出线序核对（4.1.2）', desc: 'Line Out 1–6 + Line Out 8（ch6 保留空）', log: '输出线序：FL/FR=1-2 · SL/SR=3-4 · HFL/HFR=5-6 · SUB1=8 · ch7 空', ok: '8 路已核对' },
-  { key: 'service', icon: '◫', title: '服务与静音状态', desc: 'tspi-audio-web 运行中 · DSP 待机 · 已静音', log: '服务状态：tspi-audio-web active · camilladsp inactive · master mute on', ok: 'Web 运行 · 已静音' },
+  { key: 'service', icon: '◫', title: '服务与静音状态', desc: 'khaen-audio-web 运行中 · DSP 待机 · 已静音', log: '服务状态：khaen-audio-web active · camilladsp inactive · master mute on', ok: 'Web 运行 · 已静音' },
 ];
 function renderStep1() {
   const body = $('#step-body');
@@ -600,7 +600,7 @@ function renderStep2() {
           '<div class="kv"><span>高度 2</span><b>HFL / HFR</b></div>' +
           '<div class="kv"><span>低音 1</span><b>SUB1 = Line Out 8</b></div>' +
           '<div class="kv"><span>ch6</span><b>保留空（不分配）</b></div>' +
-          '<div class="tik" style="font-size:9.5px;color:var(--muted2);line-height:1.6;margin-top:8px">映射来自 audio/overlay/etc/tspi-audio/layout-presets.yml 的 4.1.2；MOTU 22ch 仅使用 1-6、8 路。</div>' +
+          '<div class="tik" style="font-size:9.5px;color:var(--muted2);line-height:1.6;margin-top:8px">映射来自 audio/overlay/etc/khaen-audio/layout-presets.yml 的 4.1.2；MOTU 22ch 仅使用 1-6、8 路。</div>' +
         '</div></div>' +
       '</div>' +
     '</div>';
@@ -829,7 +829,7 @@ function refreshPointsUI() {
   const msg = $('#points-msg');
   if (msg) {
     const sweet = state.points.some(p => p.on && p.sweet);
-    if (typeof TSPI_LIVE !== 'undefined' && TSPI_LIVE && sweet) msg.innerHTML = '<b>✓</b><span style="color:var(--teal)">皇帝位已点亮。多点和 ART 的 3 点要求留在页面上，这次不测</span>';
+    if (typeof KHAEN_LIVE !== 'undefined' && KHAEN_LIVE && sweet) msg.innerHTML = '<b>✓</b><span style="color:var(--teal)">皇帝位已点亮。多点和 ART 的 3 点要求留在页面上，这次不测</span>';
     else if (n >= 3 && sweet) msg.innerHTML = '<b>✓</b><span style="color:var(--teal)">' + n + ' 点（含听音位）· 满足多点校正与 ART ≥3 要求</span>';
     else if (n < 3) msg.innerHTML = '<span style="color:var(--red)">✗ 仅 ' + n + ' 点：ART 至少需要 3 个有效测点</span>';
     else msg.innerHTML = '<span style="color:var(--red)">✗ 必须包含听音位（P1 甜点）</span>';
@@ -929,10 +929,10 @@ function updateMeasureLive() {
 }
 async function runMeasure(isRemeasure) {
   if (state.measure.running) return;
-  if (TSPI_LIVE && !isRemeasure) {
+  if (KHAEN_LIVE && !isRemeasure) {
     state.measure.running = true;
     try {
-      const response = await tspiPostJob('measure');
+      const response = await khaenPostJob('measure');
       state.measure.liveAck = !!response && response.state !== 'failed';
       state.measure.progressText = response && response.progress_text ? response.progress_text : '';
       const sweet = state.points.find(p => p.sweet && p.on);
@@ -1350,7 +1350,7 @@ function renderStep7() {
           '<div class="lc-row" style="margin-top:6px"><span class="lbl" id="art-cell-lbl">FL ← SUB1</span><input type="range" id="art-level" data-test="art-level" min="-24" max="0" step="1" value="' + c.level + '"><span class="unit" id="art-level-out">' + (c.level < 0 ? c.level + ' dB' : '0（关闭）') + '</span></div>' +
           '<div class="mimo-row" style="margin:0;font-size:9px;color:var(--muted2);line-height:1.4">0 = 关闭 · −24 dB = 最强（示意）</div>' +
         '</div></div>' +
-        (TSPI_LIVE
+        (KHAEN_LIVE
           ? '<div class="panel"><div class="panel-h">皇帝位侧路 <span class="badge3 model">f_hi / 从喇叭</span></div><div class="panel-b">' +
               '<div class="lc-row"><span class="lbl">上沿</span><input type="number" id="f-hi" data-test="f-hi" min="20" max="150" step="1" value="' + d.fHi + '"><span class="unit">Hz</span></div>' +
               '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
@@ -1643,7 +1643,7 @@ function openApplyConfirm() {
       '<table class="confirm-table">' + rows +
       '<tr><td>目标曲线 / 低切</td><td>' + (d.target || '未选') + ' · 主箱 ' + d.cut.mains + ' / 环绕 ' + d.cut.surround + ' Hz</td></tr>' +
       '<tr><td>ART 衰减 / MIMO 衰减（示意）</td><td>' + countArt() + ' 条 · ' + d.mimo.mains + '/' + d.mimo.surround + '/' + d.mimo.height + ' dB</td></tr>' +
-      '<tr><td>导出槽位</td><td>Slot 3 · TSPI-DiracFlow-Demo</td></tr>' +
+      '<tr><td>导出槽位</td><td>Slot 3 · KHAEN-DiracFlow-Demo</td></tr>' +
       '<tr><td>回滚快照</td><td>will create · #FLOW-SNAP-' + Date.now().toString().slice(-5) + '</td></tr></table>' +
       '<div class="confirm-note">应用后可通过“回滚”恢复应用前状态；演示环境不会修改任何设备或 CueMix。</div>',
     buttons: [
@@ -1654,7 +1654,7 @@ function openApplyConfirm() {
 }
 function applyFlow() {
   hideModal();
-  tspiPostJob('remeasure').catch(() => {});
+  khaenPostJob('remeasure').catch(() => {});
   saveSnapshot();
   state.design.applied = true; state.design.rolledBack = false;
   renderStep8();
@@ -1676,7 +1676,7 @@ function openRollbackConfirm() {
 function rollbackFlow() {
   hideModal();
   if (state.jobId) {
-    tspiApi('POST', CAL_API.jobs + '/' + encodeURIComponent(state.jobId) + '/rollback', {}).catch(() => {});
+    khaenApi('POST', CAL_API.jobs + '/' + encodeURIComponent(state.jobId) + '/rollback', {}).catch(() => {});
   }
   const snap = state.design.snapshotBeforeApply;
   if (snap && snap.design) {
@@ -1698,7 +1698,7 @@ function buildFlowConfig() {
     if (k.on) artConns.push({ main: r, support: c, attenuation_db: k.level, f_low_hz: k.low, f_high_hz: k.high });
   }
   return {
-    schema: 'tspi-dirac-flow-demo/v2',
+    schema: 'khaen-dirac-flow-demo/v2',
     generated_at: new Date().toISOString(),
     demo: true,
     note: '演示导出，不写设备。实测数据与示意/目标数据分列；ART/MIMO/After 为示意模型。',
@@ -1728,16 +1728,16 @@ function buildFlowConfig() {
       mimo_attenuation_db: d.mimo,
       target_rt60_s: 0.45,
     },
-    apply: { slot: 3, name: 'TSPI-DiracFlow-Demo', applied: d.applied, rolled_back: !!d.rolledBack, rollback_snapshot: 'FLOW-SNAP' },
+    apply: { slot: 3, name: 'KHAEN-DiracFlow-Demo', applied: d.applied, rolled_back: !!d.rolledBack, rollback_snapshot: 'FLOW-SNAP' },
   };
 }
 function buildFlowYaml() {
   const d = state.design;
-  const lines = ['# tspi dirac-style flow 导出片段（演示，不写设备）', 'device:', '  audio_interface: MOTU UltraLite-mk5', '  mic: UMIK-1 718-7696', '  mic_orientation_deg: 90', '  sample_rate: 48000', 'layout:', '  preset: 4.1.2'];
+  const lines = ['# khaen dirac-style flow 导出片段（演示，不写设备）', 'device:', '  audio_interface: MOTU UltraLite-mk5', '  mic: UMIK-1 718-7696', '  mic_orientation_deg: 90', '  sample_rate: 48000', 'layout:', '  preset: 4.1.2'];
   for (const r of state.layout.roles) lines.push('  - {id: ' + r.id + ', output_channel: ' + r.out + '}');
   lines.push('design:', '  target_curve: ' + d.target, '  target_curve_fullband: ' + (d.target === 'tilt10' ? '{at_20hz_db: 0, at_20khz_db: -10}' : '{at_20hz_db: 0, at_20khz_db: 0}'), '  low_cut:', '    mains: {freq_hz: ' + d.cut.mains + ', slope_db_oct: ' + d.slope.mains + '}', '    surround: {freq_hz: ' + d.cut.surround + ', slope_db_oct: ' + d.slope.surround + '}', '    sub_lowpass: {follows: mains, freq_hz: ' + d.cut.mains + '}', '  art_attenuation:', '    fsiso_hz: ' + d.fsiso);
   for (const r of ART_ROWS) for (const c of ART_COLS) { if (r === c) continue; const k = getConn(r, c); if (k.on) lines.push('    - {main: ' + r + ', support: ' + c + ', attenuation_db: ' + k.level + ', f_low: ' + k.low + ', f_high: ' + k.high + '}'); }
-  lines.push('  mimo_attenuation_db: {mains: ' + d.mimo.mains + ', surround: ' + d.mimo.surround + ', height: ' + d.mimo.height + ', sub: ' + d.mimo.sub + '}', 'apply: {slot: 3, name: TSPI-DiracFlow-Demo, applied: ' + d.applied + ', rolled_back: ' + !!d.rolledBack + '}');
+  lines.push('  mimo_attenuation_db: {mains: ' + d.mimo.mains + ', surround: ' + d.mimo.surround + ', height: ' + d.mimo.height + ', sub: ' + d.mimo.sub + '}', 'apply: {slot: 3, name: KHAEN-DiracFlow-Demo, applied: ' + d.applied + ', rolled_back: ' + !!d.rolledBack + '}');
   return lines.join('\n') + '\n';
 }
 function openFlowExport() {
@@ -1802,7 +1802,7 @@ window.__flow = {
 
 /* ---------------- boot ---------------- */
 renderStep();
-if (typeof tspiBoot === 'function') tspiBoot();
+if (typeof khaenBoot === 'function') khaenBoot();
 
 /* =========================================================
  * Step 3（麦克风/校准设置）+ Step Level / Delay / Bass
@@ -1823,35 +1823,35 @@ function renderWarnings(list) {
   return '<div class="cal-warnings">' + list.map(w => '<div class="cal-warn" data-code="' + w.code + '"><b>' + w.code + '</b><span>' + w.message + '</span></div>').join('') + '</div>';
 }
 
-async function tspiLoadSettings() {
-  const payload = await tspiApi('GET', CAL_API.settings);
+async function khaenLoadSettings() {
+  const payload = await khaenApi('GET', CAL_API.settings);
   if (payload && payload.settings) state.settings = payload.settings;
   state.settingsValidation = payload ? payload.validation : null;
   state.settingsSaved = true;
   if (state.settings && state.settings.target_mode) state.design.target = state.settings.target_mode;
 }
-async function tspiLoadStatus() {
-  const payload = await tspiApi('GET', CAL_API.status);
+async function khaenLoadStatus() {
+  const payload = await khaenApi('GET', CAL_API.status);
   state.serverStatus = payload;
   state.calApplied = payload.applied || null;
 }
-async function tspiSaveSettings() {
-  const payload = await tspiApi('POST', CAL_API.settings, settingsDeepCopy());
+async function khaenSaveSettings() {
+  const payload = await khaenApi('POST', CAL_API.settings, settingsDeepCopy());
   if (payload && payload.settings) state.settings = payload.settings;
   state.settingsValidation = payload ? payload.validation : null;
   state.settingsSaved = true;
   if (state.settings && state.settings.target_mode) state.design.target = state.settings.target_mode;
   toast('校准设置已保存（' + calValidationText() + '）');
 }
-async function tspiBoot() {
-  state.authOk = await tspiLoadSession();
+async function khaenBoot() {
+  state.authOk = await khaenLoadSession();
   try {
-    await tspiLoadSettings();
+    await khaenLoadSettings();
   } catch (error) {
     state.settingsSaved = false;
-    state.settingsError = tspiErrorText(error);
+    state.settingsError = khaenErrorText(error);
   }
-  try { await tspiLoadStatus(); } catch (error) { /* status is optional */ }
+  try { await khaenLoadStatus(); } catch (error) { /* status is optional */ }
   const footerRun = document.getElementById('btn-run-all');
   if (footerRun) footerRun.addEventListener('click', runAll);
   renderStep();
@@ -1878,7 +1878,7 @@ async function onCalFileSelected(event) {
     renderStep();
     toast('已选择 ' + file.name + (sha ? '（SHA-256 已计算）' : '（SHA-256 不可用）'));
   } catch (error) {
-    toast('读取校准文件失败：' + tspiErrorText(error));
+    toast('读取校准文件失败：' + khaenErrorText(error));
   }
 }
 
@@ -1910,7 +1910,7 @@ function renderStep3() {
       '</div></div>' +
       '<div class="panel"><div class="panel-h">校准文件（可选） <span class="badge3 sim">绝对/相对</span></div><div class="panel-b">' +
         '<div class="cal-form">' +
-          '<label>host 可读路径 <input id="cal-file-path" data-test="cal-file-path" type="text" spellcheck="false" placeholder="/var/lib/tspi-rt-stack/cal/umik1-90deg.txt" value="' + (cal && cal.path ? cal.path : '') + '"></label>' +
+          '<label>host 可读路径 <input id="cal-file-path" data-test="cal-file-path" type="text" spellcheck="false" placeholder="/var/lib/khaen-rt-stack/cal/umik1-90deg.txt" value="' + (cal && cal.path ? cal.path : '') + '"></label>' +
           '<label>或选择文件（浏览器计算 SHA-256；上传落盘 pending host） <input id="cal-file-input" data-test="cal-file-input" type="file" accept=".txt,.cal,.csv"></label>' +
         '</div>' +
         '<div class="cal-file-state" data-test="cal-file-state">' + (cal
@@ -1960,17 +1960,17 @@ function renderStep3() {
   }
   $('#btn-settings-save').addEventListener('click', function () {
     readSettingsInputs();
-    tspiSaveSettings().then(function () { renderStep(); }).catch(function (error) {
-      state.settingsError = tspiErrorText(error);
+    khaenSaveSettings().then(function () { renderStep(); }).catch(function (error) {
+      state.settingsError = khaenErrorText(error);
       toast('保存设置失败：' + state.settingsError);
       renderStep();
     });
   });
   $('#btn-settings-reload').addEventListener('click', function () {
-    tspiLoadSettings().then(function () { renderStep(); }).catch(function (error) { toast('读取设置失败：' + tspiErrorText(error)); });
+    khaenLoadSettings().then(function () { renderStep(); }).catch(function (error) { toast('读取设置失败：' + khaenErrorText(error)); });
   });
   $('#btn-settings-status').addEventListener('click', function () {
-    tspiLoadStatus().then(function () { renderStep(); toast('状态已刷新'); }).catch(function (error) { toast('状态刷新失败：' + tspiErrorText(error)); });
+    khaenLoadStatus().then(function () { renderStep(); toast('状态已刷新'); }).catch(function (error) { toast('状态刷新失败：' + khaenErrorText(error)); });
   });
   $('#cal-file-input').addEventListener('change', onCalFileSelected);
   $('#btn-cal-file-clear').addEventListener('click', function () {
@@ -2220,7 +2220,7 @@ function bindBassSettings() {
   const save = $('#btn-bass-save');
   if (save) save.addEventListener('click', function () {
     readBassForm();
-    tspiSaveSettings().then(function () { renderStep(); toast('Bass/多炮设置已保存'); }).catch(function (error) { toast('保存 Bass 设置失败：' + tspiErrorText(error)); });
+    khaenSaveSettings().then(function () { renderStep(); toast('Bass/多炮设置已保存'); }).catch(function (error) { toast('保存 Bass 设置失败：' + khaenErrorText(error)); });
   });
 }
 
@@ -2263,7 +2263,7 @@ function bindFirSettings() {
   const save = $('#btn-fir-save');
   if (save) save.addEventListener('click', function () {
     readFirForm();
-    tspiSaveSettings().then(function () { renderStep(); toast('全频 FIR 设置已保存'); }).catch(function (error) { toast('保存 FIR 失败：' + tspiErrorText(error)); });
+    khaenSaveSettings().then(function () { renderStep(); toast('全频 FIR 设置已保存'); }).catch(function (error) { toast('保存 FIR 失败：' + khaenErrorText(error)); });
   });
 }
 
@@ -2307,7 +2307,7 @@ function bindModalSettings() {
   const save = $('#btn-modal-save');
   if (save) save.addEventListener('click', function () {
     readModalForm();
-    tspiSaveSettings().then(function () { renderStep(); toast('Modal 设置已保存'); }).catch(function (error) { toast('保存 Modal 失败：' + tspiErrorText(error)); });
+    khaenSaveSettings().then(function () { renderStep(); toast('Modal 设置已保存'); }).catch(function (error) { toast('保存 Modal 失败：' + khaenErrorText(error)); });
   });
 }
 
@@ -2347,7 +2347,7 @@ async function runAll() {
   renderStep();
   if (dryRun) {
     try {
-      const payload = await tspiApi('POST', CAL_API.run, { dry_run: true, stages: RUN_ORDER });
+      const payload = await khaenApi('POST', CAL_API.run, { dry_run: true, stages: RUN_ORDER });
       const stages = payload.stages || [];
       state.runner.stages = stages;
       state.runner.total = stages.length || RUN_ORDER.length;
@@ -2362,7 +2362,7 @@ async function runAll() {
     } catch (error) {
       state.runner.running = false;
       state.runner.failedStage = 'dry-run';
-      state.runner.error = tspiErrorText(error);
+      state.runner.error = khaenErrorText(error);
       state.runner.progressText = 'dry-run 失败：' + state.runner.error;
       renderStep();
     }
@@ -2430,13 +2430,13 @@ async function startStage(kind) {
   slot.lanes = []; if (kind === 'bass') slot.result = null;
   renderStep();
   try {
-    const payload = await tspiPostJob(kind);
+    const payload = await khaenPostJob(kind);
     slot.jobId = payload.job_id;
     slot.progressText = payload.progress_text || ('job ' + payload.job_id + ' 已创建');
     const firstLanes = payload.lanes || (payload.job && payload.job.lanes) || null;
     if (firstLanes && firstLanes.lanes) slot.lanes = firstLanes.lanes;
     if (firstLanes && firstLanes.bass) slot.result = firstLanes;
-    const job = await tspiPollJob(payload.job_id, function (update) {
+    const job = await khaenPollJob(payload.job_id, function (update) {
       slot.progressText = update.progress_text || slot.progressText;
       const lanes = update.lanes || (update.job && update.job.lanes) || null;
       if (lanes && lanes.lanes) slot.lanes = lanes.lanes;
@@ -2449,7 +2449,7 @@ async function startStage(kind) {
     slot.progressText = job.progress_text || slot.progressText;
     if (job.state !== 'complete') slot.error = job.failure || ('job 状态 ' + job.state);
   } catch (error) {
-    slot.error = tspiErrorText(error) + (error && error.code === 'pending_host_field'
+    slot.error = khaenErrorText(error) + (error && error.code === 'pending_host_field'
       ? '（host 字段未就绪；可点“跳过”继续，但绝不会标 applied）'
       : '');
   }
@@ -2461,10 +2461,10 @@ async function cancelStage(kind) {
   const slot = stageState(kind);
   if (!slot.jobId) return;
   try {
-    await tspiApi('POST', CAL_API.jobs + '/' + encodeURIComponent(slot.jobId) + '/cancel', {});
+    await khaenApi('POST', CAL_API.jobs + '/' + encodeURIComponent(slot.jobId) + '/cancel', {});
     slot.progressText = '已取消 ' + slot.jobId;
   } catch (error) {
-    slot.error = '取消失败：' + tspiErrorText(error);
+    slot.error = '取消失败：' + khaenErrorText(error);
   }
   renderStep();
 }
@@ -2477,12 +2477,12 @@ async function applyStage(kind) {
   if (kind === 'fir') body.fir = state.settings.fir;
   if (kind === 'modal') body.modal = state.settings.modal;
   try {
-    const payload = await tspiApi('POST', CAL_API.apply, body);
+    const payload = await khaenApi('POST', CAL_API.apply, body);
     slot.applied = true; slot.skipped = false;
     state.calApplied = payload.applied || state.calApplied;
     toast(kind + ' 已应用（daemon 回执；applied_to_audio=false）');
   } catch (error) {
-    slot.error = '应用失败：' + tspiErrorText(error) + (error && error.code === 'pending_host_field' ? '（host 字段未就绪，不标 applied）' : '');
+    slot.error = '应用失败：' + khaenErrorText(error) + (error && error.code === 'pending_host_field' ? '（host 字段未就绪，不标 applied）' : '');
     slot.applied = false;
   }
   renderStep(); renderRail(); renderHeader();
@@ -2490,12 +2490,12 @@ async function applyStage(kind) {
 async function clearStage(kind) {
   const slot = stageState(kind);
   try {
-    const payload = await tspiApi('POST', CAL_API.clear, { targets: [kind] });
+    const payload = await khaenApi('POST', CAL_API.clear, { targets: [kind] });
     slot.applied = false; slot.skipped = false;
     state.calApplied = payload.applied || null;
     toast(kind + ' 已清除（daemon 回执）');
   } catch (error) {
-    slot.error = '清除失败：' + tspiErrorText(error);
+    slot.error = '清除失败：' + khaenErrorText(error);
   }
   renderStep(); renderRail(); renderHeader();
 }

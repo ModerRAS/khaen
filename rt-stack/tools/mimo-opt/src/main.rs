@@ -501,7 +501,7 @@ fn run_verify(args: &Args, scenes: &[String]) -> Result<(), String> {
         }
     }
     let verify = Json::obj(vec![
-        ("format", Json::str("tspi-mimo-verify/v1")),
+        ("format", Json::str("khaen-mimo-verify/v1")),
         (
             "provenance",
             Json::obj(vec![

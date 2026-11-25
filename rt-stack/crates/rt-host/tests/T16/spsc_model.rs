@@ -24,8 +24,8 @@ fn mk_desc(
     block_size: u16,
     slot_index: u32,
     flags: u32,
-) -> TspiBlockDescV1 {
-    TspiBlockDescV1 {
+) -> KhaenBlockDescV1 {
+    KhaenBlockDescV1 {
         abi_version: ABI_VERSION,
         block_size,
         n_in: 2,
@@ -44,14 +44,14 @@ fn mk_desc(
 
 /// 一个环的固定存储：64 B 原子头 + 4 个 desc 槽（地址稳定即生产等价）。
 struct Fixture {
-    header: TspiSpscHeaderV1,
+    header: KhaenSpscHeaderV1,
     slots: [DescSlot; SPSC_CAPACITY],
 }
 
 impl Fixture {
     fn new() -> Self {
         Self {
-            header: TspiSpscHeaderV1::new(SPSC_CAPACITY as u32, SPSC_ENTRY_BYTES),
+            header: KhaenSpscHeaderV1::new(SPSC_CAPACITY as u32, SPSC_ENTRY_BYTES),
             slots: core::array::from_fn(|_| DescSlot::empty()),
         }
     }
@@ -76,7 +76,7 @@ fn make_consumer<'a>(fx: &'a Fixture) -> Consumer<'a> {
 }
 
 /// 直接写 desc 槽（模拟生产者写入 / 制造损坏），不走发布配方。
-fn poke_slot(fx: &Fixture, index: usize, desc: TspiBlockDescV1) {
+fn poke_slot(fx: &Fixture, index: usize, desc: KhaenBlockDescV1) {
     // SAFETY: 测试单线程持有该环，poke 用于复现“未发布即被读”的负向场景（P-05）与损坏块。
     unsafe {
         *fx.slots[index].0.get() = desc;
@@ -106,7 +106,7 @@ fn t16_new_valid_ring_reports_fixed_capacity() {
     let consumer = make_consumer(&fx);
     assert_eq!(producer.capacity(), 4);
     assert_eq!(consumer.capacity(), 4);
-    assert_eq!(producer.header().magic, TSPI_RING_MAGIC);
+    assert_eq!(producer.header().magic, KHAEN_RING_MAGIC);
     assert_eq!(producer.header().abi_version, ABI_VERSION);
     assert_eq!(producer.header().entry_bytes, SPSC_ENTRY_BYTES);
     assert_eq!(producer.header().entry_stride, u32::from(SPSC_ENTRY_BYTES));
@@ -179,9 +179,9 @@ fn t16_desc_slots_from_raw_checks_null_align_capacity() {
     let null = unsafe { DescSlot::slice_from_raw(core::ptr::null_mut(), SPSC_CAPACITY) };
     assert_eq!(null.err(), Some(RtStatus::ERR_BAD_LAYOUT));
 
-    let mut store = [TspiBlockDescV1::ZERO; SPSC_CAPACITY];
+    let mut store = [KhaenBlockDescV1::ZERO; SPSC_CAPACITY];
     let base = store.as_mut_ptr();
-    let misaligned = unsafe { base.cast::<u8>().add(1).cast::<TspiBlockDescV1>() };
+    let misaligned = unsafe { base.cast::<u8>().add(1).cast::<KhaenBlockDescV1>() };
     let bad = unsafe { DescSlot::slice_from_raw(misaligned, SPSC_CAPACITY) };
     assert_eq!(bad.err(), Some(RtStatus::ERR_BAD_LAYOUT));
 
@@ -1102,11 +1102,11 @@ fn t16_rt_visible_types_have_no_drop_and_fixed_layout() {
     assert!(!core::mem::needs_drop::<DescSlot>());
     assert!(!core::mem::needs_drop::<Producer<'_>>());
     assert!(!core::mem::needs_drop::<Consumer<'_>>());
-    assert!(!core::mem::needs_drop::<TspiSpscHeaderV1>());
-    assert!(!core::mem::needs_drop::<TspiBlockDescV1>());
+    assert!(!core::mem::needs_drop::<KhaenSpscHeaderV1>());
+    assert!(!core::mem::needs_drop::<KhaenBlockDescV1>());
     assert_eq!(core::mem::size_of::<DescSlot>(), 64);
     assert_eq!(core::mem::align_of::<DescSlot>(), 64);
-    assert_eq!(core::mem::size_of::<TspiSpscHeaderV1>(), 64);
+    assert_eq!(core::mem::size_of::<KhaenSpscHeaderV1>(), 64);
     assert_eq!(SPSC_CAPACITY, 4);
     assert_eq!(SPSC_ENTRY_BYTES, 64);
 }

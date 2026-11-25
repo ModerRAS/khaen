@@ -306,8 +306,8 @@ struct FlowMediaClock {
 
 /// [NONRT 证据] 环境变量门控的 capture 输入 dump（16ch 全通道 FFT/RMS 复核用）。
 ///
-/// 设置 TSPI_AES67_RX_DUMP=<prefix> 后，把每个 Ok 块的图输入按帧交错 f32 追加到
-/// 预分配内存（容量由 TSPI_AES67_RX_DUMP_SECONDS 控制，默认 5 s，48 kHz），退出时
+/// 设置 KHAEN_AES67_RX_DUMP=<prefix> 后，把每个 Ok 块的图输入按帧交错 f32 追加到
+/// 预分配内存（容量由 KHAEN_AES67_RX_DUMP_SECONDS 控制，默认 5 s，48 kHz），退出时
 /// 写 <prefix>.f32 + <prefix>.json。块循环内只做 memcpy，无分配；默认关闭，不参与
 /// 任何 RT 决策与生产配置。
 struct Aes67RxDump {
@@ -320,11 +320,11 @@ struct Aes67RxDump {
 
 impl Aes67RxDump {
     fn from_env(channels: usize, sample_rate: u32) -> Option<Self> {
-        let prefix = std::env::var_os("TSPI_AES67_RX_DUMP")?;
+        let prefix = std::env::var_os("KHAEN_AES67_RX_DUMP")?;
         if prefix.is_empty() {
             return None;
         }
-        let seconds = std::env::var("TSPI_AES67_RX_DUMP_SECONDS")
+        let seconds = std::env::var("KHAEN_AES67_RX_DUMP_SECONDS")
             .ok()
             .and_then(|text| text.parse::<u32>().ok())
             .unwrap_or(5)

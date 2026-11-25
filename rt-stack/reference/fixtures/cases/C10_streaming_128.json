@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C10_streaming_128",
   "title": "block streaming invariance: 128-sample input, D=1 offdiag tail, block sizes 1/2/3/64/128",
   "tags": [

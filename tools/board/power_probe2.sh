@@ -1,7 +1,7 @@
 #!/bin/bash
 echo '== soak =='
-systemctl is-active tspi-soak12.service 2>&1
-tail -2 /var/lib/tspi-soak/status.csv 2>&1
+systemctl is-active khaen-soak12.service 2>&1
+tail -2 /var/lib/khaen-soak/status.csv 2>&1
 echo '== regulators =='
 for r in /sys/class/regulator/*; do
   [ -e "$r/name" ] || continue

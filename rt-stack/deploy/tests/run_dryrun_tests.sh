@@ -24,14 +24,14 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$OUT" ] || OUT="$RS/evidence/migration-plan/dryrun"
 mkdir -p "$OUT"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/tspi-t28-tests-XXXXXX")" || { echo "mktemp failed" >&2; exit 7; }
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/khaen-t28-tests-XXXXXX")" || { echo "mktemp failed" >&2; exit 7; }
 cleanup() { [ "$KEEP" = "1" ] || rm -rf "$TMP"; }
 trap cleanup EXIT
 winpath() { cygpath -m "$1" 2>/dev/null || printf '%s' "$1"; }
 BOARD="$TMP/board"
 ROOT="$(winpath "$BOARD")"
 export PATH="$MOCKS:$PATH"
-export TSPI_PYTHON=python TSPI_POLL_SECS=0 TSPI_DEPLOY_ROOT="$ROOT"
+export KHAEN_PYTHON=python KHAEN_POLL_SECS=0 KHAEN_DEPLOY_ROOT="$ROOT"
 export MOCK_STATE="$TMP/mock" MOCK_LOG="$TMP/mock/log" MOCK_PROCS="$TMP/mock/procs"
 export MOCK_SS="$TMP/mock/ss.txt" MOCK_SND_BUSY="$TMP/mock/snd_busy" MOCK_HEALTH_CODE=200 MOCK_HEALTH_EXIT=0
 export MOCK_FAIL_MATCH=""
@@ -59,17 +59,17 @@ raise SystemExit(0 if ok else 1)
 PYEOF
 }
 a_log_no_c_start() {
-  if grep -Eq 'systemctl (start|restart|try-restart|reload-or-restart|enable|unmask) [^ ]*(camilladsp|tspi-upmix-autodetect)' "$MOCK_LOG" 2>/dev/null; then
-    fail_msg "出现启动/使能旧 C 的命令: $(grep -E 'systemctl (start|restart|enable|unmask) [^ ]*(camilladsp|tspi-upmix-autodetect)' "$MOCK_LOG" | head -n 2 | tr '\n' ' ')"
+  if grep -Eq 'systemctl (start|restart|try-restart|reload-or-restart|enable|unmask) [^ ]*(camilladsp|khaen-upmix-autodetect)' "$MOCK_LOG" 2>/dev/null; then
+    fail_msg "出现启动/使能旧 C 的命令: $(grep -E 'systemctl (start|restart|enable|unmask) [^ ]*(camilladsp|khaen-upmix-autodetect)' "$MOCK_LOG" | head -n 2 | tr '\n' ' ')"
   fi
   return 0
 }
 
 reset_board() {
   rm -rf "$BOARD" "$MOCK_STATE"
-  mkdir -p "$BOARD/etc/systemd/system" "$BOARD/etc/tspi" "$BOARD/etc/tspi-rt-stack" \
-           "$BOARD/opt/tspi-rt-stack/releases" "$BOARD/var/lib/tspi-rt-stack/evidence" \
-           "$BOARD/run/tspi" "$BOARD/dev/snd" "$BOARD/proc/asound/card4/pcm0p/sub0" \
+  mkdir -p "$BOARD/etc/systemd/system" "$BOARD/etc/khaen" "$BOARD/etc/khaen-rt-stack" \
+           "$BOARD/opt/khaen-rt-stack/releases" "$BOARD/var/lib/khaen-rt-stack/evidence" \
+           "$BOARD/run/khaen" "$BOARD/dev/snd" "$BOARD/proc/asound/card4/pcm0p/sub0" \
            "$BOARD/proc/4321/fd" "$BOARD/proc/4322/fd" \
            "$BOARD/proc/irq/56" "$BOARD/proc/irq/57" "$BOARD/proc/irq/58" \
            "$BOARD/sys/devices/system/cpu"
@@ -85,10 +85,10 @@ reset_board() {
   printf 'closed\n' > "$BOARD/proc/asound/card4/pcm0p/sub0/status"
   printf 'Max realtime priority            99\nMax locked memory              unlimited\n' > "$BOARD/proc/4321/limits"
   printf 'Max realtime priority            49\nMax locked memory              67108864\n' > "$BOARD/proc/4322/limits"
-  printf 'x\n' > "$BOARD/run/tspi/camilladsp.yml"
-  printf 'TSPI_X=1\n' > "$BOARD/run/tspi/camilladsp.env"
-  printf 'off\n' > "$BOARD/run/tspi/mode"
-  printf 'off\n' > "$BOARD/etc/tspi/last-mode"
+  printf 'x\n' > "$BOARD/run/khaen/camilladsp.yml"
+  printf 'KHAEN_X=1\n' > "$BOARD/run/khaen/camilladsp.env"
+  printf 'off\n' > "$BOARD/run/khaen/mode"
+  printf 'off\n' > "$BOARD/etc/khaen/last-mode"
   mkdir -p "$MOCK_STATE/units" "$MOCK_STATE/active" "$MOCK_STATE/enabled" "$MOCK_STATE/envs"
   # task-192 夹具：irqbalance 初始 enabled+active（04 安装时应 disable+stop；preflight/06 会拒绝复活）
   printf '[Unit]\nDescription=irqbalance\n' > "$MOCK_STATE/units/irqbalance.service"
@@ -100,9 +100,9 @@ reset_board() {
   # 防止旧实现的 systemctl-show-Environment 路径在夹具里「假通过」。
   export MOCK_SHOW_ENV_REAL=1
   local u
-  for u in tspi-audio.target tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service \
-           khaen-audio-web.service tspi-statime-inferno.service tspi-aes67-daemon.service \
-           tspi-ravenna-lkm.service tspi-ptp4l-master.service tspi-phc2sys.service; do
+  for u in khaen-audio.target khaen-camilladsp.service khaen-upmix-autodetect.service khaen-boot-mode.service \
+           khaen-audio-web.service khaen-statime-inferno.service khaen-aes67-daemon.service \
+           khaen-ravenna-lkm.service khaen-ptp4l-master.service khaen-phc2sys.service; do
     printf 'enabled\n' > "$MOCK_STATE/enabled/$u"
   done
   touch "$MOCK_STATE/active/khaen-audio-web.service"
@@ -123,8 +123,8 @@ elif mode=="expired":
     s=now-datetime.timedelta(minutes=120); e=now-datetime.timedelta(minutes=60)
 else:
     raise SystemExit("bad mode")
-d={"schema":"tspi-rt-stack/switch-window/v1","window_id":"test-"+mode,"authorized_by":"dryrun-test",
-   "board_host":"tspi-audio-dsp","start":s.isoformat(timespec="seconds"),"end":e.isoformat(timespec="seconds"),
+d={"schema":"khaen-rt-stack/switch-window/v1","window_id":"test-"+mode,"authorized_by":"dryrun-test",
+   "board_host":"khaen-audio-dsp","start":s.isoformat(timespec="seconds"),"end":e.isoformat(timespec="seconds"),
    "max_duration_min":90,"scope":["snapshot","preflight","retire-c","install-release","start-new","verify","mark-last-good","rollback"],
    "audio_off_required":True,"s1_stop_acknowledged":True,"soak_absent":True,"physical_access":"test-fixture",
    "notes":"dry-run fixture, NOT an authorization"}
@@ -190,11 +190,11 @@ case_syntax() {
   bash "$HERE/check_syntax.sh" --quiet >/dev/null 2>&1; a_rc 0 $? "check_syntax.sh"
   # T28-P1-a 回归：ev_cmd 必须返回真实退出码并如实记 exit=1（旧实现 ! "$@" 吞错恒返回 0）。
   mkdir -p "$TMP/ev-evcmd"
-  TSPI_DEPLOY_DRY_RUN=0 TSPI_EVIDENCE_RUN="$TMP/ev-evcmd" \
+  KHAEN_DEPLOY_DRY_RUN=0 KHAEN_EVIDENCE_RUN="$TMP/ev-evcmd" \
     bash -c '. '"$(winpath "$DEPLOY")"'/lib/common.sh; ev_cmd false' >/dev/null 2>&1
   a_rc 1 $? "ev_cmd 应传播失败 rc"
   a_contains "$TMP/ev-evcmd/commands.log" "exit=1"
-  TSPI_DEPLOY_DRY_RUN=0 TSPI_EVIDENCE_RUN="$TMP/ev-evcmd" \
+  KHAEN_DEPLOY_DRY_RUN=0 KHAEN_EVIDENCE_RUN="$TMP/ev-evcmd" \
     bash -c '. '"$(winpath "$DEPLOY")"'/lib/common.sh; ev_cmd true' >/dev/null 2>&1
   a_rc 0 $? "ev_cmd true 应 rc=0"
 }
@@ -213,7 +213,7 @@ case_snapshot_live() {
   local dir; dir="$(ls -d "$ev"/*-00-snapshot-old-c 2>/dev/null | tail -n 1)"
   a_dir "$dir"
   a_file "$dir/snapshot.json"; a_file "$dir/MANIFEST.sha256"; a_file "$dir/files.tsv"; a_file "$dir/units.tsv"
-  a_json "$dir/snapshot.json" "d['schema']=='tspi-rt-stack/old-c-snapshot/v1' and len(d['files'])>8 and len(d['units'])>8 and d['integrity_equal'] in ('true','UNKNOWN')"
+  a_json "$dir/snapshot.json" "d['schema']=='khaen-rt-stack/old-c-snapshot/v1' and len(d['files'])>8 and len(d['units'])>8 and d['integrity_equal'] in ('true','UNKNOWN')"
   a_contains "$dir/files.tsv" "/usr/local/bin/camilladsp"
   a_contains "$dir/snapshot.json" "old-c-snapshot"
 }
@@ -238,10 +238,10 @@ case_bundle_build() {
   reset_board
   make_bundle t-001; a_rc 0 $? "make-release-bundle"
   a_file "$BUNDLE/manifest.json"; a_file "$BUNDLE/bin/khaen-rt-host"; a_file "$BUNDLE/SHA256SUMS"; a_file "$BUNDLE/README.deploy.md"
-  a_file "$BUNDLE/units/tspi-irq-affinity.service"   # task-192：IRQ 持久化 oneshot 必须随 bundle
+  a_file "$BUNDLE/units/khaen-irq-affinity.service"   # task-192：IRQ 持久化 oneshot 必须随 bundle
   # B1（2026-11-20 板窗）：bundle unit 必须携带开机等待前置（打包门；旧 service/ 不得进 v12）
-  a_contains "$BUNDLE/units/tspi-irq-affinity.service" "ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait"
-  a_json "$BUNDLE/manifest.json" "d['schema']=='tspi-rt-stack/release/v1' and len(d['files'])>=8 and any(f['kind']=='binary' for f in d['files'])"
+  a_contains "$BUNDLE/units/khaen-irq-affinity.service" "ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait"
+  a_json "$BUNDLE/manifest.json" "d['schema']=='khaen-rt-stack/release/v1' and len(d['files'])>=8 and any(f['kind']=='binary' for f in d['files'])"
   python "$DEPLOY/lib/release_manifest.py" verify "$(winpath "$BUNDLE")" --require-arch aarch64 >/dev/null 2>&1
   a_rc 0 $? "release_manifest verify --require-arch aarch64"
 }
@@ -249,33 +249,33 @@ case_install_release() {
   reset_board; make_window "$WIN" valid; make_bundle t-001; a_rc 0 $? "bundle"
   bash "$DEPLOY/bin/04-install-release.sh" --live --root "$ROOT" --authorize "$WIN" --bundle "$BUNDLE" --evidence "$(winpath "$TMP/ev-install")" >"$LOGD/install.log" 2>&1
   a_rc 0 $? "install-release"
-  a_file "$BOARD/opt/tspi-rt-stack/releases/t-001/manifest.json"
+  a_file "$BOARD/opt/khaen-rt-stack/releases/t-001/manifest.json"
   a_file "$BOARD/etc/systemd/system/khaen-rt-host.service"
-  a_file "$BOARD/etc/systemd/system/tspi-rt-stack.target"
-  a_contains "$MOCK_LOG" "enable tspi-rt-stack.target"
+  a_file "$BOARD/etc/systemd/system/khaen-rt-stack.target"
+  a_contains "$MOCK_LOG" "enable khaen-rt-stack.target"
   local rel; rel="$(current_release_dir 2>/dev/null || true)"
   case "$rel" in *t-001*) : ;; *) fail_msg "current 未指向 t-001: $rel" ;; esac
-  a_file "$BOARD/etc/tspi-rt-stack/rt-host.env"
+  a_file "$BOARD/etc/khaen-rt-stack/rt-host.env"
   # F-18/T28-P0-2：首次安装必须落 toml；已有文件不得覆盖。
-  a_file "$BOARD/etc/tspi-rt-stack/rt-host.toml"
-  a_file "$BOARD/etc/tspi-rt-stack/rt-daemon.toml"
-  printf '# local override (must be preserved)\n[host]\nblock_size = 64\n' > "$BOARD/etc/tspi-rt-stack/rt-host.toml"
+  a_file "$BOARD/etc/khaen-rt-stack/rt-host.toml"
+  a_file "$BOARD/etc/khaen-rt-stack/rt-daemon.toml"
+  printf '# local override (must be preserved)\n[host]\nblock_size = 64\n' > "$BOARD/etc/khaen-rt-stack/rt-host.toml"
   bash "$DEPLOY/bin/04-install-release.sh" --live --root "$ROOT" --authorize "$WIN" --bundle "$BUNDLE" --evidence "$(winpath "$TMP/ev-install2")" >>"$LOGD/install2.log" 2>&1
   a_rc 0 $? "二次安装（不覆盖 toml）"
-  a_contains "$BOARD/etc/tspi-rt-stack/rt-host.toml" "local override"
-  a_contains "$MOCK_LOG" "enable tspi-motu-48k-keeper.service"
+  a_contains "$BOARD/etc/khaen-rt-stack/rt-host.toml" "local override"
+  a_contains "$MOCK_LOG" "enable khaen-motu-48k-keeper.service"
   # task-192：04 安装时必须 disable+stop irqbalance、写 IRQ pin 并回读，装 pin 脚本/env/oneshot unit
   a_contains "$MOCK_LOG" "disable irqbalance.service"
   a_contains "$MOCK_LOG" "stop irqbalance.service"
   a_eq "1" "$(cat "$BOARD/proc/irq/58/smp_affinity_list")" "IRQ58 应钉到 CPU1"
   a_eq "2" "$(cat "$BOARD/proc/irq/56/smp_affinity_list")" "IRQ56 应钉到 CPU2"
   a_eq "3" "$(cat "$BOARD/proc/irq/57/smp_affinity_list")" "IRQ57 应钉到 CPU3"
-  a_file "$BOARD/usr/local/lib/tspi/irq-affinity-pin"
-  a_file "$BOARD/etc/tspi-rt-stack/irq-affinity.env"
-  a_file "$BOARD/etc/systemd/system/tspi-irq-affinity.service"
+  a_file "$BOARD/usr/local/lib/khaen/irq-affinity-pin"
+  a_file "$BOARD/etc/khaen-rt-stack/irq-affinity.env"
+  a_file "$BOARD/etc/systemd/system/khaen-irq-affinity.service"
   # B1（2026-11-20 板窗）：装到板上的 oneshot 必须含开机等待前置；pin 脚本支持 wait；record 记录 B1 字段
-  a_contains "$BOARD/etc/systemd/system/tspi-irq-affinity.service" "ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait"
-  a_contains "$BOARD/usr/local/lib/tspi/irq-affinity-pin" "irq-affinity-pin wait"
+  a_contains "$BOARD/etc/systemd/system/khaen-irq-affinity.service" "ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait"
+  a_contains "$BOARD/usr/local/lib/khaen/irq-affinity-pin" "irq-affinity-pin wait"
   a_json "$TMP/ev-install/install-record.json" "d['boot_race_fix_b1']['unit_execstartpre_wait'] is True and d['boot_race_fix_b1']['legacy_live_only_dropin']=='absent'"
   a_file "$TMP/ev-install/irq-affinity.json"
   a_json "$TMP/ev-install/irq-affinity.json" "d['overall_ok'] is True and d['t45']['plan_equivalent']=='PASS'"
@@ -288,38 +288,38 @@ case_install_bad_arch() {
   a_rc 0 $? "foreign bundle 打包"
   bash "$DEPLOY/bin/04-install-release.sh" --live --root "$ROOT" --authorize "$WIN" --bundle "$TMP/bundle-bad" --evidence "$(winpath "$TMP/ev-bad")" >"$LOGD/install-bad.log" 2>&1
   a_rc 3 $? "PE 二进制安装应 exit 3"
-  a_absent "$BOARD/opt/tspi-rt-stack/current"
+  a_absent "$BOARD/opt/khaen-rt-stack/current"
 }
 case_retire_live() {
   reset_board; make_window "$WIN" valid
   bash "$DEPLOY/bin/03-retire-c.sh" --live --root "$ROOT" --authorize "$WIN" --evidence "$(winpath "$TMP/ev-retire")" >"$LOGD/retire.log" 2>&1
   a_rc 0 $? "retire-c live"
-  a_contains "$MOCK_LOG" "disable tspi-camilladsp.service"
-  a_contains "$MOCK_LOG" "mask tspi-camilladsp.service"
-  a_contains "$MOCK_LOG" "disable tspi-upmix-autodetect.service"
+  a_contains "$MOCK_LOG" "disable khaen-camilladsp.service"
+  a_contains "$MOCK_LOG" "mask khaen-camilladsp.service"
+  a_contains "$MOCK_LOG" "disable khaen-upmix-autodetect.service"
   a_contains "$MOCK_LOG" "stop khaen-audio-web.service"
-  a_contains "$MOCK_LOG" "disable tspi-audio.target"
+  a_contains "$MOCK_LOG" "disable khaen-audio.target"
   a_log_no_c_start
-  a_absent "$BOARD/run/tspi/camilladsp.yml"
-  a_absent "$BOARD/run/tspi/camilladsp.env"
-  a_absent "$BOARD/etc/tspi/last-mode"
-  a_absent "$BOARD/run/tspi/mode"
+  a_absent "$BOARD/run/khaen/camilladsp.yml"
+  a_absent "$BOARD/run/khaen/camilladsp.env"
+  a_absent "$BOARD/etc/khaen/last-mode"
+  a_absent "$BOARD/run/khaen/mode"
   a_file "$TMP/ev-retire/result.txt"
   a_contains "$TMP/ev-retire/result.txt" "FAILS=0"
 }
 case_verify_detects_c() {
   reset_board
   systemctl start khaen-rt-host.service >/dev/null 2>&1
-  printf 'enabled\n' > "$MOCK_STATE/enabled/tspi-camilladsp.service"
-  touch "$MOCK_STATE/active/tspi-camilladsp.service"
-  printf '999 camilladsp -p 1234 -a 127.0.0.1 -l warn --gain1=-120 --gain2=0 /run/tspi/camilladsp.yml\n' >> "$MOCK_PROCS"
+  printf 'enabled\n' > "$MOCK_STATE/enabled/khaen-camilladsp.service"
+  touch "$MOCK_STATE/active/khaen-camilladsp.service"
+  printf '999 camilladsp -p 1234 -a 127.0.0.1 -l warn --gain1=-120 --gain2=0 /run/khaen/camilladsp.yml\n' >> "$MOCK_PROCS"
   bash "$DEPLOY/bin/06-verify-switch.sh" --live --root "$ROOT" --evidence "$(winpath "$TMP/ev-verify-bad")" >"$LOGD/verify-bad.log" 2>&1
   a_rc 5 $? "C 仍 active 时 verify 应 exit 5"
   a_contains "$TMP/ev-verify-bad/verify-report.json" "FAIL"
   # F-42：disabled 但未 mask 也算 C 未退役（只查 enabled 不够）。
-  rm -f "$MOCK_STATE/active/tspi-camilladsp.service"
+  rm -f "$MOCK_STATE/active/khaen-camilladsp.service"
   grep -v "camilladsp" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true
-  printf 'disabled\n' > "$MOCK_STATE/enabled/tspi-camilladsp.service"
+  printf 'disabled\n' > "$MOCK_STATE/enabled/khaen-camilladsp.service"
   systemctl start khaen-rt-host.service >/dev/null 2>&1
   bash "$DEPLOY/bin/06-verify-switch.sh" --live --root "$ROOT" --evidence "$(winpath "$TMP/ev-verify-nomask")" >"$LOGD/verify-nomask.log" 2>&1
   a_rc 5 $? "C disabled 但未 mask 时 verify 应 exit 5"
@@ -328,21 +328,21 @@ case_verify_detects_c() {
 case_rollback_mute() {
   reset_board; make_window "$WIN" valid
   local u
-  for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service khaen-audio-web.service; do
+  for u in khaen-camilladsp.service khaen-upmix-autodetect.service khaen-boot-mode.service khaen-audio-web.service; do
     printf 'masked\n' > "$MOCK_STATE/enabled/$u"
   done
-  printf 'disabled\n' > "$MOCK_STATE/enabled/tspi-audio.target"
+  printf 'disabled\n' > "$MOCK_STATE/enabled/khaen-audio.target"
   systemctl stop khaen-audio-web.service >/dev/null 2>&1
   systemctl start khaen-rt-host.service >/dev/null 2>&1
   bash "$DEPLOY/bin/08-rollback.sh" --live --root "$ROOT" --authorize "$WIN" --evidence "$(winpath "$TMP/ev-rb-mute")" --mute >"$LOGD/rb-mute.log" 2>&1
   a_rc 10 $? "无 last-good 的 --mute 应 exit 10"
   a_file "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf"
-  a_file "$BOARD/etc/tspi-rt-stack/90-safe-mute.env"
+  a_file "$BOARD/etc/khaen-rt-stack/90-safe-mute.env"
   # F-17：drop-in 用 EnvironmentFile（不是 Environment=），env 写正确变量名，能压过 rt-host.env 的 normal。
-  a_contains "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf" "EnvironmentFile=/etc/tspi-rt-stack/90-safe-mute.env"
-  a_not_contains "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf" "Environment=TSPI_"
-  a_contains "$BOARD/etc/tspi-rt-stack/90-safe-mute.env" "TSPI_HOST_SAFE_MODE=mute"
-  a_not_contains "$BOARD/etc/tspi-rt-stack/90-safe-mute.env" "TSPI_RT_HOST_SAFE_MODE"
+  a_contains "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf" "EnvironmentFile=/etc/khaen-rt-stack/90-safe-mute.env"
+  a_not_contains "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf" "Environment=KHAEN_"
+  a_contains "$BOARD/etc/khaen-rt-stack/90-safe-mute.env" "KHAEN_HOST_SAFE_MODE=mute"
+  a_not_contains "$BOARD/etc/khaen-rt-stack/90-safe-mute.env" "KHAEN_RT_HOST_SAFE_MODE"
   a_file "$TMP/ev-rb-mute/rollback-report.json"
   a_contains "$TMP/ev-rb-mute/rollback-report.json" "DEGRADED_MUTE"
   a_contains "$TMP/ev-rb-mute/rollback-report.json" "已生效"
@@ -353,22 +353,22 @@ case_atomic_success() {
   do_switch t-001 "$TMP/ev-switch"; a_rc 0 $? "atomic-switch 成功路径"
   a_file "$TMP/ev-switch/result.json"
   a_json "$TMP/ev-switch/result.json" "d['final_state']=='RUNNING_LAST_GOOD' and d['exit']==0"
-  a_file "$BOARD/var/lib/tspi-rt-stack/last-good.json"
-  a_json "$BOARD/var/lib/tspi-rt-stack/last-good.json" "d['schema']=='tspi-rt-stack/last-good/v1' and d['c_policy']=='never-camilladsp' and d['release_id']=='t-001'"
+  a_file "$BOARD/var/lib/khaen-rt-stack/last-good.json"
+  a_json "$BOARD/var/lib/khaen-rt-stack/last-good.json" "d['schema']=='khaen-rt-stack/last-good/v1' and d['c_policy']=='never-camilladsp' and d['release_id']=='t-001'"
   a_file "$TMP/ev-switch/verify/verify-report.json"
   a_json "$TMP/ev-switch/verify/verify-report.json" "d['fails']==0"
-  a_contains "$MOCK_LOG" "enable tspi-rt-stack.target"
-  a_contains "$MOCK_STATE/enabled/tspi-camilladsp.service" "masked"
+  a_contains "$MOCK_LOG" "enable khaen-rt-stack.target"
+  a_contains "$MOCK_STATE/enabled/khaen-camilladsp.service" "masked"
   a_file "$MOCK_STATE/active/khaen-rt-host.service"
   # F-18/T28-P0-a：start target 后 host+daemon 都必须 active（target Wants= 生效）。
-  a_file "$MOCK_STATE/active/tspi-rt-daemon.service"
-  a_file "$BOARD/etc/tspi-rt-stack/rt-host.toml"
-  a_file "$BOARD/etc/tspi-rt-stack/rt-daemon.toml"
+  a_file "$MOCK_STATE/active/khaen-rt-daemon.service"
+  a_file "$BOARD/etc/khaen-rt-stack/rt-host.toml"
+  a_file "$BOARD/etc/khaen-rt-stack/rt-daemon.toml"
   # F-40：只读 pre-install 门必须排在 install 之前；F-45：stages 与文件头顺序一致。
   local npre nins; npre="$(grep -n '^2-preflight-pre' "$TMP/ev-switch/stages.log" | head -n1 | cut -d: -f1)"; nins="$(grep -n '^3-install' "$TMP/ev-switch/stages.log" | head -n1 | cut -d: -f1)"
   [ -n "$npre" ] && [ -n "$nins" ] && [ "$npre" -lt "$nins" ] || fail_msg "stages 顺序错误：pre-install 应在 install 之前（pre=$npre install=$nins）"
   # task-192：05 在 start target 前显式 start 钉核 oneshot；06 V10 复核 IRQ 仍在 A53
-  a_contains "$MOCK_LOG" "start tspi-irq-affinity.service"
+  a_contains "$MOCK_LOG" "start khaen-irq-affinity.service"
   a_eq "1" "$(cat "$BOARD/proc/irq/58/smp_affinity_list")" "切换后 IRQ58 仍在 CPU1"
   a_file "$TMP/ev-switch/irq-affinity.json"
   a_json "$TMP/ev-switch/verify/verify-report.json" "any(c['id']=='V10.pins' and c['status']=='PASS' for c in d['checks'])"
@@ -378,7 +378,7 @@ case_atomic_success() {
   a_json "$TMP/ev-switch/verify/verify-report.json" "any(c['id']=='V10.bootwait' and c['status']=='PASS' for c in d['checks'])"
   a_json "$TMP/ev-switch/verify/verify-report.json" "any(c['id']=='V10.legacy-dropin' and c['status']=='PASS' for c in d['checks'])"
   # B1 负例：删掉已装 unit 的 ExecStartPre wait → 06 必须等价重启后 FAIL（rc=5，V10.bootwait FAIL）
-  sed -i '/^ExecStartPre=.*irq-affinity-pin wait$/d' "$BOARD/etc/systemd/system/tspi-irq-affinity.service"
+  sed -i '/^ExecStartPre=.*irq-affinity-pin wait$/d' "$BOARD/etc/systemd/system/khaen-irq-affinity.service"
   bash "$DEPLOY/bin/06-verify-switch.sh" --live --root "$ROOT" --settle-secs 0 --require-daemon --evidence "$(winpath "$TMP/ev-bootwait-bad")" >"$LOGD/bootwait-bad.log" 2>&1
   a_rc 5 $? "B1：缺开机等待前置时 verify 应 rc=5"
   a_contains "$TMP/ev-bootwait-bad/verify-report.json" "V10.bootwait"
@@ -386,7 +386,7 @@ case_atomic_success() {
 }
 case_atomic_fail_start() {
   reset_board; make_window "$WIN" valid; make_bundle t-001; a_rc 0 $? "bundle"
-  export MOCK_FAIL_MATCH="start tspi-rt-stack.target"
+  export MOCK_FAIL_MATCH="start khaen-rt-stack.target"
   do_switch t-001 "$TMP/ev-switch-fail"; a_rc 10 $? "启动失败应回退为 mute(10)"
   a_json "$TMP/ev-switch-fail/result.json" "d['final_state']=='DEGRADED_MUTE' and d['exit']==10"
   a_file "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf"
@@ -411,13 +411,13 @@ case_rollback_contract() {
   reset_board
   mkdir -p "$TMP/reg/bin" "$TMP/reg/releases/t/r1/bin"
   make_elf_aarch64 "$TMP/reg/releases/t/r1/bin/khaen-rt-host"
-  printf '{"schema":"tspi-rt-stack/release/v1","release_id":"r1","files":[]}\n' > "$TMP/reg/releases/t/r1/manifest.json"
-  printf '{"schema":"tspi-rt-stack/last-good/v1","release_id":"r1","release_dir":"%s","binary_sha256":{"khaen-rt-host":"%s"},"units_sha256":{"khaen-rt-host.service":"%s"},"verified_at":"2026-11-17T00:00:00+08:00","c_policy":"never-camilladsp","previous":null}\n' \
+  printf '{"schema":"khaen-rt-stack/release/v1","release_id":"r1","files":[]}\n' > "$TMP/reg/releases/t/r1/manifest.json"
+  printf '{"schema":"khaen-rt-stack/last-good/v1","release_id":"r1","release_dir":"%s","binary_sha256":{"khaen-rt-host":"%s"},"units_sha256":{"khaen-rt-host.service":"%s"},"verified_at":"2026-11-17T00:00:00+08:00","c_policy":"never-camilladsp","previous":null}\n' \
     "$(winpath "$TMP/reg/releases/t/r1")" "$(sha256sum "$TMP/reg/releases/t/r1/bin/khaen-rt-host" | awk '{print $1}')" "$(sha256sum "$TMP/reg/releases/t/r1/manifest.json" | awk '{print $1}')" > "$TMP/reg/last-good.json"
   python "$HERE/check_rollback_file.py" --deploy "$(winpath "$DEPLOY")" --service "$(winpath "$RS/service")" --last-good "$(winpath "$TMP/reg/last-good.json")" --require-release >"$LOGD/rb-contract.log" 2>&1
   a_rc 0 $? "rollback 契约检查 PASS"
   cp -r "$DEPLOY" "$TMP/bad-deploy"
-  printf 'systemctl start tspi-camilladsp.service\n' >> "$TMP/bad-deploy/bin/03-retire-c.sh"
+  printf 'systemctl start khaen-camilladsp.service\n' >> "$TMP/bad-deploy/bin/03-retire-c.sh"
   python "$HERE/check_rollback_file.py" --deploy "$(winpath "$TMP/bad-deploy")" --service "$(winpath "$RS/service")" >"$LOGD/rb-contract-bad.log" 2>&1
   a_rc 3 $? "注入 C start 后检查器应 FAIL(3)"
 }
@@ -426,14 +426,14 @@ case_unit_syntax() {
   a_rc 0 $? "service 单元语法检查"
   a_file "$TMP/units-report.json"
   a_json "$TMP/units-report.json" "d['ok'] is True and d['checked']>=3"
-  a_contains "$TMP/units-report.json" "tspi-irq-affinity.service"
+  a_contains "$TMP/units-report.json" "khaen-irq-affinity.service"
   # F3/F4（2026-11-18 板窗缺陷回归）
-  a_contains "$RS/service/khaen-rt-host.service" "RuntimeDirectory=tspi-rt-stack"
-  a_contains "$RS/service/khaen-rt-host.service" "LogsDirectory=tspi-rt-stack"
+  a_contains "$RS/service/khaen-rt-host.service" "RuntimeDirectory=khaen-rt-stack"
+  a_contains "$RS/service/khaen-rt-host.service" "LogsDirectory=khaen-rt-stack"
   a_contains "$RS/service/khaen-rt-host.service" "DeviceAllow=char-alsa rw"
   a_not_contains "$RS/service/khaen-rt-host.service" "DeviceAllow=/dev/snd/*"
-  a_contains "$RS/service/tspi-rt-daemon.service" "RuntimeDirectory=tspi-rt-stack"
-  a_contains "$RS/service/tspi-rt-daemon.service" "LogsDirectory=tspi-rt-stack"
+  a_contains "$RS/service/khaen-rt-daemon.service" "RuntimeDirectory=khaen-rt-stack"
+  a_contains "$RS/service/khaen-rt-daemon.service" "LogsDirectory=khaen-rt-stack"
   rm -rf "$TMP/bad-units"; cp -r "$RS/service" "$TMP/bad-units"
   printf 'BogusKey=1\n' >> "$TMP/bad-units/khaen-rt-host.service"
   python "$HERE/check_unit_syntax.py" "$(winpath "$TMP/bad-units")" >"$LOGD/units-bad.log" 2>&1
@@ -445,17 +445,17 @@ case_unit_syntax() {
   a_rc 3 $? "F4：DeviceAllow=/dev/snd/* 通配应 FAIL(3)"
   # F3 负例：删除 RuntimeDirectory 必须 FAIL
   rm -rf "$TMP/bad-units3"; cp -r "$RS/service" "$TMP/bad-units3"
-  sed -i '/^RuntimeDirectory=tspi-rt-stack$/d' "$TMP/bad-units3/khaen-rt-host.service"
+  sed -i '/^RuntimeDirectory=khaen-rt-stack$/d' "$TMP/bad-units3/khaen-rt-host.service"
   python "$HERE/check_unit_syntax.py" "$(winpath "$TMP/bad-units3")" >"$LOGD/units-bad3.log" 2>&1
   a_rc 3 $? "F3：缺 RuntimeDirectory 应 FAIL(3)"
   # B1（2026-11-20 板窗）负例：删掉开机等待 ExecStartPre → FAIL(3)
   rm -rf "$TMP/bad-units4"; cp -r "$RS/service" "$TMP/bad-units4"
-  sed -i '/^ExecStartPre=.*irq-affinity-pin wait$/d' "$TMP/bad-units4/tspi-irq-affinity.service"
+  sed -i '/^ExecStartPre=.*irq-affinity-pin wait$/d' "$TMP/bad-units4/khaen-irq-affinity.service"
   python "$HERE/check_unit_syntax.py" "$(winpath "$TMP/bad-units4")" >"$LOGD/units-bad4.log" 2>&1
   a_rc 3 $? "B1：删除 ExecStartPre wait 应 FAIL(3)"
   # B1 负例：去掉 TimeoutStartSec（等待窗口余量）→ FAIL(3)
   rm -rf "$TMP/bad-units5"; cp -r "$RS/service" "$TMP/bad-units5"
-  sed -i '/^TimeoutStartSec=120$/d' "$TMP/bad-units5/tspi-irq-affinity.service"
+  sed -i '/^TimeoutStartSec=120$/d' "$TMP/bad-units5/khaen-irq-affinity.service"
   python "$HERE/check_unit_syntax.py" "$(winpath "$TMP/bad-units5")" >"$LOGD/units-bad5.log" 2>&1
   a_rc 3 $? "B1：缺 TimeoutStartSec 应 FAIL(3)"
 }
@@ -477,8 +477,8 @@ case_bundle_dryrun() {
 
 case_irq_pin_script() {
   reset_board
-  local cfg="$BOARD/etc/tspi-rt-stack/irq-affinity.env"
-  printf 'TSPI_IRQ_PINS="58:1 56:2 57:3"\nTSPI_IRQ_DSP_CPUS="4,5,6,7"\n' > "$cfg"
+  local cfg="$BOARD/etc/khaen-rt-stack/irq-affinity.env"
+  printf 'KHAEN_IRQ_PINS="58:1 56:2 57:3"\nKHAEN_IRQ_DSP_CPUS="4,5,6,7"\n' > "$cfg"
   bash "$DEPLOY/config/irq-affinity-pin" verify --root "$ROOT" >"$LOGD/irqpin-before.log" 2>&1
   a_rc 3 $? "初始 A72 亲和时 pin verify 应 rc=3"
   bash "$DEPLOY/config/irq-affinity-pin" apply --root "$ROOT" >"$LOGD/irqpin-apply.log" 2>&1
@@ -531,64 +531,64 @@ case_irq_persist_regression() {
 case_irq_boot_wait() {
   reset_board
   local pin="$DEPLOY/config/irq-affinity-pin"
-  printf 'TSPI_IRQ_PINS="58:1 56:2 57:3"\nTSPI_IRQ_WAIT_SECS="5"\n' > "$BOARD/etc/tspi-rt-stack/irq-affinity.env"
+  printf 'KHAEN_IRQ_PINS="58:1 56:2 57:3"\nKHAEN_IRQ_WAIT_SECS="5"\n' > "$BOARD/etc/khaen-rt-stack/irq-affinity.env"
   # 1) 节点齐全：wait 立即 PASS
-  TSPI_IRQ_WAIT_SECS=5 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-ok.log" 2>&1
+  KHAEN_IRQ_WAIT_SECS=5 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-ok.log" 2>&1
   a_rc 0 $? "节点齐全时 pin wait 应 rc=0"
   a_contains "$LOGD/bootwait-ok.log" "RESULT PASS（action=wait"
   # 2) IRQ56 节点晚到 0.6s：wait 轮询等待后 PASS（v11 首启现场：end0 枚举晚于 oneshot）
   rm -f "$BOARD/proc/irq/56/smp_affinity_list"
   ( sleep 0.6; printf '6\n' > "$BOARD/proc/irq/56/smp_affinity_list" ) &
   local bg=$!
-  TSPI_IRQ_WAIT_SECS=5 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-late.log" 2>&1
+  KHAEN_IRQ_WAIT_SECS=5 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-late.log" 2>&1
   a_rc 0 $? "IRQ 节点晚到时 pin wait 应等待后 rc=0"
   a_contains "$LOGD/bootwait-late.log" "WAIT 依赖 IRQ 节点未就绪"
   wait "$bg" 2>/dev/null || true
   # 3) 节点始终缺失：超时 fail-closed rc=3，日志点名缺失 IRQ
   rm -f "$BOARD/proc/irq/56/smp_affinity_list"
-  TSPI_IRQ_WAIT_SECS=1 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-timeout.log" 2>&1
+  KHAEN_IRQ_WAIT_SECS=1 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-timeout.log" 2>&1
   a_rc 3 $? "IRQ 节点始终缺失时 pin wait 应 fail-closed rc=3"
   a_contains "$LOGD/bootwait-timeout.log" "FAIL 依赖 IRQ 的 /proc/irq 节点在 1s 内未就绪"
   a_contains "$LOGD/bootwait-timeout.log" "IRQ56"
-  # 4) TSPI_IRQ_WAIT_SECS=0：只查一次立即 rc=3（不等待）
-  TSPI_IRQ_WAIT_SECS=0 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-zero.log" 2>&1
-  a_rc 3 $? "TSPI_IRQ_WAIT_SECS=0 且节点缺失应 rc=3（不等待）"
+  # 4) KHAEN_IRQ_WAIT_SECS=0：只查一次立即 rc=3（不等待）
+  KHAEN_IRQ_WAIT_SECS=0 bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-zero.log" 2>&1
+  a_rc 3 $? "KHAEN_IRQ_WAIT_SECS=0 且节点缺失应 rc=3（不等待）"
   # 5) 非法等待值：用法错误 rc=2
-  TSPI_IRQ_WAIT_SECS=abc bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-badsecs.log" 2>&1
-  a_rc 2 $? "非法 TSPI_IRQ_WAIT_SECS 应 rc=2"
+  KHAEN_IRQ_WAIT_SECS=abc bash "$pin" wait --root "$ROOT" >"$LOGD/bootwait-badsecs.log" 2>&1
+  a_rc 2 $? "非法 KHAEN_IRQ_WAIT_SECS 应 rc=2"
   # 6) unit 契约：等待前置 + 超时余量
-  a_contains "$RS/service/tspi-irq-affinity.service" "ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait"
-  a_contains "$RS/service/tspi-irq-affinity.service" "TimeoutStartSec=120"
+  a_contains "$RS/service/khaen-irq-affinity.service" "ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait"
+  a_contains "$RS/service/khaen-irq-affinity.service" "TimeoutStartSec=120"
   # 7) 配置模板说明等待语义（04 首次安装落盘；既有 env 缺键时脚本默认 60）
-  a_contains "$DEPLOY/config/irq-affinity.env.example" "TSPI_IRQ_WAIT_SECS="
+  a_contains "$DEPLOY/config/irq-affinity.env.example" "KHAEN_IRQ_WAIT_SECS="
 }
 
 case_irq_boot_persist() {
   reset_board; make_window "$WIN" valid; make_bundle t-001; a_rc 0 $? "bundle"
   # bundle 内的 oneshot 必须携带 B1 等待前置（打包门）
-  a_contains "$BUNDLE/units/tspi-irq-affinity.service" "ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait"
+  a_contains "$BUNDLE/units/khaen-irq-affinity.service" "ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait"
   # 板端存量 live-only drop-in（v11 板窗现场）→ 04 应备份到 evidence 后删除
-  mkdir -p "$BOARD/etc/systemd/system/tspi-irq-affinity.service.d"
+  mkdir -p "$BOARD/etc/systemd/system/khaen-irq-affinity.service.d"
   printf '[Service]\nExecStartPre=/usr/bin/timeout 60 /bin/sh -c "until [ -e /proc/irq/56/smp_affinity_list ]; do sleep 0.2; done"\n' \
-    > "$BOARD/etc/systemd/system/tspi-irq-affinity.service.d/10-wait-irq.conf"
+    > "$BOARD/etc/systemd/system/khaen-irq-affinity.service.d/10-wait-irq.conf"
   bash "$DEPLOY/bin/04-install-release.sh" --live --root "$ROOT" --authorize "$WIN" --bundle "$BUNDLE" --evidence "$(winpath "$TMP/ev-boot-inst")" >"$LOGD/boot-inst.log" 2>&1
   a_rc 0 $? "04 安装（B1 unit 门 + legacy drop-in 迁移）"
-  a_contains "$BOARD/etc/systemd/system/tspi-irq-affinity.service" "ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait"
-  a_absent "$BOARD/etc/systemd/system/tspi-irq-affinity.service.d/10-wait-irq.conf"
+  a_contains "$BOARD/etc/systemd/system/khaen-irq-affinity.service" "ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait"
+  a_absent "$BOARD/etc/systemd/system/khaen-irq-affinity.service.d/10-wait-irq.conf"
   a_file "$TMP/ev-boot-inst/migrated-dropins/10-wait-irq.conf"
   a_file "$TMP/ev-boot-inst/migrated-dropins/SHA256SUMS"
   a_json "$TMP/ev-boot-inst/install-record.json" "d['boot_race_fix_b1']['legacy_live_only_dropin']=='migrated'"
   # 负例 A：bundle unit 被截（缺 B1 wait 指令；注释匹配不算）+ manifest 重绑 sha → 04 安装前 fail-closed rc=3
   local badb="$TMP/bundle-bootbad"
   rm -rf "$badb"; cp -r "$BUNDLE" "$badb"
-  grep -v '^ExecStartPre=' "$badb/units/tspi-irq-affinity.service" > "$badb/units/.unit.tmp"
-  mv -f "$badb/units/.unit.tmp" "$badb/units/tspi-irq-affinity.service"
+  grep -v '^ExecStartPre=' "$badb/units/khaen-irq-affinity.service" > "$badb/units/.unit.tmp"
+  mv -f "$badb/units/.unit.tmp" "$badb/units/khaen-irq-affinity.service"
   python - "$(winpath "$badb")" <<'PYEOF' || fail_msg "重绑 bad bundle manifest 失败"
 import hashlib, json, os, sys
 b = sys.argv[1]
 mp = os.path.join(b, 'manifest.json')
 m = json.load(open(mp, encoding='utf-8'))
-rel = 'units/tspi-irq-affinity.service'
+rel = 'units/khaen-irq-affinity.service'
 fp = os.path.join(b, rel)
 h = hashlib.sha256(open(fp, 'rb').read()).hexdigest()
 for e in m['files']:
@@ -600,11 +600,11 @@ PYEOF
   bash "$DEPLOY/bin/04-install-release.sh" --live --root "$ROOT" --authorize "$WIN" --bundle "$badb" --evidence "$(winpath "$TMP/ev-boot-bad")" >"$LOGD/boot-inst-bad.log" 2>&1
   a_rc 3 $? "bundle 缺 B1 wait 前置时 04 应 fail-closed rc=3"
   a_contains "$LOGD/boot-inst-bad.log" "B1 开机竞态防护缺失"
-  a_contains "$BOARD/etc/systemd/system/tspi-irq-affinity.service" "ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait"
+  a_contains "$BOARD/etc/systemd/system/khaen-irq-affinity.service" "ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait"
   # 负例 B：旧 service/（缺 B1 wait）进打包 → make-release-bundle 必须拒绝（--service-dir 指向坏目录）
   local badsvc="$TMP/bad-service"
   rm -rf "$badsvc"; cp -r "$RS/service" "$badsvc"
-  sed -i '/^ExecStartPre=.*irq-affinity-pin wait$/d' "$badsvc/tspi-irq-affinity.service"
+  sed -i '/^ExecStartPre=.*irq-affinity-pin wait$/d' "$badsvc/khaen-irq-affinity.service"
   bash "$DEPLOY/bin/make-release-bundle.sh" --live --bin-dir "$(winpath "$TMP/bin-t-001")" \
     --service-dir "$(winpath "$badsvc")" --out "$(winpath "$TMP/bundle-bootbad2")" --release-id bad2 >"$LOGD/bundle-bad-svc.log" 2>&1
   a_rc 3 $? "旧 service/ 缺 B1 wait 时打包应 rc=3"
@@ -651,9 +651,9 @@ PYEOF
   a_file "$TMP/pkg-x/README-UPLOAD.md"
   # 修复已随包：F2 移走再 mask、F5 /proc 环境核对、F3/F4 unit 键
   a_contains "$TMP/pkg-x/deploy/bin/03-retire-c.sh" "unit_file_move_before_mask"
-  a_contains "$TMP/pkg-x/deploy/lib/common.sh" "TSPI_PROC_ROOT"
+  a_contains "$TMP/pkg-x/deploy/lib/common.sh" "KHAEN_PROC_ROOT"
   a_contains "$TMP/pkg-x/service/khaen-rt-host.service" "DeviceAllow=char-alsa rw"
-  a_contains "$TMP/pkg-x/service/khaen-rt-host.service" "RuntimeDirectory=tspi-rt-stack"
+  a_contains "$TMP/pkg-x/service/khaen-rt-host.service" "RuntimeDirectory=khaen-rt-stack"
 }
 
 case_retire_mask_unit_file() {  # F2：/etc/systemd/system 普通 unit 文件 → 备份+移走再 mask
@@ -678,21 +678,21 @@ case_retire_mask_unit_file() {  # F2：/etc/systemd/system 普通 unit 文件 �
 case_env_resolve() {  # F5：unit_env_contains 走 /proc/<MainPID>/environ → EnvironmentFiles
   reset_board
   mkdir -p "$BOARD/proc/4321"
-  printf 'TSPI_HOST_SAFE_MODE=mute\0PATH=/usr/bin\0' > "$BOARD/proc/4321/environ"
+  printf 'KHAEN_HOST_SAFE_MODE=mute\0PATH=/usr/bin\0' > "$BOARD/proc/4321/environ"
   touch "$MOCK_STATE/active/khaen-rt-host.service"
   # A) /proc/<MainPID>/environ 含 mute（真实进程环境，主通道）
-  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
+  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "KHAEN_HOST_SAFE_MODE=mute"' \
     _ "$(winpath "$DEPLOY")" >/dev/null 2>&1
   a_rc 0 $? "F5-A：/proc/<MainPID>/environ 含 mute 应 PASS"
   # B) 无 /proc environ（进程不可读）→ 回退解析 EnvironmentFiles
   rm -f "$BOARD/proc/4321/environ"
-  printf 'TSPI_HOST_SAFE_MODE=mute\n' > "$BOARD/etc/tspi-rt-stack/rt-host.env"
-  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
+  printf 'KHAEN_HOST_SAFE_MODE=mute\n' > "$BOARD/etc/khaen-rt-stack/rt-host.env"
+  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "KHAEN_HOST_SAFE_MODE=mute"' \
     _ "$(winpath "$DEPLOY")" >/dev/null 2>&1
   a_rc 0 $? "F5-B：无 proc 时回退 EnvironmentFiles 含 mute 应 PASS"
   # C) 服务在但无静音（proc/environFiles 均 normal）→ 必须 FAIL（保留判定能力）
-  printf 'TSPI_HOST_SAFE_MODE=normal\n' > "$BOARD/etc/tspi-rt-stack/rt-host.env"
-  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
+  printf 'KHAEN_HOST_SAFE_MODE=normal\n' > "$BOARD/etc/khaen-rt-stack/rt-host.env"
+  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "KHAEN_HOST_SAFE_MODE=mute"' \
     _ "$(winpath "$DEPLOY")" >/dev/null 2>&1
   a_rc 1 $? "F5-C：服务在但无 mute 必须 FAIL（不得假阳性）"
 }
@@ -700,13 +700,13 @@ case_env_resolve() {  # F5：unit_env_contains 走 /proc/<MainPID>/environ → E
 case_mute_env_runtime() {  # F5：08 --mute 用运行时环境核对，报告 已生效 且留证据通道
   reset_board; make_window "$WIN" valid
   local u
-  for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service khaen-audio-web.service; do
+  for u in khaen-camilladsp.service khaen-upmix-autodetect.service khaen-boot-mode.service khaen-audio-web.service; do
     printf 'masked\n' > "$MOCK_STATE/enabled/$u"
   done
-  printf 'disabled\n' > "$MOCK_STATE/enabled/tspi-audio.target"
+  printf 'disabled\n' > "$MOCK_STATE/enabled/khaen-audio.target"
   systemctl stop khaen-audio-web.service >/dev/null 2>&1
   mkdir -p "$BOARD/proc/4321"
-  printf 'TSPI_HOST_SAFE_MODE=mute\0PATH=/usr/bin\0' > "$BOARD/proc/4321/environ"
+  printf 'KHAEN_HOST_SAFE_MODE=mute\0PATH=/usr/bin\0' > "$BOARD/proc/4321/environ"
   bash "$DEPLOY/bin/08-rollback.sh" --live --root "$ROOT" --authorize "$WIN" \
     --evidence "$(winpath "$TMP/ev-rb-f5")" --mute >"$LOGD/rb-f5.log" 2>&1
   a_rc 10 $? "F5：--mute 应 exit 10（DEGRADED_MUTE）"
@@ -726,7 +726,7 @@ done
 python - "$(winpath "$OUT")" "$PASS" "$FAIL" "$(winpath "$TMP/results.log")" <<'PYEOF' || true
 import json,sys,shutil,os,datetime
 out,passed,failed,reslog=sys.argv[1],int(sys.argv[2]),int(sys.argv[3]),sys.argv[4]
-d={"schema":"tspi-rt-stack/dryrun-tests/v1","suites_passed":passed,"suites_failed":failed,
+d={"schema":"khaen-rt-stack/dryrun-tests/v1","suites_passed":passed,"suites_failed":failed,
    "total":passed+failed,"verdict":"PASS" if failed==0 else "FAIL",
    "generated_at":datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds"),
    "environment":"Git Bash + mocked systemctl/pgrep/fuser/ss/curl; no board access"}

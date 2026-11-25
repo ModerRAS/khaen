@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-11-17T00:20:05.138819+08:00",
-  "tool": "tspi-upmix 1.2.0",
-  "presets_file": "C:\\work\\projects\\tspi-audio-dsp\\upmix\\presets\\upmix-presets.yml",
+  "tool": "khaen-upmix 1.2.0",
+  "presets_file": "C:\\work\\projects\\khaen-audio-dsp\\upmix\\presets\\upmix-presets.yml",
   "files": [
     {
       "path": "profiles\\upmix-4.1.2-movie.yml",

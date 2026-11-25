@@ -1,8 +1,8 @@
-# tspi-upmix 生成：upmix-5.3.2-wide
+# khaen-upmix 生成：upmix-5.3.2-wide
 # 环绕/高度左右延迟差 3ms；中置 -4.5dB；适合现场/氛围类素材（H16 容器输入）
-# 输入 h16-7.1.4（12ch）-> 输出 5.3.2（10ch）；schema tspi-channelmap/v2；tspi-upmix 1.2.0
-# 参数：中置 = mid=(L+R)/2 每源 -6.02 dB，角色增益 -4.5 dB；环绕 = (L-R)/2 差信号（每源 -6.02 dB，L/R 反相）总增益 -4.0 dB + 延迟 14.0 ms，左右延迟差 3.0 ms；高度 = mid=(L+R)/2 + 全频（不做高通/低通）（无人工去相关延迟）（width=0.50 混入左右直达）；低音管理（简化：仅 FL/FR mid 进 SUB，非完整矩阵 BM）：FL/FR 高通 80 Hz LR4；SUB1/SUB2/SUB3 = 低通 80 Hz LR4（源 -6.02 dB）；C/SL/SR 低频不汇总（redirect_from 仅校验不生效，真矩阵 BM 待做）；注意：环绕含 sources[].inverted——当前 tspi-channelmap 渲染器会丢弃（已知缺陷）；旧镜像应走独立 CamillaDSP 配置（tspi-upmix apply）或先打 patches/ 补丁；*-safe 只去掉源反相，不能绕过 bug A（Filter step 配对错误）；去相关：左右延迟差（环绕 3.0 ms / 高度 0.0 ms）
-schema: tspi-channelmap/v2
+# 输入 h16-7.1.4（12ch）-> 输出 5.3.2（10ch）；schema khaen-channelmap/v2；khaen-upmix 1.2.0
+# 参数：中置 = mid=(L+R)/2 每源 -6.02 dB，角色增益 -4.5 dB；环绕 = (L-R)/2 差信号（每源 -6.02 dB，L/R 反相）总增益 -4.0 dB + 延迟 14.0 ms，左右延迟差 3.0 ms；高度 = mid=(L+R)/2 + 全频（不做高通/低通）（无人工去相关延迟）（width=0.50 混入左右直达）；低音管理（简化：仅 FL/FR mid 进 SUB，非完整矩阵 BM）：FL/FR 高通 80 Hz LR4；SUB1/SUB2/SUB3 = 低通 80 Hz LR4（源 -6.02 dB）；C/SL/SR 低频不汇总（redirect_from 仅校验不生效，真矩阵 BM 待做）；注意：环绕含 sources[].inverted——当前 khaen-channelmap 渲染器会丢弃（已知缺陷）；旧镜像应走独立 CamillaDSP 配置（khaen-upmix apply）或先打 patches/ 补丁；*-safe 只去掉源反相，不能绕过 bug A（Filter step 配对错误）；去相关：左右延迟差（环绕 3.0 ms / 高度 0.0 ms）
+schema: khaen-channelmap/v2
 version: 2
 profile:
   name: upmix-5.3.2-wide-h16

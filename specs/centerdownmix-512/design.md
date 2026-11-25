@@ -42,7 +42,7 @@ H16 角色表不适合做这次重排：
 
 | 位置 | 改动 |
 | --- | --- |
-| `audio/overlay/etc/tspi-audio/layout-presets.yml` | 追加输入布局 `nsp-5.1.2`，`streams: [8]`，角色顺序与需求契约相同。`h16-5.1.2` 与输出布局 `4.1.2` 不动。 |
+| `audio/overlay/etc/khaen-audio/layout-presets.yml` | 追加输入布局 `nsp-5.1.2`，`streams: [8]`，角色顺序与需求契约相同。`h16-5.1.2` 与输出布局 `4.1.2` 不动。 |
 | `crates/rt-host/src/content_map.rs` | 不改折叠算法和系数。 |
 | `crates/rt-host/src/aes67_rx.rs` | 仅当本路径被显式声明时，跳过 4.1.2 角色选择，图通道 i 取线通道 i，布局名改为 5.1.2。其它图宽仍走 `rx_layout_roles`。 |
 | `crates/rt-host/src/main.rs` | 新 flow 名常量；`(8, 8)` 在未声明时仍是 `4.1.2-8ch`。声明本路径时，flow 名、内容布局、plan 的 path 表三者一起校验。 |

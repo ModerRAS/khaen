@@ -71,7 +71,7 @@ def _small_h(info_overrides=None, ir_peak=100, ir_len=8000):
     stats = {"UMIK": {"peak_dbfs": -20.0, "snr_db": 30.0, "available": True},
              "MA1": {"peak_dbfs": -10.0, "snr_db": 30.0, "available": True},
              "ARC": {"peak_dbfs": -12.0, "snr_db": 28.0, "available": True}}
-    info = {"schema": "tspi-mimo-h/test", "synthetic": False, "mic_names": ["UMIK", "MA1", "ARC"],
+    info = {"schema": "khaen-mimo-h/test", "synthetic": False, "mic_names": ["UMIK", "MA1", "ARC"],
             "arm": ARM, "fs_hz": 48000, "mic_stats": stats}
     if info_overrides:
         info.update(info_overrides)

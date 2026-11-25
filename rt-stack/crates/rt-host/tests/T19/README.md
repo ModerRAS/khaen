@@ -12,7 +12,7 @@ tests/public_registration.rs）。
 ## 运行
 
 ~~~powershell
-cd C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack
+cd C:\WorkSpace\Claw\projects\khaen-audio-dsp\rt-stack
 cargo test -p khaen-rt-host clock --offline
 # 期望：60 passed; 0 failed（DoD executed test_count > 0）
 ~~~
@@ -26,7 +26,7 @@ cargo test -p khaen-rt-host clock --offline
 |---|---|
 | 常量/错误码 | 冻结码映射（104/103/120/204/403/116/407/405）、时域/owner 名、预算常量 |
 | mono/tick | CLOCK_MONOTONIC 单调+推进、raw tick 单调、TickBudget<=3、ctl 预算、ticks_to_ns 向量、admission 标定+全局安装、probe_clock_support |
-| 三域映射 | frame/mono 已知向量与正负 ppm 方向、PTP 已知向量与往返、三域组合、未锁 PTP 拒绝、采样率/ppm/uncertainty 合理性门、时间戳越界/溢出、1e9 帧无累积舍入漂移、TspiEpochInfoV1 flags |
+| 三域映射 | frame/mono 已知向量与正负 ppm 方向、PTP 已知向量与往返、三域组合、未锁 PTP 拒绝、采样率/ppm/uncertainty 合理性门、时间戳越界/溢出、1e9 帧无累积舍入漂移、KhaenEpochInfoV1 flags |
 | ppm 估计 | 合成 +12.5 ppm/-7.5 ppm/0 ppm、PTP 独立 25 ppm、窗口容量/dropped、点数不足、超 1000 ppm 拒绝、噪声增大 sigma、PTP 无效点 |
 | epoch | 起始/单调 id/永不复用/重复 begin/先 discontinuity 拒绝/flags |
 | 唯一 servo | 第二 owner 拒绝、无 grant/旧 generation、锁定、holdover+超时失锁、holdover 恢复、质量连击失锁、5 ms step 失锁、uncertainty 门、owner 域隔离、确定性重放 |

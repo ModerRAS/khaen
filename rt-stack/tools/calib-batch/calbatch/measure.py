@@ -1,6 +1,6 @@
-"""TSPI 校准批量闭环：测量记录（capture meta）解析与 IR 提取。
+"""KHAEN 校准批量闭环：测量记录（capture meta）解析与 IR 提取。
 
-capture meta schema：tspi-cal-batch-capture/v1
+capture meta schema：khaen-cal-batch-capture/v1
 板端 khaen-calibrate measure-multi 产出 capture.raw（S24_3LE 单通道/多通道）+ 每通道
 *.analysis.json；本模块只依赖冻结的 sweep 布局（plan 生成）与裸流本身，不依赖 Rust 工具内部结论。
 
@@ -19,7 +19,7 @@ import json
 import os
 from typing import List
 
-CAPTURE_SCHEMA = "tspi-cal-batch-capture/v1"
+CAPTURE_SCHEMA = "khaen-cal-batch-capture/v1"
 
 
 def sha256_file(path: str) -> str:

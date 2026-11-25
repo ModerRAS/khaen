@@ -20,7 +20,7 @@ CamillaDSP 4.1.3 · channelmap v2 · 任务 task-17
    两条路径输出逐样本相同；与参考 DSP 仿真逐样本一致。板端 28/28 文件后端运行、64 项检查 0 失败、
    20s 音频上混 CPU 0.46–1.67s（单核 2–8%）——**板端数据为 2026-11-15 旧版（bandlimited height），
    改造后未复测，SUPERSEDED**。
-4. 过程中发现并定位 **tspi-channelmap 渲染器 3 个影响所有 profile 的 P0 问题**，提供最小 patch，
+4. 过程中发现并定位 **khaen-channelmap 渲染器 3 个影响所有 profile 的 P0 问题**，提供最小 patch，
    audio-stack 已合入（sha256 91e85e18…，OEM v5 已包含），并加回归测试。
 5. **板端热部署已验证**（只写文件，不启停服务、不占声卡）：12 个 profile 安装、WebUI API 可见、
    沙箱 load-profile 渲染通过 `camilladsp --check`、apply/rollback 的 sha 校验一致。
@@ -29,12 +29,12 @@ CamillaDSP 4.1.3 · channelmap v2 · 任务 task-17
 
 | 组件 | 路径 | 说明 |
 | --- | --- | --- |
-| 生成器 | tspi-upmix | Python3+PyYAML；预设→DSP 计划→profile/独立配置；含 check/apply/rollback |
+| 生成器 | khaen-upmix | Python3+PyYAML；预设→DSP 计划→profile/独立配置；含 check/apply/rollback |
 | 参数预设 | presets/upmix-presets.yml | 4.1.2/5.3.2 × music/movie/wide |
 | 示例 | examples/ | 12 profile（含 *-safe）+ 6 个 ALSA CamillaDSP 配置 + manifest |
 | 部署 | deploy/install-upmix.sh | 备份/安装/校验/自动回滚/卸载；不启停服务 |
 | 测试 | tests/ | 信号生成、文件后端运行、参考仿真分析、板端计时 |
-| 修复存档 | patches/ | tspi-channelmap 三处修复（已合入） |
+| 修复存档 | patches/ | khaen-channelmap 三处修复（已合入） |
 
 上混设计（详见 docs/ALGORITHM.md）：
 
@@ -81,7 +81,7 @@ CamillaDSP 4.1.3 · channelmap v2 · 任务 task-17
 
 ## 4. 渲染器问题（已修复）
 
-发现 tspi-channelmap **build_camilladsp** 三处会改变音频结果的 bug（schema/校验正常，仅 render/apply）：
+发现 khaen-channelmap **build_camilladsp** 三处会改变音频结果的 bug（schema/校验正常，仅 render/apply）：
 
 | # | 问题 | 影响 | 修复 |
 | --- | --- | --- | --- |
@@ -89,32 +89,32 @@ CamillaDSP 4.1.3 · channelmap v2 · 任务 task-17
 | B | roles[].sources[].inverted 渲染时被丢弃 | 差信号 (L−R) 变 mid (L+R) | 与 role polarity 异或后保留 |
 | C | bass_management 的 bass_extract 未直通主声道（未映射输出=静音） | 开 BM 后主声道静音 | 先显式直通 0..pb-1 |
 
-- 最小 patch：patches/tspi-channelmap-upmix-fixes.patch（基线 sha256 1e7dc232…）。
+- 最小 patch：patches/khaen-channelmap-upmix-fixes.patch（基线 sha256 1e7dc232…）。
 - audio-stack 已 review/合入，新增 3 条回归；新渲染器 sha256 **91e85e18…**，OEM v5 镜像已含。
 - 修复后两条路径逐样本一致（本文 §3.1 数据）；本工具低音管理为 FL/FR mid 简化路径（不依赖渲染器 BM）。
-- **旧镜像（<OEM v5）唯一可用路径 = 独立 CamillaDSP 配置（`tspi-upmix apply`）或先打 `patches/` 补丁；`*-safe` 只去源反相，不能绕过 bug A（所有 per-role 滤波仍会叠加）**（C-04）。
+- **旧镜像（<OEM v5）唯一可用路径 = 独立 CamillaDSP 配置（`khaen-upmix apply`）或先打 `patches/` 补丁；`*-safe` 只去源反相，不能绕过 bug A（所有 per-role 滤波仍会叠加）**（C-04）。
 
 ## 5. 热部署验证（板端 OEM v5）
 
-- install-upmix.sh：12 profile 校验（真实 tspi-channelmap validate/render + 审计）全部通过；
+- install-upmix.sh：12 profile 校验（真实 khaen-channelmap validate/render + 审计）全部通过；
   6 个 ALSA 示例 camilladsp --check 全部通过；无服务启停。
 - WebUI（khaen-audio-web :8088）GET /api/channelmap 返回 12 个 upmix-* profile，布局正确。
-- 沙箱 TSPI_CHANNELMAP_* 重定向下 load-profile upmix-4.1.2-music --mode off 成功，渲染的
+- 沙箱 KHAEN_CHANNELMAP_* 重定向下 load-profile upmix-4.1.2-music --mode off 成功，渲染的
   配置 camilladsp --check 通过（"Config is valid"），未触碰 /etc active。
-- 独立路径 tspi-upmix apply：A→B 后 rollback，sha256 与 A 一致；配置文件 camilladsp --check 通过。
+- 独立路径 khaen-upmix apply：A→B 后 rollback，sha256 与 A 一致；配置文件 camilladsp --check 通过。
 
 ## 6. 交付清单
 
-- projects/tspi-audio-dsp/upmix/：tspi-upmix、presets、examples（12 profile + 6 配置）、deploy、
+- projects/khaen-audio-dsp/upmix/：khaen-upmix、presets、examples（12 profile + 6 配置）、deploy、
   tests、docs（ALGORITHM / WEBUI-INTEGRATION / TESTING）、patches、README、本报告。
-- 板端已热部署：/usr/local/bin/tspi-upmix、/etc/tspi-audio/profiles/upmix-*.yml、
-  /etc/tspi-audio/upmix/presets.yml、camilladsp-examples、install 备份。
-- projects/tspi-audio-dsp/docs/upmix.md：给项目其他成员的入口说明。
+- 板端已热部署：/usr/local/bin/khaen-upmix、/etc/khaen-audio/profiles/upmix-*.yml、
+  /etc/khaen-audio/upmix/presets.yml、camilladsp-examples、install 备份。
+- projects/khaen-audio-dsp/docs/upmix.md：给项目其他成员的入口说明。
 
 ## 7. 已知限制与后续
 
 1. **MOTU 真机播放**未做（声卡由 audio-stack 冒烟）；需要时用 WebUI 加载 profile 或
-   tspi-upmix apply 后实际听测，重点确认 4.1.2 映射（HFL/HFR=5-6、SUB1=8，1-based）与 5.3.2。
+   khaen-upmix apply 后实际听测，重点确认 4.1.2 映射（HFL/HFR=5-6、SUB1=8，1-based）与 5.3.2。
 2. **H16 未确认**：本工具只处理 2ch 输入（pc-2ch）；16ch 容器输入、跨布局 remap 不在本任务范围。
 3. **Dante 96k**：配置层可生成（--check），**未做 96k 文件后端/真机实测**；MOTU 22ch@96k 上限待核（A-P1-12）。
 4. **allpass 去相关**仅独立配置支持（板端文件后端未跑，版本与本机一致）；channelmap profile 退化为固定延迟。
@@ -129,8 +129,8 @@ H16 固定 Pure、容器 7.1.4 但节目可能只有 2.0：新增输入内容检
 - **判定**：只用 C/SL/SR/height 活动判多声道（**LFE 不作判据**：H16 旧固件会 L/R+LFE，仍应上混）；
   窗口/连续 2.5s + 迟滞 6dB + 启动冻结 2.5s；auto 默认直通，detected=stereo 才上混。
 - **实现**：一个 CamillaDSP 双路径配置（上混路径 + 直通路径，Volume Aux1/Aux2 静音切换），
-  daemon 读 CamillaDSP websocket `GetCaptureSignalRms`，写 `/run/tspi/input-content.json`，
-  用 `SetFaderVolume` 切换（无重启、不打开声卡）；覆盖值写 `/etc/tspi-audio/input-mode.json`
+  daemon 读 CamillaDSP websocket `GetCaptureSignalRms`，写 `/run/khaen/input-content.json`，
+  用 `SetFaderVolume` 切换（无重启、不打开声卡）；覆盖值写 `/etc/khaen-audio/input-mode.json`
   （auto|stereo|multichannel，接受 force-* 别名）。
 - **CLI**：`detect --wav/--json`、`input-mode get|set`、`autodetect --simulate/--dry-run`、
   `autodetect-config --content-mode auto|stereo|multichannel`、`container -o DIR`。

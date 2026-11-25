@@ -280,7 +280,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tspi-calibrate"
+name = "khaen-calibrate"
 version = "0.1.0"
 dependencies = [
  "num-complex",

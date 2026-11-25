@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环：计划生成（窗口前冻结）。
+"""KHAEN 校准批量闭环：计划生成（窗口前冻结）。
 
 设计目标（用户需求 39：所有输入/命令/文件提前生成，现场只跑；需求 28/44：前后瀑布+RT+MIMO+holdout；
 需求 27：至少两轮独立重复）：
@@ -21,7 +21,7 @@ import os
 from . import config as cfgmod
 from . import measure
 
-PLAN_SCHEMA = "tspi-cal-batch-plan/v1"
+PLAN_SCHEMA = "khaen-cal-batch-plan/v1"
 BT = chr(96)
 
 
@@ -150,7 +150,7 @@ def build_plan(cfg: dict, round_id: str, repo_root: str, scenario: str = "") -> 
     steps = []
     idx = 0
     commands = cfg.get("commands") or {}
-    prep_dir = str(cfg.get("prep_dir", "/var/tmp/tspi-cal-batch/prep"))
+    prep_dir = str(cfg.get("prep_dir", "/var/tmp/khaen-cal-batch/prep"))
     step_root = "steps"
     slots_csv, names_csv = _channel_lists(cfg["channels"])
     base_vals = {
@@ -358,7 +358,7 @@ def render_run_plan_md(plan: dict) -> str:
     lines = []
     lines.append("# 批量校准窗口执行计划（%s / round %s）" % (plan["batch_label"], plan["round"]))
     lines.append("")
-    lines.append("> 本文件由 tspi_cal_batch plan 生成；窗口内**只执行**，不再改参数/删点/改命令。")
+    lines.append("> 本文件由 khaen_cal_batch plan 生成；窗口内**只执行**，不再改参数/删点/改命令。")
     lines.append("> plan_sha256: %s" % plan["plan_sha256"])
     lines.append("> 生成时间: %s" % plan["created_at"])
     lines.append("")
@@ -425,11 +425,11 @@ def render_run_plan_md(plan: dict) -> str:
     lines.append("")
     lines.append("%s%s%sbash" % (bt, bt, bt))
     lines.append("# 窗口前（本机/工作站）：生成并复核")
-    lines.append("python3 tspi_cal_batch.py plan --config configs/batch-config.production-4.1.2.json --round A --out plan/")
+    lines.append("python3 khaen_cal_batch.py plan --config configs/batch-config.production-4.1.2.json --round A --out plan/")
     lines.append("# 窗口内（板端）：只跑采集/应用命令（本地 argv）")
-    lines.append("python3 tspi_cal_batch.py run --plan plan/round-A/plan.json --transport cmd --work /var/lib/tspi-rt-stack/evidence/calib-batch-A")
+    lines.append("python3 khaen_cal_batch.py run --plan plan/round-A/plan.json --transport cmd --work /var/lib/khaen-rt-stack/evidence/calib-batch-A")
     lines.append("# 窗口后（工作站）：分析 + 报告")
-    lines.append("python3 tspi_cal_batch.py analyze --work <拉回的 work 目录> --out analysis/A")
+    lines.append("python3 khaen_cal_batch.py analyze --work <拉回的 work 目录> --out analysis/A")
     lines.append("%s%s%s" % (bt, bt, bt))
     lines.append("")
     return "\n".join(lines) + "\n"
@@ -445,7 +445,7 @@ def write_plan(plan: dict, out_dir: str) -> dict:
         fh.write(render_commands_txt(plan))
     with open(os.path.join(out_dir, "RUN-PLAN.md"), "w", encoding="utf-8") as fh:
         fh.write(render_run_plan_md(plan))
-    budget = {"schema": "tspi-cal-batch-time-budget/v1", "round": plan["round"],
+    budget = {"schema": "khaen-cal-batch-time-budget/v1", "round": plan["round"],
               "estimate": plan["estimate"], "plan_sha256": plan["plan_sha256"]}
     with open(os.path.join(out_dir, "time-budget.json"), "w", encoding="utf-8") as fh:
         json.dump(budget, fh, ensure_ascii=False, indent=2)

@@ -1,6 +1,6 @@
-# rt-stack/reference — TSPI f64 核心卷积参考（WBS T03，P0）
+# rt-stack/reference — KHAEN f64 核心卷积参考（WBS T03，P0）
 
-2026-11-16 · 角色 **rt-reference**（team task-23）。写域：`projects/tspi-audio-dsp/rt-stack/reference/`。
+2026-11-16 · 角色 **rt-reference**（team task-23）。写域：`projects/khaen-audio-dsp/rt-stack/reference/`。
 状态：**P0 交付完成 + T03-review（2×P2+5×P3）已修（2026-11-17），待 Lead 人工 review**；非生产代码、非 Cargo 包、不碰板端。
 
 本目录是 WBS T03 的交付：**独立的 f64 参考规范 + 手算 impulse/卷积向量 + 逐样本夹具**，
@@ -16,7 +16,7 @@
 
 ```
 reference/
-├── SPEC.md                     # tspi-reference/v1：模型/长度/流式/精度/夹具格式/消费者契约
+├── SPEC.md                     # khaen-reference/v1：模型/长度/流式/精度/夹具格式/消费者契约
 ├── HAND-CALC.md                # H1–H13 手算推导 + json handcalc/handcheck/handtrap 机器块
 ├── README.md
 ├── REVIEW-CHECKLIST.md         # 人工 review 清单 + 签收栏
@@ -39,7 +39,7 @@ reference/
 
 ## 2. 一键复现
 
-在 `projects/tspi-audio-dsp/rt-stack/reference/` 下（Python 3.12+，无需 numpy/pip）：
+在 `projects/khaen-audio-dsp/rt-stack/reference/` 下（Python 3.12+，无需 numpy/pip）：
 
 ```powershell
 python tools/gen_fixtures.py --check

@@ -1,4 +1,4 @@
-//! TSPI RT host（crate khaen-rt-host）——WBS T06 scaffold。
+//! KHAEN RT host（crate khaen-rt-host）——WBS T06 scaffold。
 //!
 //! RT host 层：SPSC、admission、clock、swap、format、fault、ALSA/AoIP/scheduler 等。
 //! **本 crate 目前只有 stub**：T16（spsc）、T17（alsa）、T18（admission）、T19（clock）、
@@ -8,12 +8,12 @@
 //! 权威契约：rt-stack/spec/core-v1.md（T02）。scaffold 状态：NOT_RUN。
 
 pub mod admission;
-/// 校准 Unix socket 与进程内虚拟输入。播放模式不改输入缓冲。
-pub mod cal_control;
 /// task-235：[NONRT] 自研用户态 AES67 接收端 → host capture 固定块适配（库级接线）。
 pub mod aes67_rx;
 pub mod alsa;
 pub mod aoip;
+/// 校准 Unix socket 与进程内虚拟输入。播放模式不改输入缓冲。
+pub mod cal_control;
 pub mod clock;
 /// T203/task-210：[NONRT] host 自持缺中置内容适配（compat 依赖已移除）。
 pub mod content_map;

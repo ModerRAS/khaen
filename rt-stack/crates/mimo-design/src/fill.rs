@@ -26,7 +26,7 @@ use crate::fir::{fir_response, FirBasis};
 use crate::solve::{weighted_ridge_ls_capped_targets, Cx};
 
 /// 单点填谷证据 schema。
-pub const SINGLE_POINT_FILL_SCHEMA: &str = "tspi-mimo-single-point-fill/v1";
+pub const SINGLE_POINT_FILL_SCHEMA: &str = "khaen-mimo-single-point-fill/v1";
 /// 单点结论标签（所有产物必须带）。
 pub const SINGLE_POINT_CLAIM: &str = "SINGLE_POINT_NOT_SPATIAL / PREDICTED_ONLY / NO_MEASUREMENT";
 /// 1/3 oct 名义中心（与 mimo-fill 证据 / spec 口径一致）。
@@ -126,11 +126,7 @@ impl SinglePointH {
         if freqs_hz.is_empty() {
             return Err("H CSV 没有数据行".to_string());
         }
-        Ok(Self {
-            freqs_hz,
-            roles,
-            h,
-        })
+        Ok(Self { freqs_hz, roles, h })
     }
 
     /// 通道数 M。
@@ -557,9 +553,18 @@ pub fn evaluate_bands(
         }
         let before_levels: Vec<f64> = indices.iter().map(|k| db_amp(before[*k].abs())).collect();
         let after_levels: Vec<f64> = indices.iter().map(|k| db_amp(after[*k].abs())).collect();
-        let ref_levels: Vec<f64> = indices.iter().map(|k| db_amp(valley_ref[*k].abs())).collect();
-        let before_linear: Vec<f64> = before_levels.iter().map(|db| 10.0f64.powf(db / 20.0)).collect();
-        let after_linear: Vec<f64> = after_levels.iter().map(|db| 10.0f64.powf(db / 20.0)).collect();
+        let ref_levels: Vec<f64> = indices
+            .iter()
+            .map(|k| db_amp(valley_ref[*k].abs()))
+            .collect();
+        let before_linear: Vec<f64> = before_levels
+            .iter()
+            .map(|db| 10.0f64.powf(db / 20.0))
+            .collect();
+        let after_linear: Vec<f64> = after_levels
+            .iter()
+            .map(|db| 10.0f64.powf(db / 20.0))
+            .collect();
         let before_rms_db = rms_amp_db(&before_linear);
         let after_rms_db = rms_amp_db(&after_linear);
         let valley_position = ref_levels
@@ -789,8 +794,7 @@ mod tests {
         SinglePointH {
             freqs_hz: freqs,
             roles: (0..h.len()).map(|i| format!("S{i}")).collect(),
-            h: h
-                .into_iter()
+            h: h.into_iter()
                 .map(|row| row.into_iter().map(|(re, im)| Cx::new(re, im)).collect())
                 .collect(),
         }

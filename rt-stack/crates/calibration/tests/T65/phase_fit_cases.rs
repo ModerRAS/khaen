@@ -952,11 +952,11 @@ fn t65_phase_fit_deterministic_json_and_artifact_write() {
         second.ops_json(),
         "ops JSON must be deterministic"
     );
-    assert!(first_json.contains("\"schema\":\"tspi-phase-fit/v1\""));
+    assert!(first_json.contains("\"schema\":\"khaen-phase-fit/v1\""));
     assert!(first_json.contains("\"all_pass\":true"));
     assert!(first
         .ops_json()
-        .contains("\"schema\":\"tspi-phase-ops/v1\""));
+        .contains("\"schema\":\"khaen-phase-ops/v1\""));
     assert_eq!(first.artifacts.entries.len(), 2);
     assert_eq!(
         first.artifacts.report_sha256,
@@ -1220,12 +1220,12 @@ fn t65_phase_fit_channel_index_mapping() {
 }
 
 // ---------------------------------------------------------------------------
-// 19) 证据样例（TSPI_T65_EVIDENCE_DIR 设置时写 evidence/T65 JSON）
+// 19) 证据样例（KHAEN_T65_EVIDENCE_DIR 设置时写 evidence/T65 JSON）
 // ---------------------------------------------------------------------------
 
 #[test]
 fn t65_phase_fit_writes_evidence_examples_when_requested() {
-    let evidence_dir = match std::env::var("TSPI_T65_EVIDENCE_DIR") {
+    let evidence_dir = match std::env::var("KHAEN_T65_EVIDENCE_DIR") {
         Ok(value) if !value.trim().is_empty() => PathBuf::from(value),
         _ => return,
     };
@@ -1264,10 +1264,10 @@ fn t65_phase_fit_writes_evidence_examples_when_requested() {
     assert!(ops_path.exists());
     assert!(fs::read_to_string(&report_path)
         .unwrap()
-        .contains("tspi-phase-fit/v1"));
+        .contains("khaen-phase-fit/v1"));
     assert!(fs::read_to_string(&ops_path)
         .unwrap()
-        .contains("tspi-phase-ops/v1"));
+        .contains("khaen-phase-ops/v1"));
 }
 
 // ---------------------------------------------------------------------------

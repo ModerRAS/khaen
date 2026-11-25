@@ -13,7 +13,7 @@ Web 服务里的「MOTU / CueMix」页通过本机 CueMix 5 datastore 读写 Ult
 4. 用 `ws://<设备IP>:1280/` 读 datastore。总超时默认 5 秒；收到第一条之后空闲 250 毫秒即停。没有网络密码时不认证。
 5. 代理子项 `0xFFFE` / 子 id `2` 表示设备已设密码。为真时页面给出「设备已设密码，暂不支持」，不做 RSA-OAEP。
 
-`TSPI_MOCK=1` 不跑 `ip`、不打开套接字。mock 设备是 UltraLite-mk5：`169.254.111.126`，口 `enx0001f2fe7e6f`，UID `UL5LFE7E6E`，固件 `2.1.2+3352`，Main 字节 28（−28 dB），直通含 in7→out7 与 in8→out8。
+`KHAEN_MOCK=1` 不跑 `ip`、不打开套接字。mock 设备是 UltraLite-mk5：`169.254.111.126`，口 `enx0001f2fe7e6f`，UID `UL5LFE7E6E`，固件 `2.1.2+3352`，Main 字节 28（−28 dB），直通含 in7→out7 与 in8→out8。
 
 状态缓存默认 12 秒。页面每 8 秒轮询，多数命中缓存。写操作绕过缓存，写完强制重读。
 

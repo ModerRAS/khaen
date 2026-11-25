@@ -1,11 +1,11 @@
 //! 生成夹具的 5 场景 load + h_matrix + rerender_check 验证（默认 ignored）。
 //!
 //! 运行：
-//!   $env:TSPI_ROOM_SIM_FIXTURES='...\fixtures'                              # 夹具根目录（含 scene-*/）
-//!   $env:TSPI_ROOM_SIM_VALIDATION='...\validation\room-sim-render-check.json'  # 输出 JSON 文件路径（不是目录！）
+//!   $env:KHAEN_ROOM_SIM_FIXTURES='...\fixtures'                              # 夹具根目录（含 scene-*/）
+//!   $env:KHAEN_ROOM_SIM_VALIDATION='...\validation\room-sim-render-check.json'  # 输出 JSON 文件路径（不是目录！）
 //!   cargo test -p khaen-room-sim --test fixtures_validation --offline -- --ignored --nocapture
 //!
-//! 注意：TSPI_ROOM_SIM_VALIDATION 必须是**文件路径**；误传目录会 os error 5（本测试对目录形式
+//! 注意：KHAEN_ROOM_SIM_VALIDATION 必须是**文件路径**；误传目录会 os error 5（本测试对目录形式
 //! 会补默认文件名，但脚本调用请直接给文件路径）。
 //!
 //! 产出 UTF-8 JSON：每场景 K/N/M、max|Δ|（WAV 单位）、相对误差、最坏 pair、SHA256SUMS 交叉校验。
@@ -83,16 +83,16 @@ fn verify_sha256sums(scene_dir: &Path, scene_id: &str, expected_entries: usize) 
 }
 
 #[test]
-#[ignore = "needs generated fixtures: set TSPI_ROOM_SIM_FIXTURES (and optionally TSPI_ROOM_SIM_VALIDATION)"]
+#[ignore = "needs generated fixtures: set KHAEN_ROOM_SIM_FIXTURES (and optionally KHAEN_ROOM_SIM_VALIDATION)"]
 fn generated_fixtures_render_check() {
-    let fixtures_dir = match std::env::var("TSPI_ROOM_SIM_FIXTURES") {
+    let fixtures_dir = match std::env::var("KHAEN_ROOM_SIM_FIXTURES") {
         Ok(value) if !value.is_empty() => PathBuf::from(value),
         _ => {
-            eprintln!("TSPI_ROOM_SIM_FIXTURES not set; skipping generated-fixture validation");
+            eprintln!("KHAEN_ROOM_SIM_FIXTURES not set; skipping generated-fixture validation");
             return;
         }
     };
-    let validation_path = std::env::var("TSPI_ROOM_SIM_VALIDATION")
+    let validation_path = std::env::var("KHAEN_ROOM_SIM_VALIDATION")
         .ok()
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
@@ -334,18 +334,18 @@ fn generated_fixtures_render_check() {
         let path = resolve_validation_path(raw_path);
         write_validation(&path, &document).unwrap_or_else(|error| {
             panic!(
-                "cannot write {}: {error} (hint: TSPI_ROOM_SIM_VALIDATION may point at a directory or a read-only file)",
+                "cannot write {}: {error} (hint: KHAEN_ROOM_SIM_VALIDATION may point at a directory or a read-only file)",
                 path.display()
             )
         });
         eprintln!("wrote validation JSON: {}", path.display());
     } else {
-        eprintln!("TSPI_ROOM_SIM_VALIDATION not set; validation JSON not written");
+        eprintln!("KHAEN_ROOM_SIM_VALIDATION not set; validation JSON not written");
         eprintln!("{document}");
     }
 }
 
-/// TSPI_ROOM_SIM_VALIDATION 允许直接给 JSON 文件路径；给目录（含尾部反斜杠）时自动补默认文件名。
+/// KHAEN_ROOM_SIM_VALIDATION 允许直接给 JSON 文件路径；给目录（含尾部反斜杠）时自动补默认文件名。
 fn resolve_validation_path(raw: &Path) -> PathBuf {
     if raw.is_dir() {
         return raw.join("room-sim-render-check.json");

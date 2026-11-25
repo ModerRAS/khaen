@@ -1,5 +1,5 @@
 # MOTU UltraLite-mk5 (USB 07fd:000c) 稳定命名与权限
-# 注意：ALSA card 号本身不稳定；tspi-mode 用 /proc/asound/cards 按 id/名称解析，不依赖本规则。
+# 注意：ALSA card 号本身不稳定；khaen-mode 用 /proc/asound/cards 按 id/名称解析，不依赖本规则。
 # 本规则只为方便人/工具引用，以及防定制镜像把音频设备权限改掉。
 
 SUBSYSTEM=="sound", KERNEL=="controlC*", ATTRS{idVendor}=="07fd", ATTRS{idProduct}=="000c", GROUP="audio", MODE="0660", SYMLINK+="snd/motu-control"

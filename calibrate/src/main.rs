@@ -153,7 +153,7 @@ fn base_measurement(
     meta: Meta,
 ) -> ChannelMeasurement {
     ChannelMeasurement {
-        schema: "tspi-channel-measurement/v1".into(),
+        schema: "khaen-channel-measurement/v1".into(),
         channel: ch,
         delay_samples: delay,
         delay_ms: if meta.sample_rate == 0 {
@@ -378,7 +378,7 @@ fn cmd_measure(a: &A) -> Result<(), String> {
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
     fs::create_dir_all(&dir).ok();
-    let sweep_path = std::env::temp_dir().join(format!("tspi-cal-sweep-ch{ch}.raw"));
+    let sweep_path = std::env::temp_dir().join(format!("khaen-cal-sweep-ch{ch}.raw"));
     let source = sp.source();
     raw::write_sweep_file(&sweep_path, pbc, ch, &source, sp.rate, sp.pre, sp.post)?;
     let cap_seconds = sp.pre + sp.seconds + sp.post + 0.8;

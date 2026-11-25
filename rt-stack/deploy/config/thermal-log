@@ -1,8 +1,8 @@
 #!/bin/bash
 # thermal-log — 每分钟记录温度/负载/频率/RT 状态，给"下次挂死"留下历史曲线
 set -u
-LOG=/var/log/tspi/thermal.log
-mkdir -p /var/log/tspi 2>/dev/null || true
+LOG=/var/log/khaen/thermal.log
+mkdir -p /var/log/khaen 2>/dev/null || true
 ts=$(date -Is 2>/dev/null || echo -)
 temp=""
 for z in /sys/class/thermal/thermal_zone*; do

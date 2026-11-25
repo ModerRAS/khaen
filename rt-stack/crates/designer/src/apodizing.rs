@@ -27,7 +27,7 @@
 //!   由 `ApodizingVerification::family` 携带）。
 //!
 //! 明确非目标（不得由本模块冒充）：
-//! - 不生成 WAV/manifest（`tspi-fir/v1` 产物与 20/20k Endpoint 落盘归 T55）；不做 target 文件导入（T11）；
+//! - 不生成 WAV/manifest（`khaen-fir/v1` 产物与 20/20k Endpoint 落盘归 T55）；不做 target 文件导入（T11）；
 //!   不做 P/G 融合/运行准入（T12/T56）；不做 RT/板端（本文件零 RT 路径、零板端动作）。
 //! - 不复刻任何专有 DAC 的 apodizing 重建滤波器；本模块只给“可算窗/可算目标”的可复现构造。
 //! - 不把 apodizing 说成砖墙：0.45fs 处 ≤ −60 dB 的构造按 §3.4 判据 7/§3.8 必须改报 brickwall/linear。
@@ -766,7 +766,7 @@ pub fn synthesize_apodizing(
 // 设计产物
 // ---------------------------------------------------------------------------
 
-/// apodizing 设计产物（`tspi-fir/v1` manifest 的系数源；WAV/manifest 归 T55）。
+/// apodizing 设计产物（`khaen-fir/v1` manifest 的系数源；WAV/manifest 归 T55）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ApodizingDesign {
     /// 原参数。

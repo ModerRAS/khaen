@@ -13,7 +13,7 @@
 //!   第 7 节 G-web（actual version 一致才 PASS）；
 //! - 现有消费者（只读参考，字段名沿用）：web/src/camilla.rs（12 条 live 读命令 + GetConfig /
 //!   SetConfigJson / SetVolume；回复按命令名取 result/value）、
-//!   audio/overlay/usr/local/bin/tspi-upmix（GetCaptureSignalRms 按采集通道索引取 dB；
+//!   audio/overlay/usr/local/bin/khaen-upmix（GetCaptureSignalRms 按采集通道索引取 dB；
 //!   SetFaderVolume 传 [fader_id, volume_db]；静音口径 -120 dB，缺失值按 -240 处理）。
 //!
 //! 本模块交付什么（可判）：
@@ -61,7 +61,7 @@
 //!   鉴权模型保证；本模块只处理已认证连接上的帧。
 //! - 不做 DSP/图编译/内存准入本身：prepare_config_json/commit_prepared 由 T26 适配
 //!   rt-host::swap::PlanRegistry（admit 对应 prepare；stage/arm/complete_swap 对应 commit；
-//!   TspiSwapAckV1 对应 ack 证据）与 T13/T12/T66 的 plan/hash 校验实现；本模块只冻结对外语义
+//!   KhaenSwapAckV1 对应 ack 证据）与 T13/T12/T66 的 plan/hash 校验实现；本模块只冻结对外语义
 //!   与 ack 判据。
 //! - 不定义校准 job 进度命令：R48/DEC 第 6 节的校准进度属 T42 REST + T70 Web 面；本任务不扩
 //!   WS 命令集，避免与 T42 口径分叉（记录在 evidence/T24 的 NOT_RUN/边界）。
@@ -72,7 +72,7 @@
 //!   WsOpError::from_rt_status 从 core-v1 第 9.2 节 RtStatus 统一映射；T42 复用同一函数与
 //!   validate_commit_ack。
 //! - WS 协议版本走 GetVersion（W05：新栈 WS 协议版本，不是 Camilla 版本）；REST 版本走可选
-//!   请求头 X-TSPI-API-Version（X14/Q18），两者不混用。
+//!   请求头 X-KHAEN-API-Version（X14/Q18），两者不混用。
 
 use core::fmt::Write as _;
 
@@ -83,7 +83,7 @@ use khaen_core::rt::{RtStatus, SAMPLE_RATES_HZ};
 // ---------------------------------------------------------------------------
 
 /// 新栈 WS 协议版本（W05：客户端能力判断用；不是 CamillaDSP 版本）。
-pub const WS_PROTOCOL_VERSION: &str = "tspi-ws/1";
+pub const WS_PROTOCOL_VERSION: &str = "khaen-ws/1";
 
 /// 默认单帧上限（字节；配置 2 MiB 转义后可能接近 4 MiB，留余量）。
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
@@ -1246,7 +1246,7 @@ impl PreparedConfig {
     }
 }
 
-/// commit 后 host 报告的实际生效证据（T26 由 rt-host::swap::PlanRegistry + TspiSwapAckV1 +
+/// commit 后 host 报告的实际生效证据（T26 由 rt-host::swap::PlanRegistry + KhaenSwapAckV1 +
 /// BlockDesc 统计构造；WS 层用 validate_commit_ack 核对后才允许回 Ok）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitAck {

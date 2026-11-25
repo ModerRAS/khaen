@@ -6,7 +6,7 @@
 
 #[cfg(target_os = "linux")]
 mod imp {
-    use alsa::pcm::{Access, Format, HwParams, PCM, State};
+    use alsa::pcm::{Access, Format, HwParams, State, PCM};
     use alsa::{Direction, ValueOr};
 
     /// ALSA 播放句柄。
@@ -47,8 +47,7 @@ mod imp {
                     .map_err(|e| format!("set_period_size_near({period_frames}): {e}"))?;
                 hwp.set_buffer_size_near(buffer_frames as alsa::pcm::Frames)
                     .map_err(|e| format!("set_buffer_size_near({buffer_frames}): {e}"))?;
-                pcm.hw_params(&hwp)
-                    .map_err(|e| format!("hw_params: {e}"))?;
+                pcm.hw_params(&hwp).map_err(|e| format!("hw_params: {e}"))?;
             }
             pcm.prepare().map_err(|e| format!("prepare: {e}"))?;
             Ok(Self {
@@ -155,4 +154,3 @@ mod imp {
 
 #[cfg(not(target_os = "linux"))]
 pub use imp::*;
-

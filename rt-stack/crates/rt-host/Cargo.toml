@@ -1,4 +1,4 @@
-# TSPI RT host：SPSC / admission / clock / swap / format / fault scaffold（T06；leaf T16-T22/T43/T45/T26）
+# KHAEN RT host：SPSC / admission / clock / swap / format / fault scaffold（T06；leaf T16-T22/T43/T45/T26）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-rt-host"
@@ -28,5 +28,5 @@ khaen-aoip-aes67 = { workspace = true }
 alsa = { workspace = true }
 
 [[bin]]
-name = "tspi-rt-host"
+name = "khaen-rt-host"
 path = "src/main.rs"

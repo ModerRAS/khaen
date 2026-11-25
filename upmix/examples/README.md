@@ -3,7 +3,7 @@
 ## examples/（生成产物，随生成器版本更新）
 
 ```bash
-python3 tspi-upmix --layout-presets /etc/tspi-audio/layout-presets.yml \
+python3 khaen-upmix --layout-presets /etc/khaen-audio/layout-presets.yml \
   all -o examples --playback-channels 22
 ```
 
@@ -32,7 +32,7 @@ docs/TESTING.md 复现；报告中的路径为生成时路径。
 ## container/（H16 容器输入，task-19）
 
 ```bash
-python3 tspi-upmix --layout-presets /etc/tspi-audio/layout-presets.yml \
+python3 khaen-upmix --layout-presets /etc/khaen-audio/layout-presets.yml \
   container -o examples/container --input-layout h16-7.1.4 --playback-channels 22
 ```
 

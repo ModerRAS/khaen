@@ -340,7 +340,7 @@ impl SystemBackend for RealSystemBackend {
         };
         out.hostname = match read_opt("/etc/hostname").await {
             Some(t) if !t.trim().is_empty() => t.trim().to_string(),
-            _ => std::env::var("HOSTNAME").unwrap_or_else(|_| "tspi-audio".to_string()),
+            _ => std::env::var("HOSTNAME").unwrap_or_else(|_| "khaen-audio".to_string()),
         };
         out.kernel = match read_opt("/proc/sys/kernel/osrelease").await {
             Some(t) => t.trim().to_string(),
@@ -447,7 +447,7 @@ pub struct MockSystemBackend;
 impl SystemBackend for MockSystemBackend {
     async fn info(&self) -> SystemInfo {
         SystemInfo {
-            hostname: "tspi-audio".into(),
+            hostname: "khaen-audio".into(),
             kernel: "6.1.99-rt36-rk3576".into(),
             os: "Debian GNU/Linux 12 (bookworm)".into(),
             uptime_secs: 12_345,

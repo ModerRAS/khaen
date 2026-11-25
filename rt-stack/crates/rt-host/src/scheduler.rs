@@ -3,7 +3,7 @@
 //! 职责：把**实测**拓扑（CPU 在线/允许集合、物理 core、隔离集合、IRQ→CPU 亲和）与准入
 //! 参数（profile worker 数、FIFO 优先级、每 worker 依赖 IRQ 位图、tick/spin/cutoff 标定值）
 //! 归一化为可审计的参数化计划：
-//! - 每 worker 一条 TspiWorkerAffinityV1（32 B / align 8，§11.13）亲和表；
+//! - 每 worker 一条 KhaenWorkerAffinityV1（32 B / align 8，§11.13）亲和表；
 //! - 2 worker 与 4 worker 是**独立 profile**（独立计划/hash/expected_workers/ACK_MASK）；
 //! - 准入判决（SchedPlan::validate_against / gate_block）与 §12.3 的 sched 报告字段；
 //! - 失核时**整块/整图拒收**（gate_block 返回 RejectWholeBlock），绝不返回“剩余 CPU
@@ -35,7 +35,7 @@
 //!   T105/v1.1 I15 合并 cpu_set_mask/allowed_cpu/expected_workers 等 T45 字段（见
 //!   rt-host/src/admission.rs）；T26 目前从 config 构建 SchedRequest 调本模块，AdmissionEnv
 //!   是否统一成 env 签名由 integrator 决定；本 leaf 不反向依赖 AdmissionEnv。
-//! - D-02：TspiWorkerAffinityV1 已提升到 core::abi（§11.13，32 B/align 8；task-105）；
+//! - D-02：KhaenWorkerAffinityV1 已提升到 core::abi（§11.13，32 B/align 8；task-105）；
 //!   PlanHeader 也已有 v1.1.2 errata E1 定稿的 affinity_table_offset（u32@96）/
 //!   affinity_count（u16@100）字段（reserved1@94、reserved2@102 为显式 padding，必须 0；
 //!   size 128/align 64 不变）。本模块仍保留 leaf 本地同布局类型 + 编译期断言（本批次只改
@@ -65,7 +65,7 @@ pub const MAX_CPU: usize = 64;
 pub const DSP_CPU_MAX: usize = RT_WORKERS as usize;
 /// plan affinity 表条目上限（core-v1 §3.4 WORKER_AFFINITY_COUNT）。
 pub const WORKER_AFFINITY_COUNT: usize = 4;
-/// TspiWorkerAffinityV1 单条字节（§11.13：32 B / align 8）。
+/// KhaenWorkerAffinityV1 单条字节（§11.13：32 B / align 8）。
 pub const AFFINITY_ENTRY_BYTES: usize = 32;
 /// affinity 表最大字节（4 × 32 = 128）。
 pub const AFFINITY_TABLE_MAX_BYTES: usize = WORKER_AFFINITY_COUNT * AFFINITY_ENTRY_BYTES;
@@ -123,12 +123,12 @@ pub const IRQ_CLASS_COUNT: usize = 8;
 pub const KERNEL_WRITES_PERFORMED: bool = false;
 
 /// affinity_hash 域分隔标签（D-04）。
-const AFFINITY_HASH_DOMAIN: &[u8] = b"tspi-affinity-v1";
+const AFFINITY_HASH_DOMAIN: &[u8] = b"khaen-affinity-v1";
 const FNV1A64_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A64_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 // ---------------------------------------------------------------------------
-// §11.13 TspiWorkerAffinityV1（32 B / align 8；core::abi 已提供，leaf 保留同布局副本——D-02）
+// §11.13 KhaenWorkerAffinityV1（32 B / align 8；core::abi 已提供，leaf 保留同布局副本——D-02）
 // ---------------------------------------------------------------------------
 
 /// worker 亲和/优先级/IRQ 依赖表项（core-v1 §11.13；**align 例外**：32 B / align 8）。
@@ -138,7 +138,7 @@ const FNV1A64_PRIME: u64 = 0x0000_0100_0000_01b3;
 /// 本类型是 plan 内 POD 表项（不是跨线程原子结构），只由本模块在 admission 前构建/校验。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiWorkerAffinityV1 {
+pub struct KhaenWorkerAffinityV1 {
     /// worker 编号 0..3。
     pub worker_id: u8,
     /// FIFO 优先级（初值 70；实测校正后必须满足 dsp < io <= irq）。
@@ -157,7 +157,7 @@ pub struct TspiWorkerAffinityV1 {
     pub reserved2: u64,
 }
 
-impl TspiWorkerAffinityV1 {
+impl KhaenWorkerAffinityV1 {
     /// 构造一条亲和表项（reserved 恒 0；flags 只允许已知位）。
     pub const fn new(
         worker_id: u8,
@@ -917,7 +917,7 @@ pub struct SchedPlan {
     /// 本 profile worker 数：4（生产）或 2（独立降级 profile）。
     pub workers: u8,
     /// 逐 worker（前 workers 条有效）affinity 表；未用槽全零。
-    pub affinity: [TspiWorkerAffinityV1; WORKER_AFFINITY_COUNT],
+    pub affinity: [KhaenWorkerAffinityV1; WORKER_AFFINITY_COUNT],
     /// DSP worker FIFO 优先级（与表项一致）。
     pub dsp_priority: u8,
     /// ALSA I/O owner FIFO 优先级（计划参数，供 T26 应用）。
@@ -963,7 +963,7 @@ impl SchedPlan {
     }
 
     /// worker k 的 affinity 表项（k >= workers 返回 None）。
-    pub fn affinity_entry(&self, worker: usize) -> Option<TspiWorkerAffinityV1> {
+    pub fn affinity_entry(&self, worker: usize) -> Option<KhaenWorkerAffinityV1> {
         if worker >= self.workers as usize || worker >= WORKER_AFFINITY_COUNT {
             None
         } else {
@@ -1043,7 +1043,7 @@ impl SchedPlan {
                     return Err(RtStatus::ERR_ADMISSION_SCHED);
                 }
                 cpu_seen[k] = entry.cpu_index;
-            } else if entry != TspiWorkerAffinityV1::ZERO {
+            } else if entry != KhaenWorkerAffinityV1::ZERO {
                 return Err(RtStatus::ERR_ADMISSION_SCHED);
             }
             k += 1;
@@ -1383,7 +1383,7 @@ pub fn plan(req: &SchedRequest, topo: &TopologySnapshot) -> Result<SchedPlan, Rt
     req.validate()?;
     topo.validate()?;
     let workers = req.workers as usize;
-    let mut affinity = [TspiWorkerAffinityV1::ZERO; WORKER_AFFINITY_COUNT];
+    let mut affinity = [KhaenWorkerAffinityV1::ZERO; WORKER_AFFINITY_COUNT];
     let mut k = 0usize;
     while k < workers {
         let cpu = req.dsp_cpus[k];
@@ -1427,7 +1427,7 @@ pub fn plan(req: &SchedRequest, topo: &TopologySnapshot) -> Result<SchedPlan, Rt
         if topo.cpu_isolated(cpu) {
             flags |= AFFINITY_FLAG_ISOLATED_CPU;
         }
-        affinity[k] = TspiWorkerAffinityV1::new(k as u8, req.dsp_priority, flags, cpu, deps);
+        affinity[k] = KhaenWorkerAffinityV1::new(k as u8, req.dsp_priority, flags, cpu, deps);
         k += 1;
     }
     let mut built = SchedPlan {
@@ -1448,11 +1448,11 @@ pub fn plan(req: &SchedRequest, topo: &TopologySnapshot) -> Result<SchedPlan, Rt
     Ok(built)
 }
 
-/// §12.3 同名入口的 leaf 适配版：返回 [TspiWorkerAffinityV1;4] 亲和表（D-01 说明签名差异）。
+/// §12.3 同名入口的 leaf 适配版：返回 [KhaenWorkerAffinityV1;4] 亲和表（D-01 说明签名差异）。
 pub fn plan_affinity(
     req: &SchedRequest,
     topo: &TopologySnapshot,
-) -> Result<[TspiWorkerAffinityV1; WORKER_AFFINITY_COUNT], RtStatus> {
+) -> Result<[KhaenWorkerAffinityV1; WORKER_AFFINITY_COUNT], RtStatus> {
     let built = plan(req, topo)?;
     Ok(built.affinity)
 }
@@ -1476,7 +1476,7 @@ fn fnv1a64_byte(hash: u64, byte: u8) -> u64 {
 /// 计算 affinity 表规范化 hash（8 B LE；含 workers 数，2/4 profile 必不同）。
 pub fn compute_affinity_hash(
     workers: u8,
-    entries: &[TspiWorkerAffinityV1; WORKER_AFFINITY_COUNT],
+    entries: &[KhaenWorkerAffinityV1; WORKER_AFFINITY_COUNT],
 ) -> [u8; AFFINITY_HASH_BYTES] {
     let mut hash = FNV1A64_OFFSET_BASIS;
     let mut index = 0usize;
@@ -1503,9 +1503,9 @@ pub fn compute_affinity_hash(
 // ---------------------------------------------------------------------------
 
 const _: () = {
-    assert!(size_of::<TspiWorkerAffinityV1>() == AFFINITY_ENTRY_BYTES);
-    assert!(align_of::<TspiWorkerAffinityV1>() == 8);
-    assert!(!needs_drop::<TspiWorkerAffinityV1>());
+    assert!(size_of::<KhaenWorkerAffinityV1>() == AFFINITY_ENTRY_BYTES);
+    assert!(align_of::<KhaenWorkerAffinityV1>() == 8);
+    assert!(!needs_drop::<KhaenWorkerAffinityV1>());
     assert!(!needs_drop::<TopologySnapshot>());
     assert!(!needs_drop::<LscpuSnapshot>());
     assert!(!needs_drop::<SchedRequest>());

@@ -1,21 +1,21 @@
 #!/bin/sh
-# TSPI PTP shared shell helpers (sourced by ptp-master-start / ptp-phc2sys-start).
+# KHAEN PTP shared shell helpers (sourced by ptp-master-start / ptp-phc2sys-start).
 # Debian 12 /bin/sh is dash: keep this POSIX, no bashisms.
 # shellcheck shell=sh
 
-ptp_log() { printf 'tspi-ptp: %s\n' "$*" >&2; }
+ptp_log() { printf 'khaen-ptp: %s\n' "$*" >&2; }
 
 # resolve_ptp_iface: echo the interface to serve PTP on.
-# Honors TSPI_PTP_IFACE; "auto"/empty selects the interface of the IPv4 default route.
+# Honors KHAEN_PTP_IFACE; "auto"/empty selects the interface of the IPv4 default route.
 resolve_ptp_iface() {
-    _iface=${TSPI_PTP_IFACE:-auto}
+    _iface=${KHAEN_PTP_IFACE:-auto}
     case "$_iface" in
         ''|auto|AUTO)
             _iface=$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit }}')
             ;;
     esac
     if [ -z "$_iface" ]; then
-        ptp_log "ERROR: cannot auto-detect interface (no IPv4 default route); set TSPI_PTP_IFACE"
+        ptp_log "ERROR: cannot auto-detect interface (no IPv4 default route); set KHAEN_PTP_IFACE"
         return 1
     fi
     if [ ! -e "/sys/class/net/$_iface" ]; then
@@ -27,15 +27,15 @@ resolve_ptp_iface() {
 
 # detect_ptp_phc <iface>: echo the PHC device (e.g. /dev/ptp0) when the interface can do
 # hardware timestamping; return 1 when it cannot.
-# Order: explicit TSPI_PTP_PHC override -> ethtool -T capabilities -> sysfs device/ptp.
+# Order: explicit KHAEN_PTP_PHC override -> ethtool -T capabilities -> sysfs device/ptp.
 detect_ptp_phc() {
     _iface=$1
-    if [ -n "${TSPI_PTP_PHC:-}" ]; then
-        if [ -e "${TSPI_PTP_PHC}" ]; then
-            printf '%s\n' "${TSPI_PTP_PHC}"
+    if [ -n "${KHAEN_PTP_PHC:-}" ]; then
+        if [ -e "${KHAEN_PTP_PHC}" ]; then
+            printf '%s\n' "${KHAEN_PTP_PHC}"
             return 0
         fi
-        ptp_log "ERROR: TSPI_PTP_PHC=${TSPI_PTP_PHC} does not exist"
+        ptp_log "ERROR: KHAEN_PTP_PHC=${KHAEN_PTP_PHC} does not exist"
         return 1
     fi
     _hw=0

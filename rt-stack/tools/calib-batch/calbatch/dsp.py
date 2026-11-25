@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环：DSP 基础函数（numpy 依赖，仅分析/合成使用）。
+"""KHAEN 校准批量闭环：DSP 基础函数（numpy 依赖，仅分析/合成使用）。
 
 设计口径（2026-11-17，task-201）：
 - 分析输入是"测量记录"（WAV 或 S24_3LE raw）+ 冻结的 capture meta（slot 布局）。

@@ -152,10 +152,10 @@ fn sha256_nist_vectors() {
 
 #[test]
 fn sha256_hex_and_is_hex64_contract() {
-    let digest = sha256(b"tspi");
+    let digest = sha256(b"khaen");
     assert_eq!(digest.len(), 32);
-    assert_eq!(hex(&digest), sha256_hex(b"tspi"));
-    assert!(is_hex64(&sha256_hex(b"tspi")));
+    assert_eq!(hex(&digest), sha256_hex(b"khaen"));
+    assert!(is_hex64(&sha256_hex(b"khaen")));
     assert!(is_hex64(&"F".repeat(64)));
     assert!(!is_hex64(&"a".repeat(63)));
     assert!(!is_hex64(&("a".repeat(63) + "g")));

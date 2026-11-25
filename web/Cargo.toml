@@ -29,5 +29,5 @@ lto = "thin"
 codegen-units = 1
 
 [[bin]]
-name = "tspi-audio-web"
+name = "khaen-audio-web"
 path = "src/main.rs"

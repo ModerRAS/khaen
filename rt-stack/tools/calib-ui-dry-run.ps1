@@ -1,9 +1,9 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  TSPI calibration UI one-command dry-run acceptance (no audio).
+  KHAEN calibration UI one-command dry-run acceptance (no audio).
 .DESCRIPTION
-  Starts local tspi-rt-daemon (synthetic backend, no sound), then:
+  Starts local khaen-rt-daemon (synthetic backend, no sound), then:
   1) POST /api/calibration/run {dry_run:true} -> six-stage plan; unimplemented stages
      MUST be reported pending_host_field, never faked as passed.
   2) POST /api/calibration/jobs for bass/fir/modal/level/delay -> expected 501
@@ -26,9 +26,9 @@ function Write-Step([string]$text) { Write-Host ("== " + $text) }
 
 $root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrEmpty($Bin)) {
-  $Bin = Join-Path $root 'target\debug\tspi-rt-daemon.exe'
+  $Bin = Join-Path $root 'target\debug\khaen-rt-daemon.exe'
 }
-if (-not (Test-Path $Bin)) { throw "daemon binary not found: $Bin (run cargo build -p khaen-control --bin tspi-rt-daemon)" }
+if (-not (Test-Path $Bin)) { throw "daemon binary not found: $Bin (run cargo build -p khaen-control --bin khaen-rt-daemon)" }
 
 # TEMP may point at R: (ImDisk) where mkdir can be denied; use C: workspace temp.
 $runRoot = 'C:\WorkSpace\Claw\scratch\lead\cal-ui-tmp'
@@ -62,7 +62,7 @@ function Convert-ResponseBody($response) {
 function Invoke-Api {
   param([string]$Method, [string]$Path, $Body = $null, [bool]$Auth = $true)
   $headers = @{ 'Accept' = 'application/json' }
-  if ($Auth -and $csrf) { $headers['X-TSPI-CSRF'] = $csrf }
+  if ($Auth -and $csrf) { $headers['X-KHAEN-CSRF'] = $csrf }
   $params = @{ Uri = ($base + $Path); Method = $Method; UseBasicParsing = $true; WebSession = $session; Headers = $headers; TimeoutSec = 10 }
   if ($null -ne $Body) {
     $params['ContentType'] = 'application/json'
@@ -158,7 +158,7 @@ try {
   $page = Invoke-WebRequest -Uri ($base + '/calibration') -UseBasicParsing -TimeoutSec 5
   $css = Invoke-WebRequest -Uri ($base + '/calibration/style.css') -UseBasicParsing -TimeoutSec 5
   $js = Invoke-WebRequest -Uri ($base + '/calibration/app.js') -UseBasicParsing -TimeoutSec 5
-  $pageOk = ($page.StatusCode -eq 200 -and $page.Content -match 'TSPI' -and $page.Content -match '/calibration/app.js')
+  $pageOk = ($page.StatusCode -eq 200 -and $page.Content -match 'KHAEN' -and $page.Content -match '/calibration/app.js')
   if (-not $pageOk) { Add-Failure 'calibration page content check failed' }
   if ($css.StatusCode -ne 200 -or $js.StatusCode -ne 200) { Add-Failure 'calibration assets not 200' }
 

@@ -151,7 +151,7 @@ fn temp_root(tag: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let number = COUNTER.fetch_add(1, Ordering::SeqCst);
     let root = std::env::temp_dir().join(format!(
-        "tspi-caljob-t60-public-{}-{}-{}",
+        "khaen-caljob-t60-public-{}-{}-{}",
         std::process::id(),
         tag,
         number

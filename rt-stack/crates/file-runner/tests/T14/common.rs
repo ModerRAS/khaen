@@ -1,4 +1,4 @@
-//! T14 测试公共夹具：合成 WAV / `tspi-fir/v1` manifest / `tspi-cal-ir-draft/v1` / session。
+//! T14 测试公共夹具：合成 WAV / `khaen-fir/v1` manifest / `khaen-cal-ir-draft/v1` / session。
 //!
 //! 全部夹具在内存里构造（`MapSource`），不依赖板端/ALSA/网络/本地文件；确定性（无时间戳/随机）。
 
@@ -66,7 +66,7 @@ pub fn endpoint_na() -> Json {
     ])
 }
 
-/// 构造 `tspi-fir/v1` manifest JSON + raw_f32le 系数文件字节（默认 fs=48k）。
+/// 构造 `khaen-fir/v1` manifest JSON + raw_f32le 系数文件字节（默认 fs=48k）。
 pub fn fir(family: &str, coeffs: &[f32], file: &str) -> (Json, Vec<u8>) {
     fir_custom(family, coeffs, file, "regular", 4096)
 }
@@ -624,7 +624,7 @@ pub fn protection_none() -> Json {
     protection("identity_p_post", &[], true)
 }
 
-/// `tspi-cal-ir-draft/v1` role_metadata 草案（P FIR=[1]；runner 应用 D/polarity）。
+/// `khaen-cal-ir-draft/v1` role_metadata 草案（P FIR=[1]；runner 应用 D/polarity）。
 pub fn ir_role_metadata(delays: &[u32; 6], invert: &[bool; 6]) -> Json {
     ir_draft("role_metadata", 48_000, "4.1.2", delays, invert, None)
 }
@@ -668,12 +668,12 @@ pub fn ir_draft(
         ]));
     }
     let mut root = vec![
-        ("schema", Json::String("tspi-cal-ir-draft/v1".to_string())),
+        ("schema", Json::String("khaen-cal-ir-draft/v1".to_string())),
         ("ir_version", Json::Number(1.0)),
         ("ir_hash", Json::String(HASH_A.to_string())),
         (
             "hash_algo",
-            Json::String("tspi-cal-ir-canonical-v1".to_string()),
+            Json::String("khaen-cal-ir-canonical-v1".to_string()),
         ),
         (
             "source",

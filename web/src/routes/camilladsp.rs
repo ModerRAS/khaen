@@ -1,7 +1,7 @@
 //! CamillaDSP legacy 只读路由（F-04）。
 //!
 //! 本 crate（旧 web / khaen-audio-web）属于**退役栈镜像**：Phase 1 运行镜像不安装它，
-//! REST/WS/Web 由 tspi-rt-daemon 提供（T42/T44/T70）。源码保留 GET status/configs/config 仅供
+//! REST/WS/Web 由 khaen-rt-daemon 提供（T42/T44/T70）。源码保留 GET status/configs/config 仅供
 //! 历史对照与 T72 取证；**不再提供** CamillaDSP 启停接口（POST /camilladsp/{start,stop,restart}
 //! 已删除，旧前端调用会得到 404）。不要在退役后把它重新接到生产控制面。
 

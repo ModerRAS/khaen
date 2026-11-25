@@ -1,6 +1,6 @@
-//! tspi-rt-daemon —— TSPI 控制面/校准 daemon 入口（WBS T70/T42/T44/T60 的部署接线，T155）。
+//! khaen-rt-daemon —— KHAEN 控制面/校准 daemon 入口（WBS T70/T42/T44/T60 的部署接线，T155）。
 //!
-//! 角色（与 service/tspi-rt-daemon.service 契约一致）：REST/WS/Web 的**唯一**控制面进程；
+//! 角色（与 service/khaen-rt-daemon.service 契约一致）：REST/WS/Web 的**唯一**控制面进程；
 //! **不直接打开 PCM**（ALSA/设备 owner 只在 khaen-rt-host）。本文件只做进程接线：
 //! 读 config -> 建 RestService（T42）+ WebServer（T70，含 WS/REST 桥）-> 监听端口 ->
 //! 优雅退出（SIGINT/SIGTERM 或 --exit-after-ms/T155 证据用）。
@@ -13,15 +13,15 @@
 //!   blocks_committed/ack_mask 是内存合成的，`engine_info().synthetic=true` 会原样出现在
 //!   commit/status 回执里，页面显示 synthetic 而不是「已生效（actual）」（F-13）。
 //!   真实 host engine 经 T26 注入属 follow-up；T70 evidence E-1/E-3 已登记；
-//! - 校准 job 已挂：默认 TSPI_CAL_JOB_BACKEND=synthetic 构造 T60 JobManager 的
+//! - 校准 job 已挂：默认 KHAEN_CAL_JOB_BACKEND=synthetic 构造 T60 JobManager 的
 //!   CalibrationPort 适配（calibration_job_port.rs）——job 状态机/互斥/进度/apply/rollback
 //!   走真实 T60/T66 代码，但测量=stage fake、设计=synthetic_offline、apply=T66 离线合成
 //!   ack，所以 REST/页面显式 engine=t60-jobmanager-synthetic + synthetic=true（F-13 口径，
-//!   不冒充板端 actual）。TSPI_CAL_JOB_BACKEND=real 把请求转到 host 的 Unix socket
+//!   不冒充板端 actual）。KHAEN_CAL_JOB_BACKEND=real 把请求转到 host 的 Unix socket
 //!   （socket 不在时该次请求 503，不造测量记录）；=off 显式禁用（REST 503）；
 //! - 真实浏览器/板端/80 端口部署、真实校准 job/REST 板端闭环 NOT_RUN。
 //!
-//! 用法：tspi-rt-daemon serve --config <rt-daemon.toml> [--exit-after-ms N] [--bind ADDR] [--check]
+//! 用法：khaen-rt-daemon serve --config <rt-daemon.toml> [--exit-after-ms N] [--bind ADDR] [--check]
 
 use std::env;
 use std::fs;
@@ -54,7 +54,7 @@ extern "C" fn on_signal(_signum: i32) {
     STOP.store(true, Ordering::SeqCst);
 }
 
-/// daemon 配置（rt-daemon.toml；DRAFT -> T155 冻结为 tspi-rt-daemon/v1）。
+/// daemon 配置（rt-daemon.toml；DRAFT -> T155 冻结为 khaen-rt-daemon/v1）。
 #[derive(Clone, Debug)]
 struct DaemonConfig {
     /// 监听地址（host:port；生产 0.0.0.0:80，本机开发 127.0.0.1:8090）。
@@ -73,7 +73,7 @@ struct DaemonConfig {
     io_timeout_secs: u64,
     /// 校准 stage 后端（toml `[calibration] stage`；None = 未配置，按 env/默认 synthetic）。
     ///
-    /// 取值与 `TSPI_CAL_JOB_BACKEND`/`TSPI_CAL_STAGE` 同口径（synthetic/cli/off/real）；
+    /// 取值与 `KHAEN_CAL_JOB_BACKEND`/`KHAEN_CAL_STAGE` 同口径（synthetic/cli/off/real）；
     /// `cli` = 真实 MOTU/UMIK 音频（本机 calib-stage.sh），apply 为 file-backend
     /// NOT_APPLIED_TO_AUDIO。
     cal_stage: Option<String>,
@@ -83,9 +83,9 @@ impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
             listen: DEFAULT_LISTEN.to_string(),
-            state_dir: "/var/lib/tspi-rt-stack".to_string(),
-            auth_file: "/etc/tspi-rt-stack/daemon-auth.json".to_string(),
-            job_dir: "/var/lib/tspi-rt-stack/calibration".to_string(),
+            state_dir: "/var/lib/khaen-rt-stack".to_string(),
+            auth_file: "/etc/khaen-rt-stack/daemon-auth.json".to_string(),
+            job_dir: "/var/lib/khaen-rt-stack/calibration".to_string(),
             control_url: "http://127.0.0.1:8090".to_string(),
             max_connections: DEFAULT_MAX_CONNECTIONS,
             io_timeout_secs: DEFAULT_IO_TIMEOUT_SECS,
@@ -138,9 +138,7 @@ fn parse_config(text: &str, warnings: &mut Vec<String>) -> Result<DaemonConfig, 
             ("daemon", "job_dir") => config.job_dir = value,
             ("control", "url") | ("daemon", "control_url") => config.control_url = value,
             // `[calibration] stage = "cli"` → 真实 CLI stage 后端（默认仍是 synthetic）。
-            ("calibration", "stage") | ("calibration", "backend") => {
-                config.cal_stage = Some(value)
-            }
+            ("calibration", "stage") | ("calibration", "backend") => config.cal_stage = Some(value),
             ("web", "max_connections") | ("daemon", "max_connections") => {
                 config.max_connections = value
                     .parse()
@@ -163,23 +161,23 @@ fn load_config(path: &str) -> Result<(DaemonConfig, Vec<String>), String> {
     let mut warnings = Vec::new();
     let mut config = parse_config(text, &mut warnings)?;
     // 环境变量覆盖（systemd EnvironmentFile 契约；T155 冻结）。
-    if let Ok(value) = env::var("TSPI_DAEMON_LISTEN") {
+    if let Ok(value) = env::var("KHAEN_DAEMON_LISTEN") {
         config.listen = value;
     }
-    if let Ok(value) = env::var("TSPI_DAEMON_STATE_DIR") {
+    if let Ok(value) = env::var("KHAEN_DAEMON_STATE_DIR") {
         config.state_dir = value;
     }
-    if let Ok(value) = env::var("TSPI_DAEMON_AUTH_FILE") {
+    if let Ok(value) = env::var("KHAEN_DAEMON_AUTH_FILE") {
         config.auth_file = value;
     }
-    if let Ok(value) = env::var("TSPI_DAEMON_JOB_DIR") {
+    if let Ok(value) = env::var("KHAEN_DAEMON_JOB_DIR") {
         config.job_dir = value;
     }
-    if let Ok(value) = env::var("TSPI_RT_HOST_CONTROL_URL") {
+    if let Ok(value) = env::var("KHAEN_RT_HOST_CONTROL_URL") {
         config.control_url = value;
     }
-    // `TSPI_CAL_STAGE=cli` 最高优先（systemd EnvironmentFile 契约）；显式空值视为未配置。
-    if let Ok(value) = env::var("TSPI_CAL_STAGE") {
+    // `KHAEN_CAL_STAGE=cli` 最高优先（systemd EnvironmentFile 契约）；显式空值视为未配置。
+    if let Ok(value) = env::var("KHAEN_CAL_STAGE") {
         if !value.trim().is_empty() {
             config.cal_stage = Some(value);
         }
@@ -205,16 +203,16 @@ fn json_escape(text: &str) -> String {
 
 fn usage() -> &'static str {
     concat!(
-        "tspi-rt-daemon (T155 control-plane entry)\n",
+        "khaen-rt-daemon (T155 control-plane entry)\n",
         "usage:\n",
-        "  tspi-rt-daemon serve --config <rt-daemon.toml> [--exit-after-ms N] [--bind ADDR]\n",
-        "  tspi-rt-daemon check --config <rt-daemon.toml>\n",
+        "  khaen-rt-daemon serve --config <rt-daemon.toml> [--exit-after-ms N] [--bind ADDR]\n",
+        "  khaen-rt-daemon check --config <rt-daemon.toml>\n",
         "calibration backend:\n",
         "  default synthetic  = real T60 state machine, Fake measurement/offline apply ack\n",
-        "  TSPI_CAL_STAGE=cli = real MOTU/UMIK audio via /usr/local/lib/tspi/calib-stage.sh;\n",
+        "  KHAEN_CAL_STAGE=cli = real MOTU/UMIK audio via /usr/local/lib/khaen/calib-stage.sh;\n",
         "                       apply is file-backend active.yml = NOT_APPLIED_TO_AUDIO\n",
         "                       (host does not consume calibration.yml yet)\n",
-        "  TSPI_CAL_JOB_BACKEND=off|real = REST calibration endpoints 503 (not faked)\n",
+        "  KHAEN_CAL_JOB_BACKEND=off|real = REST calibration endpoints 503 (not faked)\n",
         "NOT_TESTED: real browser/board/80-port deployment; engine=synthetic(memory), ",
         "mode_services=simulated (T26/T44 follow-up)\n"
     )
@@ -233,7 +231,7 @@ fn install_signals() {
 // 校准 job 接线（T60 JobManager -> T42 CalibrationPort；task-226）
 // ---------------------------------------------------------------------------
 
-/// 校准 backend 模式（env TSPI_CAL_JOB_BACKEND；默认 synthetic）。
+/// 校准 backend 模式（env KHAEN_CAL_JOB_BACKEND；默认 synthetic）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CalBackendMode {
     /// 离线合成（默认）：真实 T60 状态机 + Fake 测量/synthetic_offline 设计/离线 apply ack。
@@ -268,13 +266,13 @@ impl CalBackendMode {
         }
     }
 
-    /// 解析模式：toml `[calibration] stage`（已含 env `TSPI_CAL_STAGE` 覆盖）优先，
-    /// 其次 env `TSPI_CAL_JOB_BACKEND`，缺省 synthetic。
+    /// 解析模式：toml `[calibration] stage`（已含 env `KHAEN_CAL_STAGE` 覆盖）优先，
+    /// 其次 env `KHAEN_CAL_JOB_BACKEND`，缺省 synthetic。
     fn resolve(config_stage: Option<&str>) -> Self {
         if let Some(value) = config_stage {
             return CalBackendMode::parse(value);
         }
-        match env::var("TSPI_CAL_JOB_BACKEND") {
+        match env::var("KHAEN_CAL_JOB_BACKEND") {
             Ok(value) => CalBackendMode::parse(&value),
             Err(_) => CalBackendMode::Synthetic,
         }
@@ -340,7 +338,7 @@ fn build_calibration_with_mode(
             None,
             CalibrationReport::disabled(
                 mode.as_str(),
-                "calibration disabled by TSPI_CAL_JOB_BACKEND=off; REST calibration endpoints return 503",
+                "calibration disabled by KHAEN_CAL_JOB_BACKEND=off; REST calibration endpoints return 503",
             ),
         ),
         CalBackendMode::Real => (
@@ -442,7 +440,7 @@ fn build_calibration_with_mode(
     }
 }
 
-/// 按 toml `[calibration] stage` / env（TSPI_CAL_STAGE / TSPI_CAL_JOB_BACKEND）构造校准 port。
+/// 按 toml `[calibration] stage` / env（KHAEN_CAL_STAGE / KHAEN_CAL_JOB_BACKEND）构造校准 port。
 fn build_calibration(
     job_dir: &str,
     cal_stage: Option<&str>,
@@ -495,7 +493,7 @@ fn run_serve(
         .map_err(|err| format!("local_addr: {err}"))?
         .to_string();
     println!(
-        "{{\"status\":\"ready\",\"mode\":\"tspi-rt-daemon\",\"listen\":\"{}\",\"state_dir\":\"{}\",\"job_dir\":\"{}\",\"control_url\":\"{}\",\"engine\":\"memory\",\"synthetic\":true,\"mode_controller\":\"T44\",\"mode_services\":\"simulated\",\"calibration\":{},\"warnings\":[{}]}}",
+        "{{\"status\":\"ready\",\"mode\":\"khaen-rt-daemon\",\"listen\":\"{}\",\"state_dir\":\"{}\",\"job_dir\":\"{}\",\"control_url\":\"{}\",\"engine\":\"memory\",\"synthetic\":true,\"mode_controller\":\"T44\",\"mode_services\":\"simulated\",\"calibration\":{},\"warnings\":[{}]}}",
         json_escape(&local_addr),
         json_escape(&config.state_dir),
         json_escape(&config.job_dir),
@@ -535,7 +533,7 @@ fn run_serve(
     }
     let uptime_ms = started.elapsed().as_millis() as u64;
     println!(
-        "{{\"status\":\"ok\",\"mode\":\"tspi-rt-daemon\",\"listen\":\"{}\",\"uptime_ms\":{},\"graceful\":true}}",
+        "{{\"status\":\"ok\",\"mode\":\"khaen-rt-daemon\",\"listen\":\"{}\",\"uptime_ms\":{},\"graceful\":true}}",
         json_escape(&local_addr),
         uptime_ms
     );
@@ -608,7 +606,7 @@ fn main() -> ExitCode {
             Ok(code) => ExitCode::from(code as u8),
             Err(err) => {
                 eprintln!(
-                    "{{\"status\":\"error\",\"mode\":\"tspi-rt-daemon\",\"error\":\"{}\"}}",
+                    "{{\"status\":\"error\",\"mode\":\"khaen-rt-daemon\",\"error\":\"{}\"}}",
                     json_escape(&err)
                 );
                 ExitCode::from(1)
@@ -623,20 +621,20 @@ fn main() -> ExitCode {
                     match probe_free_port(&bind) {
                         Ok(()) => {
                             println!(
-                            "{{\"status\":\"ok\",\"mode\":\"tspi-rt-daemon-check\",\"listen\":\"{}\",\"warnings\":[{}]}}",
+                            "{{\"status\":\"ok\",\"mode\":\"khaen-rt-daemon-check\",\"listen\":\"{}\",\"warnings\":[{}]}}",
                             json_escape(&bind),
                             warnings.iter().map(|w| format!("\"{}\"", json_escape(w))).collect::<Vec<_>>().join(",")
                         );
                             ExitCode::SUCCESS
                         }
                         Err(err) => {
-                            eprintln!("{{\"status\":\"error\",\"mode\":\"tspi-rt-daemon-check\",\"error\":\"{}\"}}", json_escape(&err));
+                            eprintln!("{{\"status\":\"error\",\"mode\":\"khaen-rt-daemon-check\",\"error\":\"{}\"}}", json_escape(&err));
                             ExitCode::from(1)
                         }
                     }
                 }
                 Err(err) => {
-                    eprintln!("{{\"status\":\"error\",\"mode\":\"tspi-rt-daemon-check\",\"error\":\"{}\"}}", json_escape(&err));
+                    eprintln!("{{\"status\":\"error\",\"mode\":\"khaen-rt-daemon-check\",\"error\":\"{}\"}}", json_escape(&err));
                     ExitCode::from(1)
                 }
             }
@@ -659,9 +657,7 @@ mod tests {
     use khaen_control::rest::calibration_job_port::{
         cleanup_offline_root, unique_offline_root, CAL_PORT_ENGINE_SYNTHETIC,
     };
-    use khaen_control::rest::{
-        JsonValue, Method, RestConfig, RestRequest, TOKEN_HEADER,
-    };
+    use khaen_control::rest::{JsonValue, Method, RestConfig, RestRequest, TOKEN_HEADER};
 
     const TEST_TOKEN: &str = "test-token-0123456789abcdef";
 
@@ -728,7 +724,10 @@ mod tests {
         assert_eq!(report.engine, "host-socket");
         assert!(report.synthetic, "没有房间录音之前不得标成 actual");
         let status = report.to_json();
-        assert!(status.contains("\"engine\":\"host-socket\""), "status={status}");
+        assert!(
+            status.contains("\"engine\":\"host-socket\""),
+            "status={status}"
+        );
         let service = service_with_port(port.expect("port"));
         let full = service.handle(&post_json(
             "/api/calibration/jobs",
@@ -745,7 +744,11 @@ mod tests {
             r#"{"kind":"emperor","stage":"solve","audible_sweep_authorized":false}"#,
         ));
         assert_eq!(down.status, 503, "body={}", down.body);
-        assert!(down.body.contains("service_unavailable"), "body={}", down.body);
+        assert!(
+            down.body.contains("service_unavailable"),
+            "body={}",
+            down.body
+        );
         assert!(!down.body.contains("FIELD_SHORTER"), "body={}", down.body);
         cleanup_offline_root(&dir);
     }
@@ -756,14 +759,23 @@ mod tests {
         let (port, _) =
             build_calibration_with_mode(dir.to_string_lossy().as_ref(), CalBackendMode::Synthetic);
         let service = service_with_port(port.expect("synthetic port"));
-        let response = service.handle(&post_json(
-            "/api/calibration/jobs",
-            r#"{"kind":"emperor"}"#,
-        ));
+        let response = service.handle(&post_json("/api/calibration/jobs", r#"{"kind":"emperor"}"#));
         assert_eq!(response.status, 201, "body={}", response.body);
-        assert!(response.body.contains("\"synthetic\":true"), "body={}", response.body);
-        assert!(response.body.contains("PREDICTED_ONLY"), "body={}", response.body);
-        assert!(!response.body.contains("FIELD_SHORTER"), "body={}", response.body);
+        assert!(
+            response.body.contains("\"synthetic\":true"),
+            "body={}",
+            response.body
+        );
+        assert!(
+            response.body.contains("PREDICTED_ONLY"),
+            "body={}",
+            response.body
+        );
+        assert!(
+            !response.body.contains("FIELD_SHORTER"),
+            "body={}",
+            response.body
+        );
         cleanup_offline_root(&dir);
     }
 
@@ -782,9 +794,9 @@ mod tests {
     #[test]
     fn t226_daemon_config_job_dir_is_parsed() {
         let mut warnings = Vec::new();
-        let config =
-            parse_config("[daemon]\njob_dir = \"/tmp/tspi-jobs\"\n", &mut warnings).expect("parse");
-        assert_eq!(config.job_dir, "/tmp/tspi-jobs");
+        let config = parse_config("[daemon]\njob_dir = \"/tmp/khaen-jobs\"\n", &mut warnings)
+            .expect("parse");
+        assert_eq!(config.job_dir, "/tmp/khaen-jobs");
         assert!(warnings.is_empty(), "warnings={warnings:?}");
     }
 

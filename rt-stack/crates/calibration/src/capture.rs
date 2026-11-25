@@ -88,9 +88,9 @@ use crate::sweep::{SweepTimeline, PLACEHOLDER_GRAPH_ID};
 // ---------------------------------------------------------------------------
 
 /// 采集报告 schema（raw/repeat/timebase 证据包）。
-pub const UMIK_CAPTURE_SCHEMA: &str = "tspi-umik-capture/v1";
+pub const UMIK_CAPTURE_SCHEMA: &str = "khaen-umik-capture/v1";
 /// 时基报告 schema（render frame 与 capture sample 映射 + clock）。
-pub const UMIK_TIMEBASE_SCHEMA: &str = "tspi-umik-timebase/v1";
+pub const UMIK_TIMEBASE_SCHEMA: &str = "khaen-umik-timebase/v1";
 
 /// P1 口径：UMIK 是独立 USB ADC 单通道采集（DSP-HOST-DECISION §2.2）。
 pub const UMIK_REQUIRED_CHANNELS: u16 = 1;

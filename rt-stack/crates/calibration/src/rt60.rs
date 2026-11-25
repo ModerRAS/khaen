@@ -1,7 +1,7 @@
 //! [NONRT] RT60 (EDT/T15/T20/T30) + CSD 后处理（goal 6：把瀑布图/混响时间接入测量流水线）。
 //!
 //! 本模块是 tools/analysis/rt60_waterfall.py v2-20261122 的**纯 Rust 移植**：
-//! 同一算法、同一门限、同一 flags/valid/confidence 判定，便于在 tspi-cal job
+//! 同一算法、同一门限、同一 flags/valid/confidence 判定，便于在 khaen-cal job
 //! artifact 里离线产出 RT60/CSD，不依赖 Python/numpy（板端也可用）。
 //!
 //! 算法（与 Python v2 逐项一致；差异只在浮点实现）：
@@ -31,13 +31,13 @@ use crate::microfft::{rfft, C64};
 /// 工具版本（写进 summary.json，与 Python v2 区分）。
 pub const RT60_TOOL_VERSION: &str = "rust-v1-20261122";
 /// summary schema。
-pub const RT60_SCHEMA: &str = "tspi-rt60/v1";
+pub const RT60_SCHEMA: &str = "khaen-rt60/v1";
 /// CSD schema。
-pub const RT60_CSD_SCHEMA: &str = "tspi-rt60-csd/v1";
+pub const RT60_CSD_SCHEMA: &str = "khaen-rt60-csd/v1";
 /// warning schema（RT60 失败但主流程继续）。
-pub const RT60_WARNING_SCHEMA: &str = "tspi-rt60-warning/v1";
+pub const RT60_WARNING_SCHEMA: &str = "khaen-rt60-warning/v1";
 /// status schema（--no-rt60 或不适用的显式记录）。
-pub const RT60_STATUS_SCHEMA: &str = "tspi-rt60-status/v1";
+pub const RT60_STATUS_SCHEMA: &str = "khaen-rt60-status/v1";
 
 /// 默认倍频带中心频率（与 Python DEFAULT_BANDS 一致；31.5 Hz–16 kHz）。
 pub const DEFAULT_BANDS_HZ: [f64; 10] = [
@@ -554,11 +554,7 @@ fn block_power(y: &[f64], sample_rate: f64) -> (Vec<f64>, f64) {
 // ---------------------------------------------------------------------------
 
 /// 带内噪声平台：返回 (起块, 止块, 电平 dB, 时长 s)。与 Python find_noise_plateau 一致。
-fn find_noise_plateau(
-    pblock: &[f64],
-    dt: f64,
-    peak_db: f64,
-) -> Option<(usize, usize, f64, f64)> {
+fn find_noise_plateau(pblock: &[f64], dt: f64, peak_db: f64) -> Option<(usize, usize, f64, f64)> {
     let n = pblock.len();
     if n < 8 {
         return None;
@@ -722,12 +718,7 @@ fn fit_decay(
 }
 
 /// 块包络拟合（Python fit_envelope）。
-fn fit_envelope(
-    pblock: &[f64],
-    dt: f64,
-    peak_db: f64,
-    nf_db: f64,
-) -> Option<Rt60Envelope> {
+fn fit_envelope(pblock: &[f64], dt: f64, peak_db: f64, nf_db: f64) -> Option<Rt60Envelope> {
     let dbv: Vec<f64> = pblock.iter().map(|p| db10(*p)).collect();
     let last = last_above_gate(pblock, nf_db);
     let pk = argmax(&dbv);
@@ -1227,17 +1218,14 @@ pub fn parse_wav_pcm(bytes: &[u8]) -> Result<WavPcm, String> {
     let mut data: Option<&[u8]> = None;
     while offset + 8 <= bytes.len() {
         let id = &bytes[offset..offset + 4];
-        let size = read_u32(bytes, offset + 4).ok_or_else(|| "truncated chunk size".to_string())?
-            as usize;
+        let size =
+            read_u32(bytes, offset + 4).ok_or_else(|| "truncated chunk size".to_string())? as usize;
         let body_start = offset + 8;
         let body_end = body_start
             .checked_add(size)
             .ok_or_else(|| "chunk size overflow".to_string())?;
         if body_end > bytes.len() {
-            return Err(format!(
-                "truncated chunk {}",
-                String::from_utf8_lossy(id)
-            ));
+            return Err(format!("truncated chunk {}", String::from_utf8_lossy(id)));
         }
         if id == b"fmt " {
             if size < 16 {
@@ -1660,18 +1648,22 @@ fn push_band_json(out: &mut String, band: &Rt60Band) {
 }
 
 impl Rt60Report {
-    /// 机读 summary JSON（schema tspi-rt60/v1）。
+    /// 机读 summary JSON（schema khaen-rt60/v1）。
     pub fn summary_json(&self) -> String {
         let mut out = String::with_capacity(8192);
         out.push('{');
         push_json_str_field(&mut out, "schema", RT60_SCHEMA);
         out.push(',');
         out.push_str("\"tool\":{");
-        push_json_str_field(&mut out, "name", "tspi-cal rt60 (rust)");
+        push_json_str_field(&mut out, "name", "khaen-cal rt60 (rust)");
         out.push(',');
         push_json_str_field(&mut out, "version", RT60_TOOL_VERSION);
         out.push(',');
-        push_json_str_field(&mut out, "python_reference", "rt60_waterfall.py v2-20261122");
+        push_json_str_field(
+            &mut out,
+            "python_reference",
+            "rt60_waterfall.py v2-20261122",
+        );
         out.push('}');
         out.push(',');
         out.push_str(&format!("\"generated_unix\":{},", self.generated_unix));
@@ -1708,11 +1700,7 @@ impl Rt60Report {
         out.push(',');
         push_json_bool_field(&mut out, "simulated", self.source.simulated);
         out.push(',');
-        push_json_str_field(
-            &mut out,
-            "real_measurement",
-            self.source.real_measurement,
-        );
+        push_json_str_field(&mut out, "real_measurement", self.source.real_measurement);
         out.push(',');
         push_json_str_field(&mut out, "ir_origin", &self.source.ir_origin);
         out.push(',');
@@ -1761,10 +1749,7 @@ impl Rt60Report {
                 None => out.push_str("\"ir_wav_path\":null"),
             }
             out.push(',');
-            out.push_str(&format!(
-                "\"repeats_averaged\":{}",
-                entry.repeats_averaged
-            ));
+            out.push_str(&format!("\"repeats_averaged\":{}", entry.repeats_averaged));
             out.push('}');
         }
         out.push(']');
@@ -1876,10 +1861,22 @@ impl Rt60Report {
                     opt_num(Some(band.decay_end_s)),
                     opt_num(Some(band.window_s)),
                     opt_num(Some(band.edc_plateau_db)),
-                    band.edt.as_ref().and_then(|f| f.rt60_s).map(fmt_num).unwrap_or_default(),
-                    band.t20.as_ref().and_then(|f| f.rt60_s).map(fmt_num).unwrap_or_default(),
+                    band.edt
+                        .as_ref()
+                        .and_then(|f| f.rt60_s)
+                        .map(fmt_num)
+                        .unwrap_or_default(),
+                    band.t20
+                        .as_ref()
+                        .and_then(|f| f.rt60_s)
+                        .map(fmt_num)
+                        .unwrap_or_default(),
                     band.t20.as_ref().map(|f| fmt_num(f.r2)).unwrap_or_default(),
-                    band.t30.as_ref().and_then(|f| f.rt60_s).map(fmt_num).unwrap_or_default(),
+                    band.t30
+                        .as_ref()
+                        .and_then(|f| f.rt60_s)
+                        .map(fmt_num)
+                        .unwrap_or_default(),
                     band.flags.join(";"),
                 ];
                 let escaped: Vec<String> = fields.iter().map(|f| csv_escape(f)).collect();
@@ -1906,7 +1903,7 @@ fn csv_escape(text: &str) -> String {
     }
 }
 
-/// CSD 单 IR JSON（频率 x 时间矩阵；schema tspi-rt60-csd/v1）。
+/// CSD 单 IR JSON（频率 x 时间矩阵；schema khaen-rt60-csd/v1）。
 pub fn csd_json(entry: &Rt60AnalyzedIr, window_ms: f64) -> String {
     let analysis = &entry.analysis;
     let csd = &analysis.csd;
@@ -1969,7 +1966,11 @@ pub fn status_json(enabled: bool, stage: &str, reason: &str) -> String {
     out.push(',');
     push_json_bool_field(&mut out, "enabled", enabled);
     out.push(',');
-    push_json_str_field(&mut out, "status", if enabled { "ACTIVE" } else { "DISABLED" });
+    push_json_str_field(
+        &mut out,
+        "status",
+        if enabled { "ACTIVE" } else { "DISABLED" },
+    );
     out.push(',');
     push_json_str_field(&mut out, "stage", stage);
     out.push(',');
@@ -2042,9 +2043,7 @@ struct Lcg {
 #[cfg(test)]
 impl Lcg {
     fn new(seed: u64) -> Self {
-        Lcg {
-            state: seed | 1,
-        }
+        Lcg { state: seed | 1 }
     }
     fn next_u64(&mut self) -> u64 {
         self.state = self
@@ -2269,10 +2268,10 @@ mod tests {
         };
         let json = report.summary_json();
         assert!(json.starts_with('{') && json.ends_with('}'));
-        assert!(json.contains("\"schema\":\"tspi-rt60/v1\""));
+        assert!(json.contains("\"schema\":\"khaen-rt60/v1\""));
         assert!(json.contains("\"real_measurement\":\"NOT_RUN\""));
         assert!(json.contains("\"labels\"") == false);
-        let dump = std::env::temp_dir().join("tspi-rt60-summary-unit-test.json");
+        let dump = std::env::temp_dir().join("khaen-rt60-summary-unit-test.json");
         let _ = std::fs::write(&dump, &json);
         // 简易平衡检查：引号数为偶数（不含转义内部复杂度，仅粗检）
         assert!(
@@ -2290,9 +2289,6 @@ mod tests {
         assert!(warning.contains("\"status\":\"WARNING\""));
         assert!(warning.contains("\"blocking\":\"false\""));
         let csd = csd_json(&report.irs[0], 600.0);
-        assert!(csd.contains("\"schema\":\"tspi-rt60-csd/v1\""));
+        assert!(csd.contains("\"schema\":\"khaen-rt60-csd/v1\""));
     }
 }
-
-
-

@@ -503,11 +503,11 @@ async fn overview_has_expected_data() {
         .iter()
         .map(|s| s["unit"].as_str().unwrap())
         .collect();
-    assert!(units.contains(&"tspi-camilladsp.service"), "{units:?}");
-    assert!(units.contains(&"tspi-ptp4l-master.service"), "{units:?}");
-    assert!(units.contains(&"tspi-phc2sys.service"), "{units:?}");
-    assert!(units.contains(&"tspi-statime-inferno.service"), "{units:?}");
-    assert!(units.contains(&"tspi-aes67-daemon.service"), "{units:?}");
+    assert!(units.contains(&"khaen-camilladsp.service"), "{units:?}");
+    assert!(units.contains(&"khaen-ptp4l-master.service"), "{units:?}");
+    assert!(units.contains(&"khaen-phc2sys.service"), "{units:?}");
+    assert!(units.contains(&"khaen-statime-inferno.service"), "{units:?}");
+    assert!(units.contains(&"khaen-aes67-daemon.service"), "{units:?}");
     assert!(
         !units.contains(&"camilladsp.service"),
         "旧名字不应再出现: {units:?}"
@@ -1112,13 +1112,13 @@ async fn channelmap_view_needs_setup_and_real_presets() {
     assert_eq!(body["enabled"], true);
     assert_eq!(body["needs_setup"], true);
     assert!(body["document"].is_null());
-    assert_eq!(body["presets"]["schema"], "tspi-layout-presets/v2");
+    assert_eq!(body["presets"]["schema"], "khaen-layout-presets/v2");
     assert!(body["presets"]["input_layouts"]["h16-7.1.4"].is_object());
     assert!(body["presets"]["output_layouts"]["5.1.2"].is_object());
     assert!(body["presets"]["remap_presets"]["5.1.2->5.1.2"].is_object());
     assert!(!body["presets"]["remap_presets"]["7.1.4->5.3.2"].is_object());
     assert!(!body["presets"]["remap_presets"]["7.1.4->4.1.2"].is_object());
-    // 板端 MOTU 真相（audio/overlay/etc/tspi-audio/layout-presets.yml）：
+    // 板端 MOTU 真相（audio/overlay/etc/khaen-audio/layout-presets.yml）：
     // FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7，ch6 空，SUB=Line Out 8。
     let l412 = &body["presets"]["output_layouts"]["4.1.2"]["roles"];
     let roles: Vec<(String, Vec<u64>)> = l412
@@ -1210,7 +1210,7 @@ async fn channelmap_draft_validate_save_and_apply_off() {
         .await;
     assert_eq!(status, StatusCode::OK, "{draft}");
     let document = draft["document"].clone();
-    assert_eq!(document["schema"], "tspi-channelmap/v2");
+    assert_eq!(document["schema"], "khaen-channelmap/v2");
     assert_eq!(document["version"], 2);
     assert_eq!(document["input"]["layout"], "h16-5.1.2");
     assert_eq!(document["output"]["layout"], "5.1.2");
@@ -1324,7 +1324,7 @@ async fn channelmap_channel_mismatch_blocks_apply() {
 
 #[tokio::test]
 async fn channelmap_peq_type_and_q_rules_mirror_board_cli() {
-    // 本地回退（mock/测试）必须镜像板端 tspi-channelmap：type 白名单 + 按 type 分流的 q 界限。
+    // 本地回退（mock/测试）必须镜像板端 khaen-channelmap：type 白名单 + 按 type 分流的 q 界限。
     let app = TestApp::new();
     let mut document = channelmap_draft_5_1_2(&app).await;
     document["output"]["roles"][0]["peq"] = json!([
@@ -1441,7 +1441,7 @@ async fn channelmap_profiles_export_import() {
     let (status, _, raw) = app.get_token("/api/channelmap/export").await;
     assert_eq!(status, StatusCode::OK);
     let text = raw.as_str().unwrap();
-    assert!(text.contains("tspi-channelmap/v2"));
+    assert!(text.contains("khaen-channelmap/v2"));
 
     let (status, _, body) = app
         .post_token(

@@ -443,7 +443,7 @@ def build_report(workdir, results, plans, variant_filter=None, preset_filter=Non
     if fails == 0 and total > 0:
         lines.append("- 所有信号级检查通过：CamillaDSP 实际输出与参考 DSP 仿真逐样本一致"
                      "（max|diff| ~1e-8，float32 量化级），说明配置/滤波器/延迟/矩阵与设计一致。")
-        lines.append("- 独立生成的 CamillaDSP 配置与 tspi-channelmap 渲染路径（修复后）输出逐样本相同。")
+        lines.append("- 独立生成的 CamillaDSP 配置与 khaen-channelmap 渲染路径（修复后）输出逐样本相同。")
         lines.append("- 电平、频带、延迟、反相/差信号隔离均符合设计；未发现非预期的梳状/抵消"
                      "（r(lag0)≈0，合成通道与前声道的最大相关出现在配置延迟处）。")
         lines.append("- 已知设计取舍：SL/SR 为反相差信号（相关 -1）、HFL/HFR 为单声道高度（相关 +1），"

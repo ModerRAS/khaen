@@ -34,10 +34,10 @@ flowchart LR
 | --- | --- |
 | 语言与载体 | 只使用 `calibrate/` 的 Rust 二进制，不新增 crate，不新增、不调用 Python。 |
 | 滤波器 | Peaking、low_shelf、high_shelf。不引入 FIR，不调用 MIMO 引擎。 |
-| 目标曲线 | 独立 YAML（`tspi-target-curve/v1`），只进拟合和报告。 |
+| 目标曲线 | 独立 YAML（`khaen-target-curve/v1`），只进拟合和报告。 |
 | 契约 | 新文件写 `khaen-calibration/v1.1`。无 `type` 的旧文件仍按 Peaking 读取。 |
 | 校验 | `khaen-calibrate validate` 与 `check-pair`。公式放在独立模块 `check.rs`，拟合代码不能调用它来凑答案。 |
-| 渲染 | `calibrate` 的 CamillaDSP 片段按 type 映射。Web 本地校验同步放宽。仓库外的 Python 渲染器 `tspi-channelmap` 不在本方案中调用。 |
+| 渲染 | `calibrate` 的 CamillaDSP 片段按 type 映射。Web 本地校验同步放宽。仓库外的 Python 渲染器 `khaen-channelmap` 不在本方案中调用。 |
 
 CamillaDSP 映射：`type: Biquad`，`parameters.type` 为 `Peaking` / `Lowshelf` / `Highshelf`，字段 `freq`、`q`、`gain`。
 

@@ -1,4 +1,4 @@
-# /etc/tspi-rt-stack/rt-host.toml —— khaen-rt-host 配置模板（schema khaen-rt-host/v1，T155 冻结）
+# /etc/khaen-rt-stack/rt-host.toml —— khaen-rt-host 配置模板（schema khaen-rt-host/v1，T155 冻结）
 # 安装时由 04-install-release.sh 从 .example 复制；不得覆盖已存在文件。
 # 纪律：不得出现 CamillaDSP/旧栈路径；回退只用自研 last-good 或 mute（G-no-C）。
 [host]
@@ -25,20 +25,20 @@ io_priority = 80
 irq_priority = 90
 tick_freq_hz = 1000000000     # T19 标定值；0 = 拒启
 apply_affinity = false        # true = 启动期真实写 mlockall/SCHED_FIFO/亲和（F6/task-216；失败 fail-closed）；
-                              # 板端播放验收用 EnvironmentFile TSPI_HOST_APPLY_AFFINITY=true 覆盖（无需改本行）
+                              # 板端播放验收用 EnvironmentFile KHAEN_HOST_APPLY_AFFINITY=true 覆盖（无需改本行）
 
 [web]
-bind = "127.0.0.1:8090"       # host 只记录/探测；Web 由 tspi-rt-daemon unit 提供
+bind = "127.0.0.1:8090"       # host 只记录/探测；Web 由 khaen-rt-daemon unit 提供
 
 [control]
 url = "http://127.0.0.1:8090"
 
 [daemon]
-# 非空 = 单进程 dev/验证模式：run 会拉起同目录 tspi-rt-daemon 并探测端口（deploy 用两 unit，保持空）
+# 非空 = 单进程 dev/验证模式：run 会拉起同目录 khaen-rt-daemon 并探测端口（deploy 用两 unit，保持空）
 config = ""
 
 [paths]
-last_good = "/var/lib/tspi-rt-stack/last-good.json"
+last_good = "/var/lib/khaen-rt-stack/last-good.json"
 
 [run]
 max_blocks = 0                # 0 = 直到 SIGINT/SIGTERM（daemon 模式）
@@ -51,7 +51,7 @@ duration_ms = 0               # 0 = 不限时；>0 到点优雅退出
 # source = "aes67"                 # synth | file | motu | inferno | aes67
 # mode = "aes67"                   # source 与 mode 一一对应（off|toslink|aes67|dante 互斥）
 # aes67_transport = "userspace"    # userspace = 自研用户态 RTP 接收端；ravenna = RAVENNA LKM
-# aes67_sdp = "/var/lib/tspi-rt-stack/nsp16-aes67.sdp"
+# aes67_sdp = "/var/lib/khaen-rt-stack/nsp16-aes67.sdp"
 #
 # 收包接口（task-320）：IPv4 或网卡名；逗号列表 / 单行 TOML 数组 = 多接口（组播每个接口一条
 # 显式 IP_ADD_MEMBERSHIP；单播只允许 1 个接口）。留空 = 0.0.0.0（旧行为；多网卡启动时 WARN）。

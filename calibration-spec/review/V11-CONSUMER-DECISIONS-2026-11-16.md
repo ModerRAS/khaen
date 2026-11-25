@@ -9,7 +9,7 @@
 与 Q>10 窄模态，且"丢 type 静默降级"（最大 ~3 dB）不可接受。
 
 要求：
-- 板端 Python `tspi-channelmap`：`PEQ_KEYS` 加 `type`（可省，缺省 `peaking`）；白名单 `peaking|low_shelf|high_shelf`；
+- 板端 Python `khaen-channelmap`：`PEQ_KEYS` 加 `type`（可省，缺省 `peaking`）；白名单 `peaking|low_shelf|high_shelf`；
   遇到其它 type = **schema error rc=2**（不降级）；q 规则见裁决 2；`render` 按 type 输出
   `Peaking{freq,q,gain}` / `Lowshelf|Highshelf{freq,slope,gain}`（`slope = 12*q`）。
 - `q` 界限：peaking `[0.1,10]`（保持）；shelf 亦 `[0.1,10]`（q=RBJ slope S，见裁决 2）。超出 = 明确报错，不 clamp。
@@ -30,13 +30,13 @@ CamillaDSP `Slope` 型的公式是 `sin/2*sqrt((A+1/A)*(1/(slope/12)-1)+2)`（`b
 - CONTRACT §3.4/§4.2 写清：shelf 的 `filters[].q` 是 RBJ slope S；→CamillaDSP 用 `slope`（dB/oct，=12S）；
   消费方若自己实现 biquad，必须用 RBJ shelf 的 S 公式，不得套 peaking 的 Q 公式。
 - `check.rs`/`peq.rs`/predicted.csv/pair 判据的模型不变（本来就是 S）。
-- `tspi-channelmap` 渲染 shelf 同样用 `slope = 12*q`（见裁决 1）。
+- `khaen-channelmap` 渲染 shelf 同样用 `slope = 12*q`（见裁决 1）。
 
-## 裁决 3：板端 Python `tspi-channelmap` 是唯一权威；Web 只委托 + 展示
+## 裁决 3：板端 Python `khaen-channelmap` 是唯一权威；Web 只委托 + 展示
 
 要求：
 - Web 后端本地回退必须与 Python 规则一致（type 白名单、q 界限、shelf 映射）；**不一致时禁止放行**：
-  若 CLI 缺失/不可用，返回明确错误（"tspi-channelmap 不可用，无法校验/渲染"），不得用本地规则替代。
+  若 CLI 缺失/不可用，返回明确错误（"khaen-channelmap 不可用，无法校验/渲染"），不得用本地规则替代。
 - `web/dist` 二进制作废（11-15 构建，grep 无 `low_shelf/high_shelf`）：重编译后再上板，同时带入 `MAIN_TRIM_MAX` 补丁。
 - Web UI（P2，不阻塞）：PEQ 行加 `type` 只读显示 + 下拉（默认 peaking），保存/apply 前能看到 shelf。
 - 无校准文件导入路由（P2，后置；先走 CLI+profile）。
@@ -46,13 +46,13 @@ CamillaDSP `Slope` 型的公式是 `sin/2*sqrt((A+1/A)*(1/(slope/12)-1)+2)`（`b
 | 任务 | 负责人 | 写作用域 |
 | --- | --- | --- |
 | task-12：calibrate P0（A 根因 snap + B fit_clock 鲁棒 + P0-2 模态过拟合 + P0-3 SUB SNR + P0-4 position_usable）+ 片段 shelf slope + validate 提示口径 + 构建 | audio-stack | `calibrate/` |
-| task-13：板端 `tspi-channelmap` peq.type 支持 + slope 映射 + 测试/文档 | upmix-dev | `audio/overlay/usr/local/bin/tspi-channelmap`、`upmix/docs` |
+| task-13：板端 `khaen-channelmap` peq.type 支持 + slope 映射 + 测试/文档 | upmix-dev | `audio/overlay/usr/local/bin/khaen-channelmap`、`upmix/docs` |
 | task-14：Web 对齐 + UI type 显示 + 重编译 | web-consumer | `web/` |
 | CONTRACT §4.1/§4.2 更新、裁决记录、板端复测 | Lead | `calibration-spec/`、板端 |
 
 ## 验收（本裁决）
 
-1. `tspi-channelmap validate/render` 对含 shelf 的 profile：rc=0，产物含 `Lowshelf/Highshelf` + `slope=12q`；
+1. `khaen-channelmap validate/render` 对含 shelf 的 profile：rc=0，产物含 `Lowshelf/Highshelf` + `slope=12q`；
    未知 type：rc=2 且不产文件；q 越界：rc=3。
 2. CamillaDSP `--check` 通过含 shelf 的渲染配置；producer 片段 shelf 用 `slope`（不再用 `q`）。
 3. Web 重编译后：板端 validate/apply 全部委托 Python；UI 能看到 type。
@@ -88,7 +88,7 @@ CamillaDSP `Slope` 型的公式是 `sin/2*sqrt((A+1/A)*(1/(slope/12)-1)+2)`（`b
 
 裁决（三处一致，supercedes 裁决 1/2 里的字面 q 界限）：
 - `filters[].q`：**peaking** 保持 `[0.1, 10]`（channelmap）/ `≥0.1 无上限`（v1.1 契约，窄模态）；**shelf（low_shelf/high_shelf）改为 `[0.1, 1.0]`**（RBJ slope S；S=1 即 12 dB/oct，CamillaDSP 上限）。
-- 板端 `tspi-channelmap`：shelf q 超界 = **rc=3**（error，不产文件），删除 "q>1 仅 warning" 的做法。
+- 板端 `khaen-channelmap`：shelf q 超界 = **rc=3**（error，不产文件），删除 "q>1 仅 warning" 的做法。
 - Web 本地回退、Python 复核校验器、Rust 校验器（audio-stack）同步；producer 的 `fit` shelf 默认 S=0.7，天然满足。
 - CONTRACT §2.1/§3.4/§10 按此改写；CamillaDSP 片段 `slope=12*q` 因此恒 ≤12。
 

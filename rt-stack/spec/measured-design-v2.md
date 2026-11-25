@@ -1,4 +1,4 @@
-# measured design spec v2（tspi-cal-measured-design/v2）
+# measured design spec v2（khaen-cal-measured-design/v2）
 
 > 状态：2026-11-22 代码/单测/离线实验完成；**真实多点测量窗口、apply 后 holdout remeasure、
 > T3 复测、T6 质量门、T68/T69 仍 NOT_RUN**。本文是 schema 与语义说明，不是验收结论。
@@ -16,8 +16,8 @@
 
 | 场景 | 行为 |
 | --- | --- |
-| `schema: tspi-cal-measured-design/v1` | 原样接受；单 `design_position` + 必须 `validation = pilot_single_position_same_as_design_proxy`；构建行为与历史一致（曲线 = design×通道 + V1_proxy×通道；phase 只 design） |
-| `schema: tspi-cal-measured-design/v2` + 单 `design_position` | 兼容写法；无 `validation_positions[]` 时仍必须 proxy，且只允许 1 个 design 点 |
+| `schema: khaen-cal-measured-design/v1` | 原样接受；单 `design_position` + 必须 `validation = pilot_single_position_same_as_design_proxy`；构建行为与历史一致（曲线 = design×通道 + V1_proxy×通道；phase 只 design） |
+| `schema: khaen-cal-measured-design/v2` + 单 `design_position` | 兼容写法；无 `validation_positions[]` 时仍必须 proxy，且只允许 1 个 design 点 |
 | v2 + `design_positions[]`（>=2） | 必须给 `validation_positions[]`（>=1）与 `validation = independent_validation_positions`；**不允许 proxy 冒充 holdout** |
 | v1 文件出现 v2 数组字段 | 稳定拒绝（`E_WIRING_MEASURED_SPEC`） |
 | v2 同时出现 `design_position` 与 `design_positions[]` | 稳定拒绝（歧义） |
@@ -28,7 +28,7 @@
 
 | 字段 | 类型 | 必填 | 语义 |
 | --- | --- | --- | --- |
-| `schema` | string | 是 | `tspi-cal-measured-design/v2` |
+| `schema` | string | 是 | `khaen-cal-measured-design/v2` |
 | `design_positions` | array<Position> | v2 二选一 | 参与 T64/T65 fit 的 design 测点（>=1） |
 | `design_position` | Position | v2 二选一 | 单点兼容写法（与 `design_positions` 互斥） |
 | `validation_positions` | array<Position> | 独立 holdout 必填 | 独立 validation/holdout 测点（>=1）；不参与拟合 |
@@ -49,14 +49,14 @@
 | 字段 | 类型 | 必填 | 语义 |
 | --- | --- | --- | --- |
 | `name` | string | 是 | 通道/role 名（如 FL/FR/SL/SR/SUB1；同一位置内不得重复） |
-| `analysis` | path | 是 | 旧工具 analysis JSON（`tspi-channel-measurement/v1`；相对 spec 目录或绝对路径） |
+| `analysis` | path | 是 | 旧工具 analysis JSON（`khaen-channel-measurement/v1`；相对 spec 目录或绝对路径） |
 | `diag` | path | 否 | 槽位 nominal/actual onset；提供时优先用 `actual_start - nominal_start` 作相位重建延迟 |
 
 ### 2.4 示例（2 design + 1 独立 validation）
 
 ```json
 {
-  "schema": "tspi-cal-measured-design/v2",
+  "schema": "khaen-cal-measured-design/v2",
   "session_id": "multipoint-pilot-20261122",
   "layout": "stereo-2.0",
   "sample_rate_hz": 48000,
@@ -113,7 +113,7 @@
 
 ## 4. 证据 JSON
 
-### 4.1 measured summary（`tspi-cal-measured-summary/v1`，新增键）
+### 4.1 measured summary（`khaen-cal-measured-summary/v1`，新增键）
 
 - `design_positions` / `validation_positions`：label 数组；
 - `positions`：逐位置 `{label, role, weight, mic_orientation, channels[]}`；
@@ -125,7 +125,7 @@
   - `seat_spread`：逐通道 `{max_spread_db, rms_spread_db, worst_freq_hz}`；
   - `holdout`：`mode/evaluation/remeasure_after_apply/participates_in_fit`。
 
-### 4.2 多点证据（`tspi-cal-measured-multipoint/v1`）
+### 4.2 多点证据（`khaen-cal-measured-multipoint/v1`）
 
 由 `multipoint_evidence_json(&FitWiringDesign, &PeqFitReport)` 生成（示例：
 `evidence/.../multipoint-20261122/report/multipoint-report.json`）：

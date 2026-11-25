@@ -9,8 +9,8 @@
   python3 run_file_backend.py \
     --workdir ../scratch/upmix-run --signals tests/signals \
     --camilladsp /usr/local/bin/camilladsp \
-    --tspi-upmix ./tspi-upmix --layout-presets /etc/tspi-audio/layout-presets.yml \
-    --channelmap /usr/local/bin/tspi-channelmap \
+    --khaen-upmix ./khaen-upmix --layout-presets /etc/khaen-audio/layout-presets.yml \
+    --channelmap /usr/local/bin/khaen-channelmap \
     --variants standalone,renderer --presets upmix-4.1.2-music,upmix-5.3.2-music
 
 产物：
@@ -105,10 +105,10 @@ def main():
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--signals", required=True)
     ap.add_argument("--camilladsp", default="camilladsp")
-    ap.add_argument("--tspi-upmix", default=os.path.join(HERE, "..", "tspi-upmix"))
-    ap.add_argument("--layout-presets", default="/etc/tspi-audio/layout-presets.yml")
-    ap.add_argument("--presets-file", default=None, help="upmix 预设 YAML（默认用 tspi-upmix 内置查找）")
-    ap.add_argument("--channelmap", default="tspi-channelmap", help="tspi-channelmap（renderer 变体用）")
+    ap.add_argument("--khaen-upmix", default=os.path.join(HERE, "..", "khaen-upmix"))
+    ap.add_argument("--layout-presets", default="/etc/khaen-audio/layout-presets.yml")
+    ap.add_argument("--presets-file", default=None, help="upmix 预设 YAML（默认用 khaen-upmix 内置查找）")
+    ap.add_argument("--channelmap", default="khaen-channelmap", help="khaen-channelmap（renderer 变体用）")
     ap.add_argument("--variants", default="standalone")
     ap.add_argument("--presets", default="upmix-4.1.2-music,upmix-4.1.2-movie,upmix-5.3.2-music,upmix-5.3.2-movie")
     ap.add_argument("--signals-filter", default=None, help="逗号分隔通配，如 '*tone*,*noise*'")
@@ -126,9 +126,9 @@ def main():
     camilladsp = shutil.which(args.camilladsp) or args.camilladsp
     if not (os.path.isfile(camilladsp) or shutil.which(camilladsp)):
         die("camilladsp 不存在：%s" % camilladsp)
-    upmix = os.path.abspath(args.tspi_upmix)
+    upmix = os.path.abspath(args.khaen_upmix)
     if not os.path.isfile(upmix):
-        die("tspi-upmix 不存在：%s" % upmix)
+        die("khaen-upmix 不存在：%s" % upmix)
 
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
     presets = [p.strip() for p in args.presets.split(",") if p.strip()]
@@ -148,7 +148,7 @@ def main():
 
     channelmap_cmd = args.channelmap
     if not os.path.isfile(channelmap_cmd) and not shutil.which(channelmap_cmd):
-        die("renderer 变体需要 tspi-channelmap：%s" % channelmap_cmd)
+        die("renderer 变体需要 khaen-channelmap：%s" % channelmap_cmd)
 
     for preset in presets:
         # 1) 解析计划（生成器 show --json）

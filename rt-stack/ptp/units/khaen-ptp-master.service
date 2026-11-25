@@ -1,0 +1,42 @@
+[Unit]
+Description=KHAEN PTPv2 grandmaster (linuxptp ptp4l 4.2; NIC PHC hardware timestamps, software fallback)
+Documentation=file:///etc/khaen-ptp/ptp4l-master.conf man:ptp4l(8)
+After=network-online.target time-sync.target khaen-ptp-phc2sys.service
+Wants=network-online.target
+Requires=khaen-ptp-phc2sys.service
+ConditionPathExists=/etc/khaen-ptp/ptp4l-master.conf
+# Single PTP owner on the box: keep the old slave-only PTP paths (Dante/statime, AES67 daemon,
+# RAVENNA LKM, legacy ptp4l/phc2sys units) mutually exclusive with the grandmaster clock chain.
+Conflicts=khaen-ptp4l-master.service khaen-phc2sys.service khaen-statime-inferno.service khaen-aes67-daemon.service khaen-ravenna-lkm.service
+PartOf=khaen-ptp.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/khaen-ptp/ptp-master.env
+ExecStart=/usr/local/lib/khaen/ptp-master-start
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=khaen-ptp
+RuntimeDirectoryMode=0755
+ReadWritePaths=/run/khaen-ptp
+Nice=-10
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+# CAP_NET_BIND_SERVICE: bind PTP event/general UDP ports 319/320 (<1024)
+# CAP_NET_RAW: AF_PACKET sockets for PTP (L2) / socket setup
+# CAP_NET_ADMIN: SIOCSHWTSTAMP hardware timestamp filter on the NIC
+# CAP_SYS_TIME: ptp4l clock status/UTC bookkeeping (phc2sys sibling also needs it)
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_TIME
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_TIME
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectClock=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_PACKET AF_NETLINK
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

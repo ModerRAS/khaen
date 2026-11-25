@@ -114,7 +114,7 @@ fn custom_target(fs: u32) -> TargetCurve {
     }
     points.push(']');
     let document = format!(
-        "{{\"schema\":\"tspi-target-draft/v1\",\"frequency_unit\":\"Hz\",\
+        "{{\"schema\":\"khaen-target-draft/v1\",\"frequency_unit\":\"Hz\",\
          \"magnitude_unit\":\"dB\",\"runtime_rate\":{fs},\"normalization\":\"none\",\
          \"interpolation\":\"log_frequency_linear\",\"edge_policy\":\"hold\",\
          \"points\":{points}}}"
@@ -846,7 +846,7 @@ fn t64_peq_fit_is_deterministic_and_artifacts_bind_report_hash() {
         .find(|entry| entry.path == FIT_MODAL_PEQ_ARTIFACT_PATH)
         .expect("modal peq artifact");
     let modal_peq_text = String::from_utf8(modal_peq.bytes.clone()).expect("utf8");
-    assert!(modal_peq_text.contains("tspi-modal-peq/v1"));
+    assert!(modal_peq_text.contains("khaen-modal-peq/v1"));
     assert!(modal_peq_text.contains(&artifacts.report_sha256));
     let target_fir = artifacts
         .entries
@@ -1139,12 +1139,12 @@ fn t64_peq_fit_report_keeps_holdout_rules_separate_from_design_pass() {
 }
 
 // ---------------------------------------------------------------------------
-// 13) 证据样例（opt-in：TSPI_T64_EVIDENCE_DIR 指向 evidence/T64 时写真实产物）
+// 13) 证据样例（opt-in：KHAEN_T64_EVIDENCE_DIR 指向 evidence/T64 时写真实产物）
 // ---------------------------------------------------------------------------
 
 #[test]
 fn t64_peq_fit_writes_evidence_examples_when_requested() {
-    let Ok(dir) = std::env::var("TSPI_T64_EVIDENCE_DIR") else {
+    let Ok(dir) = std::env::var("KHAEN_T64_EVIDENCE_DIR") else {
         return;
     };
     let fs = 48_000;

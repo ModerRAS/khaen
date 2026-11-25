@@ -1,8 +1,8 @@
-# tspi-upmix 生成：upmix-4.1.2-movie
+# khaen-upmix 生成：upmix-4.1.2-movie
 # 输入 2.0（2ch）-> 输出 4.1.2（8ch）；采样率 48000 Hz
 # 环绕/高度更响、延迟略长，对白靠 FL/FR 虚拟中置
 # 用途：独立 CamillaDSP（ALSA）
-title: tspi-upmix upmix-4.1.2-movie（2.0 -> 4.1.2）
+title: khaen-upmix upmix-4.1.2-movie（2.0 -> 4.1.2）
 description: 环绕/高度更响、延迟略长，对白靠 FL/FR 虚拟中置
 devices:
   samplerate: 48000

@@ -4,7 +4,7 @@
 > 如 80 被占用可改 `listen` 回退 8088）· 除静态资源外均返回 JSON
 > 与代码保持一致：以 `src/routes/` 为准；发现不一致请提 issue。
 >
-> **现行口径（2026-11-17，F-04/F-44）**：本文件对应的 `khaen-audio-web` 属 **S1 退役栈镜像**——Phase 1 运行镜像不安装它（compat-matrix §F-21），现行 REST/WS/Web 由 `tspi-rt-daemon`（T42/T44/T70）提供；本文仅作历史/迁移参考。
+> **现行口径（2026-11-17，F-04/F-44）**：本文件对应的 `khaen-audio-web` 属 **S1 退役栈镜像**——Phase 1 运行镜像不安装它（compat-matrix §F-21），现行 REST/WS/Web 由 `khaen-rt-daemon`（T42/T44/T70）提供；本文仅作历史/迁移参考。
 > **CamillaDSP 已退役**（Phase 1 不运行，仅历史/离线 oracle）；旧 web 只保留只读 legacy 状态面（`GET /api/camilladsp` 带 `legacy: true`），**不再提供启停接口**（F-04 已删除 `POST /api/camilladsp/{start,stop,restart}`）。
 > **采样率硬约束**：只允许 **44.1/48/88.2/96 kHz**（默认 48 kHz；Dante 96 kHz）；**禁止 176.4/192 kHz**，`PUT /api/audio/format` 提交 192000/176400 → **400**。
 
@@ -35,7 +35,7 @@
 | 409 | conflict | 模式切换在途/已是当前模式 |
 | 429 | too_many_requests | 登录失败过多 |
 | 500 | internal_error | CueMix 写入后校验失败并回滚。响应体是 WriteReport（含 `error.code`），不是只有外层 error |
-| 503 | service_unavailable | 外部服务不可用（systemd/tspi-mode/CueMix 等离线；CamillaDSP 为已退役 legacy 只读项） |
+| 503 | service_unavailable | 外部服务不可用（systemd/khaen-mode/CueMix 等离线；CamillaDSP 为已退役 legacy 只读项） |
 
 安全头：`Content-Security-Policy`（仅同源脚本）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`。
 
@@ -91,13 +91,13 @@ Header token 认证时 `auth_kind=token`、`csrf_token=null`。
 
 ### GET /api/overview
 
-返回总览聚合：`system`（CPU/内存/温度/负载/网络/RT）、`services`（实际 `tspi-*.service` 自动发现的状态快照）、`service_notes`（如 Inferno 是 ALSA 插件、无独立服务）、
+返回总览聚合：`system`（CPU/内存/温度/负载/网络/RT）、`services`（实际 `khaen-*.service` 自动发现的状态快照）、`service_notes`（如 Inferno 是 ALSA 插件、无独立服务）、
 `camilladsp`（状态/音量/xrun 线索）、`ptp`、`alsa`（卡/PCM）、`mode`、`aoip`、`mock`。
 
 ### GET /api/system
 
 ~~~json
-{ "hostname": "tspi-audio", "kernel": "6.1.x-rt", "os": "Debian 12", "uptime_secs": 100,
+{ "hostname": "khaen-audio", "kernel": "6.1.x-rt", "os": "Debian 12", "uptime_secs": 100,
   "cpu": { "model": "RK3576", "cores": 8, "usage_percent": 12.5, "load1": 0.1 }, "memory": {}, "realtime": {} }
 ~~~
 
@@ -112,17 +112,17 @@ Header token 认证时 `auth_kind=token`、`csrf_token=null`。
 | --- | --- | --- |
 | GET | /api/mode | 当前模式 + 切换状态 + 组件 + 持久化信息 |
 | PUT | /api/mode | 触发异步切换，202；在途 409；未启用 403 |
-| GET | /api/mode/script-status | 主动执行 tspi-mode status --json 并回传 |
+| GET | /api/mode/script-status | 主动执行 khaen-mode status --json 并回传 |
 
-配置：`[mode].enabled`、`[mode].switch_script`（默认 `/usr/local/bin/tspi-mode`）、
+配置：`[mode].enabled`、`[mode].switch_script`（默认 `/usr/local/bin/khaen-mode`）、
 `[mode].restore_on_start`（**D4 默认 false**：上电音频 off、不自动恢复；Web 启动不调用脚本）。
 
 `PUT /api/mode` 请求：`{ "mode": "dante" | "aes67" | "off" }`。
 优先走 audio-stack 契约：
 
 ~~~bash
-tspi-mode dante|aes67|off --json
-tspi-mode status --json
+khaen-mode dante|aes67|off --json
+khaen-mode status --json
 # 退出码：0 就绪 / 2 参数 / 3 前置 / 4 设备 / 5 PTP 未锁 / 7 DSP 启动失败 /
 #         8 自检失败 / 9 已回滚 / 10 另一切换进行中
 ~~~
@@ -191,7 +191,7 @@ WebSocket 协议核对自 camilladsp 4.1.3 源码（历史记录）：命令为�
 | POST | /api/ptp/start、/stop、/restart | 操作 ptp4l/phc2sys（仅 B2 有意义） |
 
 linuxptp 状态来自 `pmc -u -b 0 "GET TIME_STATUS_NP"` 与 `GET PORT_DATA_SET`；
-B1 下由 aes67 daemon 日志/`tspi-mode status` 的 `ptp_lock` 提供。
+B1 下由 aes67 daemon 日志/`khaen-mode status` 的 `ptp_lock` 提供。
 
 ## 8. AES67 / Inferno
 
@@ -277,20 +277,20 @@ Inferno 无统一配置文件（上游用 `INFERNO_*` 环境变量 / `/etc/asoun
 
 ## 10. 声道分配 / 校准 / remap（channelmap v2）
 
-契约以 audio-stack 的 tspi-channelmap 为准（Python 工具 + /etc/tspi-audio/layout-presets.yml）：
+契约以 audio-stack 的 khaen-channelmap 为准（Python 工具 + /etc/khaen-audio/layout-presets.yml）：
 
-- active：`/etc/tspi-audio/channelmap.yml`（schema `tspi-channelmap/v2`，首次开机没有该文件）
-- 预设：`/etc/tspi-audio/layout-presets.yml`（schema `tspi-layout-presets/v2`，只读；含 input_layouts / output_layouts / remap_presets）。
+- active：`/etc/khaen-audio/channelmap.yml`（schema `khaen-channelmap/v2`，首次开机没有该文件）
+- 预设：`/etc/khaen-audio/layout-presets.yml`（schema `khaen-layout-presets/v2`，只读；含 input_layouts / output_layouts / remap_presets）。
   Web 内嵌副本与之逐项一致（sha256 `48561092…`）；**4.1.2 = FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7（ch6 空，MOTU Line Out 1-6/8）**，
   `tests/presets_drift.rs` 在 cargo test 中比较两侧 role→outputs/输入映射/remap preset，防漂移。**域约定（角色 vs 槽位 vs 设备 22ch）见 §10.1**。
-- profiles：`/etc/tspi-audio/profiles/*.yml`；渲染：`/run/tspi/camilladsp.yml`；last-good：`/var/lib/tspi/channelmap/`
-- CLI：`tspi-channelmap probe|validate|print|render|apply|rollback|profiles|save-profile|load-profile|export|import`
+- profiles：`/etc/khaen-audio/profiles/*.yml`；渲染：`/run/khaen/camilladsp.yml`；last-good：`/var/lib/khaen/channelmap/`
+- CLI：`khaen-channelmap probe|validate|print|render|apply|rollback|profiles|save-profile|load-profile|export|import`
 - 退出码：0 ok；2 schema/用法；3 取值/校验；4 渲染/camilladsp --check；5 apply/重启；9 已回滚 last-good
 - 严格校验：v2 拒绝未知字段；`output.roles[].sources` 与 `remap.preset/routes` 不能同时非空（sources 是最终矩阵，remap 只用于生成）
 
 ### 10.1 声道域约定（角色 / 槽位 / 设备 22ch，C-06）
 
-同一份 channelmap v2 里有三个不同的“声道号”域，**不能互相混用**（口径来源：板端 `audio/overlay/etc/tspi-audio/layout-presets.yml` +
+同一份 channelmap v2 里有三个不同的“声道号”域，**不能互相混用**（口径来源：板端 `audio/overlay/etc/khaen-audio/layout-presets.yml` +
 MOTU UltraLite-mk5 22ch 实测）：
 
 | 域 | 字段/位置 | 含义 | 4.1.2 取值 |
@@ -304,7 +304,7 @@ MOTU UltraLite-mk5 22ch 实测）：
 - **5.3.2**：10 个角色占 10 个槽位（0..9）；设备仍是 22ch。
 - 输入侧 `input_layouts[].roles[].channel` 是该角色在输入 flow 内的 0-based 通道；多 flow（streams）时全局通道 = 前序 flow 通道数之和 + channel，
   与输出槽位无关。
-- 渲染：槽位号即 CamillaDSP 混音器/滤波器内部通道号（0-based），`tspi-channelmap render` 生成的 `mixers/...` 与 `pipeline[].channels` 用同一槽位。
+- 渲染：槽位号即 CamillaDSP 混音器/滤波器内部通道号（0-based），`khaen-channelmap render` 生成的 `mixers/...` 与 `pipeline[].channels` 用同一槽位。
 - 因此：`GET /api/channelmap` 的 `presets`/`document`、`POST /api/channelmap/draft` 生成的 `roles`、`profiles/*.yml` 的 `outputs`
   都是**槽位域**；只有 `probe.playback.channels`、`device`、apply 的 `--playback-channels` 是**设备域**。
 - 反例（已修复，2026-11-16）：旧 4.1.2 把 SUB1 写到槽位 4、HFL/HFR 写到 5/6，会把 20–300 Hz 打进高度箱且 SUB 静音
@@ -313,7 +313,7 @@ MOTU UltraLite-mk5 22ch 实测）：
 模型（WebUI 保存前会物化为显式 roles+sources；下方示例的 `outputs` 是槽位，`output.channels` 是设备通道数）：
 
 ~~~yaml
-schema: tspi-channelmap/v2
+schema: khaen-channelmap/v2
 version: 2
 profile: { name: "5.3.2-h16-714", description: "..." }
 input:  { layout: "h16-7.1.4", channels: auto, presets: {}, probe_order: null }
@@ -337,7 +337,7 @@ output:
         - { freq: 1000, q: 1.0, gain_db: 0 }                       # type 缺省 = peaking
         - { freq: 80,   q: 0.7, gain_db: 2.5, type: low_shelf }    # v1.1；shelf 的 q = RBJ slope S
         - { freq: 4000, q: 0.7, gain_db: -2,  type: high_shelf }
-      fir: { path: /etc/tspi-audio/coeffs/sub1_48k.wav, samplerate: 48000 }
+      fir: { path: /etc/khaen-audio/coeffs/sub1_48k.wav, samplerate: 48000 }
 remap: { preset: null, routes: [], drop_unused: true, silence_unmapped: true }
 bass_management:
   enabled: false
@@ -352,18 +352,18 @@ bass_management:
 | --- | --- | --- |
 | GET | /api/channelmap | 视图：document/effective_roles/input_roles/validation/presets/probe/profiles/fir_files/mode_off |
 | POST | /api/channelmap/draft | `{ input_layout, output_layout, profile_name?, capture_channels?, playback_channels? }` 生成显式草稿 |
-| POST | /api/channelmap/validate | 校验文档：委托 `tspi-channelmap validate --json`（板端唯一权威）；CLI 不可用/输出无法解析返回 503，**不用本地规则放行**。mock 模式用与板端对齐的本地规则 |
+| POST | /api/channelmap/validate | 校验文档：委托 `khaen-channelmap validate --json`（板端唯一权威）；CLI 不可用/输出无法解析返回 503，**不用本地规则放行**。mock 模式用与板端对齐的本地规则 |
 | PUT | /api/channelmap | 保存 active（物化 roles+sources；force=true 允许存草稿） |
-| POST | /api/channelmap/apply | 保存→校验→tspi-channelmap apply --mode <mode> --capture-channels N --playback-channels M；off 只校验/渲染/持久化，失败（如 exit 9）返回回滚信息 |
-| POST | /api/channelmap/rollback | tspi-channelmap rollback |
-| GET | /api/channelmap/render | 渲染结果文本：真机委托 `tspi-channelmap render`（CLI 不可用返回 503，不静默读旧文件）；mock 读 /run/tspi/camilladsp.yml |
+| POST | /api/channelmap/apply | 保存→校验→khaen-channelmap apply --mode <mode> --capture-channels N --playback-channels M；off 只校验/渲染/持久化，失败（如 exit 9）返回回滚信息 |
+| POST | /api/channelmap/rollback | khaen-channelmap rollback |
+| GET | /api/channelmap/render | 渲染结果文本：真机委托 `khaen-channelmap render`（CLI 不可用返回 503，不静默读旧文件）；mock 读 /run/khaen/camilladsp.yml |
 | GET/POST | /api/channelmap/profiles | profile 列表 / 保存（`{name, document?}`） |
 | POST | /api/channelmap/profiles/load /delete | `{name}`；load 覆盖 active（备份旧文件），不自动 apply |
 | GET | /api/channelmap/export?name= | 导出 YAML |
 | POST | /api/channelmap/import | `{yaml, name?}`；name 为空写 active |
 | GET/POST | /api/channelmap/fir | FIR 列表 / 上传（base64，≤16MiB，解析采样率/taps/群延迟） |
 | POST | /api/channelmap/test-tone | `{role?, output_channel?, kind:"tone"|"sweep", duration_ms?}` |
-| GET/PUT | /api/channelmap/input-mode | 输入内容模式（auto/2.0/multichannel）：GET 读 /run/tspi/input-content.json + 覆盖文件；PUT `{mode}` 写 /etc/tspi-audio/input-mode.json（兼容 force-stereo/force-multichannel 别名，CLI 存在时优先） |
+| GET/PUT | /api/channelmap/input-mode | 输入内容模式（auto/2.0/multichannel）：GET 读 /run/khaen/input-content.json + 覆盖文件；PUT `{mode}` 写 /etc/khaen-audio/input-mode.json（兼容 force-stereo/force-multichannel 别名，CLI 存在时优先） |
 
 校验/行为要点：
 
@@ -374,13 +374,13 @@ bass_management:
   （CamillaDSP `slope=12*S` 上限 12 dB/oct；q>1 为 value error，rc=3，不产文件）。
   板端按 `Lowshelf|Highshelf{freq, slope=12*q, gain}` 渲染，与 producer 的 shelf 模型（`peq.rs` 的 S 公式）系数一致。
   转换/保存**不得丢 `type`**（丢 = 静默降级成 Peaking，响应差可达 ~3 dB）。
-- 板端 `tspi-channelmap`（Python）是校验/渲染/apply 的唯一权威：Web 只委托 + 展示；CLI 缺失/不可用时返回 503（"tspi-channelmap 不可用，无法校验/渲染"），
-  不以本地规则放行。mock（`TSPI_MOCK=1`）模式用与板端对齐的本地规则（type 白名单、peaking q [0.1,10]、shelf q [0.1,1.0]），仅用于测试/演示。
+- 板端 `khaen-channelmap`（Python）是校验/渲染/apply 的唯一权威：Web 只委托 + 展示；CLI 缺失/不可用时返回 503（"khaen-channelmap 不可用，无法校验/渲染"），
+  不以本地规则放行。mock（`KHAEN_MOCK=1`）模式用与板端对齐的本地规则（type 白名单、peaking q [0.1,10]、shelf q [0.1,1.0]），仅用于测试/演示。
 - FIR：path 可为相对（相对 profile 目录）或绝对；samplerate 必填或从 sidecar/文件名解析；与当前模式 48k/96k 不一致时校验失败（按模式分 profile）；taps >4096 实验性、>8192 强警告（v2.1 才支持 --force）。
 - bass_management enabled 时：lfe_to/redirect.targets 引用的 SUB 角色 sources 必须为空（渲染器自动生成 LFE+redirect 并接管 mains HP）。
 - H16：输入布局仅 5.1/7.1/5.1.2/5.1.4/7.1.2/7.1.4；7.1.4 = flow0 1-8 + flow1 11/12/15/16（12 路），5.1.2 = 8 路；SDP 只给每流通道数。
 - v2.1（ART-like 全 MIMO per-route FIR）字段草案：sources[].fir{path,samplerate,taps,band_limit,sparse}、roles[].limiter{threshold_db,release_ms}/max_gain_db、print --json 的 estimated{gflops_direct,gflops_fft,group_delay_ms,paths,taps_max}；WebUI 已留占位，待 benchmark 后实现矩阵页。
-- 输入内容模式（不改 channelmap v2 schema）：运行态 /run/tspi/input-content.json（schema tspi-input-content/v1，字段 content_mode/detected/override/confidence/active_channels/rms_db/threshold_db/hold_ms/reason/h16_internal_upmix/container_layout/detector/updated_unix）；覆盖文件 /etc/tspi-audio/input-mode.json {schema,mode}（mode=auto|stereo|multichannel）。优先级 override > detector > auto；auto 默认直通，detected=stereo 走 upmix；h16_internal_upmix=true 或 detected=multichannel 禁止二次上混。
+- 输入内容模式（不改 channelmap v2 schema）：运行态 /run/khaen/input-content.json（schema khaen-input-content/v1，字段 content_mode/detected/override/confidence/active_channels/rms_db/threshold_db/hold_ms/reason/h16_internal_upmix/container_layout/detector/updated_unix）；覆盖文件 /etc/khaen-audio/input-mode.json {schema,mode}（mode=auto|stereo|multichannel）。优先级 override > detector > auto；auto 默认直通，detected=stereo 走 upmix；h16_internal_upmix=true 或 detected=multichannel 禁止二次上混。
 
 ## 11. 静态资源
 
@@ -391,17 +391,17 @@ bass_management:
 
 ## 12. mock 模式与失败注入
 
-`TSPI_MOCK=1 cargo run` 后所有外部命令走内存 mock，默认 token `mock-token`：
+`KHAEN_MOCK=1 cargo run` 后所有外部命令走内存 mock，默认 token `mock-token`：
 
 | 环境变量 | 作用 |
 | --- | --- |
-| TSPI_MOCK_FAIL_START、TSPI_MOCK_FAIL_RESTART | 指定 unit 启动/重启失败（逗号分隔） |
-| TSPI_MOCK_FAIL_APPLY=1 | CamillaDSP 应用失败 → 回滚 |
-| TSPI_MOCK_STEP_DELAY_MS=150 | 模式切换每步延迟 |
-| TSPI_MOCK_PERSISTED_MODE=dante | 预置持久化模式（展示用） |
-| TSPI_MOCK_CHANNELMAP_PRESET=5.3.2 | 预置 channelmap 文档（跳过首启向导） |
-| TSPI_MOCK_CHANNELMAP_FAIL_APPLY=1 | channelmap apply 失败注入（验证回滚提示） |
-| TSPI_MOCK_MOTU_APPLY_FAILS=1 | CueMix 写入不落地，返回 500 且 `rollback: true`（状态不变） |
+| KHAEN_MOCK_FAIL_START、KHAEN_MOCK_FAIL_RESTART | 指定 unit 启动/重启失败（逗号分隔） |
+| KHAEN_MOCK_FAIL_APPLY=1 | CamillaDSP 应用失败 → 回滚 |
+| KHAEN_MOCK_STEP_DELAY_MS=150 | 模式切换每步延迟 |
+| KHAEN_MOCK_PERSISTED_MODE=dante | 预置持久化模式（展示用） |
+| KHAEN_MOCK_CHANNELMAP_PRESET=5.3.2 | 预置 channelmap 文档（跳过首启向导） |
+| KHAEN_MOCK_CHANNELMAP_FAIL_APPLY=1 | channelmap apply 失败注入（验证回滚提示） |
+| KHAEN_MOCK_MOTU_APPLY_FAILS=1 | CueMix 写入不落地，返回 500 且 `rollback: true`（状态不变） |
 
 ## 13. 接口完整路径清单
 
@@ -415,7 +415,7 @@ bass_management:
 | GET | /api/system | 是 | 系统信息 |
 | POST | /api/system/reboot、/api/system/shutdown | 是 | 电源（需确认短语） |
 | GET/PUT | /api/mode | 是 | 运行模式 |
-| GET | /api/mode/script-status | 是 | tspi-mode 状态 |
+| GET | /api/mode/script-status | 是 | khaen-mode 状态 |
 | GET/PUT | /api/audio/format | 是 | 音频格式/缓冲 |
 | GET | /api/camilladsp | 是 | 状态（legacy 只读，`legacy:true`） |
 | — | ~~/api/camilladsp/start、/stop、/restart~~ | — | **已删除（F-04）**：返回 404 |

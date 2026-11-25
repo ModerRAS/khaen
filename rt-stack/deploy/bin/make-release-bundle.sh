@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # T147/T28 make-release-bundle.sh —— 把已构建二进制 + service units + 配置模板打成可部署 release bundle
 #
-# 产物（schema tspi-rt-stack/release/v1，见 lib/release_manifest.py）：
+# 产物（schema khaen-rt-stack/release/v1，见 lib/release_manifest.py）：
 #   <out>/manifest.json       release_id/built_at/target/files[{path,size,sha256,kind}]
-#   <out>/bin/                khaen-rt-host（必需）、tspi-rt-daemon（可选）、tspi-cal（可选，goal-8 校准链 CLI）
+#   <out>/bin/                khaen-rt-host（必需）、khaen-rt-daemon（可选）、khaen-cal（可选，goal-8 校准链 CLI）
 #   <out>/units/              service/ 下 *.service/*.target + 90-safe-mute.{conf,env}.example
 #                             （B1：打包时对 units 跑 deploy/tests/check_unit_syntax.py 契约检查，并要求
-#                              tspi-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait）
+#                              khaen-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait）
 #   <out>/etc/                deploy/config 下 env/config 模板
 #   <out>/README.deploy.md    部署/回退摘要（引用 deploy/README + evidence/migration-plan）
 #   <out>/SHA256SUMS
@@ -15,7 +15,7 @@
 # F1（2026-11-18）：可选 --tgz FILE 用 lib/release_tar.py 显式写成员模式（bin/* = 0755）并校验；
 # 不依赖宿主 chmod（Windows/Git Bash 上 chmod 不改变 tar 模式，曾导致上传包脚本 0664/rc=126）。
 # 用法:
-#   ./make-release-bundle.sh --bin-dir target/aarch64-unknown-linux-musl/release --out /var/tmp/tspi-release-<id> --live
+#   ./make-release-bundle.sh --bin-dir target/aarch64-unknown-linux-musl/release --out /var/tmp/khaen-release-<id> --live
 #   ./make-release-bundle.sh --bin-dir DIR --out DIR [--release-id ID] [--tgz FILE] [--service-dir DIR] [--dry-run]
 # 退出码: 0 成功；2 用法/缺文件；3 二进制架构/输入校验失败；7 写失败。
 set -uo pipefail
@@ -63,9 +63,9 @@ if [ "$ALLOW_FOREIGN" != "1" ]; then
   py "$DEPLOY_ROOT/lib/check_elf.py" "$HOST_BIN" --require-arch aarch64 >/dev/null || die "khaen-rt-host 不是 ELF aarch64（可 --allow-foreign-arch 做本地流程测试，但产物 NOT_DEPLOYABLE）" 3
 fi
 BINS=("$HOST_BIN")
-[ -f "$BIN_DIR/tspi-rt-daemon" ] && BINS+=("$BIN_DIR/tspi-rt-daemon")
+[ -f "$BIN_DIR/khaen-rt-daemon" ] && BINS+=("$BIN_DIR/khaen-rt-daemon")
 # goal-8 / aarch64-20261122：校准链 CLI（crates/calibration per goal-8）随包发布；缺失不影响 host/daemon 打包。
-[ -f "$BIN_DIR/tspi-cal" ] && BINS+=("$BIN_DIR/tspi-cal")
+[ -f "$BIN_DIR/khaen-cal" ] && BINS+=("$BIN_DIR/khaen-cal")
 
 UNITS_DIR="${SERVICE_DIR:-$DEPLOY_ROOT/../service}"
 [ -d "$UNITS_DIR" ] || die "缺 service/ 目录: $UNITS_DIR（缺省 deploy/../service；可用 --service-dir 指定）" 2
@@ -75,7 +75,7 @@ if [ "$DRY_RUN" = "1" ]; then
   log "[dry-run] bundle 输出目录: $OUT（release_id=$RELEASE_ID target=$TARGET）"
   log "[dry-run] bin: ${BINS[*]}"
   log "[dry-run] units: $(cd "$UNITS_DIR" && printf '%s ' *.service *.target) 90-safe-mute.conf.example 90-safe-mute.env.example"
-  log "[dry-run] units 契约检查: py $DEPLOY_ROOT/tests/check_unit_syntax.py <out>/units（B1：tspi-irq-affinity.service 必须含 ExecStartPre=irq-affinity-pin wait）"
+  log "[dry-run] units 契约检查: py $DEPLOY_ROOT/tests/check_unit_syntax.py <out>/units（B1：khaen-irq-affinity.service 必须含 ExecStartPre=irq-affinity-pin wait）"
   log "[dry-run] etc: $(cd "$ETC_DIR" && printf '%s ' *.example)"
   log "[dry-run] manifest.json（逐文件 size/sha256）+ README.deploy.md + SHA256SUMS"
   exit 0
@@ -103,8 +103,8 @@ if ! py "$DEPLOY_ROOT/tests/check_unit_syntax.py" "$OUT/units" >"$UNIT_CHECK" 2>
   die "bundle units 未通过 check_unit_syntax.py（B1/unit 契约；用现行 service/ 重打）" 3
 fi
 rm -f "$UNIT_CHECK"
-if ! grep -q '^ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait' "$OUT/units/tspi-irq-affinity.service"; then
-  die "bundle 的 tspi-irq-affinity.service 缺 B1 开机等待 ExecStartPre=irq-affinity-pin wait（用现行 service/ 重打）" 3
+if ! grep -q '^ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait' "$OUT/units/khaen-irq-affinity.service"; then
+  die "bundle 的 khaen-irq-affinity.service 缺 B1 开机等待 ExecStartPre=irq-affinity-pin wait（用现行 service/ 重打）" 3
 fi
 log "units 契约检查 PASS（B1 ExecStartPre wait 已包含）"
 for f in "$ETC_DIR"/*.example; do
@@ -113,7 +113,7 @@ for f in "$ETC_DIR"/*.example; do
 done
 
 cat > "$OUT/README.deploy.md" <<MD
-# TSPI RT-first DSP stack release（$RELEASE_ID）
+# KHAEN RT-first DSP stack release（$RELEASE_ID）
 
 > 由 deploy/bin/make-release-bundle.sh 生成；部署/切换/回退见 rt-stack/deploy/README.md 与
 > rt-stack/evidence/migration-plan/PLAN.md。P1 G-no-C：禁止把 CamillaDSP/旧 C 任何 unit 作为回退。
@@ -148,7 +148,7 @@ for d, kind in (('units', 'unit'), ('etc', 'config')):
     for n in sorted(os.listdir(p)):
         add(d + '/' + n, kind)
 add('README.deploy.md', 'doc')
-m = {'schema': 'tspi-rt-stack/release/v1', 'release_id': rid,
+m = {'schema': 'khaen-rt-stack/release/v1', 'release_id': rid,
      'built_at': datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec='seconds'),
      'target': target, 'files': files}
 open(os.path.join(out, 'manifest.json'), 'w', encoding='utf-8').write(json.dumps(m, ensure_ascii=False, indent=1) + '\n')

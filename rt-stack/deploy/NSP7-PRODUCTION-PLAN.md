@@ -16,18 +16,18 @@
 
 | 文件 | 安装位置 | 说明 |
 |---|---|---|
-| `config/rt-host-nsp7.toml.example` | /etc/tspi-rt-stack/rt-host-nsp7.toml | host 配置（plan-arena + userspace 7ch + ALSA） |
-| `config/rt-host-nsp7.env.example` | /etc/tspi-rt-stack/rt-host-nsp7.env | 环境覆盖（可选） |
+| `config/rt-host-nsp7.toml.example` | /etc/khaen-rt-stack/rt-host-nsp7.toml | host 配置（plan-arena + userspace 7ch + ALSA） |
+| `config/rt-host-nsp7.env.example` | /etc/khaen-rt-stack/rt-host-nsp7.env | 环境覆盖（可选） |
 | `config/khaen-rt-host-nsp7.service` | /etc/systemd/system/khaen-rt-host-nsp7.service | 独立 unit；与旧 khaen-rt-host.service 互斥使用 |
-| `config/nsp7-wait-stream.sh` | /usr/local/lib/tspi-rt-stack/nsp7-wait-stream.sh | **NSP-first 启动闸门**（等 udp/5004 RTP 后再 exec host）；unit 的 ExecStart |
+| `config/nsp7-wait-stream.sh` | /usr/local/lib/khaen-rt-stack/nsp7-wait-stream.sh | **NSP-first 启动闸门**（等 udp/5004 RTP 后再 exec host）；unit 的 ExecStart |
 | `tools/nsp7-switch-to-host.sh` / `nsp7-rollback-to-rx.sh` / `nsp7-status.sh` | /root/aes67-rx-work/tools/ | 一键切换/回滚/状态快照（板上操作用） |
 
 数据文件（不进 repo）：
-- `/var/lib/tspi-rt-stack/nsp-aes67.sdp`：NSP 会话 `observed/aes67.sdp` 的拷贝（7ch、L24/48k、SMPTE2110.(41,2)）；
+- `/var/lib/khaen-rt-stack/nsp-aes67.sdp`：NSP 会话 `observed/aes67.sdp` 的拷贝（7ch、L24/48k、SMPTE2110.(41,2)）；
   实测安装值 sha256 `731ea83cffce56bd9cdf5046089ba49535dc2c2e15377ad98f1b9f6fcd9aa520`（361 B）。
-- `/var/lib/tspi-rt-stack/plans/plan-412-identity.bin`：已验收 4.1.2 plan（测试/生产按 sha 记录）；
+- `/var/lib/khaen-rt-stack/plans/plan-412-identity.bin`：已验收 4.1.2 plan（测试/生产按 sha 记录）；
   **实际生产使用** = 8-in/7-role identity ABI v1，1636 B，sha256 `52f2f3ad…`（graph_id `64acfb34…`）。
-- `/var/lib/tspi-rt-stack/plans/plan-412-flat.bin`：RUN2 flat 真 plan（4860 B，ABI v2，sha `3fced8bc…`）已上传，
+- `/var/lib/khaen-rt-stack/plans/plan-412-flat.bin`：RUN2 flat 真 plan（4860 B，ABI v2，sha `3fced8bc…`）已上传，
   但它是 **2-in** 设计，khaen-rt-host 的 7ch userspace 只接受 8ch strict 图输入 → 直接接入被拒（详见 §9）。
 
 ## 3. 切换步骤（静音窗口；手动 run 先行，通过后再上 unit）
@@ -37,10 +37,10 @@
 # 1) 停 standalone rx（释放 5004 + ALSA）
 bash /root/aes67-rx-work/tools/stop-rx.sh
 # 2) 准备 SDP/plan（sha256 记录到证据）
-sha256sum /var/lib/tspi-rt-stack/nsp-aes67.sdp /var/lib/tspi-rt-stack/plans/plan-412-identity.bin
+sha256sum /var/lib/khaen-rt-stack/nsp-aes67.sdp /var/lib/khaen-rt-stack/plans/plan-412-identity.bin
 # 3) 手动 run 验收（与 unit 相同 ExecStart 等价）
-/opt/tspi-rt-stack/current/bin/khaen-rt-host run --config /etc/tspi-rt-stack/rt-host-nsp7.toml \
-  > /var/log/tspi-rt-stack/manual-nsp7.json 2> /var/log/tspi-rt-stack/manual-nsp7.err
+/opt/khaen-rt-stack/current/bin/khaen-rt-host run --config /etc/khaen-rt-stack/rt-host-nsp7.toml \
+  > /var/log/khaen-rt-stack/manual-nsp7.json 2> /var/log/khaen-rt-stack/manual-nsp7.err
 # 4) 验收（另开终端；见 §4）
 # 5) 停手动 run（SIGTERM 优雅退出）→ install unit → systemctl start khaen-rt-host-nsp7
 # 6) 跟随 unit 日志验收 again；systemctl enable khaen-rt-host-nsp7（开机自启）
@@ -117,11 +117,11 @@ bash /root/aes67-rx-work/tools/start-rx.sh          # 恢复 standalone rx
 | 项 | 值 |
 |---|---|
 | unit | **`khaen-rt-host-nsp7.service`**：active (running)、**enabled（开机自启，reboot 未验证）**；旧 `khaen-rt-host.service` disabled/inactive |
-| host 二进制 | `/usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host`（`f510ed64…`，task-284 修复版）；**/opt `775bdb23…` 未替换**（其构建早于 userspace AES67 路径） |
-| 配置 | `/etc/tspi-rt-stack/rt-host-nsp7.toml`（jitter 64000 µs、ring 8192、stall 400、apply_affinity=false） |
+| host 二进制 | `/usr/local/lib/khaen-rt-stack/f510ed64/khaen-rt-host`（`f510ed64…`，task-284 修复版）；**/opt `775bdb23…` 未替换**（其构建早于 userspace AES67 路径） |
+| 配置 | `/etc/khaen-rt-stack/rt-host-nsp7.toml`（jitter 64000 µs、ring 8192、stall 400、apply_affinity=false） |
 | SDP / plan | `nsp-aes67.sdp`（`731ea83c…`）/ **8-in/7-role identity ABI v1**（`52f2f3ad…`） |
 | 启动顺序 | NSP-first：`nsp7-wait-stream.sh` 等 udp/5004 RTP 出现后才 exec host；systemd `Restart=on-failure/RestartSec=2/StartLimitIntervalSec=0` |
-| 启动关系 | `tspi-rt-stack.target` 的 Wants/After 已从旧 host 改为 nsp7（备份 `/etc/systemd/system/tspi-rt-stack.target.bak-nsp7-20261122`） |
+| 启动关系 | `khaen-rt-stack.target` 的 Wants/After 已从旧 host 改为 nsp7（备份 `/etc/systemd/system/khaen-rt-stack.target.bak-nsp7-20261122`） |
 | 回滚 | `bash /root/aes67-rx-work/tools/rollback-to-rx.sh`（一键停 host→启 rx supervisor）；永久回滚见 evidence RUNBOOK §3 |
 
 ### 9.2 实测验收（两段静音 soak，through systemd）

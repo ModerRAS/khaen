@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C06_row_col_asymmetry",
   "title": "P=diag(2,5) on rows: F=P*G != G*P",
   "tags": [

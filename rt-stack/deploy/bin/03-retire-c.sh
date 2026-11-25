@@ -3,11 +3,11 @@
 #
 # 动作顺序（依据 DSP-HOST-DECISION §7 G-no-C、spec/compat-matrix C07/K13/Q38/Q04/A11）：
 #   S1 旧 Web/WS shim（khaen-audio-web）stop → disable → mask
-#   S2 旧编排/开机恢复入口（tspi-boot-mode / tspi-audio.target）stop → disable（target 不 mask）
-#   S3 旧 C 依赖 daemon（tspi-upmix-autodetect）stop → disable → mask
-#   S4 旧 C 引擎（tspi-camilladsp）stop → disable → mask
-#   S5 删除旧 C 激活入口文件（/run/tspi/camilladsp.yml、camilladsp.env、/etc/tspi/last-mode、/run/tspi/mode）
-#   S6 兜底 TERM/KILL 残留 camilladsp/tspi-upmix 进程并核对
+#   S2 旧编排/开机恢复入口（khaen-boot-mode / khaen-audio.target）stop → disable（target 不 mask）
+#   S3 旧 C 依赖 daemon（khaen-upmix-autodetect）stop → disable → mask
+#   S4 旧 C 引擎（khaen-camilladsp）stop → disable → mask
+#   S5 删除旧 C 激活入口文件（/run/khaen/camilladsp.yml、camilladsp.env、/etc/khaen/last-mode、/run/khaen/mode）
+#   S6 兜底 TERM/KILL 残留 camilladsp/khaen-upmix 进程并核对
 #   S7 验证：C 无进程、相关 unit 非 active 且 disabled/masked、入口文件不存在、保留 AoIP/PTP 未被改动
 #
 # 禁止：本脚本不 enable/start 任何旧 C unit，不写 C 配置，不改内核参数/CueMix；失败即停并保留现状。
@@ -47,9 +47,9 @@ fail() { FAILS=$((FAILS+1)); warn "[FAIL] $*"; }
 if [ "$DRY_RUN" = "0" ]; then
   printf 'unit\tactive\tenabled\n' > "$EVIDENCE_DIR/pre-units.tsv"
   for u in "${ALL_OLD_AUDIO_UNITS[@]}"; do
-    printf '%s\t%s\t%s\n' "$u" "$("$TSPI_SYSTEMCTL" is-active "$u" 2>/dev/null || true)" "$(sunit_enabled_state "$u")" >> "$EVIDENCE_DIR/pre-units.tsv"
+    printf '%s\t%s\t%s\n' "$u" "$("$KHAEN_SYSTEMCTL" is-active "$u" 2>/dev/null || true)" "$(sunit_enabled_state "$u")" >> "$EVIDENCE_DIR/pre-units.tsv"
   done
-  pgrep -a -f 'camilladsp|tspi-upmix|khaen-audio-web' 2>/dev/null > "$EVIDENCE_DIR/pre-procs.txt" || true
+  pgrep -a -f 'camilladsp|khaen-upmix|khaen-audio-web' 2>/dev/null > "$EVIDENCE_DIR/pre-procs.txt" || true
   for f in "${C_ENTRY_FILES[@]}"; do
     [ -e "$(p "$f")" ] && printf '%s\t%s\n' "$f" "$(sha256_of "$(p "$f")")" >> "$EVIDENCE_DIR/pre-entry-files.tsv"
   done
@@ -62,7 +62,7 @@ fi
 # 已 masked（/dev/null 符号链接）或不存在 → 不动；目录等异常形态 → FAIL（不绕过）。
 unit_file_move_before_mask() {  # unit
   local u="$1" f dst
-  f="$(p "$TSPI_SYSTEMD_DIR/$u")"
+  f="$(p "$KHAEN_SYSTEMD_DIR/$u")"
   if [ -L "$f" ]; then return 0; fi   # 已 mask 的符号链接：交给 systemctl mask 幂等处理
   if [ ! -e "$f" ]; then return 0; fi
   if [ -d "$f" ]; then warn "[FAIL] $f 是目录（预期 unit 文件）；拒绝移走"; return 1; fi
@@ -84,14 +84,14 @@ unit_file_move_before_mask() {  # unit
 stop_disable_mask() {  # unit mask(1/0)
   local u="$1" do_mask="${2:-1}" state
   if ! sunit_exists "$u"; then SKIPPED+=("$u:NOT_PRESENT"); notice "跳过不存在 unit: $u"; return 0; fi
-  if sunit_active "$u"; then run "$TSPI_SYSTEMCTL" stop "$u" || { fail "stop $u 失败"; return 1; }; fi
+  if sunit_active "$u"; then run "$KHAEN_SYSTEMCTL" stop "$u" || { fail "stop $u 失败"; return 1; }; fi
   state="$(sunit_enabled_state "$u")"
   if [ "$state" != "disabled" ] && [ "$state" != "masked" ]; then
-    run "$TSPI_SYSTEMCTL" disable "$u" || { fail "disable $u 失败"; return 1; }
+    run "$KHAEN_SYSTEMCTL" disable "$u" || { fail "disable $u 失败"; return 1; }
   fi
   if [ "$do_mask" = "1" ] && [ "$state" != "masked" ]; then
     unit_file_move_before_mask "$u" || { fail "mask 前移走普通 unit 文件失败: $u"; return 1; }
-    run "$TSPI_SYSTEMCTL" mask "$u" || { fail "mask $u 失败"; return 1; }
+    run "$KHAEN_SYSTEMCTL" mask "$u" || { fail "mask $u 失败"; return 1; }
   fi
   RETIRED+=("$u")
   return 0
@@ -102,12 +102,12 @@ log "== 03 retire-c（DRY_RUN=$DRY_RUN）"
 for u in "${REPLACE_SHIM_UNITS[@]}"; do stop_disable_mask "$u" 1 || true; done
 # S2 旧编排/开机恢复入口
 for u in "${RETIRE_ENTRY_UNITS[@]}"; do
-  if [ "$u" = "tspi-audio.target" ]; then stop_disable_mask "$u" 0 || true; else stop_disable_mask "$u" 1 || true; fi
+  if [ "$u" = "khaen-audio.target" ]; then stop_disable_mask "$u" 0 || true; else stop_disable_mask "$u" 1 || true; fi
 done
 # S3/S4 旧 C 链：先 WS 消费者再引擎
 for u in "${RETIRE_C_UNITS[@]}"; do stop_disable_mask "$u" 1 || true; done
 
-# S5 激活入口文件（先记录 hash 到证据，再删除；不允许后由旧 tspi-mode 复活 C）
+# S5 激活入口文件（先记录 hash 到证据，再删除；不允许后由旧 khaen-mode 复活 C）
 if [ "$CLEAN_ENTRIES" = "1" ]; then
   for f in "${C_ENTRY_FILES[@]}"; do
     fp="$(p "$f")"
@@ -136,7 +136,7 @@ for pat in "${C_PROCESS_PATTERNS[@]}"; do
       # shellcheck disable=SC2086
       command kill -TERM $pids 2>/dev/null || true
     fi
-    for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$pat" >/dev/null 2>&1 || break; sleep "${TSPI_POLL_SECS:-1}"; done
+    for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$pat" >/dev/null 2>&1 || break; sleep "${KHAEN_POLL_SECS:-1}"; done
     pids2="$(pgrep -f "$pat" 2>/dev/null || true)"
     if [ -n "$pids2" ]; then
       if command -v pkill >/dev/null 2>&1; then
@@ -152,7 +152,7 @@ done
 
 # S7 验证
 if [ "$DRY_RUN" = "0" ]; then
-  sleep "${TSPI_POLL_SECS:-1}" 2>/dev/null || true
+  sleep "${KHAEN_POLL_SECS:-1}" 2>/dev/null || true
   ACTIVE=()
   for u in "${RETIRE_C_UNITS[@]}" "${RETIRE_ENTRY_UNITS[@]}" "${REPLACE_SHIM_UNITS[@]}"; do
     sunit_active "$u" && ACTIVE+=("$u")
@@ -163,8 +163,8 @@ if [ "$DRY_RUN" = "0" ]; then
     st="$(sunit_enabled_state "$u")"
     case "$st" in masked|disabled) : ;; *) fail "$u enabled=$st（要求 masked/disabled）" ;; esac
   done
-  st="$(sunit_enabled_state tspi-audio.target)"
-  [ "$st" = "disabled" ] && notice "PASS：tspi-audio.target disabled" || fail "tspi-audio.target enabled=$st（要求 disabled）"
+  st="$(sunit_enabled_state khaen-audio.target)"
+  [ "$st" = "disabled" ] && notice "PASS：khaen-audio.target disabled" || fail "khaen-audio.target enabled=$st（要求 disabled）"
 
   for pat in "${C_PROCESS_PATTERNS[@]}"; do
     if pgrep -f "$pat" >/dev/null 2>&1; then fail "仍有进程 pattern=$pat"; else notice "PASS：无进程 $pat"; fi
@@ -176,7 +176,7 @@ if [ "$DRY_RUN" = "0" ]; then
 
   # 保留 AoIP/PTP：记录状态但不改动；若被旧 target 顺带停掉，这里如实记录（不自动重启）
   for u in "${RETAIN_AOIP_UNITS[@]}"; do
-    printf '%s\t%s\t%s\n' "$u" "$("$TSPI_SYSTEMCTL" is-active "$u" 2>/dev/null || true)" "$(sunit_enabled_state "$u")" >> "$EVIDENCE_DIR/retained-units.tsv"
+    printf '%s\t%s\t%s\n' "$u" "$("$KHAEN_SYSTEMCTL" is-active "$u" 2>/dev/null || true)" "$(sunit_enabled_state "$u")" >> "$EVIDENCE_DIR/retained-units.tsv"
   done
 
   printf 'PASSES=%s FAILS=%s\nRETIRED=%s\nSKIPPED=%s\n' "$(( ${#RETIRED[@]} ))" "$FAILS" "${RETIRED[*]:-}" "${SKIPPED[*]:-}" > "$EVIDENCE_DIR/result.txt"

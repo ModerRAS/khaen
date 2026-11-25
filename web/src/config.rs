@@ -1,7 +1,7 @@
 //! 配置模型与加载。
 //!
 //! 默认路径：Linux \`/etc/khaen-audio-web/config.toml\`，Windows（开发）\`./config.toml\`。
-//! 支持环境变量覆盖（见 README），TSPI_MOCK=1 时无需配置文件。
+//! 支持环境变量覆盖（见 README），KHAEN_MOCK=1 时无需配置文件。
 
 use std::path::{Path, PathBuf};
 
@@ -29,7 +29,7 @@ pub struct AppConfig {
     pub cookie_secure: bool,
     /// journalctl 默认读取行数。
     pub log_lines: usize,
-    /// TSPI_MOCK=1 时强制开启；一般不在配置文件里写。
+    /// KHAEN_MOCK=1 时强制开启；一般不在配置文件里写。
     pub mock: bool,
     pub camilladsp: CamillaConfig,
     pub ptp: PtpConfig,
@@ -74,7 +74,7 @@ pub struct CamillaConfig {
     /// CamillaDSP websocket 地址。
     pub ws_url: String,
     /// systemd 单元名（F-04 legacy 只读展示：旧 web 不再提供 CamillaDSP 启停接口；
-    /// 该值只用于 status/logs 的历史对照。板端旧 C 实际 unit 是 tspi-camilladsp.service）。
+    /// 该值只用于 status/logs 的历史对照。板端旧 C 实际 unit 是 khaen-camilladsp.service）。
     pub service: String,
     /// 当前生效配置（CamillaDSP 启动读取的文件，切换配置时同步写这里）。
     pub config_file: String,
@@ -88,7 +88,7 @@ impl Default for CamillaConfig {
     fn default() -> Self {
         Self {
             ws_url: "ws://127.0.0.1:1234".into(),
-            service: "tspi-camilladsp.service".into(),
+            service: "khaen-camilladsp.service".into(),
             config_file: "/etc/camilladsp/config.yml".into(),
             config_dir: "/etc/camilladsp/configs".into(),
             ws_timeout_ms: 3000,
@@ -312,7 +312,7 @@ impl Default for ModeConfig {
         Self {
             enabled: true,
             state_file: "/etc/khaen-audio-web/state.json".into(),
-            switch_script: "/usr/local/bin/tspi-mode".into(),
+            switch_script: "/usr/local/bin/khaen-mode".into(),
             // D4：默认开机不自动恢复音频模式（audio off，用户手动切换）。
             restore_on_start: false,
             switch_timeout_secs: 180,
@@ -360,7 +360,7 @@ impl Default for ModeConfig {
 }
 
 impl AppConfig {
-    /// mock 模式默认配置（无需配置文件即可 `TSPI_MOCK=1 cargo run`）。
+    /// mock 模式默认配置（无需配置文件即可 `KHAEN_MOCK=1 cargo run`）。
     /// 默认同样监听 80（与生产口径一致）；非 root 或 80 被占用时用
     /// `--listen 127.0.0.1:8088` 回退。
     pub fn mock_defaults() -> Self {
@@ -397,13 +397,13 @@ pub struct ChannelmapConfig {
     pub render_file: String,
     /// FIR 文件目录。
     pub fir_dir: String,
-    /// tspi-mode 脚本（channelmap apply/rollback）。
+    /// khaen-mode 脚本（channelmap apply/rollback）。
     pub script: String,
     /// 兼容保留字段（已不使用）：校验/渲染统一走 `cli_bin`；CLI 缺失时返回 503，不回退内置规则。
     pub validate_bin: String,
     /// 布局预设文件（audio-stack 提供；不存在时回退内置预设）。
     pub presets_file: String,
-    /// tspi-channelmap CLI（probe/validate/print/render/apply/rollback/profiles）。
+    /// khaen-channelmap CLI（probe/validate/print/render/apply/rollback/profiles）。
     pub cli_bin: String,
     /// 输入通道检测：SDP 文件目录（可配置；不存在时回退 CamillaDSP 配置）。
     pub sdp_dir: String,
@@ -411,11 +411,11 @@ pub struct ChannelmapConfig {
     pub default_layout: String,
     /// 默认输出设备（空 = 自动优先 MOTU / 第一个播放设备）。
     pub output_device: String,
-    /// 输入内容检测运行态（tspi-upmix 检测器写；WebUI 只读）。
+    /// 输入内容检测运行态（khaen-upmix 检测器写；WebUI 只读）。
     pub input_state_file: String,
-    /// 输入内容模式用户覆盖（WebUI 写；tspi-upmix/渲染侧读取）。
+    /// 输入内容模式用户覆盖（WebUI 写；khaen-upmix/渲染侧读取）。
     pub input_mode_file: String,
-    /// tspi-upmix CLI（可选；存在时 input-mode set 优先走 CLI，否则直接写覆盖文件）。
+    /// khaen-upmix CLI（可选；存在时 input-mode set 优先走 CLI，否则直接写覆盖文件）。
     pub upmix_bin: String,
 }
 
@@ -423,20 +423,20 @@ impl Default for ChannelmapConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            config_file: "/etc/tspi-audio/channelmap.yml".into(),
-            profiles_dir: "/etc/tspi-audio/profiles".into(),
-            render_file: "/run/tspi/camilladsp.yml".into(),
-            fir_dir: "/etc/tspi-audio/coeffs".into(),
-            script: "/usr/local/bin/tspi-mode".into(),
-            validate_bin: "/usr/local/bin/tspi-channelmap".into(),
-            presets_file: "/etc/tspi-audio/layout-presets.yml".into(),
-            cli_bin: "/usr/local/bin/tspi-channelmap".into(),
+            config_file: "/etc/khaen-audio/channelmap.yml".into(),
+            profiles_dir: "/etc/khaen-audio/profiles".into(),
+            render_file: "/run/khaen/camilladsp.yml".into(),
+            fir_dir: "/etc/khaen-audio/coeffs".into(),
+            script: "/usr/local/bin/khaen-mode".into(),
+            validate_bin: "/usr/local/bin/khaen-channelmap".into(),
+            presets_file: "/etc/khaen-audio/layout-presets.yml".into(),
+            cli_bin: "/usr/local/bin/khaen-channelmap".into(),
             sdp_dir: "/etc/aes67/sdp".into(),
             default_layout: "5.3.2".into(),
             output_device: String::new(),
-            input_state_file: "/run/tspi/input-content.json".into(),
-            input_mode_file: "/etc/tspi-audio/input-mode.json".into(),
-            upmix_bin: "/usr/local/bin/tspi-upmix".into(),
+            input_state_file: "/run/khaen/input-content.json".into(),
+            input_mode_file: "/etc/khaen-audio/input-mode.json".into(),
+            upmix_bin: "/usr/local/bin/khaen-upmix".into(),
         }
     }
 }
@@ -573,69 +573,69 @@ pub fn write_private_file(path: &Path, content: &str) -> std::io::Result<()> {
 }
 
 fn apply_env_overrides(config: &mut AppConfig) {
-    if let Ok(v) = std::env::var("TSPI_LISTEN") {
+    if let Ok(v) = std::env::var("KHAEN_LISTEN") {
         if !v.trim().is_empty() {
             config.listen = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_TOKEN") {
+    if let Ok(v) = std::env::var("KHAEN_TOKEN") {
         if !v.trim().is_empty() {
             config.token = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_AUTH_FILE") {
+    if let Ok(v) = std::env::var("KHAEN_AUTH_FILE") {
         if !v.trim().is_empty() {
             config.auth_file = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_CAMILLADSP_WS") {
+    if let Ok(v) = std::env::var("KHAEN_CAMILLADSP_WS") {
         if !v.trim().is_empty() {
             config.camilladsp.ws_url = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_MODE_SCRIPT") {
+    if let Ok(v) = std::env::var("KHAEN_MODE_SCRIPT") {
         config.mode.switch_script = v.trim().to_string();
     }
-    if let Ok(v) = std::env::var("TSPI_CHANNELMAP_FILE") {
+    if let Ok(v) = std::env::var("KHAEN_CHANNELMAP_FILE") {
         if !v.trim().is_empty() {
             config.channelmap.config_file = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_STATE_FILE") {
+    if let Ok(v) = std::env::var("KHAEN_STATE_FILE") {
         if !v.trim().is_empty() {
             config.mode.state_file = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_INPUT_STATE_FILE") {
+    if let Ok(v) = std::env::var("KHAEN_INPUT_STATE_FILE") {
         if !v.trim().is_empty() {
             config.channelmap.input_state_file = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_INPUT_MODE_FILE") {
+    if let Ok(v) = std::env::var("KHAEN_INPUT_MODE_FILE") {
         if !v.trim().is_empty() {
             config.channelmap.input_mode_file = v.trim().to_string();
         }
     }
-    if let Ok(v) = std::env::var("TSPI_UPMIX_BIN") {
+    if let Ok(v) = std::env::var("KHAEN_UPMIX_BIN") {
         if !v.trim().is_empty() {
             config.channelmap.upmix_bin = v.trim().to_string();
         }
     }
-    if let Some(v) = env_truthy("TSPI_ALLOW_REBOOT") {
+    if let Some(v) = env_truthy("KHAEN_ALLOW_REBOOT") {
         config.system.allow_reboot = v;
     }
-    if let Some(v) = env_truthy("TSPI_ALLOW_SHUTDOWN") {
+    if let Some(v) = env_truthy("KHAEN_ALLOW_SHUTDOWN") {
         config.system.allow_shutdown = v;
     }
-    if let Some(v) = env_truthy("TSPI_MODE_ENABLED") {
+    if let Some(v) = env_truthy("KHAEN_MODE_ENABLED") {
         config.mode.enabled = v;
     }
-    if let Some(v) = env_truthy("TSPI_RESTORE_MODE") {
+    if let Some(v) = env_truthy("KHAEN_RESTORE_MODE") {
         config.mode.restore_on_start = v;
     }
 }
 
-/// 加载配置：显式路径 > TSPI_CONFIG > 默认路径。
+/// 加载配置：显式路径 > KHAEN_CONFIG > 默认路径。
 ///
 /// - 文件不存在且非 mock：按模板生成（含随机 token），打印提示。
 /// - 文件存在但 token 为占位符且非 mock：自动生成并改写 token 行。
@@ -644,7 +644,7 @@ pub fn load(
     mock_requested: bool,
 ) -> Result<(AppConfig, LoadReport), String> {
     let path = cli_path
-        .or_else(|| std::env::var("TSPI_CONFIG").ok().map(PathBuf::from))
+        .or_else(|| std::env::var("KHAEN_CONFIG").ok().map(PathBuf::from))
         .unwrap_or_else(default_config_path);
 
     let mut report = LoadReport {
@@ -725,7 +725,7 @@ pub fn load(
     }
 
     apply_env_overrides(&mut config);
-    // 根治 token 双文件不一致：服务启动即把当前 token 同步到 /etc/tspi/web-token。
+    // 根治 token 双文件不一致：服务启动即把当前 token 同步到 /etc/khaen/web-token。
     if !mock_requested && !is_placeholder_token(&config.token) {
         if let Err(e) = sync_web_token(&config.token) {
             report.warnings.push(e);
@@ -734,11 +734,11 @@ pub fn load(
     Ok((config, report))
 }
 
-/// 把当前 token 同步到 OEM 约定的 token 文件（默认 /etc/tspi/web-token）。
+/// 把当前 token 同步到 OEM 约定的 token 文件（默认 /etc/khaen/web-token）。
 /// 目录不存在时跳过（开发机/mock）；写失败只告警不阻断启动。
 fn sync_web_token(token: &str) -> Result<(), String> {
     let path =
-        std::env::var("TSPI_WEB_TOKEN_FILE").unwrap_or_else(|_| "/etc/tspi/web-token".to_string());
+        std::env::var("KHAEN_WEB_TOKEN_FILE").unwrap_or_else(|_| "/etc/khaen/web-token".to_string());
     let p = std::path::Path::new(&path);
     if p.parent().map(|d| !d.exists()).unwrap_or(true) {
         return Ok(());
@@ -795,7 +795,7 @@ mod tests {
         assert!(parsed.channelmap.enabled);
         assert_eq!(
             parsed.channelmap.config_file,
-            "/etc/tspi-audio/channelmap.yml"
+            "/etc/khaen-audio/channelmap.yml"
         );
         assert_eq!(parsed.channelmap.default_layout, "5.3.2");
         assert_eq!(

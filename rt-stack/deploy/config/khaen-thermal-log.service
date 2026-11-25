@@ -1,0 +1,7 @@
+[Unit]
+Description=KHAEN thermal/load logger (one shot; driven by khaen-thermal-log.timer)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/khaen/thermal-log
+TimeoutStartSec=20

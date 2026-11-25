@@ -31,11 +31,11 @@ SSH_OPTS = [
 DEFAULTS = {
     "remote_host": "192.0.2.63",
     "remote_user": "adqew",
-    "remote_key": r"C:\WorkSpace\Claw\projects\tspi-audio-dsp\deploy\ssh\tspi_audio_ed25519",
+    "remote_key": r"C:\WorkSpace\Claw\projects\khaen-audio-dsp\deploy\ssh\khaen_audio_ed25519",
     "remote_workspace": r"D:\WorkSpace\Claw",
     "board_host": "192.0.2.215",
     "board_user": "root",
-    "board_key": r"C:\WorkSpace\Claw\projects\tspi-audio-dsp\deploy\ssh\tspi_audio_ed25519",
+    "board_key": r"C:\WorkSpace\Claw\projects\khaen-audio-dsp\deploy\ssh\khaen_audio_ed25519",
 }
 
 
@@ -220,7 +220,7 @@ def main() -> int:
 
     args = ap.parse_args()
     cfg = load_config(args.config)
-    cfg.setdefault("local_image", r"C:\WorkSpace\Claw\projects\tspi-audio-dsp\firmware\rt-oem-v14\update.img")
+    cfg.setdefault("local_image", r"C:\WorkSpace\Claw\projects\khaen-audio-dsp\firmware\rt-oem-v14\update.img")
     if args.cmd == "status": cmd_status(cfg)
     elif args.cmd == "ps": cmd_ps(cfg, args.script, args.timeout)
     elif args.cmd == "scp": cmd_scp(cfg, args.local, args.remote)

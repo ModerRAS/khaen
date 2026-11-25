@@ -1,11 +1,11 @@
 #!/bin/bash
-# tspi-irq-affinity-pin —— 把 T45 依赖 IRQ 钉到 A53 控制核（task-192；实测依据 evidence/board-irq-affinity/）
+# khaen-irq-affinity-pin —— 把 T45 依赖 IRQ 钉到 A53 控制核（task-192；实测依据 evidence/board-irq-affinity/）
 #
 # 为什么需要持久化（task-189 实测）：
 #   T45 scheduler plan() 要求 USB/PTP/eth 依赖 IRQ 不落在 DSP_CPUS={4,5,6,7}；板端把
 #   IRQ58(xhci/MOTU)→CPU1、IRQ56(end0/PTP)→CPU2、IRQ57(end0 第二队列)→CPU3 后 plan accepted，
 #   但 irqbalance 重启后 ≤25s 把它们搬回 A72（58→7、56→3、57→5）→ 迁移不持久。
-# 因此 04-install-release.sh 停用 irqbalance，并由 tspi-irq-affinity.service（Before=tspi-rt-host.service）
+# 因此 04-install-release.sh 停用 irqbalance，并由 khaen-irq-affinity.service（Before=khaen-rt-host.service）
 # 在每次 host 启动前调用本脚本重新写 /proc/irq/<irq>/smp_affinity_list 并回读校验。
 #
 # 用法:
@@ -14,18 +14,18 @@
 #   irq-affinity-pin verify   # 只读校验（0=全部符合，3=不符合）
 #   irq-affinity-pin status   # 打印当前亲和（只读）
 #   [--root DIR]              # 只用于本地夹具/预演；板端必须 /（缺省 /）
-#   [--config FILE]           # 缺省 /etc/tspi-rt-stack/irq-affinity.env
-# 环境变量：TSPI_IRQ_PINS / TSPI_IRQ_DSP_CPUS / TSPI_IRQ_WAIT_SECS
-#   （systemd EnvironmentFile 提供；env 优先于配置文件。TSPI_IRQ_WAIT_SECS 缺省 60，0=只查一次不等待）
+#   [--config FILE]           # 缺省 /etc/khaen-rt-stack/irq-affinity.env
+# 环境变量：KHAEN_IRQ_PINS / KHAEN_IRQ_DSP_CPUS / KHAEN_IRQ_WAIT_SECS
+#   （systemd EnvironmentFile 提供；env 优先于配置文件。KHAEN_IRQ_WAIT_SECS 缺省 60，0=只查一次不等待）
 # 退出码：0 OK；2 用法/配置非法；3 写失败/回读校验失败/等待超时。
 set -u
 
 ACTION="apply"
 ROOT="/"
-CONFIG="/etc/tspi-rt-stack/irq-affinity.env"
-PINS="${TSPI_IRQ_PINS:-}"
-DSP_CPUS="${TSPI_IRQ_DSP_CPUS:-4,5,6,7}"
-WAIT_SECS="${TSPI_IRQ_WAIT_SECS:-}"
+CONFIG="/etc/khaen-rt-stack/irq-affinity.env"
+PINS="${KHAEN_IRQ_PINS:-}"
+DSP_CPUS="${KHAEN_IRQ_DSP_CPUS:-4,5,6,7}"
+WAIT_SECS="${KHAEN_IRQ_WAIT_SECS:-}"
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 
@@ -46,7 +46,7 @@ rp() { printf "%s%s" "$PFX" "$1"; }
 
 logmsg() {
   printf 'irq-affinity: %s\n' "$*"
-  if command -v logger >/dev/null 2>&1; then logger -t tspi-irq-affinity -- "$*" 2>/dev/null || true; fi
+  if command -v logger >/dev/null 2>&1; then logger -t khaen-irq-affinity -- "$*" 2>/dev/null || true; fi
 }
 warnmsg() { logmsg "WARN $*"; }
 
@@ -60,9 +60,9 @@ if [ -f "$CFG" ]; then
     key="${line%%=*}"; val="${line#*=}"
     val="${val%\"}"; val="${val#\"}"
     case "$key" in
-      TSPI_IRQ_PINS) [ -n "$PINS" ] || PINS="$val" ;;
-      TSPI_IRQ_DSP_CPUS) [ -n "${TSPI_IRQ_DSP_CPUS:-}" ] || DSP_CPUS="$val" ;;
-      TSPI_IRQ_WAIT_SECS) [ -n "$WAIT_SECS" ] || WAIT_SECS="$val" ;;
+      KHAEN_IRQ_PINS) [ -n "$PINS" ] || PINS="$val" ;;
+      KHAEN_IRQ_DSP_CPUS) [ -n "${KHAEN_IRQ_DSP_CPUS:-}" ] || DSP_CPUS="$val" ;;
+      KHAEN_IRQ_WAIT_SECS) [ -n "$WAIT_SECS" ] || WAIT_SECS="$val" ;;
     esac
   done < "$CFG"
 fi
@@ -92,7 +92,7 @@ validate_pins() {
 validate_pins || exit 2
 
 case "$WAIT_SECS" in
-  ''|*[!0-9]*) echo "irq-affinity-pin: 非法 TSPI_IRQ_WAIT_SECS=$WAIT_SECS（要求非负整数秒）" >&2; exit 2 ;;
+  ''|*[!0-9]*) echo "irq-affinity-pin: 非法 KHAEN_IRQ_WAIT_SECS=$WAIT_SECS（要求非负整数秒）" >&2; exit 2 ;;
 esac
 
 # irqbalance 仍在跑时亲和可能随后被搬回（task-189 实测 ≤25s）→ 记录警告，最终判定交给 preflight/06。
@@ -110,7 +110,7 @@ fi
 #       apply fail-closed（FAIL IRQ56 不存在），而 host Requires= 本单元 → host 不启动、无音频 owner。
 # 修复：unit 的 ExecStartPre 先调用本 wait 动作，节点就绪后再由 ExecStart 钉核；超时仍
 #       fail-closed（不启动 host，避免用错误拓扑跑 T45 admission），并给出明确 FAIL 日志。
-# 配置：TSPI_IRQ_WAIT_SECS（默认 60s；0=只查一次不等待）——见 deploy/config/irq-affinity.env.example。
+# 配置：KHAEN_IRQ_WAIT_SECS（默认 60s；0=只查一次不等待）——见 deploy/config/irq-affinity.env.example。
 if [ "$ACTION" = "wait" ]; then
   missing=""
   for pair in $PINS; do

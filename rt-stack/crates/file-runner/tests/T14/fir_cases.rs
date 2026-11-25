@@ -1,4 +1,4 @@
-//! `tspi-fir/v1` manifest 解析/校验/写作（对齐 T55 报告字段面 + fir-toolbox §2.2 规则 1–7）。
+//! `khaen-fir/v1` manifest 解析/校验/写作（对齐 T55 报告字段面 + fir-toolbox §2.2 规则 1–7）。
 
 use khaen_file_runner::fir::{
     build_fir_manifest, family_constant_delay, family_expected_delay, load_fir_manifest,
@@ -26,7 +26,7 @@ fn fir_manifest_round_trip_and_semantic_digest() {
     let (manifest_json, bytes) = fir("linear", &[0.0, 1.0, 0.0], "linear.raw");
     let text = manifest_json.to_canonical();
     let parsed = parse_fir_manifest(&Json::parse(&text).expect("json")).expect("manifest");
-    assert_eq!(parsed.schema, "tspi-fir/v1");
+    assert_eq!(parsed.schema, "khaen-fir/v1");
     assert_eq!(parsed.family, "linear");
     assert_eq!(parsed.taps, 3);
     assert_eq!(parsed.fs, 48_000);
@@ -504,7 +504,7 @@ fn fir_load_str_entry_point_checks_schema() {
     let mut bad = manifest;
     map_mut(&mut bad).insert(
         "schema".to_string(),
-        Json::String("tspi-fir/v2".to_string()),
+        Json::String("khaen-fir/v2".to_string()),
     );
     assert_eq!(
         parse_fir_manifest(&bad).expect_err("schema").code(),

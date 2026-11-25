@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C05_d_in_support",
   "title": "D=2 baseline inside a longer G support plus P tail",
   "tags": [

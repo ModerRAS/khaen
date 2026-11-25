@@ -1,11 +1,11 @@
 //! [NONRT] T67 补齐：真实测量 -> 设计 fit 输入接线（旧工具 analysis JSON -> FitWiringDesign）。
 //!
 //! 背景：T67 pilot 的测量/分析链已通（UMIK-1 + MOTU 参考采集，真实 FR/IR），但新栈
-//! `tspi-cal` 只支持 `--design synthetic`——真实测量数据无法进入 T64/T65 fit，导致
+//! `khaen-cal` 只支持 `--design synthetic`——真实测量数据无法进入 T64/T65 fit，导致
 //! "测量 -> 设计 fit" 断链（pilot REPORT §9 B4）。
 //!
 //! 本模块把 **真实板端测量产物**（旧工具 `khaen-calibrate` 的 `*.analysis.json`，
-//! schema `tspi-channel-measurement/v1`，含 1/48 oct FR 幅度+相位、绝对延迟、SNR、
+//! schema `khaen-channel-measurement/v1`，含 1/48 oct FR 幅度+相位、绝对延迟、SNR、
 //! 极性置信度；以及同目录 `*.diag.json` 的槽位 nominal/actual onset）转换为
 //! [crate::fit_wiring::FitWiringDesign]：
 //!
@@ -66,15 +66,15 @@ use crate::phase_fit::{
 use crate::positions::{MultipointPlan, MultipointPosition};
 
 /// measured design spec schema v1（旧单点 proxy 文件；仍接受）。
-pub const MEASURED_SPEC_SCHEMA_V1: &str = "tspi-cal-measured-design/v1";
+pub const MEASURED_SPEC_SCHEMA_V1: &str = "khaen-cal-measured-design/v1";
 /// measured design spec schema v2：可选 `design_positions[]` / `validation_positions[]`。
-pub const MEASURED_SPEC_SCHEMA_V2: &str = "tspi-cal-measured-design/v2";
+pub const MEASURED_SPEC_SCHEMA_V2: &str = "khaen-cal-measured-design/v2";
 /// measured design spec schema（兼容别名 = v1；v2 见 [MEASURED_SPEC_SCHEMA_V2]）。
 pub const MEASURED_SPEC_SCHEMA: &str = MEASURED_SPEC_SCHEMA_V1;
 /// measured design 证据 schema（summary artifact）。
-pub const MEASURED_SUMMARY_SCHEMA: &str = "tspi-cal-measured-summary/v1";
+pub const MEASURED_SUMMARY_SCHEMA: &str = "khaen-cal-measured-summary/v1";
 /// 多点 measured 证据 schema（design/validation 逐位置残差 + 座位间 spread + holdout 口径）。
-pub const MEASURED_MULTIPOINT_SCHEMA: &str = "tspi-cal-measured-multipoint/v1";
+pub const MEASURED_MULTIPOINT_SCHEMA: &str = "khaen-cal-measured-multipoint/v1";
 /// spec 文件非法/缺字段。
 pub const E_MEASURED_SPEC: &str = "E_WIRING_MEASURED_SPEC";
 /// analysis/diag 文件读取/解析失败。
@@ -121,7 +121,7 @@ pub struct MeasuredPositionSpec {
 
 /// measured design spec（CLI `--measurement FILE`）。
 ///
-/// v1（`tspi-cal-measured-design/v1`）只有单个 `design_position` + same_as_design
+/// v1（`khaen-cal-measured-design/v1`）只有单个 `design_position` + same_as_design
 /// proxy；v2（`.../v2`）可给 `design_positions[]` / `validation_positions[]`。
 /// 内存模型统一为两个 Vec：`validation_positions` 为空 = legacy proxy。
 #[derive(Clone, Debug, PartialEq)]
@@ -338,9 +338,9 @@ pub fn load_measured_spec(spec_path: &Path) -> Result<MeasuredDesignSpec, String
     compile.options = CompileApplyOptions::default();
     // plan ABI v2（GAP-T66-3）：T64 PEQ 段进 plan 的开关，profile 可显式回退；缺省 ON。
     if let Some(value) = compile_value.get("t64_peq_in_plan") {
-        compile.t64_peq_in_plan = value.as_bool().ok_or_else(|| {
-            format!("{E_MEASURED_SPEC}: compile.t64_peq_in_plan 必须是 bool")
-        })?;
+        compile.t64_peq_in_plan = value
+            .as_bool()
+            .ok_or_else(|| format!("{E_MEASURED_SPEC}: compile.t64_peq_in_plan 必须是 bool"))?;
     }
     let unused_outputs: Vec<u16> = document
         .get("unused_outputs")
@@ -554,18 +554,18 @@ fn parse_fit_options(
 }
 
 // ---------------------------------------------------------------------------
-// 实验旁路：G 注入文件（tspi-cal-g-paths/v1）+ 构建选项
+// 实验旁路：G 注入文件（khaen-cal-g-paths/v1）+ 构建选项
 // ---------------------------------------------------------------------------
 //
 // 生产 measured 桥只生成 identity baseline G（对角线 1、非对角 0）——单点 5x5 G
 // 没有任何入口（g-singlepoint REPORT §4.3 "G 注入 NOT_WIRED"）。本处新增**显式文件入口**：
-// 求解器（T51/T52）输出的 dense m x m x l_g 系数按 tspi-cal-g-paths/v1 落成 JSON，
+// 求解器（T51/T52）输出的 dense m x m x l_g 系数按 khaen-cal-g-paths/v1 落成 JSON，
 // measured 构建时替换 identity。**只有 MeasuredBuildOptions.experiment 显式开启才会用到**。
 
 /// G 注入文件非法/不一致。
 pub const E_MEASURED_G_PATHS: &str = "E_WIRING_MEASURED_G_PATHS";
 /// G 注入文件 schema。
-pub const G_PATHS_SCHEMA: &str = "tspi-cal-g-paths/v1";
+pub const G_PATHS_SCHEMA: &str = "khaen-cal-g-paths/v1";
 /// 实验允许覆盖的 layout（仅 4.1.2 五执行器）。
 pub const EXPERIMENT_LAYOUT_4_1_2: &str = "4.1.2";
 /// 实验 G 支撑上限（与 TAPS_NORMAL_MAX 一致；超档需 extended 准入，本实验不支持）。
@@ -617,7 +617,7 @@ impl MeasuredBuildOptions {
     }
 }
 
-/// 载入 tspi-cal-g-paths/v1 文件（严格解析；任何不一致稳定报错，不静默退化）。
+/// 载入 khaen-cal-g-paths/v1 文件（严格解析；任何不一致稳定报错，不静默退化）。
 pub fn load_g_paths_file(path: &Path) -> Result<InjectedGPaths, String> {
     let text = fs::read_to_string(path).map_err(|error| {
         format!(
@@ -823,9 +823,9 @@ fn parse_analysis_file(path: &Path) -> Result<ParsedAnalysis, String> {
         .get("schema")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if schema != "tspi-channel-measurement/v1" {
+    if schema != "khaen-channel-measurement/v1" {
         return Err(format!(
-            "{E_MEASURED_FILE}: {} schema={schema:?} 不是 tspi-channel-measurement/v1",
+            "{E_MEASURED_FILE}: {} schema={schema:?} 不是 khaen-channel-measurement/v1",
             path.display()
         ));
     }
@@ -1549,9 +1549,9 @@ pub fn build_measured_design_opts(
     let mapping = MappingBinding::new(
         spec.layout.clone(),
         measurement_digest.clone(),
-        sha256_hex(format!("tspi-measured-binding/v1\n{measurement_digest}").as_bytes()),
-        sha256_hex(format!("tspi-measured-roles/v1\n{measurement_digest}").as_bytes()),
-        sha256_hex(format!("tspi-measured-participants/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-binding/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-roles/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-participants/v1\n{measurement_digest}").as_bytes()),
         spec.container_channels,
         spec.dense_to_dac.clone(),
         spec.roles.clone(),
@@ -1572,13 +1572,13 @@ pub fn build_measured_design_opts(
     //    这里显式 INCOMPLETE + identity baseline G，T66 compile 会以 E_CA_ARTIFACT_STATUS
     //    拒绝（不伪造 READY）。
     let artifact = ArtifactBinding::from_parts(
-        sha256_hex(format!("tspi-measured-no-artifact/v1\n{measurement_digest}").as_bytes()),
-        sha256_hex(format!("tspi-measured-no-manifest/v1\n{measurement_digest}").as_bytes()),
-        sha256_hex(format!("tspi-measured-no-wav/v1\n{measurement_digest}").as_bytes()),
-        sha256_hex(format!("tspi-measured-no-solution/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-no-artifact/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-no-manifest/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-no-wav/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-no-solution/v1\n{measurement_digest}").as_bytes()),
         measurement_digest.clone(),
         target.target_sha256().to_string(),
-        sha256_hex(format!("tspi-measured-no-baseline/v1\n{measurement_digest}").as_bytes()),
+        sha256_hex(format!("khaen-measured-no-baseline/v1\n{measurement_digest}").as_bytes()),
         "INCOMPLETE",
     );
     let m = spec.dense_to_dac.len();
@@ -1749,7 +1749,7 @@ fn identity_g_paths(
                 false,
                 sha256_hex(
                     format!(
-                        "tspi-measured-identity-g/v1\n{measurement_digest}\n{out_dense}\n{in_dense}"
+                        "khaen-measured-identity-g/v1\n{measurement_digest}\n{out_dense}\n{in_dense}"
                     )
                     .as_bytes(),
                 ),
@@ -1766,7 +1766,7 @@ fn identity_g_paths(
 pub fn g_paths_canonical_sha256(paths: &[GPathInput]) -> String {
     use std::fmt::Write as _;
     let mut text = String::with_capacity(paths.len() * 96 + 64);
-    text.push_str("tspi-cal-g-paths-canonical/v1\n");
+    text.push_str("khaen-cal-g-paths-canonical/v1\n");
     for path in paths {
         let _ = writeln!(
             text,
@@ -2597,7 +2597,7 @@ mod measured_design_tests {
             index += 1;
         }
         format!(
-            "{{\"schema\":\"tspi-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay:.6},\"snr_band_db\":31.0,\"polarity_confidence\":\"high\",\"meta\":{{\"sample_rate\":{sr},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
+            "{{\"schema\":\"khaen-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay:.6},\"snr_band_db\":31.0,\"polarity_confidence\":\"high\",\"meta\":{{\"sample_rate\":{sr},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
         )
     }
 
@@ -2659,7 +2659,7 @@ mod measured_design_tests {
         let (v1_fl, v1_fr) = write_position(dir, "V1", validation_shape, validation_shape);
         let spec = format!(
             r#"{{
-  "schema": "tspi-cal-measured-design/v2",
+  "schema": "khaen-cal-measured-design/v2",
   "session_id": "multipoint-unit-test",
   "layout": "stereo-2.0",
   "sample_rate_hz": 48000,
@@ -2700,7 +2700,7 @@ mod measured_design_tests {
         let (fl, fr) = write_position(dir, "D1", design_a_shape, design_a_shape);
         let spec = format!(
             r#"{{
-  "schema": "tspi-cal-measured-design/v1",
+  "schema": "khaen-cal-measured-design/v1",
   "session_id": "single-point-legacy-unit-test",
   "layout": "stereo-2.0",
   "sample_rate_hz": 48000,
@@ -2866,7 +2866,10 @@ mod measured_design_tests {
             .contains(E_MEASURED_SPEC));
 
         // e) v1 schema 却给 design_positions[] -> 拒绝
-        let v1_mixed = valid.replace("tspi-cal-measured-design/v2", "tspi-cal-measured-design/v1");
+        let v1_mixed = valid.replace(
+            "khaen-cal-measured-design/v2",
+            "khaen-cal-measured-design/v1",
+        );
         fs::write(&path, v1_mixed).unwrap();
         assert!(load_measured_spec(&path).unwrap_err().contains("v1 不支持"));
         let _ = fs::remove_dir_all(&dir);

@@ -1715,7 +1715,7 @@ fn t53_holdout_hash_deterministic_and_json_contract() {
     assert_eq!(first.content_hash(), first.report_hash);
     let json = first.to_evidence_json();
     JsonSyntax::validate(&json).expect("evidence JSON must be valid");
-    assert!(json.contains("\"schema\":\"tspi-modal-holdout-report/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-modal-holdout-report/v1\""));
     assert!(json.contains("\"verdict\":\"PREDICTED_PASS\""));
     assert!(json.contains("\"improvement_gate_db\":3."));
     assert!(json.contains("\"applied\":false"));
@@ -1818,7 +1818,7 @@ fn t53_holdout_known_fixture_dump() {
         }
         g_matrix.push(row);
     }
-    let mut inputs = String::from("{\"schema\":\"tspi-modal-holdout-fixture-inputs/v1\",");
+    let mut inputs = String::from("{\"schema\":\"khaen-modal-holdout-fixture-inputs/v1\",");
     inputs.push_str("\"fs\":48000,\"grid\":[");
     inputs.push_str(
         &fixture
@@ -1954,7 +1954,7 @@ fn t53_validate_holdout_manifest_contract() {
     JsonSyntax::validate(&report.to_evidence_json()).expect("evidence JSON must be valid");
     assert!(report
         .to_evidence_json()
-        .contains("\"schema\":\"tspi-modal-holdout-report/v1\""));
+        .contains("\"schema\":\"khaen-modal-holdout-report/v1\""));
     assert!(report
         .to_evidence_json()
         .contains("\"verdict\":\"PREDICTED_PASS\""));

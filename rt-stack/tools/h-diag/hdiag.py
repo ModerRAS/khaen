@@ -208,7 +208,7 @@ def build_parser():
 
     run = sub.add_parser("run", help="run diagnostics on a pre-registered multipoint set")
     run.add_argument("--manifest", required=True,
-                     help="positions.json (schema tspi-hdiag-positions/v1)")
+                     help="positions.json (schema khaen-hdiag-positions/v1)")
     run.add_argument("--out-dir", required=True)
     run.add_argument("--after-manifest", default=None,
                      help="optional measured-after positions.json (same labels/roles)")

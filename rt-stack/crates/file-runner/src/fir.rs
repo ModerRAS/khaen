@@ -1,7 +1,7 @@
-//! [NONRT] `tspi-fir/v1` FIR 系数 manifest：解析/校验/写作（对齐 T55 reporter + fir-toolbox §2）。
+//! [NONRT] `khaen-fir/v1` FIR 系数 manifest：解析/校验/写作（对齐 T55 reporter + fir-toolbox §2）。
 //!
 //! WBS T14 的“metadata”与 DSP-HOST-DECISION §2.6 的“每 path mono FIR WAV + manifest/设计报告”：
-//! runner 从 `tspi-fir/v1` manifest 加载 A/G/P 每条路径的 f32 系数，并校验 spec/fir-toolbox.md
+//! runner 从 `khaen-fir/v1` manifest 加载 A/G/P 每条路径的 f32 系数，并校验 spec/fir-toolbox.md
 //! §2.2 的规范性规则（T55 报告字段面直接消费）：
 //!
 //! 1. `taps` 与系数文件实际样本数相等（E_FILE_TAPS）；系数文件必须是 mono f32 WAV @ manifest.fs，
@@ -33,7 +33,7 @@ use crate::{
 };
 
 /// 系数 manifest schema（spec/fir-toolbox.md §2.2）。
-pub const FIR_SCHEMA: &str = "tspi-fir/v1";
+pub const FIR_SCHEMA: &str = "khaen-fir/v1";
 /// 支持的七家族 + lowdelay 别名（manifest family 枚举）。
 pub const FIR_FAMILIES: [&str; 8] = [
     "linear",
@@ -92,7 +92,7 @@ pub struct FirLimits {
     pub fits_budget: bool,
 }
 
-/// 解析后的 `tspi-fir/v1` manifest（未加载系数）。
+/// 解析后的 `khaen-fir/v1` manifest（未加载系数）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct FirManifest {
     /// schema（必须 = [`FIR_SCHEMA`]）。
@@ -859,7 +859,7 @@ pub fn load_fir_manifest_str(
     load_fir_manifest(&json, file_bytes, runtime_profile)
 }
 
-/// 写作 `tspi-fir/v1` manifest 的规范输入（T26/T55 导出系数文件后调用）。
+/// 写作 `khaen-fir/v1` manifest 的规范输入（T26/T55 导出系数文件后调用）。
 #[derive(Clone, Debug)]
 pub struct FirManifestSpec<'a> {
     /// 家族（[`FIR_FAMILIES`]）。
@@ -910,7 +910,7 @@ pub struct FirManifestSpec<'a> {
     pub warnings: Vec<String>,
 }
 
-/// 构建 `tspi-fir/v1` manifest JSON（确定性；不含 created_unix 时间戳）。
+/// 构建 `khaen-fir/v1` manifest JSON（确定性；不含 created_unix 时间戳）。
 pub fn build_fir_manifest(spec: &FirManifestSpec<'_>) -> RunnerResult<Json> {
     if !FIR_FAMILIES.contains(&spec.family) {
         return Err(RunnerError::new(

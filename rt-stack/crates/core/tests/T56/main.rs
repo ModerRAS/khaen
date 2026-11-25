@@ -20,7 +20,7 @@
 //!
 //! 本测试只消费 T09/T12/T55 已合入的只读 API；不依赖板端/ALSA/RT 实测（NOT_RUN）。
 
-use khaen_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
+use khaen_core::abi::{KhaenDiagFirV1, KhaenPathV1, KhaenRoleV1};
 use khaen_core::compile::FusionForm;
 use khaen_core::direct::{DirectTopology, DIRECT_NO_SOURCE};
 use khaen_core::rt::RtStatus;
@@ -1231,9 +1231,9 @@ fn schedule_plan_memory_model_formulas() {
     assert_eq!(plan.coeff_bytes, (7 * 1 + 25 * 4096 + 7 * 1024) * 4);
     // 表：header/path/diag/role，各自 64B 对齐。
     let expected_tables = align64(128)
-        + align64(25 * core::mem::size_of::<TspiPathV1>() as u64)
-        + align64(7 * core::mem::size_of::<TspiDiagFirV1>() as u64)
-        + align64(7 * core::mem::size_of::<TspiRoleV1>() as u64);
+        + align64(25 * core::mem::size_of::<KhaenPathV1>() as u64)
+        + align64(7 * core::mem::size_of::<KhaenDiagFirV1>() as u64)
+        + align64(7 * core::mem::size_of::<KhaenRoleV1>() as u64);
     assert_eq!(plan.table_bytes, expected_tables);
     // 历史：A 历史 0 + 7*(4095+1023) samples x f32。
     assert_eq!(plan.history_bytes, 7 * (4095 + 1023) * 4);

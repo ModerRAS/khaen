@@ -1199,7 +1199,10 @@ mod tests {
         assert_eq!(stats.stream_restarts, 0, "持续 11 s 正常流不得重锚");
         assert_eq!(stats.timestamp_jumps, 0, "连续 ts 步进不应算跳变");
         assert_eq!(stats.frames_received, packets as u64 * 48);
-        assert!(played_blocks >= 4_000, "应已消费大部分数据，got {played_blocks}");
+        assert!(
+            played_blocks >= 4_000,
+            "应已消费大部分数据，got {played_blocks}"
+        );
     }
 
     #[test]

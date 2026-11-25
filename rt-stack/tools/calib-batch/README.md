@@ -1,4 +1,4 @@
-# tspi-cal-batch：校准批量闭环（前后扫频 + 瀑布/RT + MIMO/holdout 对比）
+# khaen-cal-batch：校准批量闭环（前后扫频 + 瀑布/RT + MIMO/holdout 对比）
 
 > task-201 · 2026-11-17 · 状态：**离线流水线已自测 PASS；真实板端全部 NOT_RUN**
 > 证据：`rt-stack/evidence/calib-batch-waterfall/` · 窗口步骤：`docs/BOARD-WINDOW-RUNBOOK-T67-T74.md` §14
@@ -20,7 +20,7 @@
 
 ```text
 rt-stack/tools/calib-batch/
-  tspi_cal_batch.py        CLI：plan / run / analyze / selftest / version
+  khaen_cal_batch.py        CLI：plan / run / analyze / selftest / version
   calbatch/
     config.py              冻结配置 schema + fail-closed 校验
     dsp.py                 扫频/反卷积/FR/EDC/RT/瀑布/Biquad/SVG（numpy）
@@ -54,9 +54,9 @@ rt-stack/tools/calib-batch/
 
 ```bash
 cd rt-stack/tools/calib-batch
-python3 tspi_cal_batch.py plan \
+python3 khaen_cal_batch.py plan \
   --config configs/batch-config.production-4.1.2.json \
-  --out ~/tspi-batch/plan
+  --out ~/khaen-batch/plan
 # 输出 round-A/ round-B/，各含 plan.json / commands.txt / RUN-PLAN.md / time-budget.json
 # plan 会校验：schema、48k、-50 dBFS、白天窗、可闻授权、UMIK 90deg+cal sha256、
 #            design>=6 + holdout>=3 + repeats>=3、pilot 分离、命令模板、时间预算是否超窗
@@ -70,10 +70,10 @@ python3 tspi_cal_batch.py plan \
 ### 4.2 窗口内（板端，只执行）
 
 ```bash
-python3 tspi_cal_batch.py run \
+python3 khaen_cal_batch.py run \
   --plan plan/round-A/plan.json \
   --transport cmd \
-  --work /var/lib/tspi-rt-stack/evidence/$(date +%Y%m%d)-calib-batch-A
+  --work /var/lib/khaen-rt-stack/evidence/$(date +%Y%m%d)-calib-batch-A
 # 只跑 plan 冻结的 argv；每步写 steps/<NN-id>/{stdout.log,stderr.log,exit.json}
 # + captures/<step>.meta.json；任一步失败 fail-closed（preflight/measure/apply），
 # 自动执行 restore（如 config.restore_after_batch=true），exit 4
@@ -84,7 +84,7 @@ python3 tspi_cal_batch.py run \
 
 ```bash
 # 把板端 work 目录拉回后
-python3 tspi_cal_batch.py analyze --work <work目录> --out ~/tspi-batch/analysis-A
+python3 khaen_cal_batch.py analyze --work <work目录> --out ~/khaen-batch/analysis-A
 # 输出 analysis/{REPORT.md,comparison.json,MANIFEST.json,quality.csv,fr/,rt/,waterfall/,plots/}
 ```
 
@@ -102,7 +102,7 @@ python3 tspi_cal_batch.py analyze --work <work目录> --out ~/tspi-batch/analysi
 ## 6. 离线自测
 
 ```bash
-python3 tspi_cal_batch.py selftest --out <证据目录>
+python3 khaen_cal_batch.py selftest --out <证据目录>
 ```
 - fake transport 合成 9 点位（6 design + 3 holdout）+ 三麦 pilot 的 before/after 记录；
 - 断言：plan 负向用例被拒、IMPROVED/WORSE（含问题定位）/FLAT 三场景分类正确、

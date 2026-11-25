@@ -1,11 +1,11 @@
-# TSPI P1 兼容矩阵（T05 / compat-auditor）
+# KHAEN P1 兼容矩阵（T05 / compat-auditor）
 
 > 状态：**v0.1 草案（2026-11-16）**，供 Lead 评审与 T13/T24/T25/T42/T44/T57/T60/T70/T74 消费。
 > 本轮只写规范：**未实现代码、未启动服务、未接板、未运行 REST/WS、未 git commit**；所有"验证"仅指对既有源码/文档的静态核对。
 > **2026-11-17 更新（Cursor 审计 F-32）**：T24 已落地 P1 ADD 的显式 prepare/commit/abort 三命令（§4 W23–W25），T42 R49 与 T70 消费同一 prepare/commit 语义；库内 `cargo test` 证据在 `crates/{compat,control}/tests`，**真实 host/板端路径仍为 NOT_RUN**。矩阵其余行口径不变。
 > **2026-11-17 更新（Cursor 审计 F-21，task-184）**：新增 §3.7「R 矩阵 ↔ `crates/control/src/rest.rs` 路由落地对照」——R01-R06/R10-R14/R47-R49 已落地（ROUTED/RETIRED_ROUTE），R50/R51 为横切语义（CROSS_CUTTING），**R07-R09/R15-R46 共 35 行改为 `ADAPT-DEFERRED`/`KEEP-DEFERRED`（P1 不注册路由，逐行理由/owner 见 §3.7）**；`cargo test -p khaen-control rest` 的 `matrix_routes` 用例自动核对矩阵↔路由（含负向用例）；证据 `rt-stack/evidence/cursor-fix-matrix/`。
-> 写域：本文件 `projects/tspi-audio-dsp/rt-stack/spec/compat-matrix.md`。其余项目文件与目录只读。
-> 权威链（自上而下，冲突按此裁决，DEC §0）：用户最新要求 → `DSP-HOST-DECISION.md`（下称 DEC）→ `TSPI-RT-STACK-WBS.md`（下称 WBS）→ 既有契约稳定字段语义（校准/通道图/模式状态）→ 现有实现（只读参考）。
+> 写域：本文件 `projects/khaen-audio-dsp/rt-stack/spec/compat-matrix.md`。其余项目文件与目录只读。
+> 权威链（自上而下，冲突按此裁决，DEC §0）：用户最新要求 → `DSP-HOST-DECISION.md`（下称 DEC）→ `KHAEN-RT-STACK-WBS.md`（下称 WBS）→ 既有契约稳定字段语义（校准/通道图/模式状态）→ 现有实现（只读参考）。
 > 证据标记：**【验】**= 已逐行读源码/文档确认（静态，不等于运行验证）；**【推】**= 由已读材料推导、需实现或 Lead 裁决；**【未测】**= 无运行证据（板端/服务/WS/HTTP 均未实跑）。
 > 引用策略（task-38 起）：DEC/WBS/API.md 一律用「文件路径 + §章节 / WBS 任务 ID」引用，不再写死行号与 hash；代码/契约仍用 file:line。输入快照 hash 仅见 §13.1（快照时间 2026-11-17 00:15）。
 
@@ -39,9 +39,9 @@
 | 组件 | 当前职责 | 关键入口 | 证据 |
 | --- | --- | --- | --- |
 | khaen-audio-web（Rust/axum 0.8） | 当前唯一 Web/REST；默认 0.0.0.0:80；session+CSRF；聚合状态 | `web/src/routes/mod.rs:27-129`（60 条 route 条目/67 个方法操作）；`web/Cargo.toml:10` | 【验】 |
-| tspi-mode（bash） | dante/aes67/off 唯一切换入口；exit 0/2/3/4/5/7/8/9/10（注释另含 1/6） | `audio/overlay/usr/local/bin/tspi-mode:2-14,37-51,454-492` | 【验】 |
-| tspi-channelmap（Python） | channelmap v2 校验/渲染/apply/rollback 唯一权威；layout-presets v2 | `audio/overlay/usr/local/bin/tspi-channelmap:6-7,36-61,78-85` | 【验】 |
-| tspi-upmix（Python） | **S1** 输入内容检测 + 双路径上混；读 Camilla WS RMS、切 Aux fader | `audio/overlay/usr/local/bin/tspi-upmix:1666-1717`；`upmix/docs/INPUT-MODE.md:10-118` | 【验】 |
+| khaen-mode（bash） | dante/aes67/off 唯一切换入口；exit 0/2/3/4/5/7/8/9/10（注释另含 1/6） | `audio/overlay/usr/local/bin/khaen-mode:2-14,37-51,454-492` | 【验】 |
+| khaen-channelmap（Python） | channelmap v2 校验/渲染/apply/rollback 唯一权威；layout-presets v2 | `audio/overlay/usr/local/bin/khaen-channelmap:6-7,36-61,78-85` | 【验】 |
+| khaen-upmix（Python） | **S1** 输入内容检测 + 双路径上混；读 Camilla WS RMS、切 Aux fader | `audio/overlay/usr/local/bin/khaen-upmix:1666-1717`；`upmix/docs/INPUT-MODE.md:10-118` | 【验】 |
 | CamillaDSP 4.1.3 | 当前 DSP；WS `ws://127.0.0.1:1234`；4.x 无 GetXruns | `web/src/camilla.rs:3-7,435-448`；`web/docs/API.md §6` | 【验】 |
 | AES67 daemon / Inferno+statime / ptp4l / phc2sys | AoIP 端点与 PTP | `audio/overlay/etc/aes67-daemon/daemon.conf:1-37`；`audio/overlay/etc/statime/inferno-ptpv1.toml`；`audio/overlay/etc/ptp4l-master-aes67.conf` | 【验】 |
 | MOTU CueMix 5 | MOTU 控制面（UDP 1280 信标 + WS 1280 datastore） | `tools/motu/PROTOCOL-REPORT.md:6,14`；`web/docs/API.md §9.1` | 【验】 |
@@ -52,8 +52,8 @@
 | 消费者 | 依赖的兼容面 | 证据 |
 | --- | --- | --- |
 | 现有 Web UI `web/assets/app.js` | REST：auth、overview、mode、audio/format、camilladsp、ptp、aes67/inferno、alsa、motu、channelmap、input-mode；字段：overview 的 mode/system/camilla/ptp/alsa/services/service_notes/power、mode 的 status 字段、components.ptp/aoip/camilla/audio、channelmap view、input-mode | `web/assets/app.js:289-332,418-527,574-705,781-875,926-1005,1051-1119,1178-1259,1279-1432,1501-2166` 【验】 |
-| 现有 Web 服务端 | `tspi-mode status/切换 --json`、`tspi-channelmap validate/render/apply/rollback`、Camilla WS 1234、systemd/journald、CueMix WS 1280、/proc/asound、/sys | `web/src/mode.rs:1113-1238`；`web/src/channelmap.rs:1600-2220`；`web/src/camilla.rs:287-325`；`web/src/config.rs:89,147-155,469` 【验】 |
-| S1 内容检测 daemon | Camilla WS `GetCaptureSignalRms`、`SetFaderVolume`、`/run/tspi/input-content.json`、`/etc/tspi-audio/input-mode.json` | `audio/overlay/usr/local/bin/tspi-upmix:1691-1717`；`audio/overlay/etc/systemd/system/tspi-upmix-autodetect.service:12（ExecStart；:4-5 Wants/After 见 C07）` 【验】 |
+| 现有 Web 服务端 | `khaen-mode status/切换 --json`、`khaen-channelmap validate/render/apply/rollback`、Camilla WS 1234、systemd/journald、CueMix WS 1280、/proc/asound、/sys | `web/src/mode.rs:1113-1238`；`web/src/channelmap.rs:1600-2220`；`web/src/camilla.rs:287-325`；`web/src/config.rs:89,147-155,469` 【验】 |
+| S1 内容检测 daemon | Camilla WS `GetCaptureSignalRms`、`SetFaderVolume`、`/run/khaen/input-content.json`、`/etc/khaen-audio/input-mode.json` | `audio/overlay/usr/local/bin/khaen-upmix:1691-1717`；`audio/overlay/etc/systemd/system/khaen-upmix-autodetect.service:12（ExecStart；:4-5 Wants/After 见 C07）` 【验】 |
 | 校准 producer/consumer | calibration YAML v1/v1.1（字段/范围/未知 type 拒收）、channelmap v2 合并规则 | `calibration-spec/CONTRACT.md:26-196,245-258`；`calibration-spec/tools/validate_calibration.py` 【验】 |
 | 新栈任务 | 本文件 R/W/Y/A/P/X 条与检查表 K 条 | 本文件；WBS T05/T13/T24/T60/T42/T44/T25/T70/T74【推】 |
 
@@ -75,7 +75,7 @@
 
 ### 2.2 四条硬规则
 
-1. **不静默降级**：未知字段/未知 type/未知 schema 不得被丢弃后继续（channelmap 已按此实现 rc=2；校准未知 filter type 必须整份拒绝）。见 `tspi-channelmap:409-411`、`CONTRACT.md:137,251`。
+1. **不静默降级**：未知字段/未知 type/未知 schema 不得被丢弃后继续（channelmap 已按此实现 rc=2；校准未知 filter type 必须整份拒绝）。见 `khaen-channelmap:409-411`、`CONTRACT.md:137,251`。
 2. **不假 ack**：任何"应用/切换/音量/校准 apply"响应必须在真正生效后返回，并带实际版本（graph/coeff/config hash）；prepare 与 commit 分离。见 DEC §5/§6；WBS T24。
 3. **不双计/不双应用**：校准 curve 与渲染 P 不重复乘；极性只信校准字段（CONTRACT:123-124）；同一份 manifest 不得未校验就切 profile（DEC §1）。
 4. **不回旧 C**：任何失败路径只能回自研 last-good 或 mute；不得 systemctl start camilladsp 或依赖 C 兜底（DEC §0/§7；WBS §8）。
@@ -86,7 +86,7 @@
 - REST 落地状态（F-21，task-184）：已落地/横切 16 行 = ROUTED 13（R01-R06、R10-R14、R48、R49）+ RETIRED_ROUTE 1（R47）+ CROSS_CUTTING 2（R50、R51）；`ADAPT-DEFERRED`/`KEEP-DEFERRED` 35 行（R07-R09、R15-R46）不注册路由。唯一机器可读对照见 §3.7，由 `matrix_routes` 测试自动核对。
 - WS：当前 web 客户端固定 12 条 live 读命令 + `GetConfig`/`SetConfigJson`/`SetVolume`；S1 daemon 另有 `GetCaptureSignalRms`/`SetFaderVolume`；P1 兼容子集见 §4。
 - YAML/JSON 契约：channelmap v2、layout-presets v2、calibration v1 与 v1.1、input-content v1/input-mode v1 四组；另 target 导入草案与 P1 新 IR/manifest（§5）。
-- 模式：off/aes67/dante + P1 `toslink`/`target_multichannel`（WBS T44）；`tspi-mode` exit 0..10（11 个取值：0/1/2/3/4/5/6/7/8/9/10）；`--restore` 为独立入口（不计入 exit 集）。
+- 模式：off/aes67/dante + P1 `toslink`/`target_multichannel`（WBS T44）；`khaen-mode` exit 0..10（11 个取值：0/1/2/3/4/5/6/7/8/9/10）；`--restore` 为独立入口（不计入 exit 集）。
 - chunksize：**runtime 仅 64/128**（生产 128、最终独立窗 64；T02 core-v1 Q-11）；32/256/512/1024 只作 UI/参考展示，REST 对非 64/128 返回 400/unsupported（见 R13/R14/Q09）。
 - 保护：P01-P14 共 14 行（格式/削波、计数/故障、limiter/max gain、增益裕量、延迟/极性、回退图、音量/mute、校准扫频安全、xrun/超时、启动/断流、切换安全、校准应用、验收证据、未决参数）。
 
@@ -96,7 +96,7 @@
 
 | 策略类别 | 端点/范围（含处置码） | 未知字段策略 | 版本策略 | 迁移动作 |
 | --- | --- | --- | --- | --- |
-| ADD | R48、R49（新增 calibration job / runtime 控制；§2.1 ADD） | 严格：未知字段 400 `unknown_field`（给字段名/路径） | 请求头 `X-TSPI-API-Version` 可选、缺省 v1 | 无历史包袱 |
+| ADD | R48、R49（新增 calibration job / runtime 控制；§2.1 ADD） | 严格：未知字段 400 `unknown_field`（给字段名/路径） | 请求头 `X-KHAEN-API-Version` 可选、缺省 v1 | 无历史包袱 |
 | ADAPT / ADAPT-DEFERRED | 已落地 ADAPT=R10-R14；ADAPT-DEFERRED=R07、R15-R28、R34-R46（不含 R47；§2.1/§3.7） | 落地后按各 R 行冻结 request struct，未知字段 400 `unknown_field`；DEFERRED 行当前不注册路由 | 同上 | 落地 owner 见 §3.7 |
 | KEEP / KEEP-DEFERRED | 已落地 KEEP=R01-R06、R50、R51；KEEP-DEFERRED=R08、R09、R29-R33（§2.1/§3.7） | 已落地行迁移期允许现有客户端额外字段忽略（白名单：R02-R06 认证字段等）；DEFERRED 行不注册路由 | 同上 | 白名单变更须更新本表并在 T70 回归；DEFERRED 落地见 §3.7 |
 | RETIRE | R47（input-mode；§2.1 RETIRE） | GET 200 `{"status":"not_supported"}` / PUT 400 `not_supported`（唯一例外，见 X15） | 同上 | UI 同变更隐藏/禁用 |
@@ -130,7 +130,7 @@
 | --- | --- | --- | --- | --- | --- |
 | R10 | GET /api/mode | 当前模式+切换状态+steps+components+profiles+persisted+mock；401 | ADAPT | 顶层字段（mode/mode_label/target/state/step/progress/steps/last_error/warnings/enabled/restore_on_start/switch_script/strategy/profiles/script_status/persisted）保持给 UI；**必须接受 P1 值 off/aes67/dante/toslink/target_multichannel 并回 actual profile/layout/format**；实际 owner 换新栈 T44 | 验：API.md §4、web/src/routes/mode.rs:29-33、web/src/mode.rs:217-240、web/assets/app.js:574-705；WBS T44；推断：owner 换新栈 |
 | R11 | PUT /api/mode | body `{mode}`；202 接受；在途 409；未启用 403；未知值 400 | ADAPT | 202/409/403/400 语义保持；**接受 toslink/target_multichannel 新值（WBS T44）**；切换由新栈唯一 owner；不得并行第二个模式切换；成功后 actual mode/profile 与 ack 一致 | 验：API.md §4、web/src/routes/mode.rs:69-86、web/src/config.rs:222-230；WBS T44；推断：新 control 扩展 |
-| R12 | GET /api/mode/script-status | 主动执行 `tspi-mode status --json`；脚本缺失返回 available:false+message | ADAPT | 若保留脚本则 schema `tspi-audio/v1` 字段不变；若新栈不再用该脚本，必须返回 available:false+原因（不得 500），并由 /api/mode 提供等价 status | 验：web/src/routes/mode.rs:50-67、web/src/mode.rs:157-189,1351-1379；推断：脚本退役路径 |
+| R12 | GET /api/mode/script-status | 主动执行 `khaen-mode status --json`；脚本缺失返回 available:false+message | ADAPT | 若保留脚本则 schema `khaen-audio/v1` 字段不变；若新栈不再用该脚本，必须返回 available:false+原因（不得 500），并由 /api/mode 提供等价 status | 验：web/src/routes/mode.rs:50-67、web/src/mode.rs:157-189,1351-1379；推断：脚本退役路径 |
 | R13 | GET /api/audio/format | 返回当前模式采样率/位深/声道/chunksize/target_level/允许范围/默认值/xrun 线索/告警 | ADAPT | **runtime 仅 64/128 chunksize**（生产 128、最终独立窗 64；T02 core-v1 Q-11）；32/256/512/1024 仅 UI/参考展示，REST 对非 64/128 返回 400/unsupported；采样率 48k/96k；actual 必须来自新 host 实际 hwparams | 验：API.md §5、web/src/audio.rs:10-15,109-141；推断：新 host actual |
 | R14 | PUT /api/audio/format | serde_yaml 校验→备份→写文件→WS SetConfigJson→失败 systemd restart→再失败回滚；位深/声道只读 | ADAPT | body 字段 `sample_rate/chunksize/target_level` 至少一个；非法 400；**chunksize 仅接受 64/128，其它值 400/unsupported（T02 Q-11）**；应用需 prepare/commit actual ack；不得通过 Camilla 配置或 systemd 重启生效 | 验：API.md §5、web/src/routes/audio.rs:65-106；推断：新栈生效机制 |
 
@@ -152,9 +152,9 @@
 | R21 | GET/PUT /api/ptp/config | 解析 ptp4l.conf（masterOnly/priority1）；PUT 备份+重启+失败回滚 | ADAPT-DEFERRED | 仅对仍存在的 linuxptp 服务生效；新栈若内建 PTP owner，接口必须显式映射或 410；PUT 需 400 校验+回滚证据 | 验：API.md §7、web/assets/app.js:1032；推断：PTP 归属待 Q05 |
 | R22 | POST /api/ptp/start、/stop、/restart | 操作 ptp4l/phc2sys（仅 B2 有意义） | ADAPT-DEFERRED | 不得与 AoIP daemon 的 PTP 互斥冲突；B1 下不误启 ptp4l；失败可回滚 | 验：API.md §7、web/assets/app.js:1051；推断：新栈 mode owner |
 | R23 | GET /api/aes67、/logs、/config | 服务状态+只读配置+journal 1..2000 行 | ADAPT-DEFERRED | 路径与字段（status/service）保持；端点配置只读展示来自实际渲染文件；日志行数上限保持 | 验：API.md §8、web/assets/app.js:1059-1119；推断：后端新 control |
-| R24 | POST /api/aes67/start、/stop、/restart | systemd 操作 | ADAPT-DEFERRED | 新栈 owner 管理 aes67-daemon 生命周期；与 dante 互斥；失败恢复由 mode 状态机负责；不得静默成功 | 验：API.md §8、tspi-mode:327-365；推断：owner 换新栈 |
+| R24 | POST /api/aes67/start、/stop、/restart | systemd 操作 | ADAPT-DEFERRED | 新栈 owner 管理 aes67-daemon 生命周期；与 dante 互斥；失败恢复由 mode 状态机负责；不得静默成功 | 验：API.md §8、khaen-mode:327-365；推断：owner 换新栈 |
 | R25 | GET /api/inferno、/logs、/config | 同上（Inferno 无统一配置文件） | ADAPT-DEFERRED | 保持"无独立服务"的说明语义；配置只读环境变量/ asound.conf 说明 | 验：API.md §8、web/assets/app.js:1059-1119；推断：后端新 control |
-| R26 | POST /api/inferno/start、/stop、/restart | systemd 操作 | ADAPT-DEFERRED | Dante 模式由 statime+inferno 链路；失败不半启；不得回 C | 验：API.md §8、tspi-mode:296-325；推断：新栈 owner |
+| R26 | POST /api/inferno/start、/stop、/restart | systemd 操作 | ADAPT-DEFERRED | Dante 模式由 statime+inferno 链路；失败不半启；不得回 C | 验：API.md §8、khaen-mode:296-325；推断：新栈 owner |
 | R27 | GET /api/alsa | cards/pcm（实测通道）/hw_params/usb_devices（MOTU 07fd）/motu_present/告警 | ADAPT-DEFERRED | 新栈实际 ALSA 视图；稳定 ID 与 role scatter 显式；设备独占状态可见；不得假定 card 号 | 验：API.md §9、web/assets/app.js:1192-1200；推断：新 host 维护 |
 | R28 | POST /api/alsa/test-tone | `{device,channel?}`；当前实现只校验 device（白名单），**channel 为文档字段、服务端未使用/静默忽略**（`web/src/routes/alsa.rs:34-38`）；内嵌 1k/48k/16bit WAV；mock 不执行 | ADAPT-DEFERRED | device 必填白名单；channel 必须显式决定：实现按通道播放或 400 unknown_field，禁止继续静默忽略；新 host 播放测试音、设备独占、默认低电平；401/400 保持；列入 §2.4 迁移白名单 | 验：API.md §9、web/src/routes/alsa.rs:34-38、web/assets/app.js:1178；推断：新 host 实现 |
 | R29 | GET /api/motu/status | CueMix 在线状态/main_trim/direct/phantom；离线仍 200 online:false+reason | KEEP-DEFERRED | MOTU 控制面保留（final insert/主衰减/快照）；离线语义保持；不得因新栈改变用户 Toslink 直通 | 验：API.md §9.1、web/assets/app.js:1227-1259、PROTOCOL-REPORT:6,14 |
@@ -169,10 +169,10 @@
 | --- | --- | --- | --- | --- | --- |
 | R34 | GET /api/channelmap | view：document/effective_roles/input_roles/validation/presets/probe/profiles/fir_files/mode_off/mock | ADAPT-DEFERRED | 字段保持；document 来自新栈唯一 active 文件；validation 由新栈权威校验器给出（不得本地放行） | 验：API.md §10、web/src/routes/channelmap.rs:104-107、web/assets/app.js:1501 |
 | R35 | POST /api/channelmap/draft | `{input_layout,output_layout,profile_name?,capture_channels?,playback_channels?}` 生成显式 roles+sources 草稿 | ADAPT-DEFERRED | 未知布局 400；显式 N/O；不实现上混；stereo 默认只 FL/FR | 验：API.md §10、web/assets/app.js:1574,1640,1989；推断：新栈生成 |
-| R36 | POST /api/channelmap/validate | 委托 `tspi-channelmap validate --json`；CLI 不可用 503；不得本地规则放行（mock 除外） | ADAPT-DEFERRED | 新栈权威校验器（T25/T13）同语义：error/warning 分级、未知字段 rc=2、未知 type 拒收；503→新栈 unavailable | 验：API.md §10、web/assets/app.js:2031；推断：校验器换新栈 |
+| R36 | POST /api/channelmap/validate | 委托 `khaen-channelmap validate --json`；CLI 不可用 503；不得本地规则放行（mock 除外） | ADAPT-DEFERRED | 新栈权威校验器（T25/T13）同语义：error/warning 分级、未知字段 rc=2、未知 type 拒收；503→新栈 unavailable | 验：API.md §10、web/assets/app.js:2031；推断：校验器换新栈 |
 | R37 | PUT /api/channelmap | 物化 roles+sources 保存 active；force=true 允许草稿 | ADAPT-DEFERRED | 严格 schema；保存与 apply 分离；备份旧文件；不得自动 apply | 验：API.md §10、web/assets/app.js:2042 |
 | R38 | POST /api/channelmap/apply | 保存→校验→apply --mode；失败回滚信息（如 exit 9） | ADAPT-DEFERRED | prepare→commit actual version ack；设备宽度校验；stale 拒绝；失败保留 last-good 并返回证据 | 验：API.md §10、web/assets/app.js:2058；推断：新栈 apply 语义 |
-| R39 | POST /api/channelmap/rollback | `tspi-channelmap rollback` | ADAPT-DEFERRED | 回滚到自研 last-good 图/coeff（不是回 C）；回滚后 actual version 可查 | 验：API.md §10、web/assets/app.js:2075；推断：last-good 由新栈 |
+| R39 | POST /api/channelmap/rollback | `khaen-channelmap rollback` | ADAPT-DEFERRED | 回滚到自研 last-good 图/coeff（不是回 C）；回滚后 actual version 可查 | 验：API.md §10、web/assets/app.js:2075；推断：last-good 由新栈 |
 | R40 | GET /api/channelmap/render | 渲染结果文本；CLI 不可用 503；mock 读文件 | ADAPT-DEFERRED | 渲染来自新栈 graph/target；不得读旧 C 文件冒充；文本格式可不同但需 UI 同步 | 验：API.md §10、web/assets/app.js:2136；推断：渲染器换新栈 |
 | R41 | GET/POST /api/channelmap/profiles | 列表/save `{name,document?}` | ADAPT-DEFERRED | profile 目录与命名规则保持；坏 document 400；不自动 apply | 验：API.md §10、web/assets/app.js:2097 |
 | R42 | POST /api/channelmap/profiles/load、/delete | `{name}`；load 覆盖 active（备份）不自动 apply；不存在 404 | ADAPT-DEFERRED | 语义保持；load 后 actual active 可查；delete 不存在 404 | 验：API.md §10、web/assets/app.js:2106,2115 |
@@ -188,7 +188,7 @@
 | --- | --- | --- | --- | --- | --- |
 | R48 | ADD 校准 job REST（start/status/cancel/apply/retest/rollback） | 当前无；S1 手工 calibrate 流程 | ADD | job 状态至少 queued→preflight→sweep/capture→quality_check→fit_P→solve_G→compile→prepared→apply→remeasure→independent_holdout→complete/failed/cancelled/rolled_back（DEC §2）；设备独占互斥（DEC §2）；cancel 安全停扫频；apply 实际 ack+version；retest/rollback 可查；失败只 last-good/mute；报告含 raw/hash/版本（WBS §5） | 验：DEC §2、WBS T60/T70/§5；推断：路径与响应字段由 T02/T42 冻结（Q06） |
 | R49 | ADD 新栈 runtime/control REST（status/volume/mute/target/coeff/version） | 当前分散在 camilladsp/audio 面；UI 依赖 | ADD | 必须覆盖 Web 日常：输入/路由/volume/mute/状态/目标/系数/校准入口；状态响应含 actual graph/coeff/config version 与 hash；volume 范围 -150..+50（继承）；mute 幂等；prepare/commit 分离；冲突 409 | 验：DEC §6、WBS T42/T44/T70；推断：具体路径 T42 |
-| R50 | 错误 envelope 与 API 版本（横切） | 既有统一 `{"error":{"code","message"}}`；HTTP 400/401/403/404/409/429/500/503（API.md §1、web/src/error.rs:44-68）；无 API 版本字段 | KEEP（版本策略见 X14） | 所有 REST（含 serde 提取失败）必须返回同一 envelope；版本使用**可选**请求头 `X-TSPI-API-Version`（缺省=v1），仅显式不兼容版本才 400 `unsupported_api_version`；响应头回 `X-TSPI-API-Version: 1`；状态码集合以 API.md §1 表为准（不含 422，见 X03）；安全头保持 | 验：API.md §1、web/src/error.rs:44-68,92-101、web/src/routes/mod.rs:132-151；推断：版本头 ADD |
+| R50 | 错误 envelope 与 API 版本（横切） | 既有统一 `{"error":{"code","message"}}`；HTTP 400/401/403/404/409/429/500/503（API.md §1、web/src/error.rs:44-68）；无 API 版本字段 | KEEP（版本策略见 X14） | 所有 REST（含 serde 提取失败）必须返回同一 envelope；版本使用**可选**请求头 `X-KHAEN-API-Version`（缺省=v1），仅显式不兼容版本才 400 `unsupported_api_version`；响应头回 `X-KHAEN-API-Version: 1`；状态码集合以 API.md §1 表为准（不含 422，见 X03）；安全头保持 | 验：API.md §1、web/src/error.rs:44-68,92-101、web/src/routes/mod.rs:132-151；推断：版本头 ADD |
 | R51 | 静态资源与 fallback | `/`、`/index.html`、`/style.css`、`/app.js`、`/favicon.*`、`/test-tone.wav` 公开；未知路径 404 纯文本；`/api` 外 fallback 到静态 | KEEP（单一处置） | 同源无 CDN；CSP 允许同源脚本；T70 新 UI 可更新内容但不得引入外部资源；未知 `/api/*` 必须 JSON 404（X01）；静态路径保持给旧 UI 迁移期用 | 验：API.md §11、web/src/assets.rs:32-48、web/src/routes/mod.rs:125；未测：`/api/*` 未知路径实际 fallback 行为（§13.3 未测项 6） |
 
 ### 3.7 R 矩阵 ↔ rest.rs 路由落地对照（F-21，机器可读）
@@ -279,9 +279,9 @@
 | W15 | GetConfig | 返回当前配置 YAML 字符串；WS 不可用时 web 回退读文件 | 返回当前 graph/manifest 文档（新栈自有 schema，带版本/hash）；内容不含密钥；格式变更需 REST/UI 同步 | 验：web/src/camilla.rs:524-556；推断：文档 schema 新栈定 |
 | W16 | SetConfigJson | 传 JSON 字符串（由 YAML 转 JSON）；成功才返回 Ok；失败明细；web 失败回退 systemd 重启 | **必须 prepare 校验+资源准入后再 commit，真正生效后返回 Ok**（T24"prepare commit 实际 ack"）；失败不得部分应用；返回 new version/hash；不得 C 重启兜底 | 验：web/src/camilla.rs:327-335,337-412；WBS T24；DEC §5；推断：新栈语义 |
 | W17 | SetVolume | f64；范围 -150..+50；返回实际值或 {volume} | 越界显式错误；返回 actual dB；与 mute 状态一致；写后 GetVolume 必须一致 | 验：web/src/camilla.rs:590-608；推断：新栈 |
-| W18 | GetCaptureSignalRms | 返回 `value` 数组（按采集通道索引的 dB 值）；S1 对缺失值按 -240 处理 | T24 列为必需兼容项：数组长度=采集通道数；单位 dBFS；静音可用有限负值（如 -150/-240 口径固定并文档化）；不得返回 NaN/Inf | 验：tspi-upmix:1691-1704；WBS T24；推断：口径新栈冻结 |
-| W19 | SetFaderVolume | `[fader_id:int, volume_db:float]`；S1 用 fader 1/2 切 Aux 路径；失败抛错 | T24 列为必需兼容项：支持已分配 fader id 的音量写入；未知 id 明确错误；不得用 fader 绕过保护/限幅；P1 无内容上混，不得把 fader 当"切上混路径" | 验：tspi-upmix:1707-1717；WBS T24；DEC §6；推断：fader 语义新栈定 |
-| W20 | 未知命令 | 现有客户端只处理已知命令；未回复会超时 | 必须回复同键错误（code=UnknownCommand/unsupported），连接可继续；不得静默/挂起（客户端有超时但不可依赖） | 验：web/src/camilla.rs:259-269；tspi-upmix cmd 超时：1666-1678；推断：新栈契约（Q08） |
+| W18 | GetCaptureSignalRms | 返回 `value` 数组（按采集通道索引的 dB 值）；S1 对缺失值按 -240 处理 | T24 列为必需兼容项：数组长度=采集通道数；单位 dBFS；静音可用有限负值（如 -150/-240 口径固定并文档化）；不得返回 NaN/Inf | 验：khaen-upmix:1691-1704；WBS T24；推断：口径新栈冻结 |
+| W19 | SetFaderVolume | `[fader_id:int, volume_db:float]`；S1 用 fader 1/2 切 Aux 路径；失败抛错 | T24 列为必需兼容项：支持已分配 fader id 的音量写入；未知 id 明确错误；不得用 fader 绕过保护/限幅；P1 无内容上混，不得把 fader 当"切上混路径" | 验：khaen-upmix:1707-1717；WBS T24；DEC §6；推断：fader 语义新栈定 |
+| W20 | 未知命令 | 现有客户端只处理已知命令；未回复会超时 | 必须回复同键错误（code=UnknownCommand/unsupported），连接可继续；不得静默/挂起（客户端有超时但不可依赖） | 验：web/src/camilla.rs:259-269；khaen-upmix cmd 超时：1666-1678；推断：新栈契约（Q08） |
 | W21 | 非法请求 | 未验证（现有客户端不发） | 非 JSON/空命令/类型错误：返回错误或关闭并给原因码；不得 panic；单帧大小上限；错误不泄露内部路径 | 推断：新栈契约（未测） |
 | W22 | 无 GetXruns | CamillaDSP 4.x 无该命令，xrun 由 journal+StopReason 推断 | 新栈不得假设/伪造 GetXruns；xrun/under/over 通过 REST 状态或计数提供；WS 兼容子集不扩该命令 | 验：API.md §6；web/src/camilla.rs:6-7,55-84 |
 | W23 | PrepareConfigJson | P1 ADD（非 Camilla 原生；`crates/compat/src/ws.rs` 的 `P1_ADDED_COMMANDS` 已实现）。只做 schema/字段/长度/taps/rate/role/精度/hash 校验 + 容量准入，**不得改变音频输出**；成功返回 `prepared_plan_version/graph_id/config_sha256/expected_workers` 凭据 | ADD：prepare 与 commit 分离；无 pending 时 commit/abort 返回 `not_prepared`；坏配置返回 `prepare_rejected` 且零副作用；与 T42 `/api/runtime/prepare` 同一判据 | 验（库内）：ws.rs:143-151（P1_ADDED_COMMANDS）、:2047（prepare_config）；`cargo test -p khaen-compat` W16 用例；**未测：真实 host/板端 NOT_RUN**（T26） |
@@ -292,33 +292,33 @@
 
 ## 5. YAML/JSON 文件契约矩阵（Y01–Y24）
 
-> 说明：channelmap/layout-presets 以板端 Python `tspi-channelmap` 为唯一权威（API.md §10）；校准以 `calibration-spec/CONTRACT.md` 为权威；本表给新栈 adapter（T13/T25/T57）的兼容要求。
+> 说明：channelmap/layout-presets 以板端 Python `khaen-channelmap` 为唯一权威（API.md §10）；校准以 `calibration-spec/CONTRACT.md` 为权威；本表给新栈 adapter（T13/T25/T57）的兼容要求。
 
 | ID | 文件/字段 | 现状契约与来源 | P1 要求（可判） | 证据 |
 | --- | --- | --- | --- | --- |
-| Y01 | channelmap v2 顶层键 | 白名单 `schema/version/profile/input/output/remap/bass_management`；未知键=error（"v2 严格校验"） | 新栈解析必须同样严格；未知键拒收并报路径；不得丢弃后继续 | 验：tspi-channelmap:36,78-85；API.md §10|
-| Y02 | schema/version | `schema=tspi-channelmap/v2`、`version=2`；不匹配 rc=2 | 精确匹配；新版本另立 schema；旧版只读兼容 | 验：tspi-channelmap:164-167；API.md §10|
-| Y03 | input 块 | 键 `layout/channels/presets/probe_order`；channels 可 auto；apply 优先实测通道数 | 保留键语义；未知布局/缺布局报错；N 可变；不实现上混 | 验：tspi-channelmap:38；API.md §10|
-| Y04 | output 块 | 键 `device/channels/layout/roles`；channels 可 auto；profile 值作 fallback | 保留；输出宽度与实测设备校验；未知 layout 拒收 | 验：tspi-channelmap:39；API.md §10|
-| Y05 | roles 字段与边界 | `id/label/enabled/mute/outputs/sources/gain_db/delay_ms/polarity/highpass/lowpass/peq/fir/link_to`；gain -60..+12、delay 0..200ms、polarity normal/invert、HP/LP 20..fs/2、阶数 2/4/6/8、PEQ≤32 | 保留全部字段语义与边界；越界拒收（rc=3）；未知字段拒收；多路 fan-out 支持 | 验：tspi-channelmap:43-45；API.md §10|
-| Y06 | PEQ 段 | `{freq,q,gain_db,type?}`；type∈{peaking(缺省),low_shelf,high_shelf}；peaking q 0.1..10；shelf q=RBJ slope S∈0.1..1.0；未知 type rc=2；渲染 shelf slope=12*q | 保留；不得丢 type；不得把 shelf 当 peaking；未知 type 整份拒收 | 验：tspi-channelmap:46-50,395-411；API.md §10；CONTRACT.md:137-139 |
-| Y07 | FIR 引用 | `{path,samplerate,channel?}`；path 相对 profile 或绝对；fs 必须匹配当前模式；taps>4096 实验、>8192 强警告（Web UI 标签） | 保留键；未知键/非法路径/缺 fs（无法解析时）拒收；与当前 fs 不一致拒收；**运行准入按 R45：>4096 需 T56 profile 准入（8192/16384 extended），>16384 运行期拒收**；UI 的“实验/强警告”不是准入依据；不得静默截断 taps | 验：tspi-channelmap:51,114-133；API.md §10；WBS §6；推断：新栈准入 |
-| Y08 | remap | `{preset,routes,drop_unused,silence_unmapped}`；route `{src,dest,gain_db,mute,mode}`；mode∈direct/fold/duplicate/mix/drop/silence；sources 与 remap 不能同时非空 | 保留；未知 preset/角色拒收；sources 为最终矩阵时 remap 仅生成用，不得双计 | 验：tspi-channelmap:40-42,66,457-502；API.md §10|
-| Y09 | bass_management | `enabled/lfe_role/lfe_to/lfe_gain_db/redirect{mains_highpass_hz,...}`；enabled 时 lfe_to/targets 引用的 SUB 角色 sources 必须为空 | 保留；未知角色拒收；渲染器接管 LFE+redirect 与 mains HP 的规则保持；P1 不新增"节目上混" | 验：tspi-channelmap:52-55,557；API.md §10|
-| Y10 | layout-presets v2 | `schema=tspi-layout-presets/v2`、input_layouts/output_layouts/remap_presets；4.1.2 角色 outputs 见 Y11 | 严格 schema；只读；新栈必须解析而非硬编码；与 Web 内嵌副本 drift 检查机制保留（现有 cargo test） | 验：layout-presets.yml:5,116-229；tspi-channelmap:56,103-111；API.md §10|
+| Y01 | channelmap v2 顶层键 | 白名单 `schema/version/profile/input/output/remap/bass_management`；未知键=error（"v2 严格校验"） | 新栈解析必须同样严格；未知键拒收并报路径；不得丢弃后继续 | 验：khaen-channelmap:36,78-85；API.md §10|
+| Y02 | schema/version | `schema=khaen-channelmap/v2`、`version=2`；不匹配 rc=2 | 精确匹配；新版本另立 schema；旧版只读兼容 | 验：khaen-channelmap:164-167；API.md §10|
+| Y03 | input 块 | 键 `layout/channels/presets/probe_order`；channels 可 auto；apply 优先实测通道数 | 保留键语义；未知布局/缺布局报错；N 可变；不实现上混 | 验：khaen-channelmap:38；API.md §10|
+| Y04 | output 块 | 键 `device/channels/layout/roles`；channels 可 auto；profile 值作 fallback | 保留；输出宽度与实测设备校验；未知 layout 拒收 | 验：khaen-channelmap:39；API.md §10|
+| Y05 | roles 字段与边界 | `id/label/enabled/mute/outputs/sources/gain_db/delay_ms/polarity/highpass/lowpass/peq/fir/link_to`；gain -60..+12、delay 0..200ms、polarity normal/invert、HP/LP 20..fs/2、阶数 2/4/6/8、PEQ≤32 | 保留全部字段语义与边界；越界拒收（rc=3）；未知字段拒收；多路 fan-out 支持 | 验：khaen-channelmap:43-45；API.md §10|
+| Y06 | PEQ 段 | `{freq,q,gain_db,type?}`；type∈{peaking(缺省),low_shelf,high_shelf}；peaking q 0.1..10；shelf q=RBJ slope S∈0.1..1.0；未知 type rc=2；渲染 shelf slope=12*q | 保留；不得丢 type；不得把 shelf 当 peaking；未知 type 整份拒收 | 验：khaen-channelmap:46-50,395-411；API.md §10；CONTRACT.md:137-139 |
+| Y07 | FIR 引用 | `{path,samplerate,channel?}`；path 相对 profile 或绝对；fs 必须匹配当前模式；taps>4096 实验、>8192 强警告（Web UI 标签） | 保留键；未知键/非法路径/缺 fs（无法解析时）拒收；与当前 fs 不一致拒收；**运行准入按 R45：>4096 需 T56 profile 准入（8192/16384 extended），>16384 运行期拒收**；UI 的“实验/强警告”不是准入依据；不得静默截断 taps | 验：khaen-channelmap:51,114-133；API.md §10；WBS §6；推断：新栈准入 |
+| Y08 | remap | `{preset,routes,drop_unused,silence_unmapped}`；route `{src,dest,gain_db,mute,mode}`；mode∈direct/fold/duplicate/mix/drop/silence；sources 与 remap 不能同时非空 | 保留；未知 preset/角色拒收；sources 为最终矩阵时 remap 仅生成用，不得双计 | 验：khaen-channelmap:40-42,66,457-502；API.md §10|
+| Y09 | bass_management | `enabled/lfe_role/lfe_to/lfe_gain_db/redirect{mains_highpass_hz,...}`；enabled 时 lfe_to/targets 引用的 SUB 角色 sources 必须为空 | 保留；未知角色拒收；渲染器接管 LFE+redirect 与 mains HP 的规则保持；P1 不新增"节目上混" | 验：khaen-channelmap:52-55,557；API.md §10|
+| Y10 | layout-presets v2 | `schema=khaen-layout-presets/v2`、input_layouts/output_layouts/remap_presets；4.1.2 角色 outputs 见 Y11 | 严格 schema；只读；新栈必须解析而非硬编码；与 Web 内嵌副本 drift 检查机制保留（现有 cargo test） | 验：layout-presets.yml:5,116-229；khaen-channelmap:56,103-111；API.md §10|
 | Y11 | 4.1.2 唯一 role→DAC | 0-based FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7、ch6 空；8ch 容器 7 物理角色 | 新栈唯一映射来源；须校验实际设备宽度；禁止用 Web 模板 SUB4；低带 dense 0..4→DAC 0/1/2/3/7 另表保存 | 验：layout-presets.yml:219-229；WBS §3；DEC §1；T57 |
 | Y12 | calibration v1 字段/范围 | 顶层 schema/sample_rate/reference_index/layout/created_unix/tool/version/note/measurement/channels；delay 0..200ms 且 min=0；polarity normal/invert；gain -12..+6；filters≤32；freq 20..min(20k,fs/2)、q、gain -24..+24；未知 type 拒收 | 新栈 T13 必须接受 v1（只读）；范围/唯一性/参考检查按 CONTRACT §5；错误拒收、warning 记录；不得改旧文件 | 验：CONTRACT.md:26-90,181-196；WBS T13|
 | Y13 | calibration v1.1 | v1 基础上 type 允许 low_shelf/high_shelf；peaking q 有限≥0.1（可>10）；shelf q=S∈[0.1,1.0]；未知 type 整份拒收；v1 消费方读不了含 shelf/q>10 的文件 | T13 必须接受 v1.1 并保留 type；渲染映射 slope=12*S；不得丢 type/降级 peaking | 验：CONTRACT.md:137-139,245-258；API.md §10|
 | Y14 | 校准未知项策略 | 未知顶层/通道字段=warning（保留扩展性）；未知 filter type=error；schema 不匹配=error | 新栈：语义未知（type/单位/参考/超预算）一律拒收；纯扩展字段可 warning 但不得参与应用；warning 必须上报到 job 报告 | 验：CONTRACT.md:196,89,137；已执行 validator 复核（见 §13.2） |
 | Y15 | 校准→渲染映射 | delay_ms=delay_samples*1000/fs；polarity=XOR(render, calib)；gain 相加；PEQ 追加且 type 原样；role 不存在拒收；delay 越界拒收；不双乘 curve | 新栈等价实现（映射到自有 graph）；极性只信校准字段；G 只模态残差、curve 不双乘（WBS §5）；apply 前校验、apply 后可复测 | 验：CONTRACT.md:141-163；WBS §5；DEC §2|
-| Y16 | 校准生命周期/位置 | ` /etc/tspi-audio/calibration/` 历史只增不改、原子写、current 可选；文件不自动触发应用 | 新栈保留只增不改/原子写/current 选择；apply 需显式 job；每个 artifact 带 hash/version/role/stale 字段（T13 IR 草案） | 验：CONTRACT.md:211-222；WBS T13/§5|
-| Y17 | target 导入草案（对齐 T04 现行 §6） | 字段/语义以 T04 §6（`rt-stack/spec/fir-toolbox.md`）为准：schema=tspi-target-draft/v1；必填 frequency_unit=Hz、magnitude_unit=dB、runtime_rate（必须=profile fs）、normalization=none/ref_1k/peak、interpolation=log_frequency_linear、edge_policy=hold/reject；有 phase 时必填 phase_unit=deg、phase_ref=none/absolute/delay_removed、unwrap_policy=unwrapped/auto；target_delay_samples 仅 phase_ref=delay_removed 必填（整数 0..200ms），absolute/none 必须缺省；reference_gain_db [-24,+24]；source_hash CSV 必填/ JSON 可选；x_ 未知字段 warning、其它未知字段 E_TGT_FIELD_UNKNOWN；**拒收码全集见 T04 §6.9（T04 v1.2-draft 为 28 码，随 T04 版本刷新；不写死行号/码数）** | T11 实现同规则；缺 phase 必须选明确设计 family 不猜零相位；20Hz/20k 端点另验 | 验：T04 §6（现行 v1.2-draft）；WBS §6 |
+| Y16 | 校准生命周期/位置 | ` /etc/khaen-audio/calibration/` 历史只增不改、原子写、current 可选；文件不自动触发应用 | 新栈保留只增不改/原子写/current 选择；apply 需显式 job；每个 artifact 带 hash/version/role/stale 字段（T13 IR 草案） | 验：CONTRACT.md:211-222；WBS T13/§5|
+| Y17 | target 导入草案（对齐 T04 现行 §6） | 字段/语义以 T04 §6（`rt-stack/spec/fir-toolbox.md`）为准：schema=khaen-target-draft/v1；必填 frequency_unit=Hz、magnitude_unit=dB、runtime_rate（必须=profile fs）、normalization=none/ref_1k/peak、interpolation=log_frequency_linear、edge_policy=hold/reject；有 phase 时必填 phase_unit=deg、phase_ref=none/absolute/delay_removed、unwrap_policy=unwrapped/auto；target_delay_samples 仅 phase_ref=delay_removed 必填（整数 0..200ms），absolute/none 必须缺省；reference_gain_db [-24,+24]；source_hash CSV 必填/ JSON 可选；x_ 未知字段 warning、其它未知字段 E_TGT_FIELD_UNKNOWN；**拒收码全集见 T04 §6.9（T04 v1.2-draft 为 28 码，随 T04 版本刷新；不写死行号/码数）** | T11 实现同规则；缺 phase 必须选明确设计 family 不猜零相位；20Hz/20k 端点另验 | 验：T04 §6（现行 v1.2-draft）；WBS §6 |
 | Y18 | input-content v1 / input-mode v1 | 运行态字段见 §6；覆盖文件 `{schema,mode,updated_unix,updated_by}`，mode∈auto/stereo/multichannel（兼容 force-* 别名） | **P1 不消费**：字段只作 S1 兼容资料；新栈不得据此切上混；REST 端点显式拒绝（R47/C07） | 验：INPUT-MODE.md:10-47；API.md §10；web/src/channelmap.rs:1229-1243 |
 | Y19 | 新栈 graph/manifest（ADD） | 当前为 CamillaDSP YAML（dante.yml/aes67.yml 模板）；P1 自有 IR/graph | 新增版本化 schema（version/hash/role/fs/taps/placement/P/phase/D/layout/limiters）；prepare/apply/stale 规则明确；不得把 Camilla YAML 当 P1 真值 | 验：DEC §2/§3；WBS §5；推断：T13/T42 冻结 |
 | Y20 | AoIP/PTP 配置模板 | daemon.conf JSON（http 8080/rtsp 8854/rtp 5004/mcast 239.1.0.1/ptp_domain 0/status_file）；statime TOML（kebab-case、deny_unknown_fields）；ptp4l conf（不支持行尾注释） | 新栈要渲染/校验这些模板：未知键拒收；ptp4l conf 禁止行尾注释；interface 占位符必须替换；配置 hash 纳入 actual version | 验：daemon.conf:1-37；statime toml:1-29；ptp4l conf:1-30；aoip REPORT:21,30 |
 | Y21 | CamillaDSP YAML | dante.yml/aes67.yml 模板；web 以 serde_yaml 校验并 WS 应用；仅开发参考 | P1 **仅开发 oracle**：不得作为运行时真值；可归档；新栈不依赖其字段 | 验：API.md §5/§6；DEC §0；audio/overlay/etc/camilladsp/*.yml |
-| Y22 | schema 不匹配 | channelmap rc=2；presets 加载即拒；calibration schema error | 所有文件入口先校 schema/version；不匹配拒收；不得"尽量解析" | 验：tspi-channelmap:106-107,164-167；CONTRACT.md:185 |
-| Y23 | 数值/单位校验 | 目标文件要求正频递增唯一、无 NaN；channelmap 数值范围；校准 delay 整数/极性枚举 | 新栈所有解析器：NaN/Inf/负数/超范围/混合单位/歧义语义一律拒收；错误带字段路径 | 验：WBS §6；CONTRACT.md:5,89；tspi-channelmap:88-95 |
+| Y22 | schema 不匹配 | channelmap rc=2；presets 加载即拒；calibration schema error | 所有文件入口先校 schema/version；不匹配拒收；不得"尽量解析" | 验：khaen-channelmap:106-107,164-167；CONTRACT.md:185 |
+| Y23 | 数值/单位校验 | 目标文件要求正频递增唯一、无 NaN；channelmap 数值范围；校准 delay 整数/极性枚举 | 新栈所有解析器：NaN/Inf/负数/超范围/混合单位/歧义语义一律拒收；错误带字段路径 | 验：WBS §6；CONTRACT.md:5,89；khaen-channelmap:88-95 |
 | Y24 | IR/manifest 版本与 stale | 无现成契约（P1 新） | 每个 artifact 必须带 version/hash/role/fs/taps/placement、P/phase/D、stereo mask/目标 profile；input/fs/role/P/hash 变化即 stale 重算；坏集不生效 | 验：DEC §2；WBS §5；推断：T13/T60 冻结 |
 
 ---
@@ -329,13 +329,13 @@
 
 | ID | 契约点 | 现状（S1）与来源 | P1 处置/要求 | 证据 |
 | --- | --- | --- | --- | --- |
-| C01 | 运行态文件 | `/run/tspi/input-content.json`，schema `tspi-input-content/v1`；字段 content_mode/detected/override/confidence/active_channels/rms_db/threshold_db/hold_ms/reason/h16_internal_upmix/container_layout/detector/updated_unix | P1 不写该文件、不消费该文件；REST GET 不得假装有检测结果（返回 not_supported/daemon-not-running） | 验：INPUT-MODE.md:10-38；API.md §10；web/src/channelmap.rs:1246-1307 |
-| C02 | 覆盖文件 | `/etc/tspi-audio/input-mode.json` schema `tspi-input-mode/v1`；mode∈auto/stereo/multichannel；force-* 别名归一化 | P1 不读不写；PUT 拒绝并保留旧文件不破坏（不得删除用户数据）；如未来恢复，另立版本再评审 | 验：INPUT-MODE.md:40-47；web/src/channelmap.rs:1229-1243,1757-1797 |
+| C01 | 运行态文件 | `/run/khaen/input-content.json`，schema `khaen-input-content/v1`；字段 content_mode/detected/override/confidence/active_channels/rms_db/threshold_db/hold_ms/reason/h16_internal_upmix/container_layout/detector/updated_unix | P1 不写该文件、不消费该文件；REST GET 不得假装有检测结果（返回 not_supported/daemon-not-running） | 验：INPUT-MODE.md:10-38；API.md §10；web/src/channelmap.rs:1246-1307 |
+| C02 | 覆盖文件 | `/etc/khaen-audio/input-mode.json` schema `khaen-input-mode/v1`；mode∈auto/stereo/multichannel；force-* 别名归一化 | P1 不读不写；PUT 拒绝并保留旧文件不破坏（不得删除用户数据）；如未来恢复，另立版本再评审 | 验：INPUT-MODE.md:40-47；web/src/channelmap.rs:1229-1243,1757-1797 |
 | C03 | 优先级 | override > detector > auto；auto 默认直通；detected=stereo 才上混 | 不适用（P1 无上混）；任何"默认上混"行为都被禁止 | 验：INPUT-MODE.md:47,57；web/src/channelmap.rs:1309-1334；DEC §1|
 | C04 | 判定依据 | 只用 C/SL/SR/height 的活动判多声道；**LFE 不作判据**（H16 旧固件 2.0 会填 LFE） | 不适用；若未来恢复，LFE 排除规则必须保留 | 验：INPUT-MODE.md:51-53 |
-| C05 | 时间参数 | 500ms 采样、hold 2500ms、迟滞 6dB、启动冻结 2.5s；RMS 来自 Camilla `GetCaptureSignalRms` | 不适用；新栈 RMS 命令保留（W18）但不得驱动内容切换 | 验：INPUT-MODE.md:54-56；tspi-upmix:1691-1704 |
+| C05 | 时间参数 | 500ms 采样、hold 2500ms、迟滞 6dB、启动冻结 2.5s；RMS 来自 Camilla `GetCaptureSignalRms` | 不适用；新栈 RMS 命令保留（W18）但不得驱动内容切换 | 验：INPUT-MODE.md:54-56；khaen-upmix:1691-1704 |
 | C06 | H16 内部上混标志 | `h16_internal_upmix` 按 detected 推断；true 时板端直通避免双上混；WebUI 提示 | 不适用；P1 不做内容判定，故 H16 内部上混由用户/上游决定，板端只按目标多声道直通映射/显式拒绝 | 验：INPUT-MODE.md:34-35,58-59；DEC §1|
-| C07 | P1 接口处置 | 现有 REST GET/PUT + S1 daemon + unit；unit 关键依赖：`tspi-upmix-autodetect.service:4-5` 有 `Wants/After=tspi-camilladsp.service`，`:12` 才是 ExecStart | **RETIRE（P1，状态码见 R47）** | GET 200 not_supported 状态壳、PUT 400 not_supported；UI 同变更隐藏/禁用；**必须禁用/移除 `tspi-upmix-autodetect.service` 并清除其 Wants/After=tspi-camilladsp.service（:4-5），否则 G-no-C 依赖/socket 检查失败**；不得用 fader 切上混路径 | 验：API.md §10、web/src/routes/channelmap.rs:109-127、audio/overlay/etc/systemd/system/tspi-upmix-autodetect.service:4-5,12；DEC §6；WBS §7 |
+| C07 | P1 接口处置 | 现有 REST GET/PUT + S1 daemon + unit；unit 关键依赖：`khaen-upmix-autodetect.service:4-5` 有 `Wants/After=khaen-camilladsp.service`，`:12` 才是 ExecStart | **RETIRE（P1，状态码见 R47）** | GET 200 not_supported 状态壳、PUT 400 not_supported；UI 同变更隐藏/禁用；**必须禁用/移除 `khaen-upmix-autodetect.service` 并清除其 Wants/After=khaen-camilladsp.service（:4-5），否则 G-no-C 依赖/socket 检查失败**；不得用 fader 切上混路径 | 验：API.md §10、web/src/routes/channelmap.rs:109-127、audio/overlay/etc/systemd/system/khaen-upmix-autodetect.service:4-5,12；DEC §6；WBS §7 |
 | C08 | 未知值/缺失文件 | 非规范 mode 返回 400（"mode 必须是 auto/stereo/multichannel"）；state 缺失时 detected=unknown、reason=daemon-not-running；不抛错 | P1 统一按 C07 显式拒绝；任何未知字符串不得猜成 stereo/multichannel | 验：web/src/channelmap.rs:1759-1760,2872-2876；INPUT-MODE.md:94 |
 | C09 | 缺中置内容适配（**P1 必须；用户要求项；已实现（host 自持）**；**不是**上混/通用下混） | S1 无自动折叠：4.1.2（无 C 角色）播放 5.1 内容时 C 只被警告/丢弃；新栈 plan 的 A_map 冻结「选择/零填、禁止混音」（core-v1 §1/§11.10），C 内容同样在输入选择层丢失 | **P1 必须**（用户 2026-11-17 裁决：中置暂无音箱，含 C 音轨不得丢中置）：输出布局无 C 角色（中置缺席）且输入内容布局有 C 时，在 **plan 之前的内容适配层**把 C 以 **−3 dB 同时预混进 FL/FR** 并消费 C 源（置零，防重复混）；输出布局含 C 时 passthrough（**不改有中置配置**）；D7 headroom（预测峰值 ≤−6 dBFS、headroom ≥6 dB）不满足时对全部源等量 trim；**不得**把它做成 plan 内 Mixer/上混节点、也不得扩成通用节目 downmix/自动内容上混（C01–C08 仍 RETIRE） | 验：host 自持实现 `rt-stack/crates/rt-host/src/content_map.rs`（`CenterDownmixPlan`，E_CHANNEL_MAP_*；task-210：host 不再依赖/调用 compat；host 用例见 `crates/rt-host/tests/content_map/`，含 −3 dB/有中置/无内容/不重复混/headroom/错误路径与 overlay 读取）、host 运行时接线 task-203（`rt-stack/crates/rt-host/src/main.rs`，证据 `rt-stack/evidence/center-downmix-host/`）、分层收口证据 `rt-stack/evidence/cursor-fix-v1-hostmap/`；compat 层原型 `crates/compat/src/channel_map.rs` + `crates/compat/tests/center_downmix/`（17 用例）保留为旧 S1/兼容层参考；真实 5.1 内容/板端 NOT_RUN |
 
@@ -346,26 +346,26 @@
 | ID | 契约点 | 现状与来源 | P1 要求（可判） | 证据 |
 | --- | --- | --- | --- | --- |
 | A01 | 模式取值（P1 模式面） | 现状 `off/aes67/dante`（web/src/config.rs:198-230）；P1 增加 **`toslink`（stereo_strict 直出）与 `target_multichannel`（目标多声道/file 输入）** 播放模式，与 calibration job 独占互斥（WBS T44）；解析大小写不敏感；未知值 400 | 保持这些播放模式互斥；未知值拒收；AES67/Dante 仍为 AoIP 端点模式；R10/R11 必须接受新值并返回 actual profile/layout/format；内部 calibration 独占态不得占用这些播放值语义 | 验：web/src/config.rs:198-230,849-852、web/src/routes/mode.rs:75-78、WBS T44、DEC §7；推断：新 control 扩展 |
-| A02 | CLI 契约 | `tspi-mode dante / aes67 / off [--json] [--dry-run] [--force] [--allow-unlocked-ptp] [--chunksize N] [--target-level N] [--adjust-period N] [--samplerate N]`；`status [--json]`；`--restore` | P1 可由新 control 替代，但 Web/脚本使用的参数与 JSON 输出语义需保留，或显式改调用方；未知参数 exit 2 | 验：tspi-mode:2-14,30-51 |
-| A03 | 退出码 | 0 就绪/1 未知/2 参数/3 前置缺失/4 设备/5 PTP 未锁/6 AoIP 流未就绪/7 DSP 启动失败/8 自检失败/9 已回滚/10 另一切换中 | 新 control 必须定义完整映射（现有 Web 映射缺 6，见 web/src/mode.rs:192-205），并让 Web 展示正确；exit 语义与回滚状态一致 | 验：tspi-mode:10-12；web/src/mode.rs:192-205（缺 6） |
-| A04 | status schema | `tspi-audio/v1`；顶层 schema/ts/mode/state/layout/outputs/ptp_role/ptp_lock/pid/ptp/input_content/aoip/camilladsp/alsa/last_error | 新栈 status 保留 schema 名与字段名（可 null）；camilladsp 子块改新栈 runtime 摘要或 null；unknown 字段容忍读取（现有 web 方式） | 验：tspi-mode:58-63,454-492；web/src/mode.rs:157-189（ScriptStatus）；parse_script_status 容错在 web/src/mode.rs:1510-1524，属 A05，不属本行 |
+| A02 | CLI 契约 | `khaen-mode dante / aes67 / off [--json] [--dry-run] [--force] [--allow-unlocked-ptp] [--chunksize N] [--target-level N] [--adjust-period N] [--samplerate N]`；`status [--json]`；`--restore` | P1 可由新 control 替代，但 Web/脚本使用的参数与 JSON 输出语义需保留，或显式改调用方；未知参数 exit 2 | 验：khaen-mode:2-14,30-51 |
+| A03 | 退出码 | 0 就绪/1 未知/2 参数/3 前置缺失/4 设备/5 PTP 未锁/6 AoIP 流未就绪/7 DSP 启动失败/8 自检失败/9 已回滚/10 另一切换中 | 新 control 必须定义完整映射（现有 Web 映射缺 6，见 web/src/mode.rs:192-205），并让 Web 展示正确；exit 语义与回滚状态一致 | 验：khaen-mode:10-12；web/src/mode.rs:192-205（缺 6） |
+| A04 | status schema | `khaen-audio/v1`；顶层 schema/ts/mode/state/layout/outputs/ptp_role/ptp_lock/pid/ptp/input_content/aoip/camilladsp/alsa/last_error | 新栈 status 保留 schema 名与字段名（可 null）；camilladsp 子块改新栈 runtime 摘要或 null；unknown 字段容忍读取（现有 web 方式） | 验：khaen-mode:58-63,454-492；web/src/mode.rs:157-189（ScriptStatus）；parse_script_status 容错在 web/src/mode.rs:1510-1524，属 A05，不属本行 |
 | A05 | 状态读取容错 | Web 端 ScriptStatus 用 Option 字段，未知新增字段保留为 Value，未知 schema 仅提示 | 新栈消费方保持"未知字段不崩、schema 前缀校验"；但不得把未知 schema 当成功依据 | 验：web/src/mode.rs:157-189,1200-1202 |
 | A06 | REST 切换语义 | PUT /api/mode 202 接受；在途 409；未启用 403；400 未知值 | 保持；切换串行唯一 owner；202 只表示已接受，不代表完成 | 验：API.md §4；web/src/routes/mode.rs:69-86 |
-| A07 | 切换编排 | 优先 `tspi-mode --json` 脚本；脚本缺失走内置编排（停 C→停 AoIP→停 PTP→启目标 PTP/等锁→启 AoIP→应用 dante.yml/aes67.yml→启 C→复核；失败回滚） | P1 由新 control 唯一实现；步骤中**不得有 Camilla 启停**；保留目标 PTP/锁/AoIP 就绪/自检/失败回滚顺序语义 | 验：API.md §4；web/src/mode.rs:1113-1238；DEC §6/§7|
-| A08 | dante 模式 profile | PTPv1、实际 unit `tspi-statime-inferno.service` + inferno ALSA 插件；96k/24bit、默认 chunksize 128/target 2048；web/src/config.rs 的 statime.service/inferno.service 为 legacy/内置默认名（web/src/config.rs:322-337） | 新栈按实际 overlay unit（`tspi-*`）启动并记录 actual；unit inventory 以 `systemctl list-unit-files 'tspi-*.service'` 为准；若实验/硬件变化须改 profile 并记录 | 验：audio/overlay/etc/systemd/system/tspi-statime-inferno.service、tspi-mode:465、web/src/config.rs:322-337；推断：T71 inventory |
-| A09 | aes67 模式 profile | PTPv2；B1 daemon 内建 slave（不启 ptp4l）；实际 unit `tspi-aes67-daemon.service`；48k/24bit；web/src/config.rs 的 aes67-daemon.service 为内置默认名 | 保持 B1 默认；B2/B3 仅显式配置；不得同跑 daemon 与 ptp4l GM；启动/停止以实际 unit 为准 | 验：audio/overlay/etc/systemd/system/tspi-aes67-daemon.service、tspi-mode:467、web/src/config.rs:338-356；RISKS §2 |
+| A07 | 切换编排 | 优先 `khaen-mode --json` 脚本；脚本缺失走内置编排（停 C→停 AoIP→停 PTP→启目标 PTP/等锁→启 AoIP→应用 dante.yml/aes67.yml→启 C→复核；失败回滚） | P1 由新 control 唯一实现；步骤中**不得有 Camilla 启停**；保留目标 PTP/锁/AoIP 就绪/自检/失败回滚顺序语义 | 验：API.md §4；web/src/mode.rs:1113-1238；DEC §6/§7|
+| A08 | dante 模式 profile | PTPv1、实际 unit `khaen-statime-inferno.service` + inferno ALSA 插件；96k/24bit、默认 chunksize 128/target 2048；web/src/config.rs 的 statime.service/inferno.service 为 legacy/内置默认名（web/src/config.rs:322-337） | 新栈按实际 overlay unit（`khaen-*`）启动并记录 actual；unit inventory 以 `systemctl list-unit-files 'khaen-*.service'` 为准；若实验/硬件变化须改 profile 并记录 | 验：audio/overlay/etc/systemd/system/khaen-statime-inferno.service、khaen-mode:465、web/src/config.rs:322-337；推断：T71 inventory |
+| A09 | aes67 模式 profile | PTPv2；B1 daemon 内建 slave（不启 ptp4l）；实际 unit `khaen-aes67-daemon.service`；48k/24bit；web/src/config.rs 的 aes67-daemon.service 为内置默认名 | 保持 B1 默认；B2/B3 仅显式配置；不得同跑 daemon 与 ptp4l GM；启动/停止以实际 unit 为准 | 验：audio/overlay/etc/systemd/system/khaen-aes67-daemon.service、khaen-mode:467、web/src/config.rs:338-356；RISKS §2 |
 | A10 | B1/B2/B3 | B1 默认（外部 GM 才锁）；B2 本机 ptp4l master 但 LKM 拦截/daemon slave-only 冲突；B3 第二网卡实验 | P1 不做模式选择扩展；B1 为交付默认；B2/B3 如启用必须先在 DEC 更新并重评互斥 | 验：RISKS:40-66；aoip REPORT:31-32,96 |
-| A11 | 服务单元 | 实际 overlay unit：`tspi-aes67-daemon`/`tspi-statime-inferno`/`tspi-ptp4l-master`/`tspi-phc2sys`/`tspi-ravenna-lkm`/`tspi-camilladsp`/`tspi-upmix-autodetect` 等；web/src/config.rs 默认名与 overlay 名并存 | P1 保留 AoIP/PTP 相关 unit（新 control 启停）；camilladsp unit 必须 disabled/inactive/移除；**upmix-autodetect 必须禁用且清除 `Wants/After=tspi-camilladsp.service`（service:4-5）**；G-no-C 以 systemctl inventory+依赖检查为准；禁止 dependency/socket 自动拉起 C | 验：audio/overlay/etc/systemd/system/*、tspi-upmix-autodetect.service:4-5,12；DEC §7；WBS §7 |
-| A12 | AES67 端点参数 | daemon.conf：HTTP 8080、RTSP 8854、RTP 5004、组播 239.1.0.1、ptp_domain 0、ptp_dscp 46、SAP 239.255.255.255、status_file /run/tspi/aes67-status.json、interface 占位、streamer 8 | 新栈渲染配置必须保持这些字段语义；端点选择/rate/format 互斥；status 文件可用于上线验证；不得改端口而 UI/防火墙不同步 | 验：daemon.conf:1-37；aoip REPORT:40 |
+| A11 | 服务单元 | 实际 overlay unit：`khaen-aes67-daemon`/`khaen-statime-inferno`/`khaen-ptp4l-master`/`khaen-phc2sys`/`khaen-ravenna-lkm`/`khaen-camilladsp`/`khaen-upmix-autodetect` 等；web/src/config.rs 默认名与 overlay 名并存 | P1 保留 AoIP/PTP 相关 unit（新 control 启停）；camilladsp unit 必须 disabled/inactive/移除；**upmix-autodetect 必须禁用且清除 `Wants/After=khaen-camilladsp.service`（service:4-5）**；G-no-C 以 systemctl inventory+依赖检查为准；禁止 dependency/socket 自动拉起 C | 验：audio/overlay/etc/systemd/system/*、khaen-upmix-autodetect.service:4-5,12；DEC §7；WBS §7 |
+| A12 | AES67 端点参数 | daemon.conf：HTTP 8080、RTSP 8854、RTP 5004、组播 239.1.0.1、ptp_domain 0、ptp_dscp 46、SAP 239.255.255.255、status_file /run/khaen/aes67-status.json、interface 占位、streamer 8 | 新栈渲染配置必须保持这些字段语义；端点选择/rate/format 互斥；status 文件可用于上线验证；不得改端口而 UI/防火墙不同步 | 验：daemon.conf:1-37；aoip REPORT:40 |
 | A13 | H16 AES67 流约束 | 每条 multicast flow ≤8 通道；默认组播 239.69.x.x:5004；16 TX；7.1.4 12 路需 2 flow；H16 默认 PTP slave 需外部 GM | 目标多声道 profile 必须按 flow 组合校验通道数；不得假设单 flow 16ch；H16 时钟角色未确认前 P1 AoIP 端到端为 INCOMPLETE | 验：h16-aip-research:196-198,244,270；RISKS:33-35 |
-| A14 | Dante/Inferno 端点 | inferno ALSA 插件 capture device "inferno"、S32_LE、96k、16ch；statime PTPv1 virtual clock；device id 由 MAC 派生 +0000；usrvclock 导出 | 新栈必须按稳定 ID/角色 scatter 打开设备；PTPv1 虚拟钟关系保持；inferno2pipe/ALSA 插件可加载不等于链路可用（需真实源） | 验：tspi-mode:159-165,206-222；statime toml:13-17；aoip REPORT:54-61 |
+| A14 | Dante/Inferno 端点 | inferno ALSA 插件 capture device "inferno"、S32_LE、96k、16ch；statime PTPv1 virtual clock；device id 由 MAC 派生 +0000；usrvclock 导出 | 新栈必须按稳定 ID/角色 scatter 打开设备；PTPv1 虚拟钟关系保持；inferno2pipe/ALSA 插件可加载不等于链路可用（需真实源） | 验：khaen-mode:159-165,206-222；statime toml:13-17；aoip REPORT:54-61 |
 | A15 | PTP/时钟 owner | 每 mode 唯一 PTP 来源：dante=statime PTPv1；aes67=B1 daemon 内置；B2=ptp4l+phc2sys（仅此）；PTP 锁≠USB 同钟；唯一 clock servo | 新栈单一 servo/owner；不得双闭环；phc2sys 仅 B2/B3；discontinuity 新 epoch | 验：DEC §5/§6；aoip REPORT:31-32；web/src/config.rs:240-246 |
 | A16 | 失败/回滚语义 | 真机实测：dante rc=5（PTP 20s 未锁，~27s）；aes67 rc=8（缺库，~3s）；off rc=0；失败后 mode=off + state=error + last_error；CueMix diff=0 | 新栈保持"失败不半启、状态可解释、last_error 可查、回滚到 off；用户听音路由不变"；耗时仅记录不承诺 | 验：aoip REPORT:79-88 |
 | A17 | 端点/格式/速率互斥 | 新 host 必须完成端点选择/通道/format/rate/PTP-state 互斥（DEC §6） | 同一时刻单一 capture/playback owner；模式切换期间不双开设备；format/rate 变更需重准入；actual 参数必须返回 | 验：DEC §6；WBS §4（T17） |
 | A18 | 稳定 ID/role scatter | 输入/输出稳定 ID 与 role scatter 显式；不得假定 card4 永远不变 | 新栈必须解析实际设备/通道并绑定 hash；设备缺失时拒启而非错位输出 | 验：DEC §6；WBS §3；API.md §10|
 | A19 | 真实证据要求（file 输入与真实 AoIP 拆开） | P1 G-play 允许真实 Toslink/AoIP 或 **预渲染 4.1.2 file 输入驱动 MOTU** 作为签收路径（DEC §7、WBS T74）；文件/loopback 不能替代真实 AoIP 端点，但 file 路径本身必须实测 actual playback/布局/听音 | file 路径：hash/布局/actual playback/听音证据齐全即可签 G-play-file 子项；真实 AoIP 子项须 H16/第二端点+PTP 锁，缺硬件记该子项 NOT_VERIFIED/INCOMPLETE，不阻塞 file 路径；不得用本机 loopback 冒充真实 AoIP | 验：DEC §7、WBS T74、WBS 最终验收补充；推断：T74 执行 |
 | A20 | 已知阻塞 | AES67 daemon 缺 5 库；statime panic "could not get clock identity"；ptp4l 模板行尾注释+多余 [eth0]；inferno 无时钟 | P1 排期必须显式跟踪/修复；未修复则 AoIP 门 INCOMPLETE；不得靠绕开 daemon 假装通过 | 验：aoip REPORT:12-19,34-61；docs/CURSOR-TASK-AOIP-BLOCKERS.md:16-20；PROJECT-STATUS:27 |
-| A21 | 开机自动恢复 | D4 默认 false：上电音频 off、不自动恢复；`tspi-boot-mode.service` 默认 disabled | 新栈保持默认不自动恢复；如要自动恢复须用户显式配置并记录 | 验：web/src/config.rs:315-316；RISKS:81-83,100-108 |
+| A21 | 开机自动恢复 | D4 默认 false：上电音频 off、不自动恢复；`khaen-boot-mode.service` 默认 disabled | 新栈保持默认不自动恢复；如要自动恢复须用户显式配置并记录 | 验：web/src/config.rs:315-316；RISKS:81-83,100-108 |
 | A22 | MOTU 控制面不受影响 | CueMix 控制通道 UDP 1280 信标+WS 1280；切换前后用户直通（Optical1/2→Main1）diff=0；final insert 可关闭直通 | 模式切换/校准 insert 必须保留快照/恢复/留证流程；不得改动用户 Toslink 直通；MOTU 离线写 503、读 200 语义保持 | 验：PROTOCOL-REPORT:6,14；aoip REPORT:77-88；API.md §9.1|
 
 ---
@@ -401,22 +401,22 @@
 | X02 | REST | 请求体未知字段 | 现有 handler 全部 serde 默认（无 deny_unknown_fields，grep 0 命中） | **冻结策略见 §2.4**：ADD 新端点严格 400 `unknown_field`；ADAPT 端点按各 R 行冻结 request struct；KEEP/迁移期白名单（R19 `{db}`、R28 `channel`、auth/session/login、motu confirm/trim 等）允许额外字段但须在 §2.4 记录；不再保留“待补宽容清单”状态；与 Q03 结论一致 | 验：web/src 无 deny_unknown_fields；推断：serde 默认；见 §2.4 |
 | X03 | REST | 缺失/类型错误 JSON | 无自定义 rejection 处理器（grep 0 命中）；axum 0.8 默认提取错误非统一 envelope | 统一 JSON 错误 envelope；**syntax 与 data 错误均映射 400**（`bad_request`/`invalid_json`/`invalid_field`）；不使用 422（不在 API.md §1 状态集合）；由 T42 实现自定义 rejection | 验：web/Cargo.toml:10、web/src/error.rs:92-101、web/src 无 rejection；推断：axum 默认 |
 | X04 | REST | 未知 mode | 400 bad_request，文案列出 off/aes67/dante | 保持 400；文案含允许值；不默认回 off 假装成功 | 验：web/src/config.rs:222-230；web/src/routes/mode.rs:75-78 |
-| X05 | YAML | schema/version 不匹配 | channelmap rc=2；presets 加载即拒；calibration schema error | 所有文件入口先校 schema/version；不匹配整份拒收；不"尽量解析" | 验：tspi-channelmap:106-107,164-167；CONTRACT.md:185,196 |
-| X06 | YAML | channelmap 未知字段 | `check_keys` 报 error（"未知字段（v2 严格校验）"） | 保持整份拒收；错误带 JSON path；不得仅警告后应用 | 验：tspi-channelmap:78-85；API.md §10|
+| X05 | YAML | schema/version 不匹配 | channelmap rc=2；presets 加载即拒；calibration schema error | 所有文件入口先校 schema/version；不匹配整份拒收；不"尽量解析" | 验：khaen-channelmap:106-107,164-167；CONTRACT.md:185,196 |
+| X06 | YAML | channelmap 未知字段 | `check_keys` 报 error（"未知字段（v2 严格校验）"） | 保持整份拒收；错误带 JSON path；不得仅警告后应用 | 验：khaen-channelmap:78-85；API.md §10|
 | X07 | YAML | 校准未知 filter type | 校验器/契约：未知 type=error，整份拒收；v1 只允许 peaking | 新栈 T13 同样整份拒收；不得降级 peaking；不得丢 type | 验：CONTRACT.md:137,251；validator:225-232；已执行内存复核（§13.2） |
 | X08 | YAML | 校准未知顶层/通道字段 | 契约=warning（保留扩展性），不参与应用 | 可 warning 但必须上报；未知语义字段不得参与应用；不得因 warning 变 error 误拒扩展 | 验：CONTRACT.md:196；validator:74,169；已执行复核 |
 | X09 | YAML | 单位不明/NaN/缺幅度/混合 phase/无参考/超预算（target） | 草案要求拒收 | 一律拒收并给字段；缺 phase 选明确 family，不猜零相位；频点必须正/递增/唯一/≤fs/2 | 验：DEC §3；WBS §6|
-| X10 | WS | 未知命令 | 现有客户端未覆盖；未回复→客户端超时 | 回复同键错误（如 `{"<cmd>":{"result":"UnknownCommand"}}` 或等价错误对象），连接可继续；不得静默/挂起 | 推断：web/src/camilla.rs:259-269；tspi-upmix:1666-1678；Q08 |
+| X10 | WS | 未知命令 | 现有客户端未覆盖；未回复→客户端超时 | 回复同键错误（如 `{"<cmd>":{"result":"UnknownCommand"}}` 或等价错误对象），连接可继续；不得静默/挂起 | 推断：web/src/camilla.rs:259-269；khaen-upmix:1666-1678；Q08 |
 | X11 | WS | 非法 JSON/帧类型/空命令 | 现有客户端不发；行为未测 | 错误回复或带原因关闭；不得 panic；单帧大小上限；错误信息不泄露路径 | 推断：新栈契约 |
 | X12 | WS | 值越界/类型错 | SetVolume 客户端侧 -150..+50；其余未验证 | 服务端同样校验并显式错误；SetVolume/SetFaderVolume 越界拒绝；返回 actual 值 | 验：web/src/camilla.rs:590-593；推断：服务端 |
-| X13 | WS | 未知 fader id | S1 只用 1/2 | 未分配 fader id 明确错误；不得写越界内存/静默忽略；fader 不得绕过保护 | 验：tspi-upmix:1707-1717；推断：新栈 |
-| X14 | REST | 不支持的 API 版本 | 无版本字段 | **可选**请求头 `X-TSPI-API-Version`：缺省=v1；仅显式给出不兼容版本时 400 `unsupported_api_version`；响应头回 `X-TSPI-API-Version: 1`；禁止设为必填（会误杀全部现有客户端） | 推断：R50 |
+| X13 | WS | 未知 fader id | S1 只用 1/2 | 未分配 fader id 明确错误；不得写越界内存/静默忽略；fader 不得绕过保护 | 验：khaen-upmix:1707-1717；推断：新栈 |
+| X14 | REST | 不支持的 API 版本 | 无版本字段 | **可选**请求头 `X-KHAEN-API-Version`：缺省=v1；仅显式给出不兼容版本时 400 `unsupported_api_version`；响应头回 `X-KHAEN-API-Version: 1`；禁止设为必填（会误杀全部现有客户端） | 推断：R50 |
 | X15 | REST | 退役端点被调用 | 现状不存在“退役”概念 | **一般退役端点：410 `{"error":{"code":"retired","replacement":"..."}}`**；**唯一例外：R47 input-mode 按“GET 200 not_supported 状态壳 / PUT 400 not_supported”**（理由：UI 轮询兼容）；两者都不允许纯 404 纯文本或假成功；UI 同变更更新；K13/K16 按此判 | 推断：§2.1 RETIRE + R47 |
-| X16 | CLI | 未知参数/子命令 | tspi-mode 未知参数 exit 2；channelmap argparse exit 2 | 新 CLI 保持 exit 2 + stderr 说明；不得忽略未知参数继续执行 | 验：tspi-mode:48；tspi-channelmap:6-7,25 |
+| X16 | CLI | 未知参数/子命令 | khaen-mode 未知参数 exit 2；channelmap argparse exit 2 | 新 CLI 保持 exit 2 + stderr 说明；不得忽略未知参数继续执行 | 验：khaen-mode:48；khaen-channelmap:6-7,25 |
 | X17 | 状态 | 未知 schema | Web 只提示"未知 schema"仍展示；不当作成功依据 | 消费方可容错读取，但不得以未知 schema 判定 ok；新 control 输出 schema 必须受版本校验 | 验：web/src/mode.rs:1200-1202,1510-1524 |
 | X18 | 校准 | stale/hash/role 不匹配 | 既有契约要求 apply 前校验；T13 新增 IR stale | 明确拒收并给 stale 原因（input/fs/role/P/hash 变化）；不得用旧系数应用 | 验：WBS T13/§5；DEC §2|
-| X19 | channelmap | 未知角色/输入源/设备/通道越界 | 现有 rc=3 / 400，多处校验 | 全部越界/未知一律拒收；错误带角色与通道；不得截断/复用错位 | 验：tspi-channelmap:385,457-502；API.md §10|
-| X20 | 横切 | 静默降级/假成功/回 C | 现有实现尚可（channelmap 严格），但部分入口宽容 | 全局禁止：未知字段丢弃、未知 type 降级、C 兜底、错误当 OK、旧文件冒充真值；**已声明 `x_`/扩展字段 warning 不属“丢弃”**；发现即缺陷；upmix unit 的 C 依赖（Wants/After）必须清除 | 验：CONTRACT.md:137；tspi-channelmap:409-411；DEC §7；tspi-upmix-autodetect.service:4-5 |
+| X19 | channelmap | 未知角色/输入源/设备/通道越界 | 现有 rc=3 / 400，多处校验 | 全部越界/未知一律拒收；错误带角色与通道；不得截断/复用错位 | 验：khaen-channelmap:385,457-502；API.md §10|
+| X20 | 横切 | 静默降级/假成功/回 C | 现有实现尚可（channelmap 严格），但部分入口宽容 | 全局禁止：未知字段丢弃、未知 type 降级、C 兜底、错误当 OK、旧文件冒充真值；**已声明 `x_`/扩展字段 warning 不属“丢弃”**；发现即缺陷；upmix unit 的 C 依赖（Wants/After）必须清除 | 验：CONTRACT.md:137；khaen-channelmap:409-411；DEC §7；khaen-upmix-autodetect.service:4-5 |
 | X21 | 横切 | 错误 envelope/认证 | 统一 `{"error":{"code","message"}}`；401/403/429 语义 | 新端点沿用；错误不泄露 token/密钥/内部路径；CSRF/session 不弱化 | 验：API.md §1；web/src/error.rs:44-101；web/src/routes/mod.rs:132-151 |
 | X22 | 横切 | 大小/内容限制 | 配置 >2MiB 400；FIR >16MiB 400；snapshot raw >512KiB 省略正文 | 保持上限并文档化；超限 400/413 明确；不得截断后假装成功 | 验：web/src/camilla.rs:128；API.md §9.1/§10|
 
@@ -466,8 +466,8 @@
 | K36 | 内容判定规则（S1） | LFE 不作判据；窗口/迟滞/冻结值记录 | C03-C05/D |
 | K37 | H16 内部上混提示 | h16_internal_upmix 语义与双上混禁止记录 | C06/D |
 | K38 | 内容检测 P1 处置 | 无 daemon、无 fader 切换、REST 显式拒绝、UI 隐藏 | C07,C08,R47/I |
-| K39 | 模式值/CLI/退出码 | off/aes67/dante/toslink/target_multichannel 互斥；未知参数 exit 2；tspi-mode exit 0..10 含 1/6 的映射完整 | A01-A03/D+I |
-| K40 | mode status schema | tspi-audio/v1 顶层/嵌套字段存在；unknown 字段消费方不崩 | A04,A05,I |
+| K39 | 模式值/CLI/退出码 | off/aes67/dante/toslink/target_multichannel 互斥；未知参数 exit 2；khaen-mode exit 0..10 含 1/6 的映射完整 | A01-A03/D+I |
+| K40 | mode status schema | khaen-audio/v1 顶层/嵌套字段存在；unknown 字段消费方不崩 | A04,A05,I |
 | K41 | 切换状态机 | 202 接受、串行、步骤/回滚/last_error 可见；无 C 步骤 | A06,A07,A16/I |
 | K42 | Dante profile | PTPv1/statime/inferno/96k/24bit/稳定 ID | A08,A14,I+R |
 | K43 | AES67 profile | B1 daemon 内建 slave、48k/24bit、端口/status 文件 | A09,A12,I+R |
@@ -517,7 +517,7 @@
 | Q01 | P1 Web 入口是"保留现有 khaen-audio-web 改后端"还是"T70 重写新 Web"？ | 决定 R15-R19 是 ADAPT 还是 RETIRE；决定 auth/CSRF/静态资源是否保留 | 建议保留 auth/system/channelmap/motu/alsa 面，runtime/校准页面按 T70 新建；无论哪种，R 表用途不变。**F-21 落地：Phase 1 镜像不安装旧 web，T70 只消费已落地行，未落地旧路径见 §3.7（DEFERRED）** |
 | Q02 | WS 兼容子集消费者/是否保留 Camilla shim | 部分已由 WBS T24 回答：保留 RMS/fader 等必需子集；T70 重写 UI 不改变该子集 | **已决**：按 T24 保留子集，不实现完整 Camilla 协议（不再等待裁决） |
 | Q03 | 过渡期 REST 未知 JSON 字段策略 | 已由 §2.4 冻结：ADD 严格/ADAPT 冻结 struct/KEEP 白名单；影响 X02/K24/K57 | **已决**：策略见 §2.4；T70 完成 UI 审计后收紧白名单 |
-| Q04 | 内容检测/上混 unit 退役范围 | 已由 DEC §6 决定必须禁用/移除内容自动上混 daemon；G-no-C 还要求清除 unit 依赖 | **转执行项**：C07/A11/X20 已加入“禁用 tspi-upmix-autodetect + 清除 Wants/After=tspi-camilladsp.service（service:4-5）”可判条目 |
+| Q04 | 内容检测/上混 unit 退役范围 | 已由 DEC §6 决定必须禁用/移除内容自动上混 daemon；G-no-C 还要求清除 unit 依赖 | **转执行项**：C07/A11/X20 已加入“禁用 khaen-upmix-autodetect + 清除 Wants/After=khaen-camilladsp.service（service:4-5）”可判条目 |
 | Q05 | PTP/AoIP 服务归属 | 大部分已由 DEC §6 回答：保留现有服务、new host 做选择/互斥/唯一 owner | 已决：systemd 为执行层、新 control 唯一编排 owner；T44 只需冻结调用边界 |
 | Q06 | 校准 job REST 的具体路径/状态字段/schema 由谁冻结？ | T42/T60/T70 对接 | 建议 T02 给接口原则、T42 冻结 REST 外形、T60 冻结 job 状态与 artifact schema，联合评审 |
 | Q07 | 保护限幅参数：attack/lookahead/true-peak/每输出 threshold/release/dither 取值？ | P03/P14 与声学安全 | 建议按 MIMO 既有门（-1 dBFS、50ms）起步，补 lookahead/true-peak 决策后再冻结 |
@@ -530,7 +530,7 @@
 | Q14 | 8192/16384 extended 准入 vs UI 警告 | 已由 R45/Y07 冻结：>4096 需 T56 profile 准入、8192/16384 extended、>16384 运行期拒收；UI 标签非准入 | 已决（本文件）；T56 实现准入字段 |
 | Q15 | P1 模式面 toslink/目标多声道 | 已由 A01/R10/R11/K05/K39 补入；与 calibration job 独占互斥 | 已决（本文件）；T44 实现 |
 | Q16 | target 导入字段与 T04 对齐 | 已由 Y17/K34 改为引用 T04 §6 全字段/拒收码 | 已决（本文件）；T11 按 T04 实现 |
-| Q17 | unit inventory 命名（web/src/config.rs legacy vs overlay tspi-*） | 已由 A08/A09/A11 冻结：实际以 overlay tspi-* + systemctl 为准，web/src/config.rs 值标 legacy | 已决；T71 提供 inventory 证据 |
+| Q17 | unit inventory 命名（web/src/config.rs legacy vs overlay khaen-*） | 已由 A08/A09/A11 冻结：实际以 overlay khaen-* + systemctl 为准，web/src/config.rs 值标 legacy | 已决；T71 提供 inventory 证据 |
 | Q18 | api_version 兼容策略 | 已由 X14 冻结：可选请求头、缺省 v1、仅显式不兼容版本 400；不做必填 | 已决（本文件）；T42 实现 |
 
 ---
@@ -545,7 +545,7 @@
 
 | 输入 | 字节 | sha256（快照） | 用途/备注 |
 | --- | ---: | --- | --- |
-| scratch/lead/planner/TSPI-RT-STACK-WBS.md | 35728 | `ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9` | 任务/DoD/运行边界（引 WBS Txx/§n） |
+| scratch/lead/planner/KHAEN-RT-STACK-WBS.md | 35728 | `ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9` | 任务/DoD/运行边界（引 WBS Txx/§n） |
 | scratch/lead/planner/DSP-HOST-DECISION.md | 27951 | `ab1056477d8e1c01dbe61df6f2d15c4bb0cca6b05f9177ef51559df3e2d25ded` | 主决策/门/RT 规范（引 DEC §n） |
 | web/docs/API.md（task-175 刷新） | 26790 | `4255f1ad4a4f0e2c1d4b2966aa7ad7cfa26373b904cb13f6955d161e3b721954` | REST 语义快照（引 API.md §n） |
 | docs/MIMO-COEFF-PLAN.md | 45259 | `fc832832487e73182787ad19e4fb3639edb3355584a33a5f9a4d707f539c3f30` | 测量相位口径 |
@@ -557,7 +557,7 @@
 | web/src/routes/camilladsp.rs（task-175 刷新） | 6295 | `118efe0efa2e07cfe89e305773ede872cb86efb26e5b41b2bf9f9fec50bcfe5e` | R19 `{db}` 契约 |
 | web/src/routes/alsa.rs | 1402 | `c80c04cc4330e0af0946b6c2811e80cd83f3268ab1606adb40cab9cef17352a2` | R28 channel 现状 |
 | rt-stack/evidence/baseline/board-evidence/aoip-halfcheck-REPORT-20261116-1949.md | 13646 | `9bdbd14f82470481691393783a45e5cce0c28372a91e64772e7f1d668d181a2c` | AoIP/mode 实测证据（P11/A15/A20；task-145 路径刷新） |
-| audio/overlay/etc/systemd/system/tspi-upmix-autodetect.service | — | （路径引用；:4-5 Wants/After、:12 ExecStart） | C07/A11 依赖清理 |
+| audio/overlay/etc/systemd/system/khaen-upmix-autodetect.service | — | （路径引用；:4-5 Wants/After、:12 ExecStart） | C07/A11 依赖清理 |
 
 > T02/T04 为 volatile（快照后上游仍在写）；本文件引用只到 §/任务 ID，不依赖其 hash；复审时按 §13.6 复算。本文件自身 hash 不内嵌（自引用）。
 
@@ -589,7 +589,7 @@
 5. calibration 未知 type/未知顶层字段仅通过内存函数调用验证，未用 CLI 文件级跑。
 6. 未验证 axum 0.8 对 `/api/*` 未知路径与 serde 提取错误的实际 HTTP 行为（§X01/X03 为静态推断）。
 7. 未穷举 `web/assets/app.js` 所有字段依赖（仅抓取主要调用点/字段），UI 字段级兼容以 T70 联调为准。
-8. 未核对板端部署文件实际 hash（除旁证：本地 `tspi-mode` SHA-256 前缀 `c4ec1b88` 与 `audio/BOARD-V13-VALIDATION-2026-11-15.md:6` 记录一致）。
+8. 未核对板端部署文件实际 hash（除旁证：本地 `khaen-mode` SHA-256 前缀 `c4ec1b88` 与 `audio/BOARD-V13-VALIDATION-2026-11-15.md:6` 记录一致）。
 9. 未评估性能/RT 行为（本文件不含 RT 数值门；见 WBS §6）。
 10. 未在上游 T02/T04 冻结后重算其 hash（§13.1 已标 volatile）；复审/冻结前按 §13.6 复算并以最终版本为准。
 
@@ -614,7 +614,7 @@
 | P1-1 X02/Q03 策略未冻结 | P1 | CLOSED（task-61 二次）：§2.4 重写为“策略类别 vs 处置码”解耦表（ADD= R48/R49；ADAPT=R10-R28/R34-R46；KEEP=R01-R09/R29-R33/R50/R51；RETIRE=R47；R19/R28 字段白名单不改变 ADAPT） | §2.4、X02、K57 |
 | P1-2 X03/X14 状态码/版本 | P1 | CLOSED：统一 400；API 版本可选请求头缺省 v1 | X03、X14、R50 |
 | P1-3 upmix unit Wants 依赖 | P1 | CLOSED：C07/A11/X20 加 service:4-5 依赖清除+禁用 | C07、A11、X20 |
-| P1-4 unit 命名 | P1 | CLOSED：A08/A09/A11 以 overlay tspi-* 为准，web/src/config.rs 标 legacy | A08/A09/A11 |
+| P1-4 unit 命名 | P1 | CLOSED：A08/A09/A11 以 overlay khaen-* 为准，web/src/config.rs 标 legacy | A08/A09/A11 |
 | P1-5 门清单 | P1 | CLOSED：§1.1 改 7 门（G-RT-foundation P1、G-performance 后续） | §1.1 |
 | P1-6 hash 不完整/漂移 | P1 | CLOSED（task-61 二次）：§13.1 快照 00:45；T03 hash 补全 64 位、T04/T02 更新并标 volatile、补 aoip REPORT；快照命令见 §13.6 | §13.1 |
 | P1-7 R28 channel | P1 | CLOSED：标注文档字段/当前未实现，要求新栈显式决定；列 §2.4 白名单 | R28、§2.4 |
@@ -632,7 +632,7 @@
 ### 13.6 复核命令（只读）
 
 ~~~powershell
-cd C:\WorkSpace\Claw\projects\tspi-audio-dsp
+cd C:\WorkSpace\Claw\projects\khaen-audio-dsp
 # 1) 引用策略：不应再出现 DEC:/WBS:/API.md: 数字行号
 rg -n "DEC:[0-9]|WBS:[0-9]|API\.md:[0-9]" rt-stack/spec/compat-matrix.md
 # 2) 计数基线：R51/W22/Y24/C9/A22/P14/X22/K60/Q18；矩阵行 164（C09 于 2026-11-17 task-200 新增）

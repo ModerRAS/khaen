@@ -57,7 +57,7 @@ fn log_freqs(n: usize) -> Vec<f64> {
         .collect()
 }
 
-/// 构造 tspi-target-draft/v1 单 JSON（480 点，20 Hz–20 kHz，log-f 网格）。
+/// 构造 khaen-target-draft/v1 单 JSON（480 点，20 Hz–20 kHz，log-f 网格）。
 ///
 /// phase_ref: None=仅幅度；Some("absolute")=phase_fn 返回总相位；
 /// Some("delay_removed")=phase_fn 返回 φ_ex，d_target 写 target_delay_samples。
@@ -92,7 +92,7 @@ fn build_target_json(
     }
     points.push(']');
     let mut json = String::from("{");
-    json.push_str("\"schema\":\"tspi-target-draft/v1\",");
+    json.push_str("\"schema\":\"khaen-target-draft/v1\",");
     json.push_str("\"frequency_unit\":\"Hz\",");
     json.push_str("\"magnitude_unit\":\"dB\",");
     match phase_ref {

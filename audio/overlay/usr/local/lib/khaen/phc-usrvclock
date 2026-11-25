@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""phc-usrvclock — 把网卡 PHC 导出成 usrvclock overlay（B2 板端 GM 的媒体时钟桥）。
+
+背景（为什么需要它）
+  B2 里板端是 PTPv2 GM：khaen-ptp4l-master.service（ptp4l masterOnly）+ khaen-phc2sys.service
+  （phc2sys -O 37，让网卡 PHC 跑 TAI）。B2 的 AoIP 接收端是 Inferno ALSA 插件，它需要一个
+  "媒体时钟"：Inferno 只认 CLOCK_PATH 指向的 usrvclock unix socket（不是 /dev/ptpX），所以本
+  桥把 PHC 的时标发布成 usrvclock overlay：底层用 CLOCK_MONOTONIC_RAW（任何进程可读），
+  shift/freq_scale 把 MONOTONIC_RAW 映射到 PHC 时标。协议见 gitlab.com/lumifaza/usrvclock；
+  逐字段说明见 rt-stack/evidence/b2-ptp-gm/board-scripts/phc_usrvclock.py（本文件由该实测脚本
+  收敛而来）。
+
+帧（40 字节，native/little-endian）：
+    magic "VC" | major u16=1 | minor u16=0 | flags i16=1 | clock_id i64 |
+    last_sync i64 | shift i64 | freq_scale f64
+    overlay_ns(t) = t + shift + round((t - last_sync) * freq_scale)
+
+  * clock_id/monotonic 秒数来自本机 CLOCK_MONOTONIC_RAW；
+  * shift = PHC_now - MONOTONIC_RAW_now（每帧重算，phc2sys 步进 PHC 后自动跟上）；
+  * freq_scale = (ΔPHC/ΔMONO_RAW) - 1，启动时用 --warmup 秒测一次。
+
+用法
+  phc-usrvclock [--socket PATH] [--phc-dev PATH] [--warmup SEC]
+  phc-usrvclock --print-phc-dev         # 只打印自动探测到的 PHC 设备（khaen-mode 用）
+  phc-usrvclock --probe                 # 打一行 JSON 自检（PHC/monotonic/freq），退出
+
+环境变量
+  KHAEN_IFACE            网卡名（默认 eth0；systemd unit 从 /etc/default/khaen-audio 注入）
+  KHAEN_PHC_DEV          PHC 字符设备（如 /dev/ptp0；缺省自动探测）
+  KHAEN_USRVCLOCK_SOCKET overlay socket 路径（默认 /tmp/ptp-usrvclock）
+  KHAEN_USRVCLOCK_WARMUP 测频窗口秒数（默认 4）
+
+退出码：0 正常；1 PHC 设备打不开/读失败；2 PHC 测频不稳（|freq_scale| > 1000 ppm，GM 时钟异常）。
+"""
+from __future__ import annotations
+
+import argparse
+import ctypes
+import glob
+import json
+import os
+import signal
+import socket
+import struct
+import sys
+import time
+
+FRAME = struct.Struct("<2sHHhqqqd")
+CLOCK_MONOTONIC_RAW = 4
+DEFAULT_SOCK = "/tmp/ptp-usrvclock"
+MAX_FREQ_SCALE = 1e-3  # 1000 ppm；超过说明 PHC 在被步进/漂移异常，不要拿去当媒体时钟
+
+
+def log(msg: str) -> None:
+    sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+    sys.stderr.flush()
+
+
+class Timespec(ctypes.Structure):
+    _fields_ = [("tv_sec", ctypes.c_long), ("tv_nsec", ctypes.c_long)]
+
+
+_libc = None
+
+
+def _libc_handle():
+    """延迟加载 libc（只依赖 Linux libc.so.6；延迟加载让 --help/--print-phc-dev 在非 Linux 也能跑）。"""
+    global _libc
+    if _libc is None:
+        _libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        _libc.clock_gettime.argtypes = [ctypes.c_int, ctypes.POINTER(Timespec)]
+        _libc.clock_gettime.restype = ctypes.c_int
+    return _libc
+
+
+def fd_to_clockid(fd: int) -> int:
+    """C FD_TO_CLOCKID(): 动态 POSIX clock 的 clockid 编码为 (~fd << 3) | 3。"""
+    return ((~fd) << 3) | 3
+
+
+def now_ns(clockid: int) -> int:
+    ts = Timespec()
+    libc = _libc_handle()
+    if libc.clock_gettime(clockid, ctypes.byref(ts)) != 0:
+        raise OSError(ctypes.get_errno(), "clock_gettime(%r)" % (clockid,))
+    return ts.tv_sec * 1000000000 + ts.tv_nsec
+
+
+def detect_phc(iface: str) -> str:
+    """与 khaen-mode 的 phc_dev() 保持同一探测顺序；找不到返回空串。"""
+    explicit = os.environ.get("KHAEN_PHC_DEV", "")
+    if explicit:
+        return explicit
+    for pattern in (
+        "/sys/class/net/%s/ptp/ptp*" % iface,
+        "/sys/class/net/%s/device/ptp/ptp*" % iface,
+    ):
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            return "/dev/" + os.path.basename(matches[0])
+    devs = sorted(glob.glob("/dev/ptp*"))
+    if len(devs) == 1:
+        return devs[0]
+    if devs:
+        return "/dev/ptp0"
+    return ""
+
+
+def measure(phc_clockid: int, warmup: float) -> tuple[int, int, float]:
+    """返回 (phc_now_ns, mono_raw_now_ns, freq_scale)。"""
+    p0, m0 = now_ns(phc_clockid), now_ns(CLOCK_MONOTONIC_RAW)
+    time.sleep(warmup)
+    p1, m1 = now_ns(phc_clockid), now_ns(CLOCK_MONOTONIC_RAW)
+    dm = m1 - m0
+    if dm <= 0:
+        raise OSError("monotonic clock did not advance")
+    return p1, m1, (float(p1 - p0) / float(dm)) - 1.0
+
+
+def cmd_print_phc_dev(iface: str) -> int:
+    print(detect_phc(iface))
+    return 0
+
+
+def cmd_probe(iface: str, phc_dev: str, warmup: float) -> int:
+    try:
+        phc_fd = os.open(phc_dev, os.O_RDONLY)
+    except OSError as exc:
+        log("probe: cannot open %s: %s" % (phc_dev, exc))
+        return 1
+    try:
+        phc_clockid = fd_to_clockid(phc_fd)
+        p, m, freq = measure(phc_clockid, warmup)
+    finally:
+        os.close(phc_fd)
+    print(json.dumps({
+        "schema": "khaen-phc-usrvclock/probe-v1",
+        "phc_dev": phc_dev,
+        "phc_now_ns": p,
+        "mono_raw_now_ns": m,
+        "shift_ns": p - m,
+        "freq_scale": round(freq, 12),
+        "freq_scale_ppm": round(freq * 1e6, 3),
+        "tai_offset_approx_s": round((p - time.time() * 1e9) / 1e9, 3),
+    }, ensure_ascii=False))
+    return 0
+
+
+def serve(iface: str, phc_dev: str, sock_path: str, warmup: float) -> int:
+    try:
+        phc_fd = os.open(phc_dev, os.O_RDONLY)
+    except OSError as exc:
+        log("bridge: cannot open %s: %s" % (phc_dev, exc))
+        return 1
+    phc_clockid = fd_to_clockid(phc_fd)
+    log("bridge: phc=%s iface=%s fd=%d clockid=%d" % (phc_dev, iface, phc_fd, phc_clockid))
+
+    freq_scale = 0.0
+    for attempt in range(1, 4):
+        try:
+            p, m, freq = measure(phc_clockid, warmup)
+        except OSError as exc:
+            log("bridge: rate measurement failed: %s" % (exc,))
+            return 1
+        if abs(freq) <= MAX_FREQ_SCALE:
+            freq_scale = freq
+            log("bridge: phc_now=%d mono_raw=%d freq_scale=%.9f (attempt %d)" % (p, m, freq, attempt))
+            break
+        log("bridge: unstable PHC rate %.9f (attempt %d); gm/phc2sys not settled?" % (freq, attempt))
+    else:
+        log("bridge: giving up, |freq_scale| > %.0f ppm" % (MAX_FREQ_SCALE * 1e6))
+        return 2
+
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        srv.bind(sock_path)
+    except OSError as exc:
+        log("bridge: bind %s failed: %s" % (sock_path, exc))
+        return 1
+    os.chmod(sock_path, 0o777)  # Inferno/CamillaDSP 可能以不同 uid 运行（本机回环 socket，内容只是时钟）
+    log("bridge: listening on %s (clients get 1 frame/s)" % sock_path)
+
+    def cleanup(*_args) -> None:
+        try:
+            srv.close()
+        finally:
+            try:
+                os.unlink(sock_path)
+            except OSError:
+                pass
+            log("bridge: stopped")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, cleanup)
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGHUP, cleanup)
+
+    clients: list = []
+    srv.settimeout(1.0)
+    heartbeat_at = 0.0
+    while True:
+        p = now_ns(phc_clockid)
+        m = now_ns(CLOCK_MONOTONIC_RAW)
+        frame = FRAME.pack(b"VC", 1, 0, 1, CLOCK_MONOTONIC_RAW, m, p - m, freq_scale)
+        for addr in list(clients):
+            try:
+                srv.sendto(frame, addr)
+            except OSError:
+                clients.remove(addr)
+        try:
+            _data, addr = srv.recvfrom(1024)
+            if addr is not None:
+                if addr not in clients:
+                    clients.append(addr)
+                    log("bridge: client registered %r (total %d), phc_now=%d shift=%d"
+                        % (addr, len(clients), p, p - m))
+                srv.sendto(frame, addr)
+        except socket.timeout:
+            pass
+        now = time.time()
+        if clients and now - heartbeat_at > 10:
+            log("bridge: heartbeat clients=%d phc_now=%d" % (len(clients), p))
+            heartbeat_at = now
+
+
+def main(argv: list) -> int:
+    ap = argparse.ArgumentParser(description="PHC -> usrvclock overlay bridge (khaen-audio B2)")
+    ap.add_argument("--socket", default=os.environ.get("KHAEN_USRVCLOCK_SOCKET", DEFAULT_SOCK))
+    ap.add_argument("--phc-dev", default="")
+    ap.add_argument("--warmup", type=float,
+                    default=float(os.environ.get("KHAEN_USRVCLOCK_WARMUP", "4")))
+    ap.add_argument("--probe", action="store_true", help="print one JSON self-test line and exit")
+    ap.add_argument("--print-phc-dev", action="store_true", help="print autodetected PHC device and exit")
+    args = ap.parse_args(argv)
+
+    iface = os.environ.get("KHAEN_IFACE", "eth0")
+    phc_dev = args.phc_dev or detect_phc(iface)
+    if args.print_phc_dev:
+        return cmd_print_phc_dev(iface)
+    if not phc_dev:
+        log("no PHC device found (KHAEN_PHC_DEV unset, no sysfs ptp, no /dev/ptp*)")
+        return 1
+    if args.probe:
+        return cmd_probe(iface, phc_dev, args.warmup)
+    return serve(iface, phc_dev, args.socket, args.warmup)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

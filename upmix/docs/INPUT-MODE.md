@@ -7,11 +7,11 @@ H16 默认固定 Pure/Pass-through，容器可能是 **7.1.4（12ch）**，但�
 
 ## 1. 结论/契约（Lead 2026-11-15 裁决，字段不再改）
 
-### 运行态 /run/tspi/input-content.json（daemon 写，WebUI 只读）
+### 运行态 /run/khaen/input-content.json（daemon 写，WebUI 只读）
 
 ```json
 {
-  "schema": "tspi-input-content/v1",
+  "schema": "khaen-input-content/v1",
   "content_mode": "auto|stereo|multichannel",
   "detected": "unknown|stereo|multichannel",
   "override": null,
@@ -39,10 +39,10 @@ H16 默认固定 Pure/Pass-through，容器可能是 **7.1.4（12ch）**，但�
   `override-*` / `daemon-not-running` / `ws-error` 等。
 - `detector`：`energy`（自动检测）/ `manual`（被覆盖强制）/ `fallback`（websocket 或 fader 出错）。
 
-### 覆盖文件 /etc/tspi-audio/input-mode.json（WebUI 写，daemon 每轮读）
+### 覆盖文件 /etc/khaen-audio/input-mode.json（WebUI 写，daemon 每轮读）
 
 ```json
-{"schema": "tspi-input-mode/v1", "mode": "auto|stereo|multichannel", "updated_unix": 1794724357, "updated_by": "webui"}
+{"schema": "khaen-input-mode/v1", "mode": "auto|stereo|multichannel", "updated_unix": 1794724357, "updated_by": "webui"}
 ```
 
 `auto|stereo|multichannel` 为规范值；CLI/daemon 额外接受别名 `force-stereo`、`force-multichannel`
@@ -64,7 +64,7 @@ H16 默认固定 Pure/Pass-through，容器可能是 **7.1.4（12ch）**，但�
 
 ## 2. 板端实现：双路径单配置 + Aux fader
 
-`tspi-upmix autodetect-config` 生成**一个** CamillaDSP 配置，同时包含两条路径：
+`khaen-upmix autodetect-config` 生成**一个** CamillaDSP 配置，同时包含两条路径：
 
 ```
 输入容器（12ch）
@@ -95,22 +95,22 @@ CamillaDSP 启动时 Aux 音量默认 0 dB（两条路径都开）。为避免�
 
 ```bash
 # 离线检测容器 WAV（文件后端/测试；输出与运行态同字段 JSON）
-tspi-upmix detect --wav /tmp/container714.wav --input-layout h16-7.1.4
+khaen-upmix detect --wav /tmp/container714.wav --input-layout h16-7.1.4
 
 # 读运行态（daemon 未跑时返回 detected=unknown / reason=daemon-not-running）
-tspi-upmix detect --json
+khaen-upmix detect --json
 
-# 覆盖（持久化到 /etc/tspi-audio/input-mode.json；接受 force-* 别名）
-tspi-upmix input-mode get
-tspi-upmix input-mode set auto|stereo|multichannel
+# 覆盖（持久化到 /etc/khaen-audio/input-mode.json；接受 force-* 别名）
+khaen-upmix input-mode get
+khaen-upmix input-mode set auto|stereo|multichannel
 
 # daemon（读 CamillaDSP websocket；不重启服务、不打开声卡）
-tspi-upmix autodetect --input-layout h16-7.1.4 \
-  --state /run/tspi/input-content.json --mode-file /etc/tspi-audio/input-mode.json \
+khaen-upmix autodetect --input-layout h16-7.1.4 \
+  --state /run/khaen/input-content.json --mode-file /etc/khaen-audio/input-mode.json \
   --hold-ms 2500 --startup-freeze-ms 2500
 
 # 离线验证 daemon 判定/迟滞（无 websocket，回放 RMS 序列）
-tspi-upmix autodetect --simulate frames.json --dry-run --no-write
+khaen-upmix autodetect --simulate frames.json --dry-run --no-write
 ```
 
 `--simulate` 文件格式：`{"frames":[{"rms_db":{"FL":-20,"FR":-20,"C":-120}}, ...]}`。
@@ -125,9 +125,9 @@ tspi-upmix autodetect --simulate frames.json --dry-run --no-write
 
 ## 5. 部署/服务
 
-- 安装包包含 /etc/tspi-audio/upmix/tspi-upmix-autodetect.service.example（**默认不启用**）。
-- 需要自动切换时：复制为 /etc/systemd/system/tspi-upmix-autodetect.service 后
-  `systemctl daemon-reload && systemctl enable --now tspi-upmix-autodetect`。
+- 安装包包含 /etc/khaen-audio/upmix/khaen-upmix-autodetect.service.example（**默认不启用**）。
+- 需要自动切换时：复制为 /etc/systemd/system/khaen-upmix-autodetect.service 后
+  `systemctl daemon-reload && systemctl enable --now khaen-upmix-autodetect`。
 - 该服务只连 CamillaDSP websocket + 写 state/切 fader，不启动/重启音频服务、不打开声卡。
 - 输入容器布局不同（如 h16-5.1.2）时改 `--input-layout`；CamillaDSP 的 capture 通道数需与容器一致
   （autodetect-config 默认取布局 channels，可用 `--capture-channels` 覆盖）。
@@ -136,8 +136,8 @@ tspi-upmix autodetect --simulate frames.json --dry-run --no-write
 
 ```bash
 python3 tests/gen_container_signals.py --out /tmp/container-signals   # 开发机（numpy）
-python3 tests/test_input_mode.py --tspi-upmix ./tspi-upmix \
-  --layout-presets /etc/tspi-audio/layout-presets.yml \
+python3 tests/test_input_mode.py --khaen-upmix ./khaen-upmix \
+  --layout-presets /etc/khaen-audio/layout-presets.yml \
   --signals /tmp/container-signals --camilladsp /usr/local/bin/camilladsp
 ```
 

@@ -1,4 +1,4 @@
-//! TSPI RT-first DSP 自研 host 入口（WBS **T26**；crate `khaen-rt-host` bin）。
+//! KHAEN RT-first DSP 自研 host 入口（WBS **T26**；crate `khaen-rt-host` bin）。
 //!
 //! 本文件只做**串行入口集成**：把已完成的 leaf 模块接到一个 host 进程里，不代替它们、
 //! 不重写 kernel/调度/协议。默认 `backend=fake` 不打开真实 ALSA 设备；`backend=alsa`
@@ -48,8 +48,8 @@
 //!
 //! **F-26（P2）swap 证据真实性**：`run` 的 swap 段不再用循环 `ack_worker` 合成 ack——`retire_ready`
 //! 只由**真实 block all-ack** 置位：`run_block_4thread` 只有 B1 每 worker OK、B2 全 done 且
-//! status OK、B3 每 worker OK 才返回 Ok，据此生成 `TspiBlockAckV1`（三 phase 位图 =
-//! ACK_MASK(expected)、cutoff=0）并交唯一 RT 入口 `TspiSwapAckV1::note_block_all_ack`。
+//! status OK、B3 每 worker OK 才返回 Ok，据此生成 `KhaenBlockAckV1`（三 phase 位图 =
+//! ACK_MASK(expected)、cutoff=0）并交唯一 RT 入口 `KhaenSwapAckV1::note_block_all_ack`。
 //! 后半程 plan 切换改为**真实** T20 路径：同图 re-plan v2 -> control 侧 arm -> master block
 //! 边界 `commit_swap_at_block_boundary` -> 旧图 v1 入 `GraphQuarantine` -> v2 首块 all-ack
 //! 经 `note_block_switched` 清 quarantine 位 -> 退出路径 `try_release`。JSON 以
@@ -83,9 +83,9 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use khaen_core::abi::{
-    plan_abi_supported, sample_format, TspiBlockAckV1, TspiBlockDescV1, TspiHwParamsV1,
-    TspiPlanHeaderV1, TspiRoleIirV2, ABI_VERSION, PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES,
-    PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1, TSPI_PLAN_ABI_V2, TSPI_PLAN_MAGIC,
+    plan_abi_supported, sample_format, KhaenBlockAckV1, KhaenBlockDescV1, KhaenHwParamsV1,
+    KhaenPlanHeaderV1, KhaenRoleIirV2, ABI_VERSION, KHAEN_PLAN_ABI_V1, KHAEN_PLAN_ABI_V2,
+    KHAEN_PLAN_MAGIC, PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES, PLAN_IIR_SECTION_COEFFS,
 };
 use khaen_core::direct::{
     direct_block_f32, DirectCoeffsF32, DirectLayout, DirectTopology, DIRECT_MAX_PARTICIPANTS,
@@ -249,7 +249,11 @@ fn apply_role_iir_block(
             if end > output.len() || state_pos + 2 > state.len() {
                 return;
             }
-            role_biquad_block(&section, &mut state[state_pos..state_pos + 2], &mut output[base..end]);
+            role_biquad_block(
+                &section,
+                &mut state[state_pos..state_pos + 2],
+                &mut output[base..end],
+            );
             state_pos += 2;
             index += 1;
         }
@@ -619,7 +623,7 @@ impl<'a> BlockWorkers<'a> {
         let mut index = 0usize;
         while index < n_workers as usize {
             let spawned = std::thread::Builder::new()
-                .name(format!("tspi-b2-worker-{index}"))
+                .name(format!("khaen-b2-worker-{index}"))
                 .spawn(move || b2_worker_entry(shared_ptr, index));
             match spawned {
                 Ok(handle) => handles.push(handle),
@@ -877,7 +881,7 @@ impl Drop for BlockWorkers<'_> {
 // F-26：真实 block all-ack 证据（retire_ready 的唯一来源）
 // ---------------------------------------------------------------------------
 
-/// 把"master 已真实观测到整块 4 worker 三 phase 全部完成"翻译成 `TspiBlockAckV1`。
+/// 把"master 已真实观测到整块 4 worker 三 phase 全部完成"翻译成 `KhaenBlockAckV1`。
 ///
 /// 调用前提（缺一不可；否则就是 F-26 指出的合成 ack）：
 /// - `run_block_4thread` 已返回 Ok：B1 每 worker OK、B2 全部 done 且 status OK、B3 每 worker OK；
@@ -885,11 +889,11 @@ impl Drop for BlockWorkers<'_> {
 /// - `expected_workers` = 该 plan 的 worker 数（与 swap 的 expected/ACK_MASK 一致）。
 ///
 /// 本函数只填**已经发生的事实**（三 phase 位图 = `ack_mask(expected)`、cutoff=0），不接受任何
-/// synthetic/demo 输入；产物只能交 T20 唯一 RT 入口 `TspiSwapAckV1::note_block_all_ack`，
+/// synthetic/demo 输入；产物只能交 T20 唯一 RT 入口 `KhaenSwapAckV1::note_block_all_ack`，
 /// 由它校验标签并置 retire_ready。
-fn completed_block_ack(block_seq: u64, plan_version: u32, expected_workers: u8) -> TspiBlockAckV1 {
+fn completed_block_ack(block_seq: u64, plan_version: u32, expected_workers: u8) -> KhaenBlockAckV1 {
     let mask = ack_mask(expected_workers);
-    let ack = TspiBlockAckV1::new(block_seq, EPOCH_ID, plan_version, expected_workers);
+    let ack = KhaenBlockAckV1::new(block_seq, EPOCH_ID, plan_version, expected_workers);
     let mut phase = 0usize;
     while phase < 3 {
         ack.phase_done[phase].store(mask, Ordering::Release);
@@ -908,7 +912,7 @@ fn completed_block_ack(block_seq: u64, plan_version: u32, expected_workers: u8) 
 ///
 /// 本函数只填**已经发生的事实**（三 phase 位图 = ACK_MASK(expected)、cutoff=0），
 /// 不接受任何 synthetic/demo 输入；调用前提：partitioned run_block 已返回 Ok（engine_blocks
-/// 已递增）。产物同样只能交 T20 唯一 RT 入口 `TspiSwapAckV1::note_block_all_ack`。
+/// 已递增）。产物同样只能交 T20 唯一 RT 入口 `KhaenSwapAckV1::note_block_all_ack`。
 ///
 /// 口径边界：报告里 `swap.single_executor=true` + `swap.executor="partitioned-fft-upols"`
 /// 明示这是单执行器覆盖，**不得读成 4 个 worker 线程各自 ack**；`synthetic=false` 保持不变。
@@ -916,9 +920,9 @@ fn completed_single_executor_block_ack(
     block_seq: u64,
     plan_version: u32,
     expected_workers: u8,
-) -> TspiBlockAckV1 {
+) -> KhaenBlockAckV1 {
     let mask = ack_mask(expected_workers);
-    let ack = TspiBlockAckV1::new(block_seq, EPOCH_ID, plan_version, expected_workers);
+    let ack = KhaenBlockAckV1::new(block_seq, EPOCH_ID, plan_version, expected_workers);
     let mut phase = 0usize;
     while phase < 3 {
         ack.phase_done[phase].store(mask, Ordering::Release);
@@ -988,14 +992,14 @@ fn direct_stream(
 
 /// 一个固定容量 T16 SPSC 环（header + desc 槽分开堆分配，地址稳定）。
 struct FakeRing {
-    header: Box<khaen_core::abi::TspiSpscHeaderV1>,
+    header: Box<khaen_core::abi::KhaenSpscHeaderV1>,
     slots: Box<[DescSlot]>,
 }
 
 impl FakeRing {
     fn new() -> Self {
         Self {
-            header: Box::new(khaen_core::abi::TspiSpscHeaderV1::new(
+            header: Box::new(khaen_core::abi::KhaenSpscHeaderV1::new(
                 SPSC_CAPACITY as u32,
                 SPSC_ENTRY_BYTES,
             )),
@@ -1022,7 +1026,7 @@ struct FakeIoStats {
 
 fn device_config() -> FormatConfig {
     FormatConfig {
-        hw: TspiHwParamsV1 {
+        hw: KhaenHwParamsV1 {
             abi_version: ABI_VERSION,
             sample_format: sample_format::F32_INTERLEAVED,
             n_in: 2,
@@ -1087,7 +1091,7 @@ fn fake_io(blocks: u64) -> Result<FakeIoStats, RtStatus> {
     let mut pb_prod = unsafe { Producer::new(&ring_playback.header, &ring_playback.slots[..]) }?;
     let mut pb_cons = unsafe { Consumer::new(&ring_playback.header, &ring_playback.slots[..]) }?;
 
-    let mut ctl = khaen_core::workers::TspiRtControlV1::new();
+    let mut ctl = khaen_core::workers::KhaenRtControlV1::new();
     ctl.tick_freq_hz = 1_000_000_000;
     ctl.tick_read_budget = TICK_BUDGET;
     let mut budget = TickBudget::new(TICK_BUDGET);
@@ -1124,7 +1128,7 @@ fn fake_io(blocks: u64) -> Result<FakeIoStats, RtStatus> {
             .map_err(|_| RtStatus::ERR_ADMISSION_CLOCK)?;
         stats.tick_entry_reads = budget.reads();
         let flags = FLAG_VALID | if index == 0 { FLAG_EPOCH_FIRST } else { 0 };
-        let desc = TspiBlockDescV1 {
+        let desc = KhaenBlockDescV1 {
             abi_version: ABI_VERSION,
             block_size: BLOCK,
             n_in: 2,
@@ -1346,9 +1350,9 @@ fn khaen_rt_host_sha() -> Sha256 {
 // admission-check：T18 容量/预算 + T22 format + T45 scheduler 参数自校验
 // ---------------------------------------------------------------------------
 
-fn plan_header() -> TspiPlanHeaderV1 {
-    TspiPlanHeaderV1 {
-        magic: TSPI_PLAN_MAGIC,
+fn plan_header() -> KhaenPlanHeaderV1 {
+    KhaenPlanHeaderV1 {
+        magic: KHAEN_PLAN_MAGIC,
         abi_version: ABI_VERSION,
         header_size: 128,
         plan_version: PLAN_VERSION,
@@ -1562,7 +1566,7 @@ fn admission_json() -> Result<String, RtStatus> {
 /// host 运行时配置 schema（rt-host.toml；T155 冻结为 khaen-rt-host/v1）。
 const HOST_CONFIG_SCHEMA: &str = "khaen-rt-host/v1";
 
-/// host 配置（rt-host.toml + TSPI_HOST_* 环境变量覆盖）。
+/// host 配置（rt-host.toml + KHAEN_HOST_* 环境变量覆盖）。
 #[derive(Clone, Debug)]
 struct HostRunConfig {
     block_size: u16,
@@ -1664,7 +1668,7 @@ struct HostRunConfig {
     capture_aes67_stall_fail_close_ms: u32,
     /// T239-crackle：stale-jitter 看门狗（datagrams 涨但 accepted 不涨 → 内部 reanchor）。
     capture_aes67_reanchor_watchdog: bool,
-    /// T203：[content] T57 overlay layout 预设文件路径（空 = 默认 /etc/tspi-audio/layout-presets.yml）。
+    /// T203：[content] T57 overlay layout 预设文件路径（空 = 默认 /etc/khaen-audio/layout-presets.yml）。
     content_layout_presets: String,
     /// T203：[content] 内容输入布局 id（T57 input_layouts，如 h16-5.1）；与 output_layout 同时配置才启用。
     content_input_layout: String,
@@ -1727,7 +1731,7 @@ impl Default for HostRunConfig {
             web_bind: "127.0.0.1:8090".to_string(),
             control_url: "http://127.0.0.1:8090".to_string(),
             daemon_config: String::new(),
-            last_good: "/var/lib/tspi-rt-stack/last-good.json".to_string(),
+            last_good: "/var/lib/khaen-rt-stack/last-good.json".to_string(),
             plan: String::new(),
             plan_manifest: String::new(),
             plan_last_good: String::new(),
@@ -1972,129 +1976,129 @@ fn parse_host_config(text: &str, warnings: &mut Vec<String>) -> Result<HostRunCo
     }
     // 环境变量覆盖（systemd EnvironmentFile 契约，见 deploy/config/rt-host.env.example）。
     let env_map: [(&str, fn(&mut HostRunConfig, String)); 40] = [
-        ("TSPI_HOST_BLOCK", |c, v| {
+        ("KHAEN_HOST_BLOCK", |c, v| {
             if let Ok(n) = v.parse() {
                 c.block_size = n
             }
         }),
-        ("TSPI_HOST_RATE", |c, v| {
+        ("KHAEN_HOST_RATE", |c, v| {
             if let Ok(n) = v.parse() {
                 c.sample_rate = n
             }
         }),
-        ("TSPI_HOST_WORKERS", |c, v| {
+        ("KHAEN_HOST_WORKERS", |c, v| {
             if let Ok(n) = v.parse() {
                 c.workers = n
             }
         }),
-        ("TSPI_HOST_DSP_CPUS", |c, v| c.dsp_cpus = v),
-        ("TSPI_HOST_MOTU_CARD_ID", |c, v| {
+        ("KHAEN_HOST_DSP_CPUS", |c, v| c.dsp_cpus = v),
+        ("KHAEN_HOST_MOTU_CARD_ID", |c, v| {
             c.device = format!("hw:{v},0")
         }),
-        ("TSPI_HOST_DEVICE", |c, v| c.device = v),
-        ("TSPI_HOST_PLAYBACK_CHANNELS", |c, v| {
+        ("KHAEN_HOST_DEVICE", |c, v| c.device = v),
+        ("KHAEN_HOST_PLAYBACK_CHANNELS", |c, v| {
             if let Ok(n) = v.parse() {
                 c.playback_channels = n
             }
         }),
-        ("TSPI_HOST_CAPTURE_CHANNELS", |c, v| {
+        ("KHAEN_HOST_CAPTURE_CHANNELS", |c, v| {
             if let Ok(n) = v.parse() {
                 c.capture_channels = n
             }
         }),
-        ("TSPI_HOST_ALSA_IO_MODE", |c, v| c.alsa_io_mode = v),
-        ("TSPI_HOST_SAFE_MODE", |c, v| c.safe_mode = v),
-        ("TSPI_HOST_LAST_GOOD", |c, v| c.last_good = v),
-        ("TSPI_HOST_CAPTURE_SOURCE", |c, v| c.capture_source = v),
-        ("TSPI_HOST_CAPTURE_FILE", |c, v| c.capture_path = v),
-        ("TSPI_HOST_CAPTURE_FORMAT", |c, v| c.capture_format = v),
-        ("TSPI_HOST_CAPTURE_RAW_FORMAT", |c, v| {
+        ("KHAEN_HOST_ALSA_IO_MODE", |c, v| c.alsa_io_mode = v),
+        ("KHAEN_HOST_SAFE_MODE", |c, v| c.safe_mode = v),
+        ("KHAEN_HOST_LAST_GOOD", |c, v| c.last_good = v),
+        ("KHAEN_HOST_CAPTURE_SOURCE", |c, v| c.capture_source = v),
+        ("KHAEN_HOST_CAPTURE_FILE", |c, v| c.capture_path = v),
+        ("KHAEN_HOST_CAPTURE_FORMAT", |c, v| c.capture_format = v),
+        ("KHAEN_HOST_CAPTURE_RAW_FORMAT", |c, v| {
             c.capture_raw_format = v
         }),
-        ("TSPI_HOST_CAPTURE_FILE_CHANNELS", |c, v| {
+        ("KHAEN_HOST_CAPTURE_FILE_CHANNELS", |c, v| {
             if let Ok(n) = v.parse() {
                 c.capture_file_channels = n
             }
         }),
         // T74 前置：capture source=motu|inferno|aes67 的端点/PTP 覆盖（部署 EnvironmentFile 用）。
-        ("TSPI_HOST_CAPTURE_MODE", |c, v| c.capture_mode = v),
-        ("TSPI_HOST_CAPTURE_PTP_LOCK", |c, v| c.capture_ptp_lock = v),
-        ("TSPI_HOST_CAPTURE_INFERNO_IFACE", |c, v| {
+        ("KHAEN_HOST_CAPTURE_MODE", |c, v| c.capture_mode = v),
+        ("KHAEN_HOST_CAPTURE_PTP_LOCK", |c, v| c.capture_ptp_lock = v),
+        ("KHAEN_HOST_CAPTURE_INFERNO_IFACE", |c, v| {
             c.capture_inferno_iface = v
         }),
-        ("TSPI_HOST_CAPTURE_AES67_SDP", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_SDP", |c, v| {
             c.capture_aes67_sdp = v
         }),
-        ("TSPI_HOST_CAPTURE_AES67_CARD", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_CARD", |c, v| {
             c.capture_aes67_card = v
         }),
-        ("TSPI_HOST_CAPTURE_AES67_DAEMON_READY", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_DAEMON_READY", |c, v| {
             c.capture_aes67_daemon_ready = v == "true"
         }),
         // T239：source=aes67 传输选择与用户态接收端参数（部署 EnvironmentFile 用）。
-        ("TSPI_HOST_CAPTURE_AES67_TRANSPORT", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_TRANSPORT", |c, v| {
             c.capture_aes67_transport = v
         }),
-        ("TSPI_HOST_CAPTURE_AES67_IFACE", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_IFACE", |c, v| {
             c.capture_aes67_iface = v
         }),
-        ("TSPI_HOST_CAPTURE_AES67_GROUP_ALLOW", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_GROUP_ALLOW", |c, v| {
             c.capture_aes67_group_allow = v
         }),
-        ("TSPI_HOST_CAPTURE_AES67_SOURCE_ALLOW", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_SOURCE_ALLOW", |c, v| {
             c.capture_aes67_source_allow = v
         }),
-        ("TSPI_HOST_CAPTURE_AES67_IO_PRIORITY", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_IO_PRIORITY", |c, v| {
             if let Ok(n) = v.parse() {
                 c.capture_aes67_io_priority = n
             }
         }),
-        ("TSPI_HOST_CAPTURE_AES67_STALL_BLOCKS", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_STALL_BLOCKS", |c, v| {
             if let Ok(n) = v.parse() {
                 c.capture_aes67_stall_blocks = n
             }
         }),
-        ("TSPI_HOST_CAPTURE_AES67_STAY_ON_STREAM_END", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_STAY_ON_STREAM_END", |c, v| {
             c.capture_aes67_stay_on_stream_end = v == "true" || v == "1"
         }),
-        ("TSPI_HOST_CAPTURE_AES67_SILENCE_HOLD_MS", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_SILENCE_HOLD_MS", |c, v| {
             if let Ok(n) = v.parse() {
                 c.capture_aes67_silence_hold_ms = n
             }
         }),
-        ("TSPI_HOST_CAPTURE_AES67_STALL_FAIL_CLOSE_MS", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_STALL_FAIL_CLOSE_MS", |c, v| {
             if let Ok(n) = v.parse() {
                 c.capture_aes67_stall_fail_close_ms = n
             }
         }),
-        ("TSPI_HOST_CAPTURE_AES67_REANCHOR_WATCHDOG", |c, v| {
+        ("KHAEN_HOST_CAPTURE_AES67_REANCHOR_WATCHDOG", |c, v| {
             c.capture_aes67_reanchor_watchdog = v == "true" || v == "1"
         }),
         // T203：中置下混内容适配（部署 EnvironmentFile 用；布局 id 由 T57 overlay 解析）。
-        ("TSPI_HOST_CONTENT_LAYOUT_PRESETS", |c, v| {
+        ("KHAEN_HOST_CONTENT_LAYOUT_PRESETS", |c, v| {
             c.content_layout_presets = v
         }),
-        ("TSPI_HOST_CONTENT_INPUT_LAYOUT", |c, v| {
+        ("KHAEN_HOST_CONTENT_INPUT_LAYOUT", |c, v| {
             c.content_input_layout = v
         }),
-        ("TSPI_HOST_CONTENT_OUTPUT_LAYOUT", |c, v| {
+        ("KHAEN_HOST_CONTENT_OUTPUT_LAYOUT", |c, v| {
             c.content_output_layout = v
         }),
-        ("TSPI_HOST_CONTENT_CENTER", |c, v| c.content_center = v),
+        ("KHAEN_HOST_CONTENT_CENTER", |c, v| c.content_center = v),
         // F6/task-216：RT 内核应用开机开关/参数（EnvironmentFile 侧，无需改 toml）。
-        ("TSPI_HOST_APPLY_AFFINITY", |c, v| {
+        ("KHAEN_HOST_APPLY_AFFINITY", |c, v| {
             c.apply_affinity = v == "true" || v == "1"
         }),
-        ("TSPI_HOST_MLOCKALL", |c, v| {
+        ("KHAEN_HOST_MLOCKALL", |c, v| {
             c.rt_mlockall = v == "true" || v == "1"
         }),
-        ("TSPI_HOST_IO_CPU", |c, v| {
+        ("KHAEN_HOST_IO_CPU", |c, v| {
             if let Ok(cpu) = parse_rt_io_cpu(&v) {
                 c.rt_io_cpu = cpu
             }
         }),
         // task-246：DSP 引擎选择（plan-arena；systemd EnvironmentFile 可覆盖）。
-        ("TSPI_HOST_DSP_ENGINE", |c, v| {
+        ("KHAEN_HOST_DSP_ENGINE", |c, v| {
             c.dsp_engine = v.to_ascii_lowercase()
         }),
     ];
@@ -2474,7 +2478,7 @@ fn rt_not_applied_warning(config: &HostRunConfig) -> Option<String> {
         return None;
     }
     Some(
-        "rt.apply_affinity=false：F6 —— 真实播放不写 mlockall/SCHED_FIFO/亲和（kernel_applied=false），I/O 主循环会被 worker 忙等拖过 period 预算 → 持续 xrun；播放验收前请设 [rt] apply_affinity=true（或 TSPI_HOST_APPLY_AFFINITY=true）"
+        "rt.apply_affinity=false：F6 —— 真实播放不写 mlockall/SCHED_FIFO/亲和（kernel_applied=false），I/O 主循环会被 worker 忙等拖过 period 预算 → 持续 xrun；播放验收前请设 [rt] apply_affinity=true（或 KHAEN_HOST_APPLY_AFFINITY=true）"
             .to_string(),
     )
 }
@@ -2677,7 +2681,7 @@ fn fake_alsa_contract_json(config: &HostRunConfig) -> Result<String, String> {
     }
     let sample_bytes = khaen_rt_host::alsa::sample_bytes(sf::S24_3LE_INTERLEAVED)
         .ok_or_else(|| "sample_bytes(S24_3LE) failed".to_string())?;
-    let hw = TspiHwParamsV1 {
+    let hw = KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: sf::S24_3LE_INTERLEAVED,
         n_in: config.capture_channels,
@@ -3661,9 +3665,7 @@ fn aes67_multicast_listen_warning_with(
     if CaptureSource::parse(&config.capture_source).ok()? != CaptureSource::Aes67 {
         return None;
     }
-    if Aes67Transport::parse(&config.capture_aes67_transport).ok()?
-        != Aes67Transport::Userspace
-    {
+    if Aes67Transport::parse(&config.capture_aes67_transport).ok()? != Aes67Transport::Userspace {
         return None;
     }
     if !config.capture_aes67_iface.trim().is_empty() {
@@ -3683,9 +3685,7 @@ fn aes67_multicast_listen_warning(config: &HostRunConfig) -> Option<String> {
     if CaptureSource::parse(&config.capture_source).ok()? != CaptureSource::Aes67 {
         return None;
     }
-    if Aes67Transport::parse(&config.capture_aes67_transport).ok()?
-        != Aes67Transport::Userspace
-    {
+    if Aes67Transport::parse(&config.capture_aes67_transport).ok()? != Aes67Transport::Userspace {
         return None;
     }
     if !config.capture_aes67_iface.trim().is_empty() {
@@ -7254,7 +7254,7 @@ impl FileSink {
         } else {
             4usize
         };
-        let hw = TspiHwParamsV1 {
+        let hw = KhaenHwParamsV1 {
             abi_version: ABI_VERSION,
             sample_format: sample_format_id,
             n_in: 2,
@@ -7669,8 +7669,8 @@ struct WebReport {
     note: String,
 }
 
-/// Web 控制面接线：external（deploy 两 unit 契约，web 由 tspi-rt-daemon 提供）或
-/// spawn（单进程开发/验证：host 拉起同目录 tspi-rt-daemon 子进程并探测端口）。
+/// Web 控制面接线：external（deploy 两 unit 契约，web 由 khaen-rt-daemon 提供）或
+/// spawn（单进程开发/验证：host 拉起同目录 khaen-rt-daemon 子进程并探测端口）。
 fn start_web(config: &HostRunConfig) -> Result<(Option<std::process::Child>, WebReport), String> {
     if config.daemon_config.is_empty() {
         let (status, body) = match http_probe(&config.web_bind, "/healthz", 300) {
@@ -7686,7 +7686,7 @@ fn start_web(config: &HostRunConfig) -> Result<(Option<std::process::Child>, Web
                 probe_body: body,
                 daemon_pid: None,
                 child_terminated: false,
-                note: "web served by tspi-rt-daemon.service (deploy 两 unit 契约)".to_string(),
+                note: "web served by khaen-rt-daemon.service (deploy 两 unit 契约)".to_string(),
             },
         ));
     }
@@ -7695,13 +7695,13 @@ fn start_web(config: &HostRunConfig) -> Result<(Option<std::process::Child>, Web
         .parent()
         .ok_or_else(|| "current_exe has no parent".to_string())?;
     let daemon = dir.join(if cfg!(windows) {
-        "tspi-rt-daemon.exe"
+        "khaen-rt-daemon.exe"
     } else {
-        "tspi-rt-daemon"
+        "khaen-rt-daemon"
     });
     if !daemon.is_file() {
         return Err(format!(
-            "web.mode=spawn 但同目录缺少 tspi-rt-daemon（{}）",
+            "web.mode=spawn 但同目录缺少 khaen-rt-daemon（{}）",
             daemon.display()
         ));
     }
@@ -7754,8 +7754,8 @@ fn event_record(
     severity: u8,
     value_a: u32,
     value_b: u32,
-) -> khaen_core::abi::TspiEventV1 {
-    khaen_core::abi::TspiEventV1 {
+) -> khaen_core::abi::KhaenEventV1 {
+    khaen_core::abi::KhaenEventV1 {
         seq,
         mono_ns: clock::mono_now_ns(),
         epoch_id: EPOCH_ID,
@@ -7810,7 +7810,7 @@ fn last_good_report(path: &str) -> String {
 //   evidence/center-downmix-host/）。
 //
 // [content] 配置（input_layout + output_layout 都留空 = 不启用，既有 2.0/4.1.2 路径不变）：
-//   layout_presets    = "/etc/tspi-audio/layout-presets.yml"（T57 overlay；启用时缺文件拒绝）
+//   layout_presets    = "/etc/khaen-audio/layout-presets.yml"（T57 overlay；启用时缺文件拒绝）
 //   input_layout      = "h16-5.1"（内容输入布局；其通道数必须等于 plan.n_in，逐通道对应）
 //   output_layout     = "4.1.2"（输出布局；决定中置是否存在；容器宽度必须等于 plan.n_out）
 //   center            = "auto"（auto|present|absent；声明与布局矛盾时拒绝）
@@ -7821,7 +7821,7 @@ const ERR_HOST_CONTENT_CONFIG: &str = "ERR_HOST_CONTENT_CONFIG";
 const ERR_HOST_CONTENT_LAYOUT: &str = "ERR_HOST_CONTENT_LAYOUT";
 const ERR_HOST_CONTENT_APPLY: &str = "ERR_HOST_CONTENT_APPLY";
 /// T57 overlay layout 预设默认安装路径（板端真相；与 web config 同口径）。
-const DEFAULT_LAYOUT_PRESETS_PATH: &str = "/etc/tspi-audio/layout-presets.yml";
+const DEFAULT_LAYOUT_PRESETS_PATH: &str = "/etc/khaen-audio/layout-presets.yml";
 
 /// [content] 是否声明了内容适配（两个布局任一非空；配置错误由构建期统一拒绝）。
 fn content_config_declared(config: &HostRunConfig) -> bool {
@@ -8108,36 +8108,36 @@ fn content_report_json(adapter: Option<&ContentAdapter>, applied_blocks: u64) ->
 const PLAN_PATH_FLAG_DIAG_BASELINE: u8 = 1 << 0;
 /// fused 形态标志：P 已折入 path 系数，本模式明确拒绝（不静默近似）。
 const PLAN_PATH_FLAG_FUSED: u8 = 1 << 1;
-/// role 表标志位（abi.rs TspiRoleV1.flags）。
+/// role 表标志位（abi.rs KhaenRoleV1.flags）。
 const PLAN_ROLE_FLAG_ENABLED: u16 = 1 << 0;
 const PLAN_ROLE_FLAG_ZERO_FILL: u16 = 1 << 1;
 
 use khaen_core::direct::{DIRECT_MAX_CONTAINERS, DIRECT_MAX_SOURCES};
 use khaen_core::plan::{PlanBuf, PlanToken};
-use khaen_core::workers::TspiRtControlV1;
+use khaen_core::workers::KhaenRtControlV1;
 use khaen_rt_host::admission::MockMemory;
-use khaen_rt_host::swap::{commit_swap_at_block_boundary, PlanRegistry, TspiSwapAckV1};
+use khaen_rt_host::swap::{commit_swap_at_block_boundary, KhaenSwapAckV1, PlanRegistry};
 
 /// 读 plan header（128 B；repr(C) POD，无指针/Drop；read_unaligned 不要求对齐）。
-fn read_plan_header(bytes: &[u8]) -> Result<TspiPlanHeaderV1, String> {
+fn read_plan_header(bytes: &[u8]) -> Result<KhaenPlanHeaderV1, String> {
     if bytes.len() < 128 {
         return Err(format!(
             "plan 字节 {} < 128（header 不完整；不是 T66 compile/plan.bin）",
             bytes.len()
         ));
     }
-    // SAFETY: TspiPlanHeaderV1 是 repr(C) 全整数字段 POD（无指针/无隐式 Drop）；调用方保证
+    // SAFETY: KhaenPlanHeaderV1 是 repr(C) 全整数字段 POD（无指针/无隐式 Drop）；调用方保证
     // 前 128 B 已初始化；read_unaligned 允许任意对齐；任意 bit pattern 对整数字段合法，随后
     // 由 verify_plan_header 做逐字段范围校验（magic/ABI/CRC 等）。
-    Ok(unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const TspiPlanHeaderV1) })
+    Ok(unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const KhaenPlanHeaderV1) })
 }
 
 /// plan header 结构/ABI/CRC-32C 校验（坏 plan 的第一个门；T20 parse 在其后再做表级校验）。
-fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), String> {
-    if header.magic != TSPI_PLAN_MAGIC {
+fn verify_plan_header(bytes: &[u8], header: &KhaenPlanHeaderV1) -> Result<(), String> {
+    if header.magic != KHAEN_PLAN_MAGIC {
         return Err(format!(
-            "plan header.magic={:#010x} != TSPI_PLAN_MAGIC={:#010x}（不是 plan.bin，拒绝启动）",
-            header.magic, TSPI_PLAN_MAGIC
+            "plan header.magic={:#010x} != KHAEN_PLAN_MAGIC={:#010x}（不是 plan.bin，拒绝启动）",
+            header.magic, KHAEN_PLAN_MAGIC
         ));
     }
     // GAP-T66-3：v1（无 role IIR）与 v2（per-role IIR/PEQ）都接受；其它版本明确拒绝。
@@ -8162,7 +8162,7 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
     if header.reserved0 != 0 || header.reserved1 != 0 || header.reserved2 != 0 {
         return Err("plan header reserved 字段非 0（ABI/布局损坏，拒绝启动）".to_string());
     }
-    if header.abi_version == TSPI_PLAN_ABI_V1 {
+    if header.abi_version == KHAEN_PLAN_ABI_V1 {
         if header.reserved3 != [0u32; 3] {
             return Err("plan ABI v1 header reserved3 非 0（ABI/布局损坏，拒绝启动）".to_string());
         }
@@ -8173,7 +8173,7 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
         }
         if (header.reserved3[0] == 0) != (header.reserved3[1] == 0) {
             return Err(
-                "plan ABI v2 IIR 表 offset/count 必须成对为 0 或非 0（拒绝启动）".to_string()
+                "plan ABI v2 IIR 表 offset/count 必须成对为 0 或非 0（拒绝启动）".to_string(),
             );
         }
         if header.reserved3[1] > 16 {
@@ -8189,15 +8189,11 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
                 .checked_add(PLAN_IIR_HEADER_BYTES)
                 .and_then(|value| value.checked_add(count * PLAN_IIR_ENTRY_BYTES));
             match end {
-                Some(end)
-                    if offset >= 128
-                        && offset % 8 == 0
-                        && end <= bytes.len() =>
-                {
-                    let iir_header: khaen_core::abi::TspiPlanIirHeaderV2 =
+                Some(end) if offset >= 128 && offset % 8 == 0 && end <= bytes.len() => {
+                    let iir_header: khaen_core::abi::KhaenPlanIirHeaderV2 =
                         unsafe { std::ptr::read_unaligned(bytes[offset..].as_ptr() as *const _) };
-                    if iir_header.magic != khaen_core::abi::TSPI_PLAN_IIR_MAGIC
-                        || iir_header.version != khaen_core::abi::TSPI_PLAN_IIR_VERSION
+                    if iir_header.magic != khaen_core::abi::KHAEN_PLAN_IIR_MAGIC
+                        || iir_header.version != khaen_core::abi::KHAEN_PLAN_IIR_VERSION
                         || iir_header.entry_bytes as usize != PLAN_IIR_ENTRY_BYTES
                         || iir_header.entry_count as usize != count
                         || iir_header.reserved0 != 0
@@ -8209,8 +8205,8 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
                 }
                 _ => {
                     return Err(format!(
-                        "plan ABI v2 IIR 表区间 [{offset},) 越界/未 8B 对齐（count={count}，拒绝启动）"
-                    ))
+                    "plan ABI v2 IIR 表区间 [{offset},) 越界/未 8B 对齐（count={count}，拒绝启动）"
+                ))
                 }
             }
         }
@@ -8358,13 +8354,13 @@ fn plan_coeffs_f32(
 /// T20 parse/admit + 版本 apply 成功后的 plan 上下文（registry 必须存活：ctl 的
 /// current_plan_ptr 指向 registry 内的 arena）。
 struct PlanArenaPrepared {
-    header: TspiPlanHeaderV1,
+    header: KhaenPlanHeaderV1,
     graph_id: [u8; 32],
     graph: Graph,
     version: u32,
     registry: PlanRegistry,
-    swap: TspiSwapAckV1,
-    ctl: TspiRtControlV1,
+    swap: KhaenSwapAckV1,
+    ctl: KhaenRtControlV1,
     admission_backend: &'static str,
     manifest_state: String,
     plan_sha256: String,
@@ -8376,17 +8372,10 @@ struct PlanArenaPrepared {
 
 /// NSP 5.1.2 线序进 4.1.2 容器时，plan 只能是这 7 条直通（out, in）。
 /// 中置线序 2 不在表里，由 content_map 折进前左/前右。
-const NSP512_TO_412_PATHS: [(u16, u16); 7] = [
-    (0, 0),
-    (1, 1),
-    (2, 4),
-    (3, 5),
-    (4, 6),
-    (5, 7),
-    (7, 3),
-];
+const NSP512_TO_412_PATHS: [(u16, u16); 7] =
+    [(0, 0), (1, 1), (2, 4), (3, 5), (4, 6), (5, 7), (7, 3)];
 
-fn validate_nsp512_to_412_paths(paths: &[khaen_core::abi::TspiPathV1]) -> Result<(), String> {
+fn validate_nsp512_to_412_paths(paths: &[khaen_core::abi::KhaenPathV1]) -> Result<(), String> {
     let mut got: Vec<(u16, u16)> = paths
         .iter()
         .map(|path| (path.out_index, path.in_index))
@@ -8530,8 +8519,8 @@ fn prepare_plan_arena(
     };
     // T20 版本 apply（§5.3）：admit -> stage -> arm（ctl pending+ARMED）-> RT block 边界
     // commit -> complete_swap（ctl 回 IDLE、current=该版本）。本模式单版本启动加载。
-    let mut swap = TspiSwapAckV1::new();
-    let ctl = TspiRtControlV1::new();
+    let mut swap = KhaenSwapAckV1::new();
+    let ctl = KhaenRtControlV1::new();
     let stage = registry
         .stage(version)
         .map_err(|status| format!("T20 stage 失败（status {}）", status.code()))?;
@@ -8586,7 +8575,7 @@ fn prepare_plan_arena(
 /// 任一不能无损映射的形态（fused/P 已折入、PEQ、非单射 A_map/scatter、超容量）明确拒绝。
 fn graph_from_plan(
     view: &PlanView<'_>,
-    iir_entries: &[TspiRoleIirV2],
+    iir_entries: &[KhaenRoleIirV2],
 ) -> Result<(Graph, String), String> {
     let header = view.header;
     let paths = view.paths;
@@ -8646,7 +8635,7 @@ fn graph_from_plan(
                 role.out_index
             ));
         }
-        if role.peq_count != 0 && header.abi_version == TSPI_PLAN_ABI_V1 {
+        if role.peq_count != 0 && header.abi_version == KHAEN_PLAN_ABI_V1 {
             return Err(format!(
                 "role[{index}].peq_count={}：plan abi_version=1 无 role IIR 系数区（GAP-T66-3），host 不静默丢弃 PEQ，拒绝加载",
                 role.peq_count
@@ -8992,7 +8981,6 @@ fn graph_from_plan(
     Ok((graph, adapter_json))
 }
 
-
 /// plan ABI v2 per-role IIR(PEQ) 解码 + 硬门 + 每容器级联（GAP-T66-3）。
 ///
 /// 硬门（失败即拒绝加载，不静默近似）：plan ABI 必须 v2（v1 无系数区）；每条表项必须命中
@@ -9001,7 +8989,7 @@ fn graph_from_plan(
 /// （|a2|<1 且 |a1|<1+a2）；顺序即级联顺序（同一容器多段按表项顺序串联）。
 fn build_role_iir(
     view: &PlanView<'_>,
-    entries: &[TspiRoleIirV2],
+    entries: &[KhaenRoleIirV2],
     role_by_container: &[u16; DIRECT_MAX_CONTAINERS],
     containers: usize,
 ) -> Result<RoleIirCascade, String> {
@@ -9014,7 +9002,7 @@ fn build_role_iir(
         }
         return Ok(cascade);
     }
-    if view.header.abi_version != TSPI_PLAN_ABI_V2 {
+    if view.header.abi_version != KHAEN_PLAN_ABI_V2 {
         return Err(format!(
             "plan 带 {} 条 IIR 表项但 abi_version={}（只有 plan ABI v2 有 role IIR 区，拒绝加载）",
             entries.len(),
@@ -9086,9 +9074,7 @@ fn build_role_iir(
             ));
         }
         if cascade.counts[container] != 0 {
-            return Err(format!(
-                "plan 容器 {container} 重复 IIR 表项（拒绝加载）"
-            ));
+            return Err(format!("plan 容器 {container} 重复 IIR 表项（拒绝加载）"));
         }
         let expected_len = entry.section_count as usize * 4 * PLAN_IIR_SECTION_COEFFS;
         if entry.coeff_len_bytes as usize != expected_len {
@@ -9113,7 +9099,8 @@ fn build_role_iir(
             let mut k = 0usize;
             while k < PLAN_IIR_SECTION_COEFFS {
                 let at = base + k * 4;
-                coeffs[k] = f32::from_le_bytes([blob[at], blob[at + 1], blob[at + 2], blob[at + 3]]);
+                coeffs[k] =
+                    f32::from_le_bytes([blob[at], blob[at + 1], blob[at + 2], blob[at + 3]]);
                 if !coeffs[k].is_finite() {
                     return Err(format!(
                         "plan role[{role_index}] IIR 系数非有限（NaN/Inf，段 {section_index}，拒绝加载）"
@@ -9392,7 +9379,6 @@ fn run_plan_arena_command(
     duration_ms: u64,
     mut warnings: Vec<String>,
 ) -> Result<String, String> {
-    use std::fmt::Write as _;
     use khaen_core::events::{
         EV_DEADLINE_MISS, EV_RUNNING, EV_SAFETY_MUTE_ENTER, EV_STARTING, EV_STOPPED, LANE_CONTROL,
         LANE_WATCHDOG, SEVERITY_INFO, SEVERITY_WARNING,
@@ -9400,6 +9386,7 @@ fn run_plan_arena_command(
     use khaen_core::rt::gate_ns_floor;
     use khaen_rt_host::fault::{EventLaneReader, EventLanes, Watchdog, WatchdogAction};
     use khaen_rt_host::scheduler::SchedGate;
+    use std::fmt::Write as _;
 
     validate_backend_config(config)?;
     // 1) plan 加载 + T20 parse/admit/apply（primary；失败且配置 last-good 时回退）。
@@ -9788,11 +9775,8 @@ fn run_plan_arena_command(
             } else if use_partitioned {
                 // task-284：partitioned 单执行器 all-ack（T20 note_block_all_ack 的唯一 RT 证据）。
                 // 只有真实执行过（engine_blocks 已递增）的块会到这里；mute/gate 块不产生 ack。
-                let block_ack = completed_single_executor_block_ack(
-                    blocks,
-                    prepared.version,
-                    expected_workers,
-                );
+                let block_ack =
+                    completed_single_executor_block_ack(blocks, prepared.version, expected_workers);
                 let ack_status = prepared.swap.note_block_all_ack(&block_ack);
                 if !ack_status.is_ok() {
                     return Err(format!(
@@ -10063,7 +10047,7 @@ fn run_plan_arena_command(
 #[cfg(test)]
 mod plan_arena_tests {
     use super::*;
-    use khaen_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
+    use khaen_core::abi::{KhaenDiagFirV1, KhaenPathV1, KhaenRoleV1};
 
     const T_RATE: u32 = 48_000;
     const T_BLOCK: u16 = 128;
@@ -10330,7 +10314,7 @@ mod plan_arena_tests {
         out
     }
 
-    fn path_bytes(path: &TspiPathV1) -> [u8; 32] {
+    fn path_bytes(path: &KhaenPathV1) -> [u8; 32] {
         let mut out = [0u8; 32];
         let mut offset = 0usize;
         for bytes in [
@@ -10355,7 +10339,7 @@ mod plan_arena_tests {
         out
     }
 
-    fn diag_bytes(diag: &TspiDiagFirV1) -> [u8; 32] {
+    fn diag_bytes(diag: &KhaenDiagFirV1) -> [u8; 32] {
         let mut out = [0u8; 32];
         let mut offset = 0usize;
         out[offset..offset + 2].copy_from_slice(&diag.out_index.to_le_bytes());
@@ -10376,7 +10360,7 @@ mod plan_arena_tests {
         out
     }
 
-    fn role_bytes(role: &TspiRoleV1) -> [u8; 32] {
+    fn role_bytes(role: &KhaenRoleV1) -> [u8; 32] {
         let mut out = [0u8; 32];
         let mut offset = 0usize;
         out[offset..offset + 2].copy_from_slice(&role.role_id.to_le_bytes());
@@ -10406,13 +10390,13 @@ mod plan_arena_tests {
         out
     }
 
-    fn header_raw(header: &TspiPlanHeaderV1) -> [u8; 128] {
+    fn header_raw(header: &KhaenPlanHeaderV1) -> [u8; 128] {
         // repr(C, align(64)) 128 B 布局 == T66 header_bytes() 的字段序（ABI v1.1.2 E1 定稿）。
         let mut bytes = [0u8; 128];
         // SAFETY: 只读复制 header 的前 128 B（结构体 size=128，纯整数字段）。
         unsafe {
             std::ptr::copy_nonoverlapping(
-                header as *const TspiPlanHeaderV1 as *const u8,
+                header as *const KhaenPlanHeaderV1 as *const u8,
                 bytes.as_mut_ptr(),
                 128,
             );
@@ -10420,7 +10404,7 @@ mod plan_arena_tests {
         bytes
     }
 
-    fn iir_header_bytes(header: &khaen_core::abi::TspiPlanIirHeaderV2) -> [u8; 16] {
+    fn iir_header_bytes(header: &khaen_core::abi::KhaenPlanIirHeaderV2) -> [u8; 16] {
         let mut out = [0u8; 16];
         out[0..4].copy_from_slice(&header.magic.to_le_bytes());
         out[4..6].copy_from_slice(&header.version.to_le_bytes());
@@ -10431,7 +10415,7 @@ mod plan_arena_tests {
         out
     }
 
-    fn iir_entry_bytes(entry: &TspiRoleIirV2) -> [u8; 32] {
+    fn iir_entry_bytes(entry: &KhaenRoleIirV2) -> [u8; 32] {
         let mut out = [0u8; 32];
         out[0..2].copy_from_slice(&entry.role_id.to_le_bytes());
         out[2..4].copy_from_slice(&entry.order.to_le_bytes());
@@ -10454,11 +10438,11 @@ mod plan_arena_tests {
     fn plan_parts(
         plan: &TestPlan,
     ) -> (
-        TspiPlanHeaderV1,
-        Vec<TspiPathV1>,
-        Vec<TspiDiagFirV1>,
-        Vec<TspiRoleV1>,
-        Vec<TspiRoleIirV2>,
+        KhaenPlanHeaderV1,
+        Vec<KhaenPathV1>,
+        Vec<KhaenDiagFirV1>,
+        Vec<KhaenRoleV1>,
+        Vec<KhaenRoleIirV2>,
         Vec<u8>,
         Vec<u8>,
     ) {
@@ -10499,7 +10483,7 @@ mod plan_arena_tests {
             .unwrap_or(1);
         let mut paths = Vec::with_capacity(plan.paths.len());
         for (index, path) in plan.paths.iter().enumerate() {
-            paths.push(TspiPathV1 {
+            paths.push(KhaenPathV1 {
                 in_index: path.in_index,
                 out_index: path.out_index,
                 taps: path.taps,
@@ -10514,7 +10498,7 @@ mod plan_arena_tests {
         }
         let mut diags = Vec::with_capacity(plan.diags.len());
         for (index, diag) in plan.diags.iter().enumerate() {
-            diags.push(TspiDiagFirV1 {
+            diags.push(KhaenDiagFirV1 {
                 out_index: diag.out_index,
                 flags: 0,
                 taps: diag.taps,
@@ -10527,7 +10511,7 @@ mod plan_arena_tests {
         }
         let mut roles = Vec::with_capacity(plan.roles.len());
         for (index, role) in plan.roles.iter().enumerate() {
-            roles.push(TspiRoleV1 {
+            roles.push(KhaenRoleV1 {
                 role_id: index as u16,
                 out_index: role.out_index,
                 flags: role.flags,
@@ -10543,14 +10527,14 @@ mod plan_arena_tests {
                 reserved4: 0,
             });
         }
-        let mut iir_entries: Vec<TspiRoleIirV2> = Vec::with_capacity(plan.iir.len());
+        let mut iir_entries: Vec<KhaenRoleIirV2> = Vec::with_capacity(plan.iir.len());
         let mut iir_table: Vec<u8> = Vec::new();
         let mut reserved3 = [0u32; 3];
         if !plan.iir.is_empty() {
             let iir_table_offset = ctl_meta_offset;
             for (index, iir) in plan.iir.iter().enumerate() {
                 let sections = iir.sections.len() as u16;
-                iir_entries.push(TspiRoleIirV2 {
+                iir_entries.push(KhaenRoleIirV2 {
                     role_id: iir.role_id,
                     order: 2,
                     section_count: sections,
@@ -10562,10 +10546,10 @@ mod plan_arena_tests {
                     reserved2: 0,
                 });
             }
-            let header_bytes = core::mem::size_of::<khaen_core::abi::TspiPlanIirHeaderV2>();
-            let crc_header = khaen_core::abi::TspiPlanIirHeaderV2 {
-                magic: khaen_core::abi::TSPI_PLAN_IIR_MAGIC,
-                version: khaen_core::abi::TSPI_PLAN_IIR_VERSION,
+            let header_bytes = core::mem::size_of::<khaen_core::abi::KhaenPlanIirHeaderV2>();
+            let crc_header = khaen_core::abi::KhaenPlanIirHeaderV2 {
+                magic: khaen_core::abi::KHAEN_PLAN_IIR_MAGIC,
+                version: khaen_core::abi::KHAEN_PLAN_IIR_VERSION,
                 entry_bytes: 32,
                 entry_count: iir_entries.len() as u16,
                 reserved0: 0,
@@ -10584,9 +10568,9 @@ mod plan_arena_tests {
                 }
             }
             let table_crc32c = khaen_core::nodes::crc32c(&crc_input);
-            let table_header = khaen_core::abi::TspiPlanIirHeaderV2 {
-                magic: khaen_core::abi::TSPI_PLAN_IIR_MAGIC,
-                version: khaen_core::abi::TSPI_PLAN_IIR_VERSION,
+            let table_header = khaen_core::abi::KhaenPlanIirHeaderV2 {
+                magic: khaen_core::abi::KHAEN_PLAN_IIR_MAGIC,
+                version: khaen_core::abi::KHAEN_PLAN_IIR_VERSION,
                 entry_bytes: 32,
                 entry_count: iir_entries.len() as u16,
                 reserved0: 0,
@@ -10601,10 +10585,10 @@ mod plan_arena_tests {
         let abi_version = if plan.iir.is_empty() {
             ABI_VERSION
         } else {
-            TSPI_PLAN_ABI_V2
+            KHAEN_PLAN_ABI_V2
         };
-        let header = TspiPlanHeaderV1 {
-            magic: TSPI_PLAN_MAGIC,
+        let header = KhaenPlanHeaderV1 {
+            magic: KHAEN_PLAN_MAGIC,
             abi_version,
             header_size: 128,
             plan_version: 0,
@@ -10749,7 +10733,6 @@ mod plan_arena_tests {
         assert!(error.contains("GAP-T66-3"), "{error}");
     }
 
-
     // ---- plan ABI v2：per-role IIR(PEQ)（GAP-T66-3） ----
 
     /// RBJ cookbook peaking EQ（a0 归一化）→ plan v2 系数 [b0,b1,b2,a1,a2]。
@@ -10843,7 +10826,11 @@ mod plan_arena_tests {
     fn t_abi_iir_identity_plan_is_unchanged() {
         // v1 identity plan（无 IIR）仍然 bit-exact 直通：impulse -> impulse。
         let output = render_plan_impulse(&TestPlan::stereo_identity(), 2);
-        assert!((output[0][0] - 1.0).abs() < 1e-6, "identity[0][0]={}", output[0][0]);
+        assert!(
+            (output[0][0] - 1.0).abs() < 1e-6,
+            "identity[0][0]={}",
+            output[0][0]
+        );
         assert!(
             output[0][1..].iter().all(|value| value.abs() < 1e-6),
             "identity 应无拖尾"
@@ -10868,7 +10855,10 @@ mod plan_arena_tests {
         assert_eq!(graph.iir.section_count(), 1);
         assert_eq!(graph.iir.role_count(), 1);
         assert!(adapter_json.contains("\"plan_abi\":2"), "{adapter_json}");
-        assert!(adapter_json.contains("\"role_iir_sections\":1"), "{adapter_json}");
+        assert!(
+            adapter_json.contains("\"role_iir_sections\":1"),
+            "{adapter_json}"
+        );
         // 2 s（750 块）足够 100 Hz/Q1 的 IR 衰减到可忽略；DFT 分辨率 1 Hz。
         let blocks = 750usize;
         let output = render_plan_impulse(&plan, blocks);
@@ -10899,7 +10889,10 @@ mod plan_arena_tests {
         // 中心频点解析值 = −6 dB；输出必须落在 ±0.5 dB。
         let center_expected = biquad_response_db(&coeffs, T_RATE as f64, 100.0);
         let center_measured = dft_mag_db(samples, 100.0);
-        assert!((center_expected + 6.0).abs() < 1e-3, "解析 100 Hz 应 ≈ -6 dB：{center_expected}");
+        assert!(
+            (center_expected + 6.0).abs() < 1e-3,
+            "解析 100 Hz 应 ≈ -6 dB：{center_expected}"
+        );
         assert!(
             (center_measured - center_expected).abs() <= 0.5,
             "100 Hz 实测 {center_measured:.3} dB vs 解析 {center_expected:.3} dB"
@@ -11351,7 +11344,7 @@ mod plan_arena_tests {
 
     /// T57 overlay layout 预设（与 compat/control 消费同一文件；host 用 content_map 读取）。
     const LAYOUT_PRESETS_OVERLAY: &str =
-        include_str!("../../../../audio/overlay/etc/tspi-audio/layout-presets.yml");
+        include_str!("../../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
 
     fn layout_presets_path() -> std::path::PathBuf {
         temp_file("t203-layout-presets", LAYOUT_PRESETS_OVERLAY.as_bytes())
@@ -11886,7 +11879,9 @@ mod plan_arena_tests {
         let json = run_temp_config("t284-part-mute-config", &text).expect("partitioned mute run");
         let _ = std::fs::remove_file(&plan_path);
         assert!(
-            json.contains("\"engine\":{\"requested\":\"partitioned\",\"effective\":\"partitioned\""),
+            json.contains(
+                "\"engine\":{\"requested\":\"partitioned\",\"effective\":\"partitioned\""
+            ),
             "{json}"
         );
         assert!(json.contains("\"blocks\":3"), "{json}");
@@ -12067,7 +12062,7 @@ mod center_downmix_host_tests {
     };
 
     const LAYOUT_PRESETS_OVERLAY: &str =
-        include_str!("../../../../audio/overlay/etc/tspi-audio/layout-presets.yml");
+        include_str!("../../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
 
     fn presets() -> LayoutPresets {
         LayoutPresets::parse_overlay(LAYOUT_PRESETS_OVERLAY.as_bytes())
@@ -12390,7 +12385,7 @@ mod center_downmix_host_tests {
     fn t203_content_config_parser_reads_section() {
         let text = concat!(
             "[content]\n",
-            "layout_presets = \"/etc/tspi-audio/layout-presets.yml\"\n",
+            "layout_presets = \"/etc/khaen-audio/layout-presets.yml\"\n",
             "input_layout = \"h16-5.1\"\n",
             "output_layout = \"4.1.2\"\n",
             "center = \"auto\"\n",
@@ -12403,7 +12398,7 @@ mod center_downmix_host_tests {
         assert_eq!(config.content_output_layout, "4.1.2");
         assert_eq!(
             config.content_layout_presets,
-            "/etc/tspi-audio/layout-presets.yml"
+            "/etc/khaen-audio/layout-presets.yml"
         );
         assert_eq!(config.content_center, "auto");
         assert_eq!(config.content_program_peak_dbfs, -3.0);
@@ -12493,7 +12488,7 @@ fn run_command_with_sink(
     use khaen_rt_host::fault::{EventLaneReader, EventLanes, Watchdog, WatchdogAction};
     use khaen_rt_host::scheduler::SchedGate;
     use khaen_rt_host::swap::{
-        commit_swap_at_block_boundary, note_block_switched, GraphQuarantine, TspiSwapAckV1,
+        commit_swap_at_block_boundary, note_block_switched, GraphQuarantine, KhaenSwapAckV1,
     };
 
     let (config, mut warnings) = load_host_config(config_path)?;
@@ -12558,7 +12553,7 @@ fn run_command_with_sink(
     // RT 入口）。初始 plan v1（无旧图）+ 后半程同图 re-plan v2（真实 commit + quarantine + all-ack）。
     let plan_v1_ptr = &plan as *const WorkerDagPlan as u64;
     let plan_v2_ptr = &plan_v2 as *const WorkerDagPlan as u64;
-    let mut swap = TspiSwapAckV1::new();
+    let mut swap = KhaenSwapAckV1::new();
     let mut swap_status = swap.init(1, config.workers, EPOCH_ID, 1, 0);
     let mut swap_switches = 1u32;
     let mut swap_ack_blocks = 0u64;
@@ -12571,7 +12566,7 @@ fn run_command_with_sink(
     let mut event_seq = 0u64;
     let mut watchdog = Watchdog::new();
     let mut watchdog_actions = 0u32;
-    let ctl = khaen_core::workers::TspiRtControlV1::new();
+    let ctl = khaen_core::workers::KhaenRtControlV1::new();
     ctl.current_plan_version.store(1u32, Ordering::Release);
     // INV-L1：master 首个 block 之前 current_plan_ptr 指向生效图（之后只由 block 边界 commit 替换）。
     ctl.current_plan_ptr.store(plan_v1_ptr, Ordering::Release);
@@ -13354,8 +13349,8 @@ mod tests {
 
     #[test]
     fn nsp512_to_412_path_table_rejects_identity() {
-        fn path_io(out_index: u16, in_index: u16) -> khaen_core::abi::TspiPathV1 {
-            khaen_core::abi::TspiPathV1 {
+        fn path_io(out_index: u16, in_index: u16) -> khaen_core::abi::KhaenPathV1 {
+            khaen_core::abi::KhaenPathV1 {
                 in_index,
                 out_index,
                 taps: 2,
@@ -13551,8 +13546,8 @@ mod tests {
 
     #[test]
     fn t26_real_all_ack_sets_retire_ready_synthetic_rejected() {
-        use khaen_core::abi::TspiBlockAckV1;
-        use khaen_rt_host::swap::TspiSwapAckV1;
+        use khaen_core::abi::KhaenBlockAckV1;
+        use khaen_rt_host::swap::KhaenSwapAckV1;
 
         // 真实证据：completed_block_ack 只填「该块 4 worker 三 phase 全部完成」的事实。
         let ack = completed_block_ack(7, 1, 4);
@@ -13570,7 +13565,7 @@ mod tests {
         }
         assert_eq!(ack.cutoff.load(Ordering::Acquire), 0);
 
-        let mut swap = TspiSwapAckV1::new();
+        let mut swap = KhaenSwapAckV1::new();
         assert!(swap.init(1, 4, EPOCH_ID, 1, 0).is_ok());
         assert_eq!(swap.retire_ready_value(), 0, "初始不得预置 retire_ready");
         assert!(swap.note_block_all_ack(&ack).is_ok());
@@ -13582,7 +13577,7 @@ mod tests {
         // synthetic/伪证据：partial phase / cutoff / 版本标签不符都必须被拒，
         // 且不得写 retire_ready（F-26：不得用合成 ack 冒充真实 all-ack）。
         let partial = {
-            let a = TspiBlockAckV1::new(8, EPOCH_ID, 1, 4);
+            let a = KhaenBlockAckV1::new(8, EPOCH_ID, 1, 4);
             a.phase_done[0].store(mask, Ordering::Release);
             a.phase_done[1].store(mask & 0b0111, Ordering::Release);
             a.phase_done[2].store(mask, Ordering::Release);
@@ -13596,7 +13591,7 @@ mod tests {
             ("cutoff", cutoff),
             ("wrong-version", wrong_version),
         ] {
-            let mut swap = TspiSwapAckV1::new();
+            let mut swap = KhaenSwapAckV1::new();
             assert!(swap.init(1, 4, EPOCH_ID, 1, 0).is_ok());
             assert!(
                 !swap.note_block_all_ack(&fake).is_ok(),
@@ -13613,8 +13608,8 @@ mod tests {
 
     #[test]
     fn t26_real_switch_all_ack_releases_quarantine_only_after_ack() {
-        use khaen_core::abi::TspiBlockAckV1;
-        use khaen_rt_host::swap::{note_block_switched, GraphQuarantine, TspiSwapAckV1};
+        use khaen_core::abi::KhaenBlockAckV1;
+        use khaen_rt_host::swap::{note_block_switched, GraphQuarantine, KhaenSwapAckV1};
 
         let old_version = 1u32;
         let new_version = 2u32;
@@ -13625,7 +13620,7 @@ mod tests {
         let slot = quarantine
             .enter(EPOCH_ID, old_version, old_ptr, 4)
             .expect("quarantine slot");
-        let mut swap = TspiSwapAckV1::new();
+        let mut swap = KhaenSwapAckV1::new();
         assert!(swap
             .init(new_version, 4, EPOCH_ID, new_version, old_ptr)
             .is_ok());
@@ -13634,7 +13629,7 @@ mod tests {
         assert_eq!(quarantine.remaining_mask(slot), Some(mask));
         // synthetic 半块（只 phase0 全到）不得清 quarantine 位、不得置 retire_ready。
         let partial = {
-            let a = TspiBlockAckV1::new(1, EPOCH_ID, new_version, 4);
+            let a = KhaenBlockAckV1::new(1, EPOCH_ID, new_version, 4);
             a.phase_done[0].store(mask, Ordering::Release);
             a
         };
@@ -13738,7 +13733,10 @@ mod tests {
             .expect("current_exe")
             .parent()
             .expect("test exe dir")
-            .join(format!("khaen-rt-host-f26-swap-{}.toml", std::process::id()));
+            .join(format!(
+                "khaen-rt-host-f26-swap-{}.toml",
+                std::process::id()
+            ));
         let config = concat!(
             "[host]\n",
             "block_size = 128\n",
@@ -14268,7 +14266,10 @@ mod tests {
         let output = tone_output(128);
         sink.write_block(&output, 128, 128, false)
             .expect("exhausted is not fatal");
-        assert_eq!(sink.session.state(), khaen_rt_host::alsa::DuplexState::Muted);
+        assert_eq!(
+            sink.session.state(),
+            khaen_rt_host::alsa::DuplexState::Muted
+        );
         // 下一块：capture 阶段先遇到 Muted（旧实现在这里 Err）。
         let outcome = sink.read_capture().expect("Muted capture 不得失败");
         assert_eq!(
@@ -15235,7 +15236,7 @@ mod tests {
 
     #[test]
     fn t74_file_missing_path_rejected() {
-        let missing = std::env::temp_dir().join("tspi-t74-does-not-exist-7f3a.wav");
+        let missing = std::env::temp_dir().join("khaen-t74-does-not-exist-7f3a.wav");
         let _ = std::fs::remove_file(&missing);
         let error = run_file_capture_config(
             "stereo_identity",
@@ -16441,14 +16442,16 @@ mod tests {
     use khaen_aoip_aes67::clock::frames_to_ns_ceil as t239_frames_to_ns_ceil;
     use khaen_aoip_aes67::jitter::{self as t239_jitter, JitterConfig as T239JitterConfig};
     use khaen_aoip_aes67::rtp::Header as T239RtpHeader;
-    use khaen_aoip_aes67::sender::{Aes67RtpSender as T239Sender, SenderConfig as T239SenderConfig};
+    use khaen_aoip_aes67::sender::{
+        Aes67RtpSender as T239Sender, SenderConfig as T239SenderConfig,
+    };
 
     /// 单条 userspace test SDP（单播 127.0.0.1，L24/48k/<ch>，PTPv2 参考钟声明）。
     fn t239_sdp_unicast(port: u16, channels: u16) -> String {
         format!(
             "v=0\n\
 o=- 0 0 IN IP4 127.0.0.1\n\
-s=TSPI-T239-userspace-test\n\
+s=KHAEN-T239-userspace-test\n\
 c=IN IP4 127.0.0.1\n\
 t=0 0\n\
 m=audio {} RTP/AVP 96\n\
@@ -16465,7 +16468,7 @@ a=mediaclk:direct=0\n",
         format!(
             "v=0\n\
 o=- 0 0 IN IP4 127.0.0.1\n\
-s=TSPI-T239-userspace-mcast\n\
+s=KHAEN-T239-userspace-mcast\n\
 c=IN IP4 {}/32\n\
 t=0 0\n\
 m=audio {} RTP/AVP 97\n\
@@ -16530,7 +16533,7 @@ a=mediaclk:direct=0\n",
         parse_host_config(&text, &mut warnings).expect("T239 userspace 测试配置必须可解析")
     }
 
-    /// T239 测试的进程环境锁：env 覆盖用例会临时 set/remove TSPI_HOST_CAPTURE_AES67_*，
+    /// T239 测试的进程环境锁：env 覆盖用例会临时 set/remove KHAEN_HOST_CAPTURE_AES67_*，
     /// 与并行解析配置的用例存在数据竞争；所有 T239 用例串行化该段（不影响非 T239 测试）。
     static T239_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -16591,13 +16594,13 @@ a=mediaclk:direct=0\n",
         assert_eq!(cfg.capture_aes67_iface, "127.0.0.1");
         validate_capture_config(&cfg).expect("userspace + fake backend 必须通过");
         // EnvironmentFile 覆盖（部署契约）。
-        std::env::set_var("TSPI_HOST_CAPTURE_AES67_STALL_BLOCKS", "123");
+        std::env::set_var("KHAEN_HOST_CAPTURE_AES67_STALL_BLOCKS", "123");
         let with_env = parse_host_config(
             &t239_config_text(&sdp, "fake", "synth", ""),
             &mut Vec::new(),
         )
         .expect("env config");
-        std::env::remove_var("TSPI_HOST_CAPTURE_AES67_STALL_BLOCKS");
+        std::env::remove_var("KHAEN_HOST_CAPTURE_AES67_STALL_BLOCKS");
         assert_eq!(with_env.capture_aes67_stall_blocks, 123);
 
         // mode 互斥（source/mode 一一对应先于传输分支）。
@@ -16650,7 +16653,7 @@ a=mediaclk:direct=0\n",
         assert!(error.starts_with(ERR_HOST_CAPTURE_CONFIG), "{error}");
         // 参数越界（iface/slots/io_priority/stall_blocks）。
         let mut iface = t239_userspace_config(&sdp, "fake", "synth", "");
-        iface.capture_aes67_iface = "tspi-no-such-iface-xyz".to_string();
+        iface.capture_aes67_iface = "khaen-no-such-iface-xyz".to_string();
         assert!(validate_capture_config(&iface)
             .expect_err("不存在的网卡名必须被拒（fail closed，不猜）")
             .starts_with(ERR_HOST_CAPTURE_CONFIG));
@@ -16685,7 +16688,9 @@ a=mediaclk:direct=0\n",
         // 空 = 旧行为 0.0.0.0；0.0.0.0 单独 = 旧行为；与具体接口混写 = 拒绝。
         assert!(parse_aes67_iface("").expect("空").is_empty());
         assert!(parse_aes67_iface("   ").expect("空白").is_empty());
-        assert!(parse_aes67_iface("0.0.0.0").expect("显式 0.0.0.0").is_empty());
+        assert!(parse_aes67_iface("0.0.0.0")
+            .expect("显式 0.0.0.0")
+            .is_empty());
         assert!(parse_aes67_iface("0.0.0.0,192.0.2.222").is_err());
         // 网卡名解析（注入 resolver：确定性正/负例；真实系统解析在 iface.rs 单测）。
         let named = parse_aes67_iface_with("lan0", |name| {
@@ -16734,14 +16739,15 @@ a=mediaclk:direct=0\n",
         let bad_group = parse_aes67_group_allow("192.0.2.222").expect_err("非组播组");
         assert!(bad_group.contains("aes67_group_allow"), "{bad_group}");
         assert!(parse_aes67_group_allow("239.69.16.1,239.69.16.1").is_err());
-        let sources =
-            parse_aes67_source_allow("192.0.2.0/24, 192.0.2.222").expect("来源列表");
+        let sources = parse_aes67_source_allow("192.0.2.0/24, 192.0.2.222").expect("来源列表");
         assert_eq!(sources.len(), 2);
         assert!(sources.contains(T239Ipv4Addr::new(192, 0, 2, 10)));
         assert!(!sources.contains(T239Ipv4Addr::new(10, 0, 0, 1)));
         let bad_cidr = parse_aes67_source_allow("192.0.2.0/33").expect_err("前缀越界");
         assert!(bad_cidr.contains("aes67_source_allow"), "{bad_cidr}");
-        assert!(parse_aes67_source_allow("").expect("空来源白名单").is_empty());
+        assert!(parse_aes67_source_allow("")
+            .expect("空来源白名单")
+            .is_empty());
 
         // 组白名单命中 → 计划构造成功，字段落到 receiver_configs。
         let sdp = temp_file(
@@ -16796,15 +16802,15 @@ a=mediaclk:direct=0\n",
         let error = plan_aes67_user_capture(&cfg_multi, 2).expect_err("单播 + 多接口必须被拒");
         assert!(error.contains("aes67_iface"), "{error}");
         // EnvironmentFile 覆盖（部署契约）。
-        std::env::set_var("TSPI_HOST_CAPTURE_AES67_GROUP_ALLOW", "239.69.16.146");
-        std::env::set_var("TSPI_HOST_CAPTURE_AES67_SOURCE_ALLOW", "192.0.2.0/24");
+        std::env::set_var("KHAEN_HOST_CAPTURE_AES67_GROUP_ALLOW", "239.69.16.146");
+        std::env::set_var("KHAEN_HOST_CAPTURE_AES67_SOURCE_ALLOW", "192.0.2.0/24");
         let env_cfg = parse_host_config(
             &t239_config_text(&sdp, "fake", "synth", ""),
             &mut Vec::new(),
         )
         .expect("env 配置");
-        std::env::remove_var("TSPI_HOST_CAPTURE_AES67_GROUP_ALLOW");
-        std::env::remove_var("TSPI_HOST_CAPTURE_AES67_SOURCE_ALLOW");
+        std::env::remove_var("KHAEN_HOST_CAPTURE_AES67_GROUP_ALLOW");
+        std::env::remove_var("KHAEN_HOST_CAPTURE_AES67_SOURCE_ALLOW");
         assert_eq!(env_cfg.capture_aes67_group_allow, "239.69.16.146");
         assert_eq!(env_cfg.capture_aes67_source_allow, "192.0.2.0/24");
         // 0.0.0.0 多网卡警告（注入网卡数：确定性；单网卡/显式接口/非 userspace 不警告）。
@@ -16997,7 +17003,16 @@ a=mediaclk:direct=0\n",
         let capture = Aes67RxCapture::from_readers(vec![reader], plan.adapter).expect("capture");
         assert_eq!(
             capture.capture_index(),
-            &[Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None, Some(6)]
+            &[
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(4),
+                Some(5),
+                None,
+                Some(6)
+            ]
         );
         // 显式给同一组 slot 也必须被接受（部署侧可写死映射）。
         let explicit = t239_userspace_config(
@@ -17015,7 +17030,16 @@ a=mediaclk:direct=0\n",
         let capture2 = Aes67RxCapture::from_readers(vec![reader2], plan.adapter).expect("capture");
         assert_eq!(
             capture2.capture_index(),
-            &[Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None, Some(6)]
+            &[
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(4),
+                Some(5),
+                None,
+                Some(6)
+            ]
         );
         // 7ch 只允许 4.1.2（8ch strict）图输入：2.0 图显式拒绝（不做隐式抽取/下混）。
         let error = plan_aes67_user_capture(&cfg, 2).expect_err("7ch + 2.0 图必须被拒");
@@ -17072,7 +17096,16 @@ a=comment:channel-labels=L,R,Ls,Rs,Ltf,Rtf,LFE\n";
         let capture = Aes67RxCapture::from_readers(vec![reader], plan.adapter).expect("capture");
         assert_eq!(
             capture.capture_index(),
-            &[Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), None, Some(6)]
+            &[
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(4),
+                Some(5),
+                None,
+                Some(6)
+            ]
         );
         let _ = std::fs::remove_file(&sdp);
     }
@@ -17278,7 +17311,6 @@ a=comment:channel-labels=L,R,Ls,Rs,Ltf,Rtf,LFE\n";
         let _ = std::fs::remove_file(&sdp);
     }
 
-
     #[test]
     fn t239_aes67_userspace_hold_stays_alive_reanchors_then_timeout_fails_closed() {
         let _env = t239_env_guard();
@@ -17295,7 +17327,10 @@ a=comment:channel-labels=L,R,Ls,Rs,Ltf,Rtf,LFE\n";
             .expect("userspace plan");
         assert!(plan.stay_on_stream_end);
         assert_eq!(plan.silence_hold_ms, 8);
-        assert_eq!(plan.silence_hold_blocks, 3, "8ms ≈ 3×2.667ms 块（向上取整）");
+        assert_eq!(
+            plan.silence_hold_blocks, 3,
+            "8ms ≈ 3×2.667ms 块（向上取整）"
+        );
         assert_eq!(plan.stall_fail_close_blocks, 60, "160ms = 60 块");
         assert!(plan.reanchor_watchdog);
         let config = T239JitterConfig::new(2, 48_000, AES67_RX_BLOCK_FRAMES, 8_192, 4_000)
@@ -17311,9 +17346,15 @@ a=comment:channel-labels=L,R,Ls,Rs,Ltf,Rtf,LFE\n";
             runtime
                 .fill_block(&mut input, stride, AES67_RX_BLOCK_FRAMES, index * t)
                 .expect("hold 期间不得 fail closed");
-            assert!(input.iter().all(|sample| *sample == 0.0), "hold 块必须整块静音");
+            assert!(
+                input.iter().all(|sample| *sample == 0.0),
+                "hold 块必须整块静音"
+            );
         }
-        assert_eq!(runtime.hold_events, 1, "达到 silence_hold 必须请求一次内部 reanchor");
+        assert_eq!(
+            runtime.hold_events, 1,
+            "达到 silence_hold 必须请求一次内部 reanchor"
+        );
         assert_eq!(runtime.reanchor_requests, 1);
         // 数据恢复（同场进程内）：推 8 包（384 帧 > 预滚 256 帧）→ 下一块必须 Ok。
         let origin = 10_000u64;
@@ -17378,22 +17419,13 @@ a=comment:channel-labels=L,R,Ls,Rs,Ltf,Rtf,LFE\n";
         assert!(cfg.capture_aes67_reanchor_watchdog);
         validate_aes67_userspace_config(&cfg).expect("NSP7 hold 配置必须合法");
         let bad = t239_userspace_config(&sdp, "fake", "synth", "aes67_silence_hold_ms = 5001\n");
-        assert!(
-            validate_aes67_userspace_config(&bad)
-                .expect_err("silence_hold_ms > 5000 必须被拒")
-                .contains("aes67_silence_hold_ms")
-        );
-        let bad = t239_userspace_config(
-            &sdp,
-            "fake",
-            "synth",
-            "aes67_stall_fail_close_ms = 50\n",
-        );
-        assert!(
-            validate_aes67_userspace_config(&bad)
-                .expect_err("stall_fail_close_ms 50 必须被拒（0 或 100..=600000）")
-                .contains("aes67_stall_fail_close_ms")
-        );
+        assert!(validate_aes67_userspace_config(&bad)
+            .expect_err("silence_hold_ms > 5000 必须被拒")
+            .contains("aes67_silence_hold_ms"));
+        let bad = t239_userspace_config(&sdp, "fake", "synth", "aes67_stall_fail_close_ms = 50\n");
+        assert!(validate_aes67_userspace_config(&bad)
+            .expect_err("stall_fail_close_ms 50 必须被拒（0 或 100..=600000）")
+            .contains("aes67_stall_fail_close_ms"));
         let _ = std::fs::remove_file(&sdp);
     }
 
@@ -17493,7 +17525,7 @@ a=comment:channel-labels=L,R,Ls,Rs,Ltf,Rtf,LFE\n";
             .parent()
             .expect("test exe dir")
             .join(format!(
-                "tspi-t45apply-{}-{unique}.toml",
+                "khaen-t45apply-{}-{unique}.toml",
                 std::process::id()
             ));
         let text = "[host]\nblock_size = 128\nsample_rate = 48000\nworkers = 4\ngraph = \"stereo_identity\"\n[alsa]\nbackend = \"fake\"\n[rt]\ndsp_cpus = \"2-5\"\ntick_freq_hz = 1000000000\napply_affinity = true\n[web]\nbind = \"127.0.0.1:1\"\n[run]\nmax_blocks = 1\n";

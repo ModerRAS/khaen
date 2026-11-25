@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Independent binary64 reference evaluator for TSPI reference fixtures (WBS T03).
+"""Independent binary64 reference evaluator for KHAEN reference fixtures (WBS T03).
 
 The model implemented here is the one normatively defined in ../SPEC.md:
 
@@ -33,7 +33,7 @@ from pathlib import Path
 def load_fixture(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as fh:
         fx = json.load(fh)
-    if fx.get("schema") != "tspi-reference-fixture/v1":
+    if fx.get("schema") != "khaen-reference-fixture/v1":
         raise ValueError(f"{path}: unsupported schema {fx.get('schema')!r}")
     return fx
 
@@ -218,8 +218,8 @@ def streaming(fx: dict, block_size: int) -> list[list[float]]:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="binary64 reference evaluator for TSPI reference fixtures")
-    ap.add_argument("--case", required=True, help="path to a tspi-reference-fixture/v1 JSON")
+    ap = argparse.ArgumentParser(description="binary64 reference evaluator for KHAEN reference fixtures")
+    ap.add_argument("--case", required=True, help="path to a khaen-reference-fixture/v1 JSON")
     ap.add_argument("--mode", choices=["offline", "streaming"], default="offline")
     ap.add_argument("--block", type=int, default=None, help="block size for --mode streaming")
     ap.add_argument("--out", default=None, help="write resulting container channels as JSON here")

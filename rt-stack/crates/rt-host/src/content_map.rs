@@ -31,9 +31,9 @@
 //! ## 布局来源：T57 overlay layout-presets v2（host 自持最小严格读取器）
 //!
 //! host 不复制 role→channel 映射表，仍在启动期读取同一份 T57 overlay 文件
-//! （默认 `/etc/tspi-audio/layout-presets.yml`），与 compat/control 消费同一来源。
+//! （默认 `/etc/khaen-audio/layout-presets.yml`），与 compat/control 消费同一来源。
 //! 为此本模块自带一个**最小、严格**的 YAML 子集读取器，只消费：
-//! `schema`（必须精确 `tspi-layout-presets/v2`）、`input_layouts`、`output_layouts`；
+//! `schema`（必须精确 `khaen-layout-presets/v2`）、`input_layouts`、`output_layouts`；
 //! `remap_presets` 段 host 不消费（路由绑定由 compat/control 负责），读取时整体忽略。
 //! 未知顶层/嵌套字段、重复 key/角色 id/容器槽位、schema 不匹配一律拒收（不「尽量解析」）。
 //! 与 compat::roles 的差异（如实记录，见 evidence/cursor-fix-v1-hostmap/）：
@@ -63,7 +63,7 @@ use khaen_core::rt::{MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES};
 // ---------------------------------------------------------------------------
 
 /// overlay layout-presets 的唯一 schema（不匹配即拒收，不尽量解析）。
-pub const LAYOUT_PRESETS_SCHEMA: &str = "tspi-layout-presets/v2";
+pub const LAYOUT_PRESETS_SCHEMA: &str = "khaen-layout-presets/v2";
 /// 中置角色 id（layout-presets / plan 角色命名）。
 pub const CENTER_ROLE_ID: &str = "C";
 /// 中置下混目标角色（顺序 = 左、右）。
@@ -260,7 +260,7 @@ pub struct OutputLayoutPreset {
     pub roles: Vec<OutputLayoutRole>,
 }
 
-/// 解析后的 overlay layout 预设文档（tspi-layout-presets/v2；host 只消费 input/output）。
+/// 解析后的 overlay layout 预设文档（khaen-layout-presets/v2；host 只消费 input/output）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutPresets {
     schema: String,

@@ -39,8 +39,8 @@ sudo ./install-device.sh --binary ./khaen-audio-web --rootfs /path/to/debian12-r
 - 若预置模板（token = CHANGE_ME）→ 首次启动自动轮换为新 token 并打印。
 - 查找 token：`journalctl -u khaen-audio-web -b | grep -i token`
   或 `sudo khaen-audio-web --config /etc/khaen-audio-web/config.toml --print-token`。
-- **token 双文件同步（根修）**：服务启动时会把当前 token 写入环境变量 `TSPI_WEB_TOKEN_FILE`
-  （默认 `/etc/tspi/web-token`，0600），与 first-boot 的 token 文件保持一致，避免登录 401。
+- **token 双文件同步（根修）**：服务启动时会把当前 token 写入环境变量 `KHAEN_WEB_TOKEN_FILE`
+  （默认 `/etc/khaen/web-token`，0600），与 first-boot 的 token 文件保持一致，避免登录 401。
 - 修改 token 后需 `systemctl restart khaen-audio-web`（配置仅启动加载）。
 - 如需每台设备固定 token：可在镜像构建时用随机值替换 config 模板 token 行。
 - Web 登录：`http://<设备IP>/`（默认端口 80，无需记端口；如 80 被占用，按 §4 改 `listen` 回退 8088），输入 token。
@@ -51,7 +51,7 @@ sudo ./install-device.sh --binary ./khaen-audio-web --rootfs /path/to/debian12-r
   `ExecStart=/usr/local/bin/khaen-audio-web --config /etc/khaen-audio-web/config.toml`；
   `WantedBy=multi-user.target`、`Restart=on-failure`；日志 journald。
 - **Web 服务常开**，与音频模式（dante/aes67/off）解耦；开机即启动。
-- 音频服务仍由 audio-stack 的 `tspi-mode` 控制；D4：默认 boot 时音频 off，Web 不会自动调用 tspi-mode；
+- 音频服务仍由 audio-stack 的 `khaen-mode` 控制；D4：默认 boot 时音频 off，Web 不会自动调用 khaen-mode；
   用户在 Web「运行模式」页手动切换。
 - 端口：TCP 80（默认；入站放行 80 即可；端口 <1024 由 root 的 systemd unit 绑定；如 80 被占用改成 8088 回退并放行 8088）；仅本地访问 ws://127.0.0.1:1234、systemd、journald，无外网出站依赖。
 
@@ -64,8 +64,8 @@ sudo ./install-device.sh --binary ./khaen-audio-web --rootfs /path/to/debian12-r
 | iproute2 | `ip -j addr show` 总览网络（建议） |
 | linuxptp | `pmc`（PTP 页面 / AES67 方案 B2 需要） |
 
-音频栈：CamillaDSP、aes67-linux-daemon、Inferno + Statime、`/usr/local/bin/tspi-mode`（audio-stack 提供）。
-若 `tspi-mode` 不存在，Web 的模式切换自动回退到内置编排（systemctl + CamillaDSP 配置重载）。
+音频栈：CamillaDSP、aes67-linux-daemon、Inferno + Statime、`/usr/local/bin/khaen-mode`（audio-stack 提供）。
+若 `khaen-mode` 不存在，Web 的模式切换自动回退到内置编排（systemctl + CamillaDSP 配置重载）。
 
 ## 6. 验收命令（镜像构建后/首启后）
 

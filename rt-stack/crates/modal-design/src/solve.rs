@@ -2,7 +2,7 @@
 //!
 //! ## 权威契约（只读输入，禁止在本文件改写）
 //!
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T51：因果有限 FIR 最小算子/迭代解与可恢复满秩
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T51：因果有限 FIR 最小算子/迭代解与可恢复满秩
 //!   夹具，报告未收敛/资源上界，**不写通用“消全部驻波”式承诺**。
 //! - scratch/lead/planner/DSP-HOST-DECISION.md §2.5：先冻结 P_post 基线，再以 H_eff 求真实
 //!   5x5 低频减尾/抑模态目标；正则/design 内 CV/白名单/lambda/gain headroom 归 T52；不是全带
@@ -94,11 +94,11 @@ use khaen_core::rt::{MAX_LOW_BAND_PARTICIPANTS, TAPS_NORMAL_MAX};
 // ===========================================================================
 
 /// solver 产物 schema（T51 设计侧/离线产物；不是实测或已应用）。
-pub const SOLVE_SCHEMA: &str = "tspi-modal-solve/v1";
+pub const SOLVE_SCHEMA: &str = "khaen-modal-solve/v1";
 /// solver 输出 hash domain。
-pub const SOLVE_HASH_DOMAIN: &str = "tspi-modal-solve/v1";
+pub const SOLVE_HASH_DOMAIN: &str = "khaen-modal-solve/v1";
 /// solver 问题 hash domain（输入身份；与输出 hash 分离）。
-pub const SOLVE_PROBLEM_HASH_DOMAIN: &str = "tspi-modal-solve-problem/v1";
+pub const SOLVE_PROBLEM_HASH_DOMAIN: &str = "khaen-modal-solve-problem/v1";
 
 /// 默认拟合带（Hz；MIMO 修正带，MIMO-COEFF-PLAN §1.2）。
 pub const DEFAULT_FIT_BAND_HZ: (f64, f64) = (20.0, 300.0);
@@ -2621,7 +2621,7 @@ fn json_escape(text: &str) -> String {
 }
 
 impl SolveOutcome {
-    /// 证据 JSON（schema tspi-modal-solve/v1；确定性、无时间戳；predicted-only）。
+    /// 证据 JSON（schema khaen-modal-solve/v1；确定性、无时间戳；predicted-only）。
     pub fn to_evidence_json(&self) -> String {
         let report = &self.report;
         let mut json = String::new();

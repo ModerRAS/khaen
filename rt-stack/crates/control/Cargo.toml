@@ -1,4 +1,4 @@
-# TSPI control 层：REST / modes / Web（T06 scaffold；leaf T42/T44/T70）
+# KHAEN control 层：REST / modes / Web（T06 scaffold；leaf T42/T44/T70）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-control"
@@ -9,7 +9,7 @@ publish.workspace = true
 description = "Control plane: REST API, device modes and HTTP/WebSocket server"
 
 [[bin]]
-name = "tspi-rt-daemon"
+name = "khaen-rt-daemon"
 path = "src/main.rs"
 
 [dependencies]

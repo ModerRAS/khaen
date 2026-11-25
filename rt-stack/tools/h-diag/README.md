@@ -24,18 +24,18 @@ my-run/
   ...                                 # 每个点位 5 个执行器各一份
 `@
 
-`positions.json`（schema `tspi-hdiag-positions/v1`，示例见 `examples/positions.example.json`）：
+`positions.json`（schema `khaen-hdiag-positions/v1`，示例见 `examples/positions.example.json`）：
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `schema` | 是 | 固定 `tspi-hdiag-positions/v1` |
+| `schema` | 是 | 固定 `khaen-hdiag-positions/v1` |
 | `label` | 否 | 本次测量批次名 |
 | `layout` | 否 | 期望 `4.1.2` |
 | `created_utc` / `frozen_at_unix` | 是* | 预注册冻结时间；holdout 采集必须晚于它（*MEASURED 结论需要，缺失 → INCOMPLETE） |
 | `actuators` | 是 | 必须恰为 `["FL","FR","SL","SR","SUB1"]` |
 | `excluded_roles` | 否 | 默认 `["HFL","HFR"]`（不参与低带矩阵） |
 | `mic` | 否 | `{model, serial, cal_sha256}`；也可由 session.json 提供 |
-| `session_json` | 否* | 相对路径；Rust ingest 的 `tspi-mimo-measurement/v1`（*MEASURED 结论需要） |
+| `session_json` | 否* | 相对路径；Rust ingest 的 `khaen-mimo-measurement/v1`（*MEASURED 结论需要） |
 | `common_d0_samples` | 否 | 公共整数 D0，应用于 aligned_segment 相位（所有报告指标对该值不变，见 §5） |
 | `freq_field` | 否 | `auto`（默认）`/fr/fr_modal`；auto 优先 `fr_modal`（低频分辨率高） |
 | `positions[].label` | 是 | 唯一测点名 |
@@ -43,12 +43,12 @@ my-run/
 | `positions[].weight` | 否 | 默认 1.0；**只有 design 权重进入 SVD** |
 | `positions[].files` | 是 | `{执行器: analysis.json 相对路径}` 或 `{执行器: {path, sha256}}`，5 个执行器必须齐全；声明 sha256 时逐个核对（不匹配 → INCONSISTENT `hdiag_analysis_sha_mismatch`） |
 | `positions[].metadata_sha256` | 否 | 声明 `position.json` 的 sha256；不匹配 → INCONSISTENT |
-| `positions[].position_json` | 否 | 与 Rust `tspi-mimo-position/v1` 交叉核对（name/role/weight） |
+| `positions[].position_json` | 否 | 与 Rust `khaen-mimo-position/v1` 交叉核对（name/role/weight） |
 | `expected.design_points` / `holdout_points` | 否 | 默认 6 / 3（spec） |
 | `synthetic` / `claim` | 否 | 声明 synthetic/dry-run → SYNTHETIC_REFUSED |
 | `demo_of_existing_data` | 否 | true = 非预注册的旧数据演示 → 不得给结论 |
 
-`*.analysis.json`：旧工具 schema `tspi-channel-measurement/v1`，读取
+`*.analysis.json`：旧工具 schema `khaen-channel-measurement/v1`，读取
 `fr`（或自动选择 `fr_modal`）的 `freq_hz/db/phase_deg`、`delay_samples/delay_ms/delay_coarse_samples`、
 `snr_db`、`peak_db`、`polarity`、`phase_ref`、`meta{``khaen-calibration-meta/v1``}`。
 
@@ -79,7 +79,7 @@ python hdiag.py version
 INCOMPLETE，但 hdiag.json/REPORT.md 仍写）；`2` = 输入/用法错误；`1` = 意外失败。
 
 输出：
-`hdiag.json`（机器可读，schema `tspi-h-diag/v1`）、`REPORT.md`（人读，表 + 定义 + NOT_RUN）、
+`hdiag.json`（机器可读，schema `khaen-h-diag/v1`）、`REPORT.md`（人读，表 + 定义 + NOT_RUN）、
 `per_frequency.csv`、`bands.csv`、`coherence_band.csv`、`lambda_tradeoff.csv`、
 `holdout_prediction.csv`，以及（仅当 matplotlib 可用）`plots/*.png`。
 

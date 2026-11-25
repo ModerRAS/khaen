@@ -19,7 +19,7 @@
 //!   （新 host 自研 last-good，非旧 C）。回退后 last_exit_code=9（A03 已回滚）。
 //! - **模拟服务状态**：ModeServices 抽象 + SimulatedServices 内存实现（无设备/无线程/
 //!   无 systemd 调用），按 A07 顺序编排：停旧（data→PTP）→ 启目标 PTP → 等锁 → 启 data →
-//!   自检 → 新 epoch/servo。单元名只来自 A11 的 tspi-* overlay units。
+//!   自检 → 新 epoch/servo。单元名只来自 A11 的 khaen-* overlay units。
 //! - **禁调用 C**：ServiceUnit 枚举编译期就没有 CamillaDSP 单元；服务名带
 //!   FORBIDDEN_SERVICE_MARKERS 时 debug_assert 拒绝；legacy status 的 camilladsp 恒为
 //!   null（G-no-C）。测试断言全部模式/单元里 0 个 C 标记。
@@ -68,9 +68,9 @@ use crate::rest::{
 // ---------------------------------------------------------------------------
 
 /// 本模块状态快照 schema（T26/T70 消费；与 T42 REST 的 MODE_STATUS_SCHEMA 兼容映射）。
-pub const MODE_STATE_SCHEMA: &str = "tspi-mode-state/v1";
-/// A04 legacy tspi-mode status --json schema（字段名保持，可 null）。
-pub const LEGACY_STATUS_SCHEMA: &str = "tspi-audio/v1";
+pub const MODE_STATE_SCHEMA: &str = "khaen-mode-state/v1";
+/// A04 legacy khaen-mode status --json schema（字段名保持，可 null）。
+pub const LEGACY_STATUS_SCHEMA: &str = "khaen-audio/v1";
 
 /// 播放模式默认 chunksize/period frames（T02 Q-11：runtime 仅 64/128）。
 pub const MODE_DEFAULT_CHUNKSIZE: u16 = 128;
@@ -109,7 +109,7 @@ pub const INFERNO_DEVICE_ID: &str = "00000a00020f0001";
 pub const INFERNO_BIND_IFACE: &str = "end0";
 
 /// 禁用标记（G-no-C）：任何服务单元名含这些子串即视为违规（本模块应为 0 命中）。
-pub const FORBIDDEN_SERVICE_MARKERS: [&str; 3] = ["camilladsp", "tspi-camilladsp", "camilla-"];
+pub const FORBIDDEN_SERVICE_MARKERS: [&str; 3] = ["camilladsp", "khaen-camilladsp", "camilla-"];
 
 /// 全部可选模式（A01；canonical 小写，与 T42 ALLOWED_MODES 同一集合）。
 pub const SELECTABLE_MODES: [ControlMode; 5] = [
@@ -129,18 +129,18 @@ pub fn allowed_mode_names() -> &'static [&'static str] {
 // 模拟服务（A07/A11；无 systemd、无设备、无线程）
 // ---------------------------------------------------------------------------
 
-/// A11 的实际 overlay 服务单元（只列模式编排会启停的；tspi-camilladsp 不在枚举里）。
+/// A11 的实际 overlay 服务单元（只列模式编排会启停的；khaen-camilladsp 不在枚举里）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ServiceUnit {
-    /// tspi-aes67-daemon.service（B1：内建 PTPv2 slave + AES67 端点，A09）。
+    /// khaen-aes67-daemon.service（B1：内建 PTPv2 slave + AES67 端点，A09）。
     Aes67Daemon,
-    /// tspi-ravenna-lkm.service（MergingRavennaALSA.ko，AES67 设备侧）。
+    /// khaen-ravenna-lkm.service（MergingRavennaALSA.ko，AES67 设备侧）。
     RavennaLkm,
-    /// tspi-statime-inferno.service（PTPv1 follower + usrvclock，A08/A14）。
+    /// khaen-statime-inferno.service（PTPv1 follower + usrvclock，A08/A14）。
     StatimeInferno,
-    /// tspi-ptp4l-master.service（仅 B2/B3；P1 B1 默认不启，A10/K44）。
+    /// khaen-ptp4l-master.service（仅 B2/B3；P1 B1 默认不启，A10/K44）。
     Ptp4lMaster,
-    /// tspi-phc2sys.service（仅 B2/B3；P1 B1 默认不启，A10/K44）。
+    /// khaen-phc2sys.service（仅 B2/B3；P1 B1 默认不启，A10/K44）。
     Phc2sys,
 }
 
@@ -157,11 +157,11 @@ impl ServiceUnit {
     /// actual unit 名（A11；日志/证据用）。
     pub const fn as_str(self) -> &'static str {
         match self {
-            ServiceUnit::Aes67Daemon => "tspi-aes67-daemon",
-            ServiceUnit::RavennaLkm => "tspi-ravenna-lkm",
-            ServiceUnit::StatimeInferno => "tspi-statime-inferno",
-            ServiceUnit::Ptp4lMaster => "tspi-ptp4l-master",
-            ServiceUnit::Phc2sys => "tspi-phc2sys",
+            ServiceUnit::Aes67Daemon => "khaen-aes67-daemon",
+            ServiceUnit::RavennaLkm => "khaen-ravenna-lkm",
+            ServiceUnit::StatimeInferno => "khaen-statime-inferno",
+            ServiceUnit::Ptp4lMaster => "khaen-ptp4l-master",
+            ServiceUnit::Phc2sys => "khaen-phc2sys",
         }
     }
 
@@ -1353,7 +1353,7 @@ impl ModeState {
         ])
     }
 
-    /// A04 legacy tspi-audio/v1 状态（字段名保持；camilladsp 恒 null，G-no-C）。
+    /// A04 legacy khaen-audio/v1 状态（字段名保持；camilladsp 恒 null，G-no-C）。
     pub fn legacy_status_json(&self) -> JsonValue {
         let outputs = self.legacy_outputs_json();
         let ptp = JsonValue::obj(vec![
@@ -2055,7 +2055,7 @@ impl ModeController {
         self.current.to_json()
     }
 
-    /// 当前状态 legacy tspi-audio/v1（A04）。
+    /// 当前状态 legacy khaen-audio/v1（A04）。
     pub fn legacy_status_json(&self) -> JsonValue {
         self.current.legacy_status_json()
     }

@@ -1400,7 +1400,7 @@ fn t51_solve_evidence_json_honest() {
     let target = build_preserve_target(&baseline, &plant);
     let outcome = solve_from_target_plant(&target, &plant, &options(8)).unwrap();
     let json = outcome.to_evidence_json();
-    assert!(json.contains("\"schema\":\"tspi-modal-solve/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-modal-solve/v1\""));
     assert!(json.contains("\"applied\":false"));
     assert!(json.contains("\"post_apply_measurement\":\"not_requested\""));
     assert!(json.contains("\"engine_compatibility\":\"not_validated\""));
@@ -1420,7 +1420,7 @@ fn t51_solve_evidence_json_honest() {
         outcome.to_evidence_json(),
         "evidence JSON must be deterministic"
     );
-    assert_eq!(SOLVE_SCHEMA, "tspi-modal-solve/v1");
+    assert_eq!(SOLVE_SCHEMA, "khaen-modal-solve/v1");
     assert!(SOLVE_CLAIM.contains("no guarantee"));
     println!("T51_EVIDENCE_JSON {json}");
 }
@@ -1720,7 +1720,7 @@ fn t51_solve_adapter_requires_matching_baseline() {
 #[test]
 fn t51_solve_constants_and_shapes() {
     assert_eq!(MAX_SOLVE_TAPS, 4096);
-    assert_eq!(SolveProblem::SCHEMA, "tspi-modal-solve/v1");
+    assert_eq!(SolveProblem::SCHEMA, "khaen-modal-solve/v1");
     let problem = f1_problem();
     assert_eq!(problem.m(), 3);
     assert_eq!(problem.grid_points(), problem.grid_hz.len());
@@ -1728,7 +1728,7 @@ fn t51_solve_constants_and_shapes() {
     assert!(options.taps <= MAX_SOLVE_TAPS);
     assert_eq!(options.ridge, 0.0);
     let fields = problem.canonical();
-    assert!(fields.contains("tspi-modal-solve-problem/v1"));
+    assert!(fields.contains("khaen-modal-solve-problem/v1"));
     assert!(fields.contains("provenance=synthetic"));
     assert!(problem.hash().len() == 64);
     let mut options_a = options.clone();

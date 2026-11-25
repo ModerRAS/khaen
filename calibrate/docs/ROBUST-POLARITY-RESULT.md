@@ -1,6 +1,6 @@
 # khaen-calibrate 多遍扫频 / 鲁棒极性 / 时钟漂移
 
-日期：2026-11-16。只改了 `projects/tspi-audio-dsp/calibrate/`。没有连板、没有动声卡。`khaen-calibration/v1` 的必填字段没有加。
+日期：2026-11-16。只改了 `projects/khaen-audio-dsp/calibrate/`。没有连板、没有动声卡。`khaen-calibration/v1` 的必填字段没有加。
 
 ## 改了哪些文件
 
@@ -88,14 +88,14 @@ merged 4 channels -> target\offline-remerge.yml ; cancellation check PASS (worst
 
 ## 命令输出
 
-工作目录 `projects/tspi-audio-dsp/calibrate`。release 二进制 `target/release/khaen-calibrate.exe`，1,927,168 字节。下面 5 条 warning 是原来就有的未使用项（`A.pos`、`ChannelAnalysis`、`mono_mix`、`run_checked`、`SweepSpec::new`），这次没有新增。
+工作目录 `projects/khaen-audio-dsp/calibrate`。release 二进制 `target/release/khaen-calibrate.exe`，1,927,168 字节。下面 5 条 warning 是原来就有的未使用项（`A.pos`、`ChannelAnalysis`、`mono_mix`、`run_checked`、`SweepSpec::new`），这次没有新增。
 
 ```
 ===== cargo fmt --check =====
 EXIT 0
 
 ===== cargo check =====
-    Checking khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
+    Checking khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\khaen-audio-dsp\calibrate)
 warning: field `pos` is never read
   --> src\main.rs:27:5
    |
@@ -138,7 +138,7 @@ warning: `khaen-calibrate` (bin "khaen-calibrate") generated 5 warnings
 EXIT 0
 
 ===== cargo test =====
-   Compiling khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
+   Compiling khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\khaen-audio-dsp\calibrate)
 warning: field `pos` is never read
   --> src\main.rs:27:5
    |
@@ -192,7 +192,7 @@ test dsp::tests::farina_recovers_delay_and_polarity ... ok
 test robust::tests::repeated_identical_is_high_and_median_delay ... ok
 test robust::tests::one_inverted_repeat_majority_low ... ok
 test robust::tests::reference_and_main_delays ... ok
-OK    C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate\target\robust-fixture\calibration.yml
+OK    C:\WorkSpace\Claw\projects\khaen-audio-dsp\calibrate\target\robust-fixture\calibration.yml
   WARN   channels[1].polarity 缺省（建议显式 normal）
 结果：errors=0 warnings=1
 test tests::offline_repeats_reference_and_sub_merge ... ok
@@ -203,7 +203,7 @@ test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 EXIT 0
 
 ===== cargo build --release =====
-   Compiling khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
+   Compiling khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\khaen-audio-dsp\calibrate)
 warning: field `pos` is never read
   --> src\main.rs:27:5
    |

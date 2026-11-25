@@ -515,7 +515,7 @@ fn blob_sources_map_and_fs_contracts() {
     // FsSource：绝对路径/.. 逃逸拒绝；正常文件读取。
     // 用 cargo 提供的 target 临时目录（R:\Temp 在部分沙箱下不可写）。
     let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-        "tspi-t14-fs-{}-{}",
+        "khaen-t14-fs-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -10,12 +10,12 @@ import sys
 from importlib.machinery import SourceFileLoader
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOOL = os.path.join(HERE, "..", "tspi-upmix")
+TOOL = os.path.join(HERE, "..", "khaen-upmix")
 
 
 def load_tool():
-    loader = SourceFileLoader("tspi_upmix_tool", TOOL)
-    spec = importlib.util.spec_from_loader("tspi_upmix_tool", loader)
+    loader = SourceFileLoader("khaen_upmix_tool", TOOL)
+    spec = importlib.util.spec_from_loader("khaen_upmix_tool", loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     return mod

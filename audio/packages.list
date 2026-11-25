@@ -25,10 +25,10 @@ libsystemd0 | 252.39-1~deb12u2 | aes67-daemon systemd notify/watchdog | required
 linuxptp | 3.1.1-4 | ptp4l/phc2sys/pmc（仅 B2/B3 使用，但预装） | required
 ethtool | 1:6.1-1 | 验证网卡硬件时间戳（PTP） | required
 iproute2 | 6.1.0-3 | ip/ss/tc（诊断；基线常已带） | required
-jq | 1.6-2.1+deb12u2 | tspi-mode 解析 statime 观测 JSON / daemon API | required
+jq | 1.6-2.1+deb12u2 | khaen-mode 解析 statime 观测 JSON / daemon API | required
 netcat-openbsd | 1.219-1 | 读 statime 观测 socket（nc -U） | required
 socat | 1.7.4.4-2 | 备选 socket 读取（netcat 不可用时） | optional
-curl | 7.88.1-10+deb12u15 | tspi-mode 读 aes67-daemon REST（ptp-lock hook 的兜底；build 机也用它下载） | required
+curl | 7.88.1-10+deb12u15 | khaen-mode 读 aes67-daemon REST（ptp-lock hook 的兜底；build 机也用它下载） | required
 
 ## ===== [build] 构建机（Debian 12 aarch64；不进目标镜像） =====
 build-essential | 12.9 | gcc/make（LKM、daemon、linuxptp） | build

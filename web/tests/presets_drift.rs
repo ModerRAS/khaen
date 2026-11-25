@@ -1,12 +1,12 @@
 //! 防漂移测试：Web 内嵌 layout-presets 必须与板端部署文件一致。
 //!
 //! - Web 内嵌副本：web/assets/layout-presets.yml（编译期 include_str! 进二进制，WebUI 读它）。
-//! - 板端部署真相：audio/overlay/etc/tspi-audio/layout-presets.yml，安装为 /etc/tspi-audio/layout-presets.yml，
-//!   由板端 Python tspi-channelmap 渲染器读取；两边 role→outputs 不一致会造成音源接错箱（如 4.1.2 的
+//! - 板端部署真相：audio/overlay/etc/khaen-audio/layout-presets.yml，安装为 /etc/khaen-audio/layout-presets.yml，
+//!   由板端 Python khaen-channelmap 渲染器读取；两边 role→outputs 不一致会造成音源接错箱（如 4.1.2 的
 //!   SUB1=7 / HFL=4 / HFR=5；旧表 SUB1=4 会把低频打进高度箱且 SUB 静音）。
 //!
 //! 默认按仓库相对路径找部署文件（web crate 的 ../audio/...）；只打包 web/ 的场景可用
-//! TSPI_DEPLOY_LAYOUT_PRESETS=/path/to/layout-presets.yml 覆盖。文件缺失/解析失败/任一映射不一致
+//! KHAEN_DEPLOY_LAYOUT_PRESETS=/path/to/layout-presets.yml 覆盖。文件缺失/解析失败/任一映射不一致
 //! 都直接 panic（fail closed），保证 cargo test 拦住漂移。
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 
 use serde_yaml::Value;
 
-const DEPLOY_REL: &str = "../audio/overlay/etc/tspi-audio/layout-presets.yml";
-const PRESETS_SCHEMA: &str = "tspi-layout-presets/v2";
+const DEPLOY_REL: &str = "../audio/overlay/etc/khaen-audio/layout-presets.yml";
+const PRESETS_SCHEMA: &str = "khaen-layout-presets/v2";
 
 fn deploy_path() -> PathBuf {
-    match std::env::var("TSPI_DEPLOY_LAYOUT_PRESETS") {
+    match std::env::var("KHAEN_DEPLOY_LAYOUT_PRESETS") {
         Ok(p) if !p.trim().is_empty() => PathBuf::from(p),
         _ => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEPLOY_REL),
     }
@@ -32,7 +32,7 @@ fn load(path: &Path) -> Value {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
             "读取 layout-presets 失败：{}（{e}）。防漂移测试需要仓库完整布局；\
-             如只打包 web/，请设置 TSPI_DEPLOY_LAYOUT_PRESETS 指向板端部署文件。",
+             如只打包 web/，请设置 KHAEN_DEPLOY_LAYOUT_PRESETS 指向板端部署文件。",
             path.display()
         )
     });
@@ -187,7 +187,7 @@ fn web_layout_presets_match_deployed_authoritative_file() {
     assert!(
         diffs.is_empty(),
         "web/assets/layout-presets.yml 与板端部署文件（{}）漂移（{} 处）：\n{}\n\
-         修复：以 audio/overlay/etc/tspi-audio/layout-presets.yml 为准更新 web 内嵌副本，\
+         修复：以 audio/overlay/etc/khaen-audio/layout-presets.yml 为准更新 web 内嵌副本，\
          或在 web/docs 说明有意的差异。",
         deploy_path().display(),
         diffs.len(),

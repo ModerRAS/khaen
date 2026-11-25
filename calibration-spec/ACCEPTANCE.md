@@ -182,7 +182,7 @@ T2 的数值阈值都是 **engineering default，待 pilot**：先用现有 3 �
 
 | 指标 | 阈值 |
 | --- | --- |
-| 应用链校验 | `tspi-channelmap validate/render` rc=0；独立 CamillaDSP 配置 `camilladsp --check` rc=0；记录 apply 前后 diff/sha256 |
+| 应用链校验 | `khaen-channelmap validate/render` rc=0；独立 CamillaDSP 配置 `camilladsp --check` rc=0；记录 apply 前后 diff/sha256 |
 | 残余延迟 | 实测延迟 − 目标延迟（参考通道归一）≤ 0.5 sample；且 ≤1 sample 为 hard fail |
 | 极性 | 与 YAML 一致（100%），参考通道 normal |
 | 幅频校正效果 | 应用后实测 vs “原始实测 + 校准模型预测”偏差 ≤ 1 dB（100 Hz–10 kHz，1/12 oct） |
@@ -200,7 +200,7 @@ T3 的测量必须是 **measured**（应用后实测），不得用 predicted �
 
 校准里若有 `low_shelf` / `high_shelf`，应用验收再加三条。`q` 是 RBJ slope S，必须在 [0.1, 1.0]：
 
-1. `tools/apply_calibration.py --channelmap` 写出的 profile，经 `tspi-channelmap render` 后，对应滤波器是 `Lowshelf` 或 `Highshelf`，且 `slope = 12 * q`（S=1 时 slope=12.0）。shelf 的 q=1.01 或 2.0 必须在校验阶段失败，不能留下可执行配置。
+1. `tools/apply_calibration.py --channelmap` 写出的 profile，经 `khaen-channelmap render` 后，对应滤波器是 `Lowshelf` 或 `Highshelf`，且 `slope = 12 * q`（S=1 时 slope=12.0）。shelf 的 q=1.01 或 2.0 必须在校验阶段失败，不能留下可执行配置。
 2. 这份渲染配置 `camilladsp --check` 退出码 0。板端用真实 ALSA 设备；没有 ALSA 的环境可以把 devices 换成 Stdin/Stdout（filters 与 pipeline 不动）再查。
 3. peaking 在 v1.1 契约里可以 q>10，channelmap 路线仍然只接受 [0.1, 10]。超过时拒绝整份应用，不能静默丢掉这一段。
 

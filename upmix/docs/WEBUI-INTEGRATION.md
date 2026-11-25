@@ -7,19 +7,19 @@
 已验证（板端 OEM v5，未改任何 /etc active）：
 
 - `GET /api/channelmap` 返回 12 个 `upmix-*` profile（output 布局 4.1.2/5.3.2 正确）。
-- 沙箱内 `tspi-channelmap load-profile upmix-4.1.2-music --mode off` +
+- 沙箱内 `khaen-channelmap load-profile upmix-4.1.2-music --mode off` +
   `camilladsp --check` 通过（"Config is valid"）。
 - 全程未启动/重启音频服务、未打开声卡；模式 off 下 apply 只渲染+校验+持久化。
 
 ## 1. 前置条件
 
-1. 板端 `/usr/local/bin/tspi-channelmap` 含 upmix 修复（sha256 91e85e18…；OEM v5 已含）。
+1. 板端 `/usr/local/bin/khaen-channelmap` 含 upmix 修复（sha256 91e85e18…；OEM v5 已含）。
    旧渲染器会丢 `sources[].inverted`、错误合并 Filter step（**bug A**，所有 per-role 滤波都受影响）、
    BM 主声道静音，**不要用旧镜像测试完整版**。`*-safe` 变体只去掉 `sources[].inverted`，
    **不能绕过 bug A**（仍会错误合并滤波）；旧镜像只能用独立 CamillaDSP 配置路径
-   （`tspi-upmix apply`，README 方案 B）或先打 `upmix/patches/` 的渲染器补丁。
-2. 部署 `upmix-*.yml` 到 `/etc/tspi-audio/profiles/`（deploy/install-upmix.sh 完成）。
-3. `/etc/tspi-audio/layout-presets.yml` 含 4.1.2/5.3.2 布局（OEM v5 已含；4.1.2 的 MOTU 映射：
+   （`khaen-upmix apply`，README 方案 B）或先打 `upmix/patches/` 的渲染器补丁。
+2. 部署 `upmix-*.yml` 到 `/etc/khaen-audio/profiles/`（deploy/install-upmix.sh 完成）。
+3. `/etc/khaen-audio/layout-presets.yml` 含 4.1.2/5.3.2 布局（OEM v5 已含；4.1.2 的 MOTU 映射：
    HFL/HFR=5-6、SUB1=8（1-based））。
 
 ## 2. 方案 A：零改代码（推荐）
@@ -80,7 +80,7 @@ WebUI 现有页面与接口：
 | POST /api/upmix/apply | {preset} | 等价 load-profile(preset) + apply（复用现有备份/回滚语义） |
 | POST /api/upmix/off | - | load-profile(upmix-off-restore) + apply（不存在则 409 + 提示） |
 
-参数视图可直接来自 `tspi-upmix params <preset>`（JSON），或从 profile 文件读取。
+参数视图可直接来自 `khaen-upmix params <preset>`（JSON），或从 profile 文件读取。
 「预设 → profile 名」映射固定：`upmix-<layout>-<style>`，例如 `upmix-4.1.2-music`；
 容器输入的 stereo 变体 profile.name 带 `-h16` 后缀（如 `upmix-4.1.2-music-h16`），避免与 2ch 同名冲突；
 跨布局直通 profile.name 为 `passthrough-<输入布局>-to-<输出布局>`，不是同布局直通。
@@ -88,7 +88,7 @@ WebUI 现有页面与接口：
 
 ## 4. 与现有功能的边界
 
-- 不改 channelmap v2 schema（全部字段已存在），不改 `tspi-channelmap` 校验规则——**唯一例外**是
+- 不改 channelmap v2 schema（全部字段已存在），不改 `khaen-channelmap` 校验规则——**唯一例外**是
   2026-11-16 裁决新增的 `peq[].type`（peaking/low_shelf/high_shelf，未知 type rc=2），详见
   `docs/PEQ-TYPE.md`；Web 本地回退必须与 Python 规则一致，CLI 不可用时禁止用本地规则替代。
 - 不改 CAMILLA 模板 `/etc/camilladsp/dante.yml|aes67.yml`；上混 profile 走 channelmap 的
@@ -101,7 +101,7 @@ WebUI 现有页面与接口：
 
 `*-safe` 只去掉 `sources[].inverted`，**不能绕过渲染器 bug A**（Filter step 错误合并，影响所有
 per-role 滤波），所以旧镜像上它也不是“可用”的完整替代。旧镜像的正确路径是**独立 CamillaDSP
-配置**（README 方案 B，`tspi-upmix apply`），该路径不依赖 channelmap 渲染器；或先打 `upmix/patches/`
+配置**（README 方案 B，`khaen-upmix apply`），该路径不依赖 channelmap 渲染器；或先打 `upmix/patches/`
 的渲染器补丁再装 profile。
 
 
@@ -111,10 +111,10 @@ per-role 滤波），所以旧镜像上它也不是“可用”的完整替代�
 
 | 接口 | 行为 |
 | --- | --- |
-| GET /api/channelmap/input-mode | 读 `/run/tspi/input-content.json`（daemon 未跑返回 detected=unknown） |
-| PUT /api/channelmap/input-mode {"mode": ...} | 写 `/etc/tspi-audio/input-mode.json`（接受 force-stereo/force-multichannel 别名，返回新状态） |
+| GET /api/channelmap/input-mode | 读 `/run/khaen/input-content.json`（daemon 未跑返回 detected=unknown） |
+| PUT /api/channelmap/input-mode {"mode": ...} | 写 `/etc/khaen-audio/input-mode.json`（接受 force-stereo/force-multichannel 别名，返回新状态） |
 
-运行态字段（schema `tspi-input-content/v1`，字段名已裁决，不再改）：
+运行态字段（schema `khaen-input-content/v1`，字段名已裁决，不再改）：
 `content_mode`（effective auto|stereo|multichannel）、`detected`（unknown|stereo|multichannel）、
 `override`（null|auto|stereo|multichannel）、`confidence`、`active_channels`、`rms_db`、
 `threshold_db`、`hold_ms`、`reason`、`h16_internal_upmix`（bool|null）、`container_layout`、
@@ -122,5 +122,5 @@ per-role 滤波），所以旧镜像上它也不是“可用”的完整替代�
 
 页面建议：badge 显示“自动/上混/直通”+ 检测到的内容；下拉覆盖“自动 / 强制 2.0 / 强制多声道”；
 `h16_internal_upmix=true`（或 detected=multichannel）时提示“H16 已内部上混，板端直通，未二次上混”。
-CLI 等价：`tspi-upmix input-mode get|set`；离线测试：`tspi-upmix detect --wav ...`。
+CLI 等价：`khaen-upmix input-mode get|set`；离线测试：`khaen-upmix detect --wav ...`。
 

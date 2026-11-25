@@ -12,7 +12,7 @@
 | Rust | 宿主 rustup 1.100.0 + `aarch64-unknown-linux-gnu` target；linker `aarch64-linux-gnu-gcc` + `--sysroot=<chroot>`；PKG_CONFIG_ALLOW_CROSS/SYSROOT_DIR 指向 chroot |
 | C/C++ | 宿主 `aarch64-linux-gnu-g++` 11.4 + CMAKE_TOOLCHAIN_FILE（CMAKE_SYSROOT=chroot） |
 | 离线包 | `fetch-debs.sh` 从 deb.debian.org bookworm arm64 抓 20 个运行时 .deb（MANIFEST.txt 含 sha256） |
-| 目录 | `/home/builder/audio-build/{src,rootfs,release,logs,build}`；产物同步回 `projects/tspi-audio-dsp/audio/release/` |
+| 目录 | `/home/builder/audio-build/{src,rootfs,release,logs,build}`；产物同步回 `projects/khaen-audio-dsp/audio/release/` |
 
 ## 2. 产物清单（待回填）
 

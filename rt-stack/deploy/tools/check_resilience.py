@@ -23,7 +23,7 @@ def need(text, needle, label):
 
 # sysctl
 try:
-    s = read("config/99-tspi-resilience.conf")
+    s = read("config/99-khaen-resilience.conf")
     for k, v in [("kernel.panic_on_oops", "1"), ("kernel.panic", "10"),
                  ("kernel.hardlockup_panic", "1"), ("kernel.softlockup_panic", "1"),
                  ("kernel.hung_task_timeout_secs", "120"), ("kernel.sysrq", "1")]:
@@ -36,11 +36,11 @@ try:
     else:
         ok("未改动 sched_rt_runtime_us（保持 RT 限流）")
 except FileNotFoundError:
-    bad("config/99-tspi-resilience.conf 缺失")
+    bad("config/99-khaen-resilience.conf 缺失")
 
 # watchdog
 try:
-    w = read("config/10-tspi-watchdog.conf")
+    w = read("config/10-khaen-watchdog.conf")
     need(w, "RuntimeWatchdogSec=", "systemd RuntimeWatchdogSec")
     need(w, "RebootWatchdogSec=", "systemd RebootWatchdogSec")
     m = re.search(r"RuntimeWatchdogSec=(\d+)s", w)
@@ -49,24 +49,24 @@ try:
     elif m:
         bad("watchdog 周期 %ss 不合理（应 5–120s）" % m.group(1))
 except FileNotFoundError:
-    bad("config/10-tspi-watchdog.conf 缺失")
+    bad("config/10-khaen-watchdog.conf 缺失")
 
 # pstore
 try:
     p = read("config/pstore-archive")
     for needle, label in [("/sys/fs/pstore", "读 /sys/fs/pstore"),
-                          ("/var/log/tspi/pstore", "归档到 /var/log/tspi/pstore"),
+                          ("/var/log/khaen/pstore", "归档到 /var/log/khaen/pstore"),
                           ("INDEX.txt", "空 pstore 也留 INDEX 记录"),
                           ("boot_id", "记录 boot_id")]:
         need(p, needle, label)
 except FileNotFoundError:
     bad("config/pstore-archive 缺失")
 try:
-    u = read("config/tspi-pstore-archive.service")
-    need(u, "ExecStart=/usr/local/lib/tspi/pstore-archive", "pstore unit ExecStart 路径")
+    u = read("config/khaen-pstore-archive.service")
+    need(u, "ExecStart=/usr/local/lib/khaen/pstore-archive", "pstore unit ExecStart 路径")
     need(u, "Before=", "pstore unit 有排序约束")
 except FileNotFoundError:
-    bad("config/tspi-pstore-archive.service 缺失")
+    bad("config/khaen-pstore-archive.service 缺失")
 
 # thermal
 try:
@@ -77,20 +77,20 @@ try:
 except FileNotFoundError:
     bad("config/thermal-log 缺失")
 try:
-    tm = read("config/tspi-thermal-log.timer")
+    tm = read("config/khaen-thermal-log.timer")
     m = re.search(r"^OnUnitActiveSec=(\d+)s", tm, re.M)
     if m and int(m.group(1)) <= 300:
         ok("thermal timer 周期 %ss" % m.group(1))
     else:
         bad("thermal timer 周期缺失或 >300s")
 except FileNotFoundError:
-    bad("config/tspi-thermal-log.timer 缺失")
+    bad("config/khaen-thermal-log.timer 缺失")
 
 # installer wiring
 try:
     i = read("bin/04-install-release.sh")
-    for needle, label in [("99-tspi-resilience.conf", "安装 sysctl"),
-                          ("10-tspi-watchdog.conf", "安装 watchdog 配置"),
+    for needle, label in [("99-khaen-resilience.conf", "安装 sysctl"),
+                          ("10-khaen-watchdog.conf", "安装 watchdog 配置"),
                           ("pstore-archive", "安装 pstore 归档"),
                           ("thermal-log", "安装 thermal 日志")]:
         need(i, needle, "04-install " + label)

@@ -11,7 +11,7 @@
 +    sys.path.insert(0, KIT)
 +import provenance as mimo_provenance  # noqa: E402
  PACK_BIN = os.path.join(PROJECT, "rt-stack", "target", "debug", "mimo_t66_pack.exe")
- HOST_BIN = os.path.join(PROJECT, "rt-stack", "target", "debug", "tspi-rt-host.exe")
+ HOST_BIN = os.path.join(PROJECT, "rt-stack", "target", "debug", "khaen-rt-host.exe")
  ANALYZE_PAIR = os.path.join(HERE, "steps", "analyze_pair.py")
  ACTIVE_PLAY_PROBE_TOML = os.path.join(DRYRUN, "out", "t66", "rt-host.shortfile.toml")
 @@ -432,44 +437,84 @@

@@ -154,9 +154,7 @@ impl ReceiverInterfaces {
         }
         let mut set = Self::EMPTY;
         for address in addresses {
-            if *address == Ipv4Addr::UNSPECIFIED
-                || address.is_multicast()
-                || address.is_broadcast()
+            if *address == Ipv4Addr::UNSPECIFIED || address.is_multicast() || address.is_broadcast()
             {
                 return Err(ListenConfigError::NotInterfaceAddress { address: *address });
             }
@@ -329,11 +327,11 @@ impl Ipv4Cidr {
             Some((address, prefix)) => (address.trim(), Some(prefix.trim())),
             None => (text, None),
         };
-        let address = address_text.parse::<Ipv4Addr>().map_err(|_| {
-            ListenConfigError::BadCidr {
+        let address = address_text
+            .parse::<Ipv4Addr>()
+            .map_err(|_| ListenConfigError::BadCidr {
                 text: text.to_string(),
-            }
-        })?;
+            })?;
         let prefix_len = match prefix_text {
             None => 32u8,
             Some(prefix) => {
@@ -489,10 +487,7 @@ mod tests {
         assert_eq!(dual.describe(), "192.0.2.222,10.0.0.5");
         // 重复 / 非法 / 超限。
         assert_eq!(
-            ReceiverInterfaces::try_from_addresses(&[
-                Ipv4Addr::LOCALHOST,
-                Ipv4Addr::LOCALHOST
-            ]),
+            ReceiverInterfaces::try_from_addresses(&[Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST]),
             Err(ListenConfigError::DuplicateInterface {
                 address: Ipv4Addr::LOCALHOST
             })

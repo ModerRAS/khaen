@@ -4,7 +4,7 @@
 //! - rt-stack/spec/fir-toolbox.md §3.2（v1.2-draft，含 fs/2 裁决）：参数、参考构造、规范性判据 1–5；
 //! - 同文件 §1.2/§1.3/§1.4/§1.5/§1.6、§2.2/§2.4、§3.1 判据 3–6、§7.2（运行准入）；
 //! - rt-stack/evidence/T04/recompute-vectors.mjs V17：可复现参考构造与期望值（本文件测试复算）；
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T33 行与 §1/§6/§7（写域/证据纪律）。
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T33 行与 §1/§6/§7（写域/证据纪律）。
 //!
 //! 家族语义（spec §3.2）：
 //! 1. 幅度目标 |H|=1（f<=f_p），[f_p,f_s] 升余弦（或 linear）落到 floor=10^(mag_floor_db/20)，
@@ -32,7 +32,7 @@ pub const FAMILY: &str = "min_fast";
 /// 家族中文名（spec §1.7）。
 pub const FAMILY_CN: &str = "最小相位快滚降";
 /// 系数产物 schema（本 leaf 不落盘，仅报告该常量供 T55 使用；spec §2.2）。
-pub const FIR_SCHEMA: &str = "tspi-fir/v1";
+pub const FIR_SCHEMA: &str = "khaen-fir/v1";
 
 /// 契约默认采样率（spec §2.2：manifest fs 只允许 48000/96000）。
 pub const DEFAULT_FS: f64 = 48_000.0;

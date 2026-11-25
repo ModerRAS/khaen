@@ -2,7 +2,7 @@
 //!
 //! 权威契约（只读输入）：
 //! - rt-stack/spec/fir-toolbox.md §5（v1.2-draft）：数据模型/界限、RBJ 公式、f64/f32 精度、
-//!   `tspi-modal-peq/v1` 导出 schema、“原图比对”§5.6、IIR 不硬截 FIR §5.7；
+//!   `khaen-modal-peq/v1` 导出 schema、“原图比对”§5.6、IIR 不硬截 FIR §5.7；
 //! - calibration-spec/CONTRACT.md §3.4/§10（v1.1）：peaking `q`=Q，shelf `q`=RBJ slope S，
 //!   shelf `slope=12*S`（CamillaDSP Slope 型映射）；
 //! - specs/peq-optimizer/requirements.md 需求 5/6/8：模态检测（突出度、−3 dB 带宽反算 Q、
@@ -18,7 +18,7 @@
 use std::fmt;
 
 /// 导出 JSON schema 名（spec §5.5）。
-pub const MODAL_PEQ_SCHEMA: &str = "tspi-modal-peq/v1";
+pub const MODAL_PEQ_SCHEMA: &str = "khaen-modal-peq/v1";
 
 /// 每通道模态 peaking 段上限（“10 段模态 PEQ”定义；spec §5.2）。
 pub const MAX_MODAL_PEAKINGS: usize = 10;
@@ -1039,7 +1039,7 @@ pub struct PeqSource {
     pub calibration_sha256: Option<String>,
 }
 
-/// 一次模态 PEQ 设计的完整产物（导出 schema `tspi-modal-peq/v1`）。
+/// 一次模态 PEQ 设计的完整产物（导出 schema `khaen-modal-peq/v1`）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeqDesign {
     pub tool_name: String,
@@ -1147,7 +1147,7 @@ impl PeqDesign {
         Ok(warnings)
     }
 
-    /// 导出 `tspi-modal-peq/v1` JSON（确定性：字段顺序固定、数字至少 17 位有效数字）。
+    /// 导出 `khaen-modal-peq/v1` JSON（确定性：字段顺序固定、数字至少 17 位有效数字）。
     pub fn to_json(&self) -> String {
         let mut out = String::new();
         out.push('{');

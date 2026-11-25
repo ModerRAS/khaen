@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """T28 release bundle 清单校验（04-install-release.sh / make-release-bundle.sh 共用）。
 
-bundle 结构（schema tspi-rt-stack/release/v1）：
+bundle 结构（schema khaen-rt-stack/release/v1）：
   <bundle>/manifest.json
-  <bundle>/bin/<name>            # 可执行（khaen-rt-host, tspi-rt-daemon）
+  <bundle>/bin/<name>            # 可执行（khaen-rt-host, khaen-rt-daemon）
   <bundle>/units/*.service|*.target
   <bundle>/etc/*.example         # env/config 模板（可选）
   <bundle>/README.deploy.md
@@ -19,7 +19,7 @@ import os
 import subprocess
 import sys
 
-SCHEMA = "tspi-rt-stack/release/v1"
+SCHEMA = "khaen-rt-stack/release/v1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK_ELF = os.path.join(HERE, "check_elf.py")
 

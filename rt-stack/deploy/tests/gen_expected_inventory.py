@@ -8,7 +8,7 @@
   * repo 侧可算的 sha256 现在重算（不抄 T01 数字）：repo_sha256；T01 冻结值单独列 baseline_sha256；
   * **板端实际 hash 仍是 UNKNOWN**（T01 未触板）；T71 必须先跑 00-snapshot-old-c.sh 采集 board hash；
   * disposition 只分类动作，不代表已执行；本文件不含任何板端命令执行。
-用法: gen_expected_inventory.py --baseline <manifest.json> --project-root <tspi-audio-dsp> --out <json> [--md-out <md>]
+用法: gen_expected_inventory.py --baseline <manifest.json> --project-root <khaen-audio-dsp> --out <json> [--md-out <md>]
 """
 import hashlib
 import json
@@ -16,23 +16,23 @@ import os
 import sys
 import datetime
 
-SCHEMA = 'tspi-rt-stack/old-c-inventory/v1'
+SCHEMA = 'khaen-rt-stack/old-c-inventory/v1'
 
 # 分类规则（按板端 installed_path 前缀/文件名）
 RULES = [
-    ('RETIRE_C_PROCESS', ['/usr/local/bin/camilladsp', '/etc/camilladsp/', '/etc/systemd/system/tspi-camilladsp.service',
-                          '/etc/systemd/system/tspi-upmix-autodetect.service']),
-    ('REPLACE_SHIM', ['/usr/local/bin/khaen-audio-web', '/usr/local/bin/tspi-upmix', '/usr/local/bin/tspi-mode',
-                      '/etc/systemd/system/khaen-audio-web.service', '/etc/systemd/system/tspi-audio.target',
-                      '/etc/systemd/system/tspi-boot-mode.service', '/etc/khaen-audio-web/']),
+    ('RETIRE_C_PROCESS', ['/usr/local/bin/camilladsp', '/etc/camilladsp/', '/etc/systemd/system/khaen-camilladsp.service',
+                          '/etc/systemd/system/khaen-upmix-autodetect.service']),
+    ('REPLACE_SHIM', ['/usr/local/bin/khaen-audio-web', '/usr/local/bin/khaen-upmix', '/usr/local/bin/khaen-mode',
+                      '/etc/systemd/system/khaen-audio-web.service', '/etc/systemd/system/khaen-audio.target',
+                      '/etc/systemd/system/khaen-boot-mode.service', '/etc/khaen-audio-web/']),
     ('RETAIN_AOIP', ['/usr/local/bin/statime', '/usr/local/bin/inferno2pipe', '/usr/local/bin/aes67-daemon',
                      '/usr/sbin/ptp4l', '/usr/sbin/phc2sys', '/usr/sbin/pmc',
                      '/usr/lib/aarch64-linux-gnu/alsa-lib/', '/lib/modules/', '/etc/statime/',
                      '/etc/aes67-daemon/', '/etc/ptp4l-master-aes67.conf', '/etc/asound.conf',
-                     '/usr/local/lib/tspi/']),
-    ('KEEP_DATA', ['/etc/tspi-audio/layout-presets.yml', '/etc/tspi-audio/upmix/', '/etc/tspi-audio/profiles/',
-                   '/etc/default/tspi-audio', '/etc/modprobe.d/', '/etc/security/', '/etc/udev/', '/etc/tmpfiles.d/',
-                   '/usr/share/alsa/ucm2/', '/usr/local/bin/README.md', '/usr/local/bin/tspi-channelmap']),
+                     '/usr/local/lib/khaen/']),
+    ('KEEP_DATA', ['/etc/khaen-audio/layout-presets.yml', '/etc/khaen-audio/upmix/', '/etc/khaen-audio/profiles/',
+                   '/etc/default/khaen-audio', '/etc/modprobe.d/', '/etc/security/', '/etc/udev/', '/etc/tmpfiles.d/',
+                   '/usr/share/alsa/ucm2/', '/usr/local/bin/README.md', '/usr/local/bin/khaen-channelmap']),
 ]
 ACTION = {
     'RETIRE_C_PROCESS': 'T71: stop+disable+mask systemd unit；进程必须为空；文件保留审计，禁止作为回退',
@@ -43,14 +43,14 @@ ACTION = {
 
 # baseline 未覆盖但必须快照的板端路径（S0-10 子集 + 老 Web 配置）
 EXTRA_CAPTURE = [
-    '/usr/local/bin/camilladsp', '/usr/local/bin/khaen-audio-web', '/usr/local/bin/tspi-mode',
-    '/usr/local/bin/tspi-channelmap', '/usr/local/bin/tspi-upmix', '/usr/local/bin/tspi-ptp-status',
+    '/usr/local/bin/camilladsp', '/usr/local/bin/khaen-audio-web', '/usr/local/bin/khaen-mode',
+    '/usr/local/bin/khaen-channelmap', '/usr/local/bin/khaen-upmix', '/usr/local/bin/khaen-ptp-status',
     '/usr/local/bin/statime', '/usr/local/bin/inferno2pipe', '/usr/local/bin/aes67-daemon',
     '/usr/sbin/ptp4l', '/usr/sbin/phc2sys', '/usr/sbin/pmc',
-    '/usr/local/lib/tspi/lib.sh', '/usr/local/lib/tspi/ptp-status-hook', '/usr/local/lib/tspi/ucm-backport-mk5.sh',
+    '/usr/local/lib/khaen/lib.sh', '/usr/local/lib/khaen/ptp-status-hook', '/usr/local/lib/khaen/ucm-backport-mk5.sh',
     '/usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_pcm_inferno.so',
     '/etc/khaen-audio-web/config.toml', '/etc/khaen-audio-web/auth.json',
-    '/run/tspi/camilladsp.yml', '/run/tspi/camilladsp.env', '/etc/tspi/last-mode', '/run/tspi/mode',
+    '/run/khaen/camilladsp.yml', '/run/khaen/camilladsp.env', '/etc/khaen/last-mode', '/run/khaen/mode',
 ]
 
 
@@ -140,10 +140,10 @@ def main(argv):
         'entries': entries,
         'extra_capture': extra,
         'board_capture_commands': [
-            'sudo /path/to/rt-stack/deploy/bin/00-snapshot-old-c.sh --live --out /var/lib/tspi-rt-stack/evidence',
+            'sudo /path/to/rt-stack/deploy/bin/00-snapshot-old-c.sh --live --out /var/lib/khaen-rt-stack/evidence',
             '# 等价的逐文件 hash（只读）：sha256sum <每个 installed_path>；stat -c "%n %s %a %U:%G %y" <path>',
-            'systemctl list-unit-files "tspi-*" --no-pager; systemctl list-units "tspi-*" --all --no-pager',
-            'pgrep -a -f "camilladsp|tspi-upmix"; ss -ltnp | grep -E ":(80|1234|8080)\\b"',
+            'systemctl list-unit-files "khaen-*" --no-pager; systemctl list-units "khaen-*" --all --no-pager',
+            'pgrep -a -f "camilladsp|khaen-upmix"; ss -ltnp | grep -E ":(80|1234|8080)\\b"',
             'cat /proc/asound/cards /proc/asound/devices; ls -l /dev/snd',
         ],
         'mismatches': [{'id': m['id'], 'repo_path': m['repo_path'], 'repo_sha256': m['repo_sha256'],

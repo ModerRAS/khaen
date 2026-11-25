@@ -87,7 +87,7 @@
 //! 源码级自证：无 allocation/syscall/锁 token（测试
 //! t22_module_has_no_allocation_or_syscall_tokens）。
 
-pub use khaen_core::abi::TspiHwParamsV1;
+pub use khaen_core::abi::KhaenHwParamsV1;
 pub use khaen_core::rt::RtStatus;
 
 use khaen_core::abi::{sample_format, ABI_VERSION};
@@ -150,7 +150,7 @@ pub enum DitherCfg {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormatConfig {
     /// 设备实际 hwparams（negotiated actual）。
-    pub hw: TspiHwParamsV1,
+    pub hw: KhaenHwParamsV1,
     /// dither 配置。
     pub dither: DitherCfg,
 }

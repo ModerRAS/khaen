@@ -1,12 +1,12 @@
 {
-  "schema": "tspi-reference-evidence/v1",
+  "schema": "khaen-reference-evidence/v1",
   "task": {
     "wbs": "T03",
     "team_task": "task-23",
     "role": "rt-reference",
     "title": "P0 独立 f64 参考规范 / 手算 impulse 向量与夹具（含 offdiag/尾/D）",
     "write_scope": [
-      "projects/tspi-audio-dsp/rt-stack/reference"
+      "projects/khaen-audio-dsp/rt-stack/reference"
     ],
     "status": "COMPLETE_PENDING_REVIEW"
   },
@@ -17,13 +17,13 @@
     "platform": "Windows-11-10.0.26200-SP0",
     "machine": "AMD64",
     "system": "Windows",
-    "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
-    "reference_root": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+    "cwd": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
+    "reference_root": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
     "generated_at_utc": "2026-11-16T17:06:11+00:00"
   },
   "inputs_external": [
     {
-      "path": "scratch/lead/planner/TSPI-RT-STACK-WBS.md",
+      "path": "scratch/lead/planner/KHAEN-RT-STACK-WBS.md",
       "role": "authority: WBS task table T03 row + write-scope/DoD discipline",
       "bytes": 35728,
       "sha256": "ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9"
@@ -47,7 +47,7 @@
       "sha256": "1664028e34823a08500c46416941aae584ba8ac8edc2cf0dbf99e205bd02726b"
     },
     {
-      "path": "audio/overlay/etc/tspi-audio/layout-presets.yml",
+      "path": "audio/overlay/etc/khaen-audio/layout-presets.yml",
       "role": "context: 4.1.2 role->DAC mapping (line 219)",
       "bytes": 11228,
       "sha256": "4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da"
@@ -275,46 +275,46 @@
     {
       "id": "GEN-CHECK",
       "command": "C:\\ProgramData\\miniconda3\\python.exe tools/gen_fixtures.py --check",
-      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "cwd": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
       "exit_code": 0,
-      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\GEN-CHECK.txt",
+      "stdout_stderr_file": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference\\evidence\\T03\\GEN-CHECK.txt",
       "note": "deterministic fixtures on disk are byte-identical to generated content"
     },
     {
       "id": "VERIFY",
       "command": "C:\\ProgramData\\miniconda3\\python.exe tools/verify_reference.py --report evidence/T03/verify-report.json",
-      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "cwd": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
       "exit_code": 0,
-      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\VERIFY.txt",
+      "stdout_stderr_file": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference\\evidence\\T03\\VERIFY.txt",
       "note": "independent exact-rational + binary64 + streaming + hand-block verification (108 checks)"
     },
     {
       "id": "NEG-VALID",
       "command": "C:\\ProgramData\\miniconda3\\python.exe tools/verify_reference.py --negative-validation --report evidence/T03/verify-negative-report.json",
-      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "cwd": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
       "exit_code": 0,
-      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\NEG-VALID.txt",
+      "stdout_stderr_file": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference\\evidence\\T03\\NEG-VALID.txt",
       "note": "invalid-fixture rejection + trap formula rebuild + handcheck-vs-ref_f64 (12 extra checks)"
     },
     {
       "id": "F64-OFFLINE",
       "command": "C:\\ProgramData\\miniconda3\\python.exe tools/ref_f64.py --case fixtures/cases/C04_tail_conv_1x1.json --mode offline --summary",
-      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "cwd": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
       "exit_code": 0,
-      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\F64-OFFLINE.txt",
+      "stdout_stderr_file": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference\\evidence\\T03\\F64-OFFLINE.txt",
       "note": "standalone binary64 offline evaluator smoke test"
     },
     {
       "id": "F64-STREAM",
       "command": "C:\\ProgramData\\miniconda3\\python.exe tools/ref_f64.py --case fixtures/cases/C10_streaming_128.json --mode streaming --block 64 --summary",
-      "cwd": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+      "cwd": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
       "exit_code": 0,
-      "stdout_stderr_file": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference\\evidence\\T03\\F64-STREAM.txt",
+      "stdout_stderr_file": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference\\evidence\\T03\\F64-STREAM.txt",
       "note": "standalone binary64 streaming evaluator smoke test"
     }
   ],
   "verify_summary": {
-    "schema": "tspi-reference-verify-report/v1",
+    "schema": "khaen-reference-verify-report/v1",
     "total_checks": 108,
     "failures": 0,
     "fixtures": 14,
@@ -467,7 +467,7 @@
     "真实测量数据/H_raw/房间模态效果未涉及（P0 仅数学参考）。"
   ],
   "assumptions": [
-    "以 2026-11-16 版 TSPI-RT-STACK-WBS.md（sha256 见 inputs_external）与 DSP-HOST-DECISION.md 为准。",
+    "以 2026-11-16 版 KHAEN-RT-STACK-WBS.md（sha256 见 inputs_external）与 DSP-HOST-DECISION.md 为准。",
     "4.1.2 角色顺序按 audio/overlay layout-presets 第 219 行：0-based FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7，ch6 未用（8 容器/7 角色）。",
     "D 计入 G 支撑：L_G = max(D+1, 1+max_g_tap)，L_F = L_A+L_G+L_P-2，L_out = L_in+L_F-1。",
     "流式契约：尾部补 L_F-1 个零并按 B 分块，拼接截断到 L_out，与离线逐样本一致。",

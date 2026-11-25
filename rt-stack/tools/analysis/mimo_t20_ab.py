@@ -69,7 +69,7 @@ except Exception:  # pragma: no cover - numpy-only fallback path
     HAVE_SCIPY = False
 
 TOOL_VERSION = "1.0.0"
-SCHEMA = "tspi-mimo-t20-ab/v1"
+SCHEMA = "khaen-mimo-t20-ab/v1"
 SCOPE_CLASS = "SINGLE_POINT_NOT_SPATIAL"
 SCOPE_TAGS = ("PREDICTED_OFFLINE_ANALYSIS", "SINGLE_POINT_NOT_SPATIAL", "NO_MEASUREMENT")
 SCOPE_NOTE = ("offline analysis of pre-existing RIR WAVs; no sound card, no board, no apply, "
@@ -726,7 +726,7 @@ def analyze_baseline(signals, fs, labels=None, cfg=None, provenance=None):
                          "noise_margin_db": m["noise_margin_db"], "snr_db": m["snr_db"],
                          "validity": "VALID" if m["valid"] else "NA",
                          "invalid_reasons": ";".join(m["reasons"])})
-    return {"schema": "tspi-mimo-t20-baseline/v1", "tool_version": TOOL_VERSION,
+    return {"schema": "khaen-mimo-t20-baseline/v1", "tool_version": TOOL_VERSION,
             "scope": {"class": SCOPE_CLASS, "tags": list(SCOPE_TAGS), "note": SCOPE_NOTE,
                       "certification": "NONE", "verdict": "NONE"},
             "config": cfg, "filter_method": resolve_filter(fm), "fs": int(fs),
@@ -764,7 +764,7 @@ def emit_baseline(result, outdir, tag="t20_baseline"):
              "> T20 = -20/slope over EDC [-5,-25] dB (20 dB decay time); RT60 = 3*T20.",
              "",
              "Schema: %s | tool mimo_t20_ab.py v%s | filter %s | created %s"
-             % ("tspi-mimo-t20-baseline/v1", TOOL_VERSION, result["filter_method"], created),
+             % ("khaen-mimo-t20-baseline/v1", TOOL_VERSION, result["filter_method"], created),
              "",
              "| input | band Hz | T20 [s] | RT60=3*T20 [s] | EDC100 [dB] | level [dB] | R2 | slope [dB/s] | DR [dB] | validity | reasons |",
              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"]

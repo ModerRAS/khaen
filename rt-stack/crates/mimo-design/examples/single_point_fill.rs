@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 
 use khaen_mimo_design::fill::{
     band_indices, db_amp, donor_criterion, evaluate_bands, smooth_complex_power, taps_requirements,
-    FillConfig, FillSolver, SinglePointH, DIAG_CAP_DB, SINGLE_POINT_CLAIM, SINGLE_POINT_FILL_SCHEMA,
+    FillConfig, FillSolver, SinglePointH, DIAG_CAP_DB, SINGLE_POINT_CLAIM,
+    SINGLE_POINT_FILL_SCHEMA,
 };
 use khaen_mimo_design::solve::Cx;
 
@@ -39,9 +40,7 @@ fn parse_args() -> Result<Args, String> {
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
         let mut take = |name: &str| -> Result<String, String> {
-            arguments
-                .next()
-                .ok_or_else(|| format!("{name} 缺少参数值"))
+            arguments.next().ok_or_else(|| format!("{name} 缺少参数值"))
         };
         match argument.as_str() {
             "--h" => h = Some(PathBuf::from(take("--h")?)),
@@ -112,7 +111,12 @@ fn scaled_host(host: &SinglePointH, relative_db: &[(String, f64)]) -> Result<Sin
             .h
             .iter()
             .enumerate()
-            .map(|(index, source)| source.iter().map(|value| value.scale(factors[index])).collect())
+            .map(|(index, source)| {
+                source
+                    .iter()
+                    .map(|value| value.scale(factors[index]))
+                    .collect()
+            })
             .collect(),
     })
 }
@@ -121,7 +125,8 @@ fn write_csv(path: &Path, header: &str, rows: &[String]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("建目录失败: {error}"))?;
     }
-    let mut text = String::with_capacity(header.len() + rows.iter().map(|row| row.len() + 1).sum::<usize>());
+    let mut text =
+        String::with_capacity(header.len() + rows.iter().map(|row| row.len() + 1).sum::<usize>());
     text.push_str(header);
     text.push('\n');
     for row in rows {
@@ -158,7 +163,12 @@ fn band_row_values(rows: &[khaen_mimo_design::fill::BandFillRow]) -> Vec<String>
         .collect()
 }
 
-fn design_to_fir_csvs(out: &Path, gauge: &str, tag: &str, design: &khaen_mimo_design::fill::FillDesign) -> Result<(), String> {
+fn design_to_fir_csvs(
+    out: &Path,
+    gauge: &str,
+    tag: &str,
+    design: &khaen_mimo_design::fill::FillDesign,
+) -> Result<(), String> {
     let directory = out.join("fir").join(gauge);
     fs::create_dir_all(&directory).map_err(|error| format!("建 fir 目录失败: {error}"))?;
     for (index, coefficients) in design.h.iter().enumerate() {
@@ -249,10 +259,22 @@ fn run() -> Result<(), String> {
                 row.valley_depth_db,
                 row.width_m3db_hz,
                 row.taps_needed_pointwise,
-                if row.pointwise_within_l_g_4096 { "YES" } else { "NO" },
+                if row.pointwise_within_l_g_4096 {
+                    "YES"
+                } else {
+                    "NO"
+                },
                 row.taps_needed_band_level,
-                if row.band_level_within_l_g_4096 { "YES" } else { "NO" },
-                if row.center_hz >= 63.0 { "covered" } else { "BLIND" }
+                if row.band_level_within_l_g_4096 {
+                    "YES"
+                } else {
+                    "NO"
+                },
+                if row.center_hz >= 63.0 {
+                    "covered"
+                } else {
+                    "BLIND"
+                }
             ));
         }
         write_csv(
@@ -292,12 +314,21 @@ fn run() -> Result<(), String> {
                 }
             };
             let after = host.pressure(&design.g);
-            let rows = evaluate_bands(&host.freqs_hz, &before, &after, Some(&smooth_combined), &before);
+            let rows = evaluate_bands(
+                &host.freqs_hz,
+                &before,
+                &after,
+                Some(&smooth_combined),
+                &before,
+            );
             let values = band_row_values(&rows);
             for value in &values {
                 combined_rows.push(format!("{gauge_name},{taps},{value}"));
             }
-            let fill_max = rows.iter().map(|row| row.fill_at_valley_db).fold(f64::NEG_INFINITY, f64::max);
+            let fill_max = rows
+                .iter()
+                .map(|row| row.fill_at_valley_db)
+                .fold(f64::NEG_INFINITY, f64::max);
             let depth_reduction_max = rows
                 .iter()
                 .map(|row| row.depth_reduction_db)
@@ -347,10 +378,8 @@ fn run() -> Result<(), String> {
                 );
                 let values = band_row_values(&rows);
                 for value in &values {
-                    per_channel_rows.push(format!(
-                        "{gauge_name},{},{role},{value}",
-                        args.primary_taps
-                    ));
+                    per_channel_rows
+                        .push(format!("{gauge_name},{},{role},{value}", args.primary_taps));
                 }
                 let worst = rows
                     .iter()
@@ -383,10 +412,8 @@ fn run() -> Result<(), String> {
                     if h_i.norm_sqr() <= 1e-30 {
                         continue;
                     }
-                    let ideal = smooth_channel[k].mul(Cx::new(
-                        h_i.re / h_i.norm_sqr(),
-                        -h_i.im / h_i.norm_sqr(),
-                    ));
+                    let ideal = smooth_channel[k]
+                        .mul(Cx::new(h_i.re / h_i.norm_sqr(), -h_i.im / h_i.norm_sqr()));
                     let magnitude = ideal.abs();
                     f_ideal[source_index][k] = if magnitude > cap {
                         ideal.scale(cap / magnitude)

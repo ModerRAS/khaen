@@ -6,7 +6,7 @@
 - 运行：
 
 ```powershell
-cd C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack
+cd C:\WorkSpace\Claw\projects\khaen-audio-dsp\rt-stack
 cargo test -p khaen-designer crossover
 ```
 
@@ -104,5 +104,5 @@ crossover 模块的 FFT/谱/报告路径；解析目标手算用闭合公式独�
 - AnalyticPhase 的 Nyquist fade 从 0.45fs 起：fc > 0.225fs 时 crossover 带上界进入 fade 区 →
   近似误差按判据失败（INFEASIBLE）；参数域仍以 0.45fs 表达 `E_FIR_BAND` 消息，但 >0.225fs 先由
   `E_FIR_XOVER_FC_INFEASIBLE` 拒绝（RULED 档位）。
-- 未测：板端/ALSA/CueMix/RT/soak；tspi-fir/v1 WAV/manifest 落盘（T55）；T12/T23/T56 集成；
+- 未测：板端/ALSA/CueMix/RT/soak；khaen-fir/v1 WAV/manifest 落盘（T55）；T12/T23/T56 集成；
   f32 运行期量化误差复算（T55/T22）。

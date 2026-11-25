@@ -8,7 +8,7 @@
 //! （G=I 保 P_post 保护）预分配/时限准入。
 //!
 //! 权威输入（只读）：
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T56 行 + 第 1/4/6/7 节；
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T56 行 + 第 1/4/6/7 节；
 //! - scratch/lead/planner/DSP-HOST-DECISION.md 第 4 节（四核/静态 DAG/phase）、第 5 节（RT 规范）；
 //! - scratch/lead/planner/DSP-HOST-CPU-BUDGET.md 第 2/3/5/10 节（taps/FFT/融合/扩展数表）；
 //! - rt-stack/spec/core-v1.md 第 3 节（TAPS/FFT/WORKERS/PARTITIONS 常量）、第 5 节（fallback）、
@@ -82,7 +82,7 @@
 //!   integrator 串行合入（T06/T26）。扩展 taps（8192/16384）的 FFT/kernel 实现属 T08/T26
 //!   follow-up，本任务只交付计划/预算准入；未上板、未实测、无 RT/benchmark/soak（NOT_RUN）。
 
-use crate::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
+use crate::abi::{KhaenDiagFirV1, KhaenPathV1, KhaenRoleV1};
 use crate::compile::FusionForm;
 use crate::rt::{
     gate_ns_floor, max_partitions, t_block_ns_ceil, RtStatus, BLOCK_SIZES, MAX_DIAG_FIRS,
@@ -1465,21 +1465,21 @@ fn compute_memory(plan: &mut SchedulePlan) -> Result<(), RtStatus> {
         table_bytes,
         align64(checked_mul(
             path_rows,
-            core::mem::size_of::<TspiPathV1>() as u64,
+            core::mem::size_of::<KhaenPathV1>() as u64,
         )?)?,
     )?;
     table_bytes = checked_add(
         table_bytes,
         align64(checked_mul(
             plan.diag_tiles as u64,
-            core::mem::size_of::<TspiDiagFirV1>() as u64,
+            core::mem::size_of::<KhaenDiagFirV1>() as u64,
         )?)?,
     )?;
     table_bytes = checked_add(
         table_bytes,
         align64(checked_mul(
             n_role,
-            core::mem::size_of::<TspiRoleV1>() as u64,
+            core::mem::size_of::<KhaenRoleV1>() as u64,
         )?)?,
     )?;
 
@@ -1698,7 +1698,7 @@ pub fn admit_deadline(plan: &SchedulePlan, budgets: &DeadlineBudgets) -> Deadlin
 // 热切（crossfade）预算准入
 // ---------------------------------------------------------------------------
 
-/// 热切预算声明（[NONRT]；T20 TspiCrossfadeBudgetV1 的 prepare 期输入侧口径）。
+/// 热切预算声明（[NONRT]；T20 KhaenCrossfadeBudgetV1 的 prepare 期输入侧口径）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HotSwapSpec {
     /// 旧 plan 版本（echo 到结果；版本标签由 T20 registry 校验）。

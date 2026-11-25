@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C09_4_1_2_5x5_embed",
   "title": "4.1.2: 5x5 modal embed in 7 roles, D=4, per-role P, scatter [0,1,2,3,4,5,7]",
   "tags": [

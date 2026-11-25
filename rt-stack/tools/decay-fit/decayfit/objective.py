@@ -272,7 +272,7 @@ def build_suggestions(band_results, gate_by_band, energy_db, s2_effect=None):
         sug["severity_factor"] = sev_factor.get(b)
         bands.append(sug)
     return {
-        "schema": "tspi-decay-param-suggestions/v1",
+        "schema": "khaen-decay-param-suggestions/v1",
         "purpose": "advisory parameters for merge/fit/experiment-G; opt-in, default "
                    "mimo-objective-v1 v1.1 energy-only weights stay in force",
         "weights": {

@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-channel-measurement/v1",
+  "schema": "khaen-channel-measurement/v1",
   "channel": 3,
   "delay_samples": 19.99999999956708,
   "delay_ms": 0.4166666666576475,

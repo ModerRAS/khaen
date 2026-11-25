@@ -566,7 +566,7 @@ def compare(before, after, outdir, limits=None, require_mics=3):
     if not reasons and rt60_cov_before == 0 and rt60_cov_after == 0:
         reasons.append("rt60_not_measured_at_all")
     summary = {
-        "schema": "tspi-mimo-pilot-before-after/v2",
+        "schema": "khaen-mimo-pilot-before-after/v2",
         "kit": "mimo_kit/1.0.0",
         "valid": not reasons,
         "invalid_reasons": reasons,
@@ -637,7 +637,7 @@ def compare(before, after, outdir, limits=None, require_mics=3):
     with open(os.path.join(outdir, "BEFORE-AFTER.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md) + "\n")
     with open(os.path.join(outdir, "verdict.json"), "w", encoding="utf-8") as fh:
-        json.dump({"schema": "tspi-mimo-pilot-verdict/v2", "valid": summary["valid"],
+        json.dump({"schema": "khaen-mimo-pilot-verdict/v2", "valid": summary["valid"],
                    "invalid_reasons": reasons,
                    "gates": {"marker_ok": gates["marker"]["ok"],
                              "path_consistency_ok": gates["path_consistency"]["ok"],

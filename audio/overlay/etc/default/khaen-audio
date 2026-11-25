@@ -1,0 +1,64 @@
+# /etc/default/khaen-audio — 音频栈运行时默认值（由 khaen-mode / systemd unit 读取）
+# 改完不需要重编；khaen-mode 下次切换生效。变量名保持稳定（web-manager 契约不直接读本文件）。
+
+# AoIP 物理网卡（PTP/RTP 都走它）
+KHAEN_IFACE="end0"
+
+# ALSA 卡 id（由 /etc/modprobe.d/khaen-audio.conf 固定；khaen-mode 仍会按 /proc/asound/cards 兜底解析）
+KHAEN_MOTU_CARD_ID="UltraLitemk5"
+KHAEN_RAVENNA_CARD_ID="ravenna"
+
+# 输入声道：H16-AIP 源（HDMI→AoIP 16ch 发送端；AES67 48k / Dante 96k）→ 捕获 16ch（容器 7.1.4/9.1.4，具体顺序 TBD）
+# 输出布局固定 5.3.2 = 10 路模拟输出；播放侧按 MOTU 22ch 打开，mixer 映射 0..9、10..21 补零
+KHAEN_CHANNELS="16"
+KHAEN_MAX_PLAYBACK_CHANNELS="22"
+KHAEN_LAYOUT="5.3.2"
+KHAEN_OUTPUTS="10"
+
+# 采样率：AES67=48k（标准），Dante=96k
+KHAEN_DANTE_SAMPLERATE="96000"
+KHAEN_AES67_SAMPLERATE="48000"
+
+# 缓冲：chunksize / target_level（帧）。32 帧为目标值，验收以 24h 0 xrun 的最小值为准
+KHAEN_DANTE_CHUNKSIZE="64"
+KHAEN_AES67_CHUNKSIZE="64"
+KHAEN_DANTE_TARGET_LEVEL="256"
+KHAEN_AES67_TARGET_LEVEL="256"
+KHAEN_ADJUST_PERIOD="10"
+
+# AES67 PTP 角色：slave = B1（daemon/LKM 自带 PTPv2 slave，需网内已有 GM）
+# master = 兼容别名：khaen-mode 转入 B2（板端 ptp4l GM + phc2sys -O 37 + Inferno/PHC 接收端）。
+# daemon/LKM 是 PTP slave-only 且只在 PRE_ROUTING 收包，不能与本机 GM 同跑（RISKS D1）。
+KHAEN_AES67_PTP_ROLE="slave"
+
+# B2（板端 GM）时间基准：khaen-phc2sys.service 用 -O 37 让网卡 PHC 跑 TAI（IEEE1588 时标）。
+# 本值必须与 unit 里的 -O 一致（闰秒变化时两处一起改）；khaen-mode b2 用它做 PHC/TAI 自检。
+KHAEN_GM_TAI_OFFSET="37"
+# B2 PHC 字符设备：缺省留空 = 自动探测（sysfs 网卡→ptp，其次唯一 /dev/ptp*，最后 /dev/ptp0）。
+# 已知具体设备时可显式指定，例如 /dev/ptp0。
+#KHAEN_PHC_DEV="/dev/ptp0"
+
+# 等待超时（秒）
+KHAEN_WAIT_PTP_SECS="20"
+KHAEN_WAIT_DEVICE_SECS="10"
+KHAEN_WAIT_STREAM_SECS="20"
+KHAEN_VERIFY_SECS="3"
+
+# PTP 锁定判据（Dante：statime offset 绝对值 < 阈值视为 locked；1 ms 门槛，实测可收紧到 100 us）
+KHAEN_LOCK_THRESHOLD_NS="1000000"
+
+# 切换失败是否回滚到切换前模式（1=回滚，0=直接 error 状态）
+KHAEN_ROLLBACK="1"
+
+# Inferno（Dante）参数；DEVICE_ID=auto 时由 end0 MAC 生成 16 hex（MAC 补 0000）
+KHAEN_INFERNO_NAME="khaen-dsp"
+KHAEN_INFERNO_DEVICE_ID="auto"
+KHAEN_RX_LATENCY_NS="4000000"
+KHAEN_TX_LATENCY_NS="1000000"
+
+# CamillaDSP websocket（只绑回环，给 web-manager 用）
+KHAEN_CAMILLADSP_PORT="1234"
+KHAEN_CAMILLADSP_BIND="127.0.0.1"
+
+# 是否允许在 PTP 未锁定情况下继续启动（默认 0=严格；1=调试用，会记录 warning）
+KHAEN_ALLOW_UNLOCKED_PTP="0"

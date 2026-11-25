@@ -1,5 +1,5 @@
 #!/bin/bash
-# TSPI PTP offline loopback validation (no board, no PHC, no production LAN traffic).
+# KHAEN PTP offline loopback validation (no board, no PHC, no production LAN traffic).
 #
 # Creates two network namespaces connected by a veth pair:
 #   GM  namespace: ptp4l grandmaster (raw binary OR the shipped ptp-master-start wrapper)
@@ -13,8 +13,8 @@
 # Usage:
 #   sudo tests/lab-gm-slave.sh --ptp4l BIN --pmc BIN --gm-conf CONF \
 #        --transport udp|l2 --duration SEC --out DIR [--max-abs-ns N]
-#   sudo tests/lab-gm-slave.sh --gm-wrapper /usr/local/lib/tspi/ptp-master-start \
-#        --gm-conf /etc/tspi-ptp/ptp4l-master.conf --pmc BIN ... [--gm-env K=V ...]
+#   sudo tests/lab-gm-slave.sh --gm-wrapper /usr/local/lib/khaen/ptp-master-start \
+#        --gm-conf /etc/khaen-ptp/ptp4l-master.conf --pmc BIN ... [--gm-env K=V ...]
 #
 # Exit: 0 PASS; 2 usage/environment; 3 validation FAIL.
 set -uo pipefail
@@ -57,7 +57,7 @@ case "$TRANSPORT" in udp|l2) ;; *) die "--transport must be udp|l2" ;; esac
 case "$DURATION" in ''|*[!0-9]*) die "--duration must be an integer (seconds)" ;; esac
 
 mkdir -p "$OUT" || die "cannot create out dir: $OUT"
-NS_GM="tspi-gm-$$"; NS_SLV="tspi-slv-$$"
+NS_GM="khaen-gm-$$"; NS_SLV="khaen-slv-$$"
 
 cleanup() {
   [ -n "$SLAVE_PID" ] && kill "$SLAVE_PID" 2>/dev/null || true
@@ -117,7 +117,7 @@ pmc_slv() { "$PMC" -s "$OUT/slave.uds" -u -b 0 "$1" 2>&1; }
 # ---------- GM ----------
 if [ -n "$GM_WRAPPER" ]; then
   log "starting GM via wrapper: $GM_WRAPPER"
-  ip netns exec "$NS_GM" env "${GM_ENV[@]}" TSPI_PTP_IFACE=veth-gm TSPI_PTP_CONF="$GM_CONF_RUN" "$GM_WRAPPER" > "$OUT/gm.log" 2>&1 &
+  ip netns exec "$NS_GM" env "${GM_ENV[@]}" KHAEN_PTP_IFACE=veth-gm KHAEN_PTP_CONF="$GM_CONF_RUN" "$GM_WRAPPER" > "$OUT/gm.log" 2>&1 &
 else
   log "starting GM binary: $PTP4L"
   ip netns exec "$NS_GM" "$PTP4L" -f "$GM_CONF_RUN" -i veth-gm -S -m -q > "$OUT/gm.log" 2>&1 &
@@ -146,7 +146,7 @@ fi
 
 # ---------- slave ----------
 if [ -z "${PTP4L:-}" ] && [ -n "$GM_WRAPPER" ]; then
-  PTP4L=/opt/tspi-rt-stack/ptp/current/bin/ptp4l
+  PTP4L=/opt/khaen-rt-stack/ptp/current/bin/ptp4l
 fi
 [ -n "${PTP4L:-}" ] || die "slave binary unknown (pass --ptp4l too when using --gm-wrapper)"
 log "starting slave in $NS_SLV: $PTP4L"
@@ -247,7 +247,7 @@ else:
     checks['offset_mean_abs_within_threshold'] = False
     checks['offset_p95_within_threshold'] = False
 summary = {
-    'schema': 'tspi-ptp/lab-gm-slave/v1',
+    'schema': 'khaen-ptp/lab-gm-slave/v1',
     'transport': transport,
     'duration_s': int(duration),
     'lock_time_s': int(lock_time or 0),

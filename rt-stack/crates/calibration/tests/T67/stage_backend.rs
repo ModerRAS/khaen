@@ -25,7 +25,7 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn temp_path(tag: &str) -> std::path::PathBuf {
     let base = std::env::temp_dir();
     let id = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
-    base.join(format!("tspi-t67-{tag}-{}-{id}", std::process::id()))
+    base.join(format!("khaen-t67-{tag}-{}-{id}", std::process::id()))
 }
 
 fn hex64() -> String {
@@ -255,8 +255,8 @@ fn t67_fake_acoustic_measurement_passes_protection_and_produces_evidence() {
     assert_eq!(output.summary.valid_slots, 1);
     assert!(output.summary.all_onsets_valid);
     assert!(!output.raw.is_empty());
-    assert!(output.timeline_json.contains("tspi-sweep-timeline"));
-    assert!(output.capture_report_json.contains("tspi-umik-capture"));
+    assert!(output.timeline_json.contains("khaen-sweep-timeline"));
+    assert!(output.capture_report_json.contains("khaen-umik-capture"));
     assert_eq!(output.raw_relative_path, ACOUSTIC_CAPTURE_RELATIVE_PATH);
     assert!(output.summary.capture_frames >= output.summary.timeline_frames);
     // 驱动电平按 request 生效（默认 -50 dBFS；不是 T61 常量 -30）。

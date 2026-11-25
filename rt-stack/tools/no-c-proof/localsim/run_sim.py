@@ -51,7 +51,7 @@ TQ = chr(96)
 
 def find_bash():
     cands = []
-    env_bash = os.environ.get("TSPI_BASH")
+    env_bash = os.environ.get("KHAEN_BASH")
     if env_bash:
         cands.append(env_bash)
     w = shutil.which("bash")
@@ -117,10 +117,10 @@ def main():
         return 7
     bash = find_bash()
     if not bash:
-        print("[sim] 找不到可用的 bash（可用 TSPI_BASH 指定）", file=sys.stderr)
+        print("[sim] 找不到可用的 bash（可用 KHAEN_BASH 指定）", file=sys.stderr)
         return 7
 
-    work = Path(tempfile.mkdtemp(prefix="tspi-t72-sim-"))
+    work = Path(tempfile.mkdtemp(prefix="khaen-t72-sim-"))
     generated = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     results = []
     try:
@@ -191,7 +191,7 @@ def main():
     matched = sum(1 for r in results if r.get("assertion") == "MATCH")
     mismatched = executed - matched
     (out / "results.json").write_text(json.dumps({
-        "schema": "tspi-rt-stack/no-c-proof-localsim/v1",
+        "schema": "khaen-rt-stack/no-c-proof-localsim/v1",
         "generated_at": generated,
         "tool": "rt-stack/tools/no-c-proof/board_check_no_c.sh",
         "fixture_generator": "rt-stack/tools/no-c-proof/localsim/make_fixture.sh",

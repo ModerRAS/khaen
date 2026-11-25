@@ -1,4 +1,4 @@
-# TSPI dsp-host AES67 接收端独立运行二进制（calib-chain-20261121 / aes67-rx-20261121）
+# KHAEN dsp-host AES67 接收端独立运行二进制（calib-chain-20261121 / aes67-rx-20261121）
 #
 # 设计：复用 crates/aoip-aes67 的 SDP/RTP L24 BE/抖动缓冲/媒体时钟，只补"运行时"部分：
 #   TX/RX 线程分离（crate 内收包线程 + 本 crate 播放线程）、SPSC 无锁抖动环（crate）、

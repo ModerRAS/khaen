@@ -5,7 +5,7 @@
 //! - 未知扩展字段 warning（不参与应用）；v1.1 shelf q=RBJ slope S、peaking q 无上限；
 //! - 校准 -> 渲染基线合并（delay 相加 / polarity XOR / gain 相加 / PEQ 追加、type 不降级、
 //!   二次应用拒收、跨布局拒收）；
-//! - 内部 IR 草案 tspi-cal-ir-draft/v1：version/hash/role/fs/taps/placement/P/phase/D、
+//! - 内部 IR 草案 khaen-cal-ir-draft/v1：version/hash/role/fs/taps/placement/P/phase/D、
 //!   stereo mask/target profile、stale 判定；
 //! - curve 不双叠（只绑定一次、只落 TargetFir、G 只 modal residual）；
 //! - 与 T11 目标曲线数据合同（TargetCurveSource -> TargetCurveRef）；
@@ -1243,9 +1243,9 @@ fn calibration_merge_partial_coverage_warning() {
 #[test]
 fn calibration_ir_build_basic() {
     let ir = ir_412_plain();
-    assert_eq!(ir.schema(), "tspi-cal-ir-draft/v1");
+    assert_eq!(ir.schema(), "khaen-cal-ir-draft/v1");
     assert_eq!(ir.ir_version(), 1);
-    assert_eq!(ir.hash_algo(), "tspi-cal-ir-canonical-v1");
+    assert_eq!(ir.hash_algo(), "khaen-cal-ir-canonical-v1");
     assert_eq!(ir.ir_hash().len(), 64);
     assert_eq!(ir.created_unix(), 1_800_000_000);
     assert_eq!(ir.source().schema, CalibrationSchema::V1);

@@ -14,11 +14,11 @@ use core::sync::atomic::{AtomicU32, AtomicU64};
 /// ABI 结构/语义版本；不兼容变化必须 +1。
 pub const ABI_VERSION: u16 = 1;
 /// plan 魔数：ASCII "TSP1" 的 LE u32。
-pub const TSPI_PLAN_MAGIC: u32 = 0x5453_5031;
+pub const KHAEN_PLAN_MAGIC: u32 = 0x5453_5031;
 /// ring 魔数：ASCII "TSPR" 的 LE u32。
-pub const TSPI_RING_MAGIC: u32 = 0x5453_5052;
+pub const KHAEN_RING_MAGIC: u32 = 0x5453_5052;
 /// graph_id 哈希域分离字符串（含 1 个 0x00 字节）。
-pub const GRAPH_HASH_DOMAIN: &[u8] = b"tspi-plan/v1\x00";
+pub const GRAPH_HASH_DOMAIN: &[u8] = b"khaen-plan/v1\x00";
 
 // ---------------------------------------------------------------------------
 // plan ABI 版本（GAP-T66-3：per-role IIR(PEQ) 区，ABI v2 扩展）
@@ -31,34 +31,34 @@ pub const GRAPH_HASH_DOMAIN: &[u8] = b"tspi-plan/v1\x00";
 //     旧 host 读到 abi_version=2 会明确 ERR_ABI_VERSION（不会把 v2 当 v1 运行）。
 
 /// plan ABI v1（无 role IIR 系数区；S0/S1 及全部旧 plan）。
-pub const TSPI_PLAN_ABI_V1: u16 = 1;
+pub const KHAEN_PLAN_ABI_V1: u16 = 1;
 /// plan ABI v2（per-role IIR(PEQ) 区；additive 扩展，header 128 B 不变）。
-pub const TSPI_PLAN_ABI_V2: u16 = 2;
+pub const KHAEN_PLAN_ABI_V2: u16 = 2;
 /// plan ABI v2 IIR 表魔数：ASCII "TSI2" 的 LE u32（表头/表项见 §11.10 v2 附录）。
-pub const TSPI_PLAN_IIR_MAGIC: u32 = 0x5453_4932;
-/// IIR 表头字节数（`TspiPlanIirHeaderV2`）。
+pub const KHAEN_PLAN_IIR_MAGIC: u32 = 0x5453_4932;
+/// IIR 表头字节数（`KhaenPlanIirHeaderV2`）。
 pub const PLAN_IIR_HEADER_BYTES: usize = 16;
-/// IIR 表项字节数（`TspiRoleIirV2`）。
+/// IIR 表项字节数（`KhaenRoleIirV2`）。
 pub const PLAN_IIR_ENTRY_BYTES: usize = 32;
 /// 每段 biquad 的 f32 系数个数：`[b0,b1,b2,a1,a2]`（a0 归一化为 1）。
 pub const PLAN_IIR_SECTION_COEFFS: usize = 5;
 /// IIR 区版本（与 plan abi_version 独立演进）。
-pub const TSPI_PLAN_IIR_VERSION: u16 = 1;
-/// 单 role 最大 IIR 段数（与 `TspiRoleV1.peq_count` 上限一致）。
+pub const KHAEN_PLAN_IIR_VERSION: u16 = 1;
+/// 单 role 最大 IIR 段数（与 `KhaenRoleV1.peq_count` 上限一致）。
 pub const PLAN_IIR_MAX_SECTIONS: usize = 32;
 
 /// plan ABI 版本是否被本实现接受（v1 旧 plan + v2 IIR plan）。
 pub const fn plan_abi_supported(version: u16) -> bool {
-    version == TSPI_PLAN_ABI_V1 || version == TSPI_PLAN_ABI_V2
+    version == KHAEN_PLAN_ABI_V1 || version == KHAEN_PLAN_ABI_V2
 }
 
 // ---------------------------------------------------------------------------
-// TspiPlanHeaderV1 布局常量（core-v1 §11.2 v1.1.2 errata E1 定稿；旧 94/102/106 作废）
+// KhaenPlanHeaderV1 布局常量（core-v1 §11.2 v1.1.2 errata E1 定稿；旧 94/102/106 作废）
 // ---------------------------------------------------------------------------
 
-/// `TspiPlanHeaderV1` 大小（errata E1 后不变）。
+/// `KhaenPlanHeaderV1` 大小（errata E1 后不变）。
 pub const PLAN_HEADER_SIZE: usize = 128;
-/// `TspiPlanHeaderV1` 对齐（repr(C, align(64))）。
+/// `KhaenPlanHeaderV1` 对齐（repr(C, align(64))）。
 pub const PLAN_HEADER_ALIGN: usize = 64;
 /// reserved1 偏移（E1 显式 padding，u16；把 u32 对齐到 96）。
 pub const PLAN_HEADER_OFFSET_RESERVED1: usize = 94;
@@ -77,7 +77,7 @@ pub const PLAN_HEADER_OFFSET_RESERVED3: usize = 112;
 /// header_crc32c 偏移（E1：u32@124）。
 pub const PLAN_HEADER_OFFSET_CRC: usize = 124;
 
-/// TspiHwParamsV1.sample_format 枚举值（v1 冻结，core-v1 §11.9）。
+/// KhaenHwParamsV1.sample_format 枚举值（v1 冻结，core-v1 §11.9）。
 pub mod sample_format {
     /// core 内部 canonical；不允许来自设备。
     pub const F32_PLANAR: u16 = 0;
@@ -96,7 +96,7 @@ pub mod sample_format {
 /// block 身份（64 B，align 64）。RT 只通过本结构判断 epoch/version/边界。
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiBlockDescV1 {
+pub struct KhaenBlockDescV1 {
     /// = ABI_VERSION。
     pub abi_version: u16,
     /// 块大小 B（v1 准入只允许 64/128）。
@@ -125,7 +125,7 @@ pub struct TspiBlockDescV1 {
     pub play_deadline_ns: u64,
 }
 
-impl TspiBlockDescV1 {
+impl KhaenBlockDescV1 {
     /// 全零占位（仅 scaffold/测试用；VALID 位为 0，不得发布给 playback）。
     pub const ZERO: Self = Self {
         abi_version: ABI_VERSION,
@@ -147,7 +147,7 @@ impl TspiBlockDescV1 {
 /// epoch 元数据（64 B，align 64）。
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiEpochInfoV1 {
+pub struct KhaenEpochInfoV1 {
     /// 时间轴 ID。
     pub epoch_id: u64,
     /// 启动本 epoch 的 plan。
@@ -173,7 +173,7 @@ pub struct TspiEpochInfoV1 {
 /// 事件记录（64 B，align 64；core-v1 §8.1/§11.5）。
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiEventV1 {
+pub struct KhaenEventV1 {
     /// lane 内单调序号（从 0 起）。
     pub seq: u64,
     /// 仅 I/O/CTL/WD 填写；DSP 事件写 0。
@@ -198,7 +198,7 @@ pub struct TspiEventV1 {
     pub payload: [u64; 2],
 }
 
-impl TspiEventV1 {
+impl KhaenEventV1 {
     /// 全零事件（scaffold/固定数组初始化用）。
     pub const ZERO: Self = Self {
         seq: 0,
@@ -218,7 +218,7 @@ impl TspiEventV1 {
 /// 硬件参数（64 B，align 64；core-v1 §11.9）。
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiHwParamsV1 {
+pub struct KhaenHwParamsV1 {
     /// = ABI_VERSION。
     pub abi_version: u16,
     /// sample_format 值（见本模块 sample_format）。
@@ -247,8 +247,8 @@ pub struct TspiHwParamsV1 {
 /// plan 头（128 B，align 64；core-v1 §11.10 v1.1.2 errata E1 定稿）。
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiPlanHeaderV1 {
-    /// = TSPI_PLAN_MAGIC。
+pub struct KhaenPlanHeaderV1 {
+    /// = KHAEN_PLAN_MAGIC。
     pub magic: u32,
     /// = ABI_VERSION。
     pub abi_version: u16,
@@ -299,7 +299,7 @@ pub struct TspiPlanHeaderV1 {
     pub role_table_count: u16,
     /// 必须为 0（v1.1.2 errata E1 显式 padding：把 u32 对齐到 96）。
     pub reserved1: u16,
-    /// **v1.1/I15 + errata E1（v1.1.2 定稿）**：`TspiWorkerAffinityV1` 表偏移（0 = 无）。
+    /// **v1.1/I15 + errata E1（v1.1.2 定稿）**：`KhaenWorkerAffinityV1` 表偏移（0 = 无）。
     ///
     /// E1 布局：reserved1@94 为显式 padding（u16），本字段 **u32@96**、affinity_count **u16@100**、
     /// reserved2@102 显式 padding、ctl_meta_offset **u32@104**、ctl_meta_len **u32@108**、
@@ -323,7 +323,7 @@ pub struct TspiPlanHeaderV1 {
 /// 路径表项（32 B，align 8；core-v1 §11.10）。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiPathV1 {
+pub struct KhaenPathV1 {
     /// 输入通道索引（< N）。
     pub in_index: u16,
     /// 物理输出索引（< O）。
@@ -350,7 +350,7 @@ pub struct TspiPathV1 {
 /// 对角 FIR 表项（32 B，align 8；core-v1 §11.10）。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiDiagFirV1 {
+pub struct KhaenDiagFirV1 {
     /// 物理输出索引。
     pub out_index: u16,
     /// bit0=protection、bit1=limiter、bit2=crossover、bit3=target、
@@ -373,7 +373,7 @@ pub struct TspiDiagFirV1 {
 /// role 表项（32 B，align 8；core-v1 §11.10）。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiRoleV1 {
+pub struct KhaenRoleV1 {
     /// 0..15（plan 内序号）。
     pub role_id: u16,
     /// 物理输出索引（无效用 0xFFFF）。
@@ -408,10 +408,10 @@ pub struct TspiRoleV1 {
 /// entries + 按 entry 顺序的系数 blob 原始字节（防系数被替换而 graph_id 校验缺失的洞）。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiPlanIirHeaderV2 {
-    /// = `TSPI_PLAN_IIR_MAGIC`。
+pub struct KhaenPlanIirHeaderV2 {
+    /// = `KHAEN_PLAN_IIR_MAGIC`。
     pub magic: u32,
-    /// = `TSPI_PLAN_IIR_VERSION`（1）。
+    /// = `KHAEN_PLAN_IIR_VERSION`（1）。
     pub version: u16,
     /// = 32（`PLAN_IIR_ENTRY_BYTES`）。
     pub entry_bytes: u16,
@@ -426,7 +426,7 @@ pub struct TspiPlanIirHeaderV2 {
 /// plan ABI v2 每 role IIR 表项（32 B，align 8；core-v1 §11.10 v2 附录 / GAP-T66-3）。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TspiRoleIirV2 {
+pub struct KhaenRoleIirV2 {
     /// 命中的 role 表 role_id（表项按 role_id 严格升序）。
     pub role_id: u16,
     /// IIR 阶数：当前唯一支持 2（biquad）。
@@ -450,7 +450,7 @@ pub struct TspiRoleIirV2 {
 /// worker block ack（64 B，align 64；core-v1 §11.6）。含原子字段，不是 Copy。
 #[repr(C, align(64))]
 #[derive(Debug)]
-pub struct TspiBlockAckV1 {
+pub struct KhaenBlockAckV1 {
     /// 本 ack 对应块。
     pub block_seq: u64,
     /// 本 ack 对应 epoch。
@@ -475,7 +475,7 @@ pub struct TspiBlockAckV1 {
     pub reserved1: u64,
 }
 
-impl TspiBlockAckV1 {
+impl KhaenBlockAckV1 {
     /// 构造 all-zero ack（scaffold/测试用）。
     pub const fn new(
         block_seq: u64,
@@ -502,8 +502,8 @@ impl TspiBlockAckV1 {
 /// SPSC 环头（64 B，align 64；core-v1 §11.7）。环只存 desc 值，不存指针。
 #[repr(C, align(64))]
 #[derive(Debug)]
-pub struct TspiSpscHeaderV1 {
-    /// = TSPI_RING_MAGIC。
+pub struct KhaenSpscHeaderV1 {
+    /// = KHAEN_RING_MAGIC。
     pub magic: u32,
     /// = ABI_VERSION。
     pub abi_version: u16,
@@ -525,11 +525,11 @@ pub struct TspiSpscHeaderV1 {
     pub reserved: [u64; 2],
 }
 
-impl TspiSpscHeaderV1 {
+impl KhaenSpscHeaderV1 {
     /// 构造固定容量 ring 头（scaffold/测试用）。
     pub const fn new(capacity: u32, entry_bytes: u16) -> Self {
         Self {
-            magic: TSPI_RING_MAGIC,
+            magic: KHAEN_RING_MAGIC,
             abi_version: ABI_VERSION,
             entry_bytes,
             capacity,
@@ -546,7 +546,7 @@ impl TspiSpscHeaderV1 {
 /// per-worker 统计（64 B，align 64；core-v1 §11.8）。
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TspiWorkerStatsV1 {
+pub struct KhaenWorkerStatsV1 {
     /// 完成块数。
     pub blocks_done: u64,
     /// 有用计算 tick（不含等待）。
@@ -572,7 +572,7 @@ pub struct TspiWorkerStatsV1 {
 /// RT/非 RT 均可按值拷贝；无 Drop。flags bit0=rt、bit1=isolated_cpu（T45 定义 IRQ 位义）。
 #[repr(C, align(8))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TspiWorkerAffinityV1 {
+pub struct KhaenWorkerAffinityV1 {
     /// worker 编号 0..=3。
     pub worker_id: u8,
     /// FIFO 调度优先级初值（T45 建议 70）。
@@ -596,196 +596,196 @@ pub struct TspiWorkerAffinityV1 {
 // ---------------------------------------------------------------------------
 
 const _: () = {
-    // TspiBlockDescV1
-    assert!(core::mem::size_of::<TspiBlockDescV1>() == 64);
-    assert!(core::mem::align_of::<TspiBlockDescV1>() == 64);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, epoch_id) == 8);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, block_seq) == 16);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, frame_index) == 24);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, plan_version) == 32);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, flags) == 36);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, valid_frames) == 40);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, slot_index) == 44);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, mono_publish_ns) == 48);
-    assert!(core::mem::offset_of!(TspiBlockDescV1, play_deadline_ns) == 56);
-    assert!(!core::mem::needs_drop::<TspiBlockDescV1>());
+    // KhaenBlockDescV1
+    assert!(core::mem::size_of::<KhaenBlockDescV1>() == 64);
+    assert!(core::mem::align_of::<KhaenBlockDescV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, epoch_id) == 8);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, block_seq) == 16);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, frame_index) == 24);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, plan_version) == 32);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, flags) == 36);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, valid_frames) == 40);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, slot_index) == 44);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, mono_publish_ns) == 48);
+    assert!(core::mem::offset_of!(KhaenBlockDescV1, play_deadline_ns) == 56);
+    assert!(!core::mem::needs_drop::<KhaenBlockDescV1>());
 
-    // TspiEpochInfoV1
-    assert!(core::mem::size_of::<TspiEpochInfoV1>() == 64);
-    assert!(core::mem::align_of::<TspiEpochInfoV1>() == 64);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, plan_version) == 8);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, sample_rate) == 12);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, block_size) == 16);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, n_in) == 18);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, n_out) == 20);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, mode) == 22);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, flags) == 24);
-    assert!(core::mem::offset_of!(TspiEpochInfoV1, start_mono_ns) == 32);
-    assert!(!core::mem::needs_drop::<TspiEpochInfoV1>());
+    // KhaenEpochInfoV1
+    assert!(core::mem::size_of::<KhaenEpochInfoV1>() == 64);
+    assert!(core::mem::align_of::<KhaenEpochInfoV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, plan_version) == 8);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, sample_rate) == 12);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, block_size) == 16);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, n_in) == 18);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, n_out) == 20);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, mode) == 22);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, flags) == 24);
+    assert!(core::mem::offset_of!(KhaenEpochInfoV1, start_mono_ns) == 32);
+    assert!(!core::mem::needs_drop::<KhaenEpochInfoV1>());
 
-    // TspiHwParamsV1
-    assert!(core::mem::size_of::<TspiHwParamsV1>() == 64);
-    assert!(core::mem::align_of::<TspiHwParamsV1>() == 64);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, sample_format) == 2);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, n_in) == 4);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, n_out) == 6);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, sample_rate) == 8);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, period_frames) == 12);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, buffer_frames) == 16);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, in_stride_bytes) == 20);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, out_stride_bytes) == 24);
-    assert!(core::mem::offset_of!(TspiHwParamsV1, flags) == 28);
-    assert!(!core::mem::needs_drop::<TspiHwParamsV1>());
+    // KhaenHwParamsV1
+    assert!(core::mem::size_of::<KhaenHwParamsV1>() == 64);
+    assert!(core::mem::align_of::<KhaenHwParamsV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, sample_format) == 2);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, n_in) == 4);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, n_out) == 6);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, sample_rate) == 8);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, period_frames) == 12);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, buffer_frames) == 16);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, in_stride_bytes) == 20);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, out_stride_bytes) == 24);
+    assert!(core::mem::offset_of!(KhaenHwParamsV1, flags) == 28);
+    assert!(!core::mem::needs_drop::<KhaenHwParamsV1>());
 
-    // TspiPlanHeaderV1
-    assert!(core::mem::size_of::<TspiPlanHeaderV1>() == 128);
-    assert!(core::mem::align_of::<TspiPlanHeaderV1>() == 64);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, plan_version) == 8);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, block_size) == 16);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, path_count) == 24);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, workers) == 32);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, graph_id) == 36);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, total_coeff_bytes) == 68);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, role_table_offset) == 88);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, role_table_count) == 92);
+    // KhaenPlanHeaderV1
+    assert!(core::mem::size_of::<KhaenPlanHeaderV1>() == 128);
+    assert!(core::mem::align_of::<KhaenPlanHeaderV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, plan_version) == 8);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, block_size) == 16);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, path_count) == 24);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, workers) == 32);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, graph_id) == 36);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, total_coeff_bytes) == 68);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, role_table_offset) == 88);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, role_table_count) == 92);
     // v1.1.2 errata E1（T02 定稿）：repr(C) 合法对齐版（旧字面 94/98/102/106 作废）。
-    assert!(core::mem::size_of::<TspiPlanHeaderV1>() == PLAN_HEADER_SIZE);
-    assert!(core::mem::align_of::<TspiPlanHeaderV1>() == PLAN_HEADER_ALIGN);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, reserved1) == PLAN_HEADER_OFFSET_RESERVED1);
+    assert!(core::mem::size_of::<KhaenPlanHeaderV1>() == PLAN_HEADER_SIZE);
+    assert!(core::mem::align_of::<KhaenPlanHeaderV1>() == PLAN_HEADER_ALIGN);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, reserved1) == PLAN_HEADER_OFFSET_RESERVED1);
     assert!(
-        core::mem::offset_of!(TspiPlanHeaderV1, affinity_table_offset)
+        core::mem::offset_of!(KhaenPlanHeaderV1, affinity_table_offset)
             == PLAN_HEADER_OFFSET_AFFINITY_TABLE
     );
     assert!(
-        core::mem::offset_of!(TspiPlanHeaderV1, affinity_count)
+        core::mem::offset_of!(KhaenPlanHeaderV1, affinity_count)
             == PLAN_HEADER_OFFSET_AFFINITY_COUNT
     );
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, reserved2) == PLAN_HEADER_OFFSET_RESERVED2);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, reserved2) == PLAN_HEADER_OFFSET_RESERVED2);
     assert!(
-        core::mem::offset_of!(TspiPlanHeaderV1, ctl_meta_offset) == PLAN_HEADER_OFFSET_CTL_META
+        core::mem::offset_of!(KhaenPlanHeaderV1, ctl_meta_offset) == PLAN_HEADER_OFFSET_CTL_META
     );
     assert!(
-        core::mem::offset_of!(TspiPlanHeaderV1, ctl_meta_len) == PLAN_HEADER_OFFSET_CTL_META_LEN
+        core::mem::offset_of!(KhaenPlanHeaderV1, ctl_meta_len) == PLAN_HEADER_OFFSET_CTL_META_LEN
     );
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, reserved3) == PLAN_HEADER_OFFSET_RESERVED3);
-    assert!(core::mem::offset_of!(TspiPlanHeaderV1, header_crc32c) == PLAN_HEADER_OFFSET_CRC);
-    assert!(!core::mem::needs_drop::<TspiPlanHeaderV1>());
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, reserved3) == PLAN_HEADER_OFFSET_RESERVED3);
+    assert!(core::mem::offset_of!(KhaenPlanHeaderV1, header_crc32c) == PLAN_HEADER_OFFSET_CRC);
+    assert!(!core::mem::needs_drop::<KhaenPlanHeaderV1>());
 
-    // TspiWorkerAffinityV1（§11.13 I15 / B-18；32 B / align 8 例外）
-    assert!(core::mem::size_of::<TspiWorkerAffinityV1>() == 32);
-    assert!(core::mem::align_of::<TspiWorkerAffinityV1>() == 8);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, worker_id) == 0);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, sched_priority) == 1);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, flags) == 2);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, cpu_index) == 4);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, reserved0) == 6);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, irq_dependency_mask) == 8);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, reserved1) == 16);
-    assert!(core::mem::offset_of!(TspiWorkerAffinityV1, reserved2) == 24);
-    assert!(!core::mem::needs_drop::<TspiWorkerAffinityV1>());
+    // KhaenWorkerAffinityV1（§11.13 I15 / B-18；32 B / align 8 例外）
+    assert!(core::mem::size_of::<KhaenWorkerAffinityV1>() == 32);
+    assert!(core::mem::align_of::<KhaenWorkerAffinityV1>() == 8);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, worker_id) == 0);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, sched_priority) == 1);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, flags) == 2);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, cpu_index) == 4);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, reserved0) == 6);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, irq_dependency_mask) == 8);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, reserved1) == 16);
+    assert!(core::mem::offset_of!(KhaenWorkerAffinityV1, reserved2) == 24);
+    assert!(!core::mem::needs_drop::<KhaenWorkerAffinityV1>());
 
-    // TspiEventV1
-    assert!(core::mem::size_of::<TspiEventV1>() == 64);
-    assert!(core::mem::align_of::<TspiEventV1>() == 64);
-    assert!(core::mem::offset_of!(TspiEventV1, mono_ns) == 8);
-    assert!(core::mem::offset_of!(TspiEventV1, epoch_id) == 16);
-    assert!(core::mem::offset_of!(TspiEventV1, block_seq) == 24);
-    assert!(core::mem::offset_of!(TspiEventV1, kind) == 32);
-    assert!(core::mem::offset_of!(TspiEventV1, lane) == 34);
-    assert!(core::mem::offset_of!(TspiEventV1, severity) == 35);
-    assert!(core::mem::offset_of!(TspiEventV1, value_a) == 36);
-    assert!(core::mem::offset_of!(TspiEventV1, value_b) == 40);
-    assert!(core::mem::offset_of!(TspiEventV1, payload) == 48);
-    assert!(!core::mem::needs_drop::<TspiEventV1>());
+    // KhaenEventV1
+    assert!(core::mem::size_of::<KhaenEventV1>() == 64);
+    assert!(core::mem::align_of::<KhaenEventV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenEventV1, mono_ns) == 8);
+    assert!(core::mem::offset_of!(KhaenEventV1, epoch_id) == 16);
+    assert!(core::mem::offset_of!(KhaenEventV1, block_seq) == 24);
+    assert!(core::mem::offset_of!(KhaenEventV1, kind) == 32);
+    assert!(core::mem::offset_of!(KhaenEventV1, lane) == 34);
+    assert!(core::mem::offset_of!(KhaenEventV1, severity) == 35);
+    assert!(core::mem::offset_of!(KhaenEventV1, value_a) == 36);
+    assert!(core::mem::offset_of!(KhaenEventV1, value_b) == 40);
+    assert!(core::mem::offset_of!(KhaenEventV1, payload) == 48);
+    assert!(!core::mem::needs_drop::<KhaenEventV1>());
 
-    // TspiBlockAckV1
-    assert!(core::mem::size_of::<TspiBlockAckV1>() == 64);
-    assert!(core::mem::align_of::<TspiBlockAckV1>() == 64);
-    assert!(core::mem::offset_of!(TspiBlockAckV1, phase_done) == 16);
-    assert!(core::mem::offset_of!(TspiBlockAckV1, cutoff) == 28);
-    assert!(core::mem::offset_of!(TspiBlockAckV1, plan_version) == 32);
-    assert!(core::mem::offset_of!(TspiBlockAckV1, expected_workers) == 36);
-    assert!(core::mem::offset_of!(TspiBlockAckV1, flags) == 37);
-    assert!(core::mem::offset_of!(TspiBlockAckV1, deadline_mono_ns) == 40);
-    assert!(core::mem::offset_of!(TspiBlockAckV1, compute_ticks) == 48);
-    assert!(!core::mem::needs_drop::<TspiBlockAckV1>());
+    // KhaenBlockAckV1
+    assert!(core::mem::size_of::<KhaenBlockAckV1>() == 64);
+    assert!(core::mem::align_of::<KhaenBlockAckV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenBlockAckV1, phase_done) == 16);
+    assert!(core::mem::offset_of!(KhaenBlockAckV1, cutoff) == 28);
+    assert!(core::mem::offset_of!(KhaenBlockAckV1, plan_version) == 32);
+    assert!(core::mem::offset_of!(KhaenBlockAckV1, expected_workers) == 36);
+    assert!(core::mem::offset_of!(KhaenBlockAckV1, flags) == 37);
+    assert!(core::mem::offset_of!(KhaenBlockAckV1, deadline_mono_ns) == 40);
+    assert!(core::mem::offset_of!(KhaenBlockAckV1, compute_ticks) == 48);
+    assert!(!core::mem::needs_drop::<KhaenBlockAckV1>());
 
-    // TspiSpscHeaderV1
-    assert!(core::mem::size_of::<TspiSpscHeaderV1>() == 64);
-    assert!(core::mem::align_of::<TspiSpscHeaderV1>() == 64);
-    assert!(core::mem::offset_of!(TspiSpscHeaderV1, capacity) == 8);
-    assert!(core::mem::offset_of!(TspiSpscHeaderV1, entry_stride) == 12);
-    assert!(core::mem::offset_of!(TspiSpscHeaderV1, write_pos) == 16);
-    assert!(core::mem::offset_of!(TspiSpscHeaderV1, read_pos) == 24);
-    assert!(core::mem::offset_of!(TspiSpscHeaderV1, dropped) == 32);
-    assert!(core::mem::offset_of!(TspiSpscHeaderV1, epoch_id) == 40);
-    assert!(!core::mem::needs_drop::<TspiSpscHeaderV1>());
+    // KhaenSpscHeaderV1
+    assert!(core::mem::size_of::<KhaenSpscHeaderV1>() == 64);
+    assert!(core::mem::align_of::<KhaenSpscHeaderV1>() == 64);
+    assert!(core::mem::offset_of!(KhaenSpscHeaderV1, capacity) == 8);
+    assert!(core::mem::offset_of!(KhaenSpscHeaderV1, entry_stride) == 12);
+    assert!(core::mem::offset_of!(KhaenSpscHeaderV1, write_pos) == 16);
+    assert!(core::mem::offset_of!(KhaenSpscHeaderV1, read_pos) == 24);
+    assert!(core::mem::offset_of!(KhaenSpscHeaderV1, dropped) == 32);
+    assert!(core::mem::offset_of!(KhaenSpscHeaderV1, epoch_id) == 40);
+    assert!(!core::mem::needs_drop::<KhaenSpscHeaderV1>());
 
-    // TspiWorkerStatsV1
-    assert!(core::mem::size_of::<TspiWorkerStatsV1>() == 64);
-    assert!(core::mem::align_of::<TspiWorkerStatsV1>() == 64);
-    assert!(!core::mem::needs_drop::<TspiWorkerStatsV1>());
+    // KhaenWorkerStatsV1
+    assert!(core::mem::size_of::<KhaenWorkerStatsV1>() == 64);
+    assert!(core::mem::align_of::<KhaenWorkerStatsV1>() == 64);
+    assert!(!core::mem::needs_drop::<KhaenWorkerStatsV1>());
 
-    // TspiPathV1 / TspiDiagFirV1 / TspiRoleV1
-    assert!(core::mem::size_of::<TspiPathV1>() == 32);
-    assert!(core::mem::align_of::<TspiPathV1>() == 8);
-    assert!(core::mem::offset_of!(TspiPathV1, in_index) == 0);
-    assert!(core::mem::offset_of!(TspiPathV1, out_index) == 2);
-    assert!(core::mem::offset_of!(TspiPathV1, taps) == 4);
-    assert!(core::mem::offset_of!(TspiPathV1, delay_samples) == 8);
-    assert!(core::mem::offset_of!(TspiPathV1, polarity) == 12);
-    assert!(core::mem::offset_of!(TspiPathV1, flags) == 13);
-    assert!(core::mem::offset_of!(TspiPathV1, coeff_offset_bytes) == 16);
-    assert!(core::mem::offset_of!(TspiPathV1, coeff_len_bytes) == 24);
-    assert!(!core::mem::needs_drop::<TspiPathV1>());
+    // KhaenPathV1 / KhaenDiagFirV1 / KhaenRoleV1
+    assert!(core::mem::size_of::<KhaenPathV1>() == 32);
+    assert!(core::mem::align_of::<KhaenPathV1>() == 8);
+    assert!(core::mem::offset_of!(KhaenPathV1, in_index) == 0);
+    assert!(core::mem::offset_of!(KhaenPathV1, out_index) == 2);
+    assert!(core::mem::offset_of!(KhaenPathV1, taps) == 4);
+    assert!(core::mem::offset_of!(KhaenPathV1, delay_samples) == 8);
+    assert!(core::mem::offset_of!(KhaenPathV1, polarity) == 12);
+    assert!(core::mem::offset_of!(KhaenPathV1, flags) == 13);
+    assert!(core::mem::offset_of!(KhaenPathV1, coeff_offset_bytes) == 16);
+    assert!(core::mem::offset_of!(KhaenPathV1, coeff_len_bytes) == 24);
+    assert!(!core::mem::needs_drop::<KhaenPathV1>());
 
-    assert!(core::mem::size_of::<TspiDiagFirV1>() == 32);
-    assert!(core::mem::align_of::<TspiDiagFirV1>() == 8);
-    assert!(core::mem::offset_of!(TspiDiagFirV1, out_index) == 0);
-    assert!(core::mem::offset_of!(TspiDiagFirV1, flags) == 2);
-    assert!(core::mem::offset_of!(TspiDiagFirV1, taps) == 4);
-    assert!(core::mem::offset_of!(TspiDiagFirV1, delay_samples) == 8);
-    assert!(core::mem::offset_of!(TspiDiagFirV1, coeff_offset_bytes) == 16);
-    assert!(core::mem::offset_of!(TspiDiagFirV1, coeff_len_bytes) == 24);
-    assert!(!core::mem::needs_drop::<TspiDiagFirV1>());
+    assert!(core::mem::size_of::<KhaenDiagFirV1>() == 32);
+    assert!(core::mem::align_of::<KhaenDiagFirV1>() == 8);
+    assert!(core::mem::offset_of!(KhaenDiagFirV1, out_index) == 0);
+    assert!(core::mem::offset_of!(KhaenDiagFirV1, flags) == 2);
+    assert!(core::mem::offset_of!(KhaenDiagFirV1, taps) == 4);
+    assert!(core::mem::offset_of!(KhaenDiagFirV1, delay_samples) == 8);
+    assert!(core::mem::offset_of!(KhaenDiagFirV1, coeff_offset_bytes) == 16);
+    assert!(core::mem::offset_of!(KhaenDiagFirV1, coeff_len_bytes) == 24);
+    assert!(!core::mem::needs_drop::<KhaenDiagFirV1>());
 
-    assert!(core::mem::size_of::<TspiRoleV1>() == 32);
-    assert!(core::mem::align_of::<TspiRoleV1>() == 8);
-    assert!(core::mem::offset_of!(TspiRoleV1, role_id) == 0);
-    assert!(core::mem::offset_of!(TspiRoleV1, out_index) == 2);
-    assert!(core::mem::offset_of!(TspiRoleV1, flags) == 4);
-    assert!(core::mem::offset_of!(TspiRoleV1, delay_samples) == 8);
-    assert!(core::mem::offset_of!(TspiRoleV1, gain_q15) == 12);
-    assert!(core::mem::offset_of!(TspiRoleV1, polarity) == 14);
-    assert!(core::mem::offset_of!(TspiRoleV1, peq_count) == 16);
-    assert!(core::mem::offset_of!(TspiRoleV1, name_hash) == 20);
-    assert!(!core::mem::needs_drop::<TspiRoleV1>());
+    assert!(core::mem::size_of::<KhaenRoleV1>() == 32);
+    assert!(core::mem::align_of::<KhaenRoleV1>() == 8);
+    assert!(core::mem::offset_of!(KhaenRoleV1, role_id) == 0);
+    assert!(core::mem::offset_of!(KhaenRoleV1, out_index) == 2);
+    assert!(core::mem::offset_of!(KhaenRoleV1, flags) == 4);
+    assert!(core::mem::offset_of!(KhaenRoleV1, delay_samples) == 8);
+    assert!(core::mem::offset_of!(KhaenRoleV1, gain_q15) == 12);
+    assert!(core::mem::offset_of!(KhaenRoleV1, polarity) == 14);
+    assert!(core::mem::offset_of!(KhaenRoleV1, peq_count) == 16);
+    assert!(core::mem::offset_of!(KhaenRoleV1, name_hash) == 20);
+    assert!(!core::mem::needs_drop::<KhaenRoleV1>());
 
     // plan ABI v2：IIR 表头 / 表项（GAP-T66-3，additive；header size 128 不变）
-    assert!(core::mem::size_of::<TspiPlanIirHeaderV2>() == PLAN_IIR_HEADER_BYTES);
-    assert!(core::mem::align_of::<TspiPlanIirHeaderV2>() == 8);
-    assert!(core::mem::offset_of!(TspiPlanIirHeaderV2, magic) == 0);
-    assert!(core::mem::offset_of!(TspiPlanIirHeaderV2, version) == 4);
-    assert!(core::mem::offset_of!(TspiPlanIirHeaderV2, entry_bytes) == 6);
-    assert!(core::mem::offset_of!(TspiPlanIirHeaderV2, entry_count) == 8);
-    assert!(core::mem::offset_of!(TspiPlanIirHeaderV2, reserved0) == 10);
-    assert!(core::mem::offset_of!(TspiPlanIirHeaderV2, table_crc32c) == 12);
-    assert!(!core::mem::needs_drop::<TspiPlanIirHeaderV2>());
+    assert!(core::mem::size_of::<KhaenPlanIirHeaderV2>() == PLAN_IIR_HEADER_BYTES);
+    assert!(core::mem::align_of::<KhaenPlanIirHeaderV2>() == 8);
+    assert!(core::mem::offset_of!(KhaenPlanIirHeaderV2, magic) == 0);
+    assert!(core::mem::offset_of!(KhaenPlanIirHeaderV2, version) == 4);
+    assert!(core::mem::offset_of!(KhaenPlanIirHeaderV2, entry_bytes) == 6);
+    assert!(core::mem::offset_of!(KhaenPlanIirHeaderV2, entry_count) == 8);
+    assert!(core::mem::offset_of!(KhaenPlanIirHeaderV2, reserved0) == 10);
+    assert!(core::mem::offset_of!(KhaenPlanIirHeaderV2, table_crc32c) == 12);
+    assert!(!core::mem::needs_drop::<KhaenPlanIirHeaderV2>());
 
-    assert!(core::mem::size_of::<TspiRoleIirV2>() == PLAN_IIR_ENTRY_BYTES);
-    assert!(core::mem::align_of::<TspiRoleIirV2>() == 8);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, role_id) == 0);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, order) == 2);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, section_count) == 4);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, flags) == 6);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, coeff_offset_bytes) == 8);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, coeff_len_bytes) == 16);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, reserved0) == 20);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, reserved1) == 24);
-    assert!(core::mem::offset_of!(TspiRoleIirV2, reserved2) == 28);
-    assert!(!core::mem::needs_drop::<TspiRoleIirV2>());
-    assert!(plan_abi_supported(TSPI_PLAN_ABI_V1));
-    assert!(plan_abi_supported(TSPI_PLAN_ABI_V2));
+    assert!(core::mem::size_of::<KhaenRoleIirV2>() == PLAN_IIR_ENTRY_BYTES);
+    assert!(core::mem::align_of::<KhaenRoleIirV2>() == 8);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, role_id) == 0);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, order) == 2);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, section_count) == 4);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, flags) == 6);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, coeff_offset_bytes) == 8);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, coeff_len_bytes) == 16);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, reserved0) == 20);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, reserved1) == 24);
+    assert!(core::mem::offset_of!(KhaenRoleIirV2, reserved2) == 28);
+    assert!(!core::mem::needs_drop::<KhaenRoleIirV2>());
+    assert!(plan_abi_supported(KHAEN_PLAN_ABI_V1));
+    assert!(plan_abi_supported(KHAEN_PLAN_ABI_V2));
     assert!(!plan_abi_supported(3));
 
     // 端序：ABI 只支持小端（A-ABI-4）。

@@ -1,4 +1,4 @@
-# TSPI file runner：文件输入驱动 core plan（T06 scaffold；leaf T14）
+# KHAEN file runner：文件输入驱动 core plan（T06 scaffold；leaf T14）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-file-runner"

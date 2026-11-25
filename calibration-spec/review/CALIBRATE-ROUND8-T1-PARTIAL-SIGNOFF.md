@@ -29,7 +29,7 @@ runbook 第 49 行用：
 ```
 --channels 0,1,2,3,4,5,6,7 --names FL,FR,C,SUB1,SL,SR,HFL,HFR --layout 5.3.2
 ```
-实际 layout-presets（audio/overlay/etc/tspi-audio/layout-presets.yml）5.3.2 是 10 路：
+实际 layout-presets（audio/overlay/etc/khaen-audio/layout-presets.yml）5.3.2 是 10 路：
 FL0 FR1 C2 **SL3 SR4 SUB1=5 SUB2=6 SUB3=7 HFL8 HFR9**。
 按 runbook 跑会把 SUB1 标到 ch3（实际 SL）、SL 标到 ch4（实际 SR）、HFL 标到 ch6（实际 SUB2）、HFR 标到 ch7（实际 SUB3），
 且缺 SUB2/SUB3/HFL/HFR 的独立测量 → T4 校准/报告全部错位。
@@ -46,7 +46,7 @@ runbook 的 T2/T4 用 @--capture hw:3,0 --capture-channels 2@；UMIK-1 是 1 通
 
 ### 2.3 T4 的 negative-controls 文件未创建
 
-merge 命令带 @--negative-controls /var/lib/tspi-calib/t4/negative_controls.json@，但 runbook 没给生成步骤；
+merge 命令带 @--negative-controls /var/lib/khaen-calib/t4/negative_controls.json@，但 runbook 没给生成步骤；
 文件不存在时 merge 会直接报错。建议先写一个 N1–N5 结果 JSON（或板端前先省略该参数，T4 报告再补）。
 
 ## 3. 已同步的设计侧修订

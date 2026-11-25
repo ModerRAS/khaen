@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环：冻结配置加载与 fail-closed 校验。
+"""KHAEN 校准批量闭环：冻结配置加载与 fail-closed 校验。
 
 校验口径来自（只读）：
 - calibration-spec/MICS.md：生产 = 单支 UMIK-1 移动多点；三麦固定仅 pilot。
@@ -16,7 +16,7 @@ import hashlib
 import json
 import os
 
-CONFIG_SCHEMA = "tspi-cal-batch-config/v1"
+CONFIG_SCHEMA = "khaen-cal-batch-config/v1"
 
 DEFAULT_CHANNELS_4_1_2 = [
     {"name": "FL", "playback_channel": 0, "fit_band_hz": [60.0, 20000.0]},

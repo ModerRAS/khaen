@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # T28 07-mark-last-good.sh —— 记录自研 last-good（仅成功切换并验证后写；P1 回退唯一目标，另一兜底为 mute）
 #
-# 写入 /var/lib/tspi-rt-stack/last-good.json（schema tspi-rt-stack/last-good/v1，原子写）：
+# 写入 /var/lib/khaen-rt-stack/last-good.json（schema khaen-rt-stack/last-good/v1，原子写）：
 #   release_id/release_dir/manifest_sha256/binary_sha256/units_sha256/verified_at/verify_report/
 #   c_policy=never-camilladsp/previous
 # 禁止把 CamillaDSP/旧 C 写进 last-good（G-no-C）；写前校验旧 C 已退役。
@@ -35,14 +35,14 @@ require_authorization "mark-last-good"
 evidence_prepare "07-mark-last-good"
 
 REL_DIR=""
-if [ -n "$RELEASE_ID" ]; then REL_DIR="$(p "$TSPI_STACK_PREFIX")/releases/$RELEASE_ID"; else REL_DIR="$(current_release_dir 2>/dev/null || true)"; fi
+if [ -n "$RELEASE_ID" ]; then REL_DIR="$(p "$KHAEN_STACK_PREFIX")/releases/$RELEASE_ID"; else REL_DIR="$(current_release_dir 2>/dev/null || true)"; fi
 [ -n "$REL_DIR" ] || die "找不到 current release（先 04-install-release.sh）" 3
 [ -f "$REL_DIR/manifest.json" ] || die "release 缺 manifest.json: $REL_DIR" 3
 REL_ID="$(printf '%s' "$RELEASE_ID")"
 [ -n "$REL_ID" ] || REL_ID="$(py -c 'import json,sys;print(json.load(open(sys.argv[1],encoding="utf-8"))["release_id"])' "$REL_DIR/manifest.json")"
 
 if [ "$DRY_RUN" = "1" ]; then
-  log "[dry-run] 将校验 release=$REL_ID 与 C 退役，写 last-good.json（schema tspi-rt-stack/last-good/v1, c_policy=never-camilladsp）"
+  log "[dry-run] 将校验 release=$REL_ID 与 C 退役，写 last-good.json（schema khaen-rt-stack/last-good/v1, c_policy=never-camilladsp）"
   exit 0
 fi
 
@@ -55,17 +55,17 @@ if [ -n "$VERIFY_REPORT" ]; then
   py - "$VERIFY_REPORT" <<'PY' || exit 3
 import json,sys
 d=json.load(open(sys.argv[1],encoding="utf-8"))
-if d.get("schema")!="tspi-rt-stack/verify-report/v1": raise SystemExit("verify-report schema 不符")
+if d.get("schema")!="khaen-rt-stack/verify-report/v1": raise SystemExit("verify-report schema 不符")
 if int(d.get("fails",1))!=0: raise SystemExit(f"verify-report fails={d.get('fails')}，拒绝写 last-good")
 print("verify-report PASS")
 PY
 fi
 py "$DEPLOY_ROOT/lib/release_manifest.py" verify "$REL_DIR" --require-arch aarch64 >/dev/null || die "release manifest/arch 校验失败" 3
 
-LG="$(p "$TSPI_STATE_DIR/last-good.json")"
+LG="$(p "$KHAEN_STATE_DIR/last-good.json")"
 TMP="$LG.tmp.$$"
 mkdir -p "$(dirname "$LG")"
-py - "$TMP" "$REL_ID" "$REL_DIR" "$(p "$TSPI_SYSTEMD_DIR")" "${VERIFY_REPORT:-}" "$LG" <<'PY' || die "生成 last-good JSON 失败" 7
+py - "$TMP" "$REL_ID" "$REL_DIR" "$(p "$KHAEN_SYSTEMD_DIR")" "${VERIFY_REPORT:-}" "$LG" <<'PY' || die "生成 last-good JSON 失败" 7
 import hashlib, json, os, sys, datetime
 tmp, rid, rel_dir, sys_dir, verify_report, lg_path = sys.argv[1:7]
 def sha(p):
@@ -81,7 +81,7 @@ for name in sorted(os.listdir(os.path.join(rel_dir, "bin"))):
         bins[name] = sha(fp)
 units = {}
 for name in sorted(os.listdir(sys_dir)):
-    if not name.startswith("tspi-rt-"):
+    if not name.startswith("khaen-rt-"):
         continue
     fp = os.path.join(sys_dir, name)
     if os.path.isfile(fp):
@@ -94,7 +94,7 @@ if os.path.isfile(lg_path):
     except (OSError, ValueError):
         prev = None
 d = {
-    "schema": "tspi-rt-stack/last-good/v1",
+    "schema": "khaen-rt-stack/last-good/v1",
     "release_id": rid,
     "release_dir": rel_dir,
     "manifest_sha256": sha(os.path.join(rel_dir, "manifest.json")),

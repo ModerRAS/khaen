@@ -10,19 +10,19 @@
   getFormat()、AudioManager PROPERTY_OUTPUT_SAMPLE_RATE、getPlaybackParams() 实际值；
 - 按钮 **Play file (WAV ...)**：优先从 MediaStore，其次从 /sdcard/Music、Download 找 .wav，
   自解析 RIFF（PCM 8/16/24/32-bit 或 float32）转 16-bit 立体声后用 WAV 自身采样率播放。
-  芝杜上现成可用的文件：/sdcard/Music/tspi-toslink-48k-24s.wav；
+  芝杜上现成可用的文件：/sdcard/Music/khaen-toslink-48k-24s.wav；
 - 每次播放追加一行 JSON 到 App 私有目录
-  /storage/emulated/0/Android/data/com.tspi.fixed48test/files/fixed48test-results.jsonl
+  /storage/emulated/0/Android/data/com.khaen.fixed48test/files/fixed48test-results.jsonl
   （可通过 SMB 直接读，无需 adb）。
 
-包名 com.tspi.fixed48test，minSdk/targetSdk 30，纯 Java、无 native、无 AndroidX，
+包名 com.khaen.fixed48test，minSdk/targetSdk 30，纯 Java、无 native、无 AndroidX，
 armeabi-v7a userspace 设备可直接运行。
 
 ## 构建（手工 aapt2 + javac + d8 + apksigner，无 gradle）
 
     powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 
-产物：artifacts/tspi-audio/zidoo-test/zidoo-fixed48-test-v1.0.apk + SHA256SUMS.txt；
+产物：artifacts/khaen-audio/zidoo-test/zidoo-fixed48-test-v1.0.apk + SHA256SUMS.txt；
 构建证据写到 rt-stack/evidence/calib-chain-20261121/zidoo-apk48/build-record/。
 
 - 工具链：Android SDK build-tools/35.0.0（注意：34.0.0 的 d8 对 JDK21 编出的 class 会内部

@@ -18,7 +18,7 @@ Windows 若将来确实需要 PTP 主机：防火墙预案与限制见
 \`\`\`
 BREN7P (Windows host 192.0.2.94, 生产网卡 I226 不参与)
 └── VirtualBox Host-Only Ethernet Adapter 192.168.56.1/24   ← 独立虚拟交换机
-    ├── tspi-audio-build VM (Ubuntu 22.04)  enp0s8 192.168.56.2  = PTPv2 GM（linuxptp 4.2，-S 软件时间戳）
+    ├── khaen-audio-build VM (Ubuntu 22.04)  enp0s8 192.168.56.2  = PTPv2 GM（linuxptp 4.2，-S 软件时间戳）
     └── inferno-dev VM     (Debian 13)       enp0s9 192.168.56.3  = PTPv2 slave（linuxptp 4.2，nullf 只测量）
 \`\`\`
 
@@ -33,9 +33,9 @@ BREN7P (Windows host 192.0.2.94, 生产网卡 I226 不参与)
 # Windows：确认 host-only 适配器存在并处于启用状态（192.168.56.1/24）
 Get-NetAdapter | Where-Object InterfaceDescription -like "*Host-Only*"
 # 两台 VM 关机后加 host-only NIC（可回滚 --nic2 none / --nic3 none）
-VBoxManage modifyvm tspi-audio-build --nic2 hostonly --hostonlyadapter2 "VirtualBox Host-Only Ethernet Adapter" --macaddress2 auto
+VBoxManage modifyvm khaen-audio-build --nic2 hostonly --hostonlyadapter2 "VirtualBox Host-Only Ethernet Adapter" --macaddress2 auto
 VBoxManage modifyvm inferno-dev     --nic3 hostonly --hostonlyadapter3 "VirtualBox Host-Only Ethernet Adapter" --macaddress3 auto
-VBoxManage startvm tspi-audio-build --type headless
+VBoxManage startvm khaen-audio-build --type headless
 VBoxManage startvm inferno-dev --type headless
 \`\`\`
 
@@ -54,13 +54,13 @@ ip addr add 192.168.56.3/24 dev enp0s9 && ip link set enp0s9 up
 
 ## 3. 启动 GM（builder VM）
 
-先按生产布局 staged（\`/opt/tspi-rt-stack/ptp/current/bin\` + \`/usr/local/lib/tspi/\` + \`/etc/tspi-ptp/\`），
+先按生产布局 staged（\`/opt/khaen-rt-stack/ptp/current/bin\` + \`/usr/local/lib/khaen/\` + \`/etc/khaen-ptp/\`），
 可直接用 \`start-lab-gm.sh\`：
 
 \`\`\`bash
 sudo bash rt-stack/ptp/lab/bren7p/start-lab-gm.sh --iface enp0s8 --out ~/lab/bren7p-gm
 # 日志应含：WARN no PHC ... software timestamp fallback；随后 portState MASTER
-sudo /opt/tspi-rt-stack/ptp/current/bin/pmc -s /run/tspi-ptp/ptp4l.uds -u -b 0 'GET PORT_DATA_SET'
+sudo /opt/khaen-rt-stack/ptp/current/bin/pmc -s /run/khaen-ptp/ptp4l.uds -u -b 0 'GET PORT_DATA_SET'
 \`\`\`
 
 ## 4. 启动 slave + 采样（inferno-dev VM）
@@ -105,7 +105,7 @@ sudo python3 tai-align-gm.py --offset-ns <O_ns> --utc-offset 37            # 真
 ## 7. 回滚
 
 \`\`\`powershell
-VBoxManage modifyvm tspi-audio-build --nic2 none
+VBoxManage modifyvm khaen-audio-build --nic2 none
 VBoxManage modifyvm inferno-dev     --nic3 none   # 若还需保留原 bridged 生产网卡则不要动 nic2
 \`\`\`
 VM 内追加的 \`192.168.56.x\` 地址随重启消失；inferno-dev 的 bridged 192.0.2.216 恢复方式见 §2 注。

@@ -21,7 +21,7 @@
 //! 明确非目标（不得由本模块冒充）：
 //! - 不实现 least_squares 方法：规范 §3.1 的 window.type 列了它，但它不是有限窗；T10 DoD 是
 //!   “有限窗 + 独立响应验证”。需要 LS/Remez 由后续任务/裁决另行实现，本模块不给出假系数。
-//! - 不生成 WAV/manifest（tspi-fir/v1 产物与 20 Hz/20 kHz Endpoint 报告归 T55），不做 target 导入（T11）、
+//! - 不生成 WAV/manifest（khaen-fir/v1 产物与 20 Hz/20 kHz Endpoint 报告归 T55），不做 target 导入（T11）、
 //!   不做 P/G 融合（T12）、不做 RT 运行/板端（本文件零 RT 路径、零板端动作）。
 //! - 预算判定只报 delay_samples/delay_ms 事实；15/25/40 ms 整链预算与 profile 准入归 T55/T56，
 //!   本模块不宣称“满足预算”。
@@ -755,7 +755,7 @@ pub fn validate(spec: &LinearSpec) -> Result<ValidatedLinearSpec, LinearError> {
     })
 }
 
-/// linear 设计产物（tspi-fir/v1 manifest 的系数源；WAV/manifest 归 T55）。
+/// linear 设计产物（khaen-fir/v1 manifest 的系数源；WAV/manifest 归 T55）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinearDesign {
     /// 原参数。

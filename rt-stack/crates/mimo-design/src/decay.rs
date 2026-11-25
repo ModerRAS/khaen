@@ -11,16 +11,16 @@
 //! 两个口径分开报（不许混写）：
 //! - Diagonal: 只允许 g_ii（T66 P_post 对角 FIR 可表达）——生产可实现预测；
 //! - Full5x5: 允许 g_ji（j != i，交叉帽 -6 dB；diag +6 dB）——T51/T54 modal matrix 形态的**理想上界**，
-//!   当前 tspi-cal measured 路径 G 注入 NOT_WIRED，不能落地。
+//!   当前 khaen-cal measured 路径 G 注入 NOT_WIRED，不能落地。
 //!
 //! 诚实边界：PREDICTED / SINGLE_POINT_NOT_SPATIAL / NO_MEASUREMENT；未 apply、未实测 T20。
 
+use crate::fill::db_amp;
 use crate::fir::{fft_in_place, FirBasis};
 use crate::solve::Cx;
-use crate::fill::db_amp;
 
 /// 证据 schema。
-pub const DECAY_SCHEMA: &str = "tspi-mimo-single-point-decay/v1";
+pub const DECAY_SCHEMA: &str = "khaen-mimo-single-point-decay/v1";
 /// 结论标签。
 pub const DECAY_CLAIM: &str = "PREDICTED_ONLY / SINGLE_POINT_NOT_SPATIAL / NO_MEASUREMENT";
 /// 候选 B 目标下降比例（T*=0.85T，M1 §3）。
@@ -192,7 +192,8 @@ pub fn t20_from_ir(ir: &[f64], fs: f64) -> Option<T20Estimate> {
     // 噪声底：记录尾部 NOISE_TAIL_FRACTION 的均方（本底段）；能量样本扣除后再做 EDC。
     let tail_start = ((n as f64) * (1.0 - NOISE_TAIL_FRACTION)) as usize;
     let tail = &ir[tail_start.min(n - 1)..];
-    let noise_power = tail.iter().map(|value| value * value).sum::<f64>() / tail.len().max(1) as f64;
+    let noise_power =
+        tail.iter().map(|value| value * value).sum::<f64>() / tail.len().max(1) as f64;
     let mut energy = vec![0.0f64; n + 1];
     for index in (0..n).rev() {
         let sample = ir[index] * ir[index] - noise_power;
@@ -415,7 +416,13 @@ pub fn candidate_b_target_with_anchor(
             rt60_target_s: rt60_target,
             delta_per_s: delta,
             valid,
-            note: if valid { note_edge } else if !note_edge.is_empty() { note_edge } else { "T20_NOT_ESTIMABLE" },
+            note: if valid {
+                note_edge
+            } else if !note_edge.is_empty() {
+                note_edge
+            } else {
+                "T20_NOT_ESTIMABLE"
+            },
         });
     }
     (target, infos)
@@ -564,7 +571,11 @@ pub fn fit_path_firs(
                 Some(basis) => basis.solve(response, 1e-6)?,
                 None => fit_real_fir_dual(design_freqs_hz, response, fs, taps)?,
             };
-            out.push(PathFir { out_index, in_index, coeffs });
+            out.push(PathFir {
+                out_index,
+                in_index,
+                coeffs,
+            });
         }
     }
     Ok(out)
@@ -754,19 +765,37 @@ pub fn evaluate_decay(
     let before_ir = ir_of_spectrum(before_spectrum, grid.nfft);
     let target_ir = ir_of_spectrum(target_spectrum, grid.nfft);
     let after_ir = ir_of_spectrum(after_spectrum, grid.nfft);
-    let i_db = interference_improvement_db(grid, before_spectrum, target_spectrum, after_spectrum, 63.0, 125.0, 40);
+    let i_db = interference_improvement_db(
+        grid,
+        before_spectrum,
+        target_spectrum,
+        after_spectrum,
+        63.0,
+        125.0,
+        40,
+    );
     let mut rows = Vec::new();
     for band in bands {
         let band_hi = band.center_hz * 2.0f64.powf(1.0 / 6.0);
-        let edge_note = if band_hi > band_hi_hz + 1e-9 { "PARTIAL_BAND_EDGE_TRUNCATED" } else { "" };
+        let edge_note = if band_hi > band_hi_hz + 1e-9 {
+            "PARTIAL_BAND_EDGE_TRUNCATED"
+        } else {
+            ""
+        };
         let before_band = bandpass_ir(&before_ir, grid.fs, band.center_hz);
         let after_band = bandpass_ir(&after_ir, grid.fs, band.center_hz);
         let before_est = t20_from_ir(&before_band, grid.fs);
         let target_est = t20_from_ir(&bandpass_ir(&target_ir, grid.fs, band.center_hz), grid.fs);
         let after_est = t20_from_ir(&after_band, grid.fs);
-        let (t20_before, valid_before) = before_est.map(|e| (e.t20_s, e.valid)).unwrap_or((f64::NAN, false));
-        let (t20_target, _) = target_est.map(|e| (e.t20_s, e.valid)).unwrap_or((f64::NAN, false));
-        let (t20_after, valid_after) = after_est.map(|e| (e.t20_s, e.valid)).unwrap_or((f64::NAN, false));
+        let (t20_before, valid_before) = before_est
+            .map(|e| (e.t20_s, e.valid))
+            .unwrap_or((f64::NAN, false));
+        let (t20_target, _) = target_est
+            .map(|e| (e.t20_s, e.valid))
+            .unwrap_or((f64::NAN, false));
+        let (t20_after, valid_after) = after_est
+            .map(|e| (e.t20_s, e.valid))
+            .unwrap_or((f64::NAN, false));
         let t20_drop = if valid_before && valid_after && t20_before > 1e-9 {
             1.0 - t20_after / t20_before
         } else {
@@ -858,8 +887,16 @@ mod tests {
         let estimate = t20_from_ir(&ir, fs).expect("t20");
         assert!(estimate.valid, "valid: {estimate:?}");
         // 已知答案：T60=0.6 s → T20（20 dB 时间）= T60/3 = 0.2 s（±10%）；RT60 只报告 = 3*T20。
-        assert!((estimate.t20_s - 0.2).abs() < 0.02, "t20={}", estimate.t20_s);
-        assert!((estimate.rt60_s - 0.6).abs() < 0.06, "rt60={}", estimate.rt60_s);
+        assert!(
+            (estimate.t20_s - 0.2).abs() < 0.02,
+            "t20={}",
+            estimate.t20_s
+        );
+        assert!(
+            (estimate.rt60_s - 0.6).abs() < 0.06,
+            "rt60={}",
+            estimate.rt60_s
+        );
         assert!(estimate.r2 > 0.99, "r2={}", estimate.r2);
     }
 
@@ -868,16 +905,25 @@ mod tests {
         let grid = Grid::new(12_000.0, 32_768);
         let fs = grid.fs;
         let ir = synthetic_decay(fs, 32_768, 0.60, 100.0);
-        let (target, infos) = candidate_b_target(&ir, &grid, &[BandSpec { center_hz: 100.0 }], 400.0);
+        let (target, infos) =
+            candidate_b_target(&ir, &grid, &[BandSpec { center_hz: 100.0 }], 400.0);
         let info = &infos[0];
         assert!(info.valid, "band info: {info:?}");
-        assert!((info.t20_before_s - 0.2).abs() < 0.02, "before={}", info.t20_before_s);
+        assert!(
+            (info.t20_before_s - 0.2).abs() < 0.02,
+            "before={}",
+            info.t20_before_s
+        );
         let target_band = bandpass_ir(&target, grid.fs, 100.0);
         let target_est = t20_from_ir(&target_band, fs).expect("target t20");
         let before_est = t20_from_ir(&bandpass_ir(&ir, grid.fs, 100.0), fs).expect("before t20");
         assert!(target_est.valid && before_est.valid);
         let drop = 1.0 - target_est.t20_s / before_est.t20_s;
-        assert!((drop - 0.15).abs() < 0.05, "drop={drop} target={}", target_est.t20_s);
+        assert!(
+            (drop - 0.15).abs() < 0.05,
+            "drop={drop} target={}",
+            target_est.t20_s
+        );
     }
 
     #[test]
@@ -887,7 +933,11 @@ mod tests {
         let caps = vec![2.0, 0.5, 0.5];
         let g = solve_with_caps(&h, rhs, &caps);
         for (index, value) in g.iter().enumerate() {
-            assert!(value.abs() <= caps[index] + 1e-12, "|g[{index}]|={}", value.abs());
+            assert!(
+                value.abs() <= caps[index] + 1e-12,
+                "|g[{index}]|={}",
+                value.abs()
+            );
         }
         // 残差应小于未加帽（无法完全满足）；只验证有限且非零。
         let mut sum = Cx::zero();

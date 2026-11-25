@@ -31,7 +31,7 @@ python remote.py copy-scripts
 
 - 远端：`adqew@192.0.2.63`，工作区 `D:\WorkSpace\Claw`
 - 板端：`root@192.0.2.215`
-- 镜像：`projects/tspi-audio-dsp/firmware/rt-oem-v14/update.img`
+- 镜像：`projects/khaen-audio-dsp/firmware/rt-oem-v14/update.img`
 - 工具：远端 `vendor/rockchip-tools/.../upgrade_tool.exe`（递归查找）
 
 可用 `-c config.json` 覆盖默认值；字段见 `remote.py` 顶部 `DEFAULTS`。

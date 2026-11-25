@@ -22,7 +22,7 @@
 //!   "coefficients": { "a": [ { "src": 0, "file": "a0.wav", "manifest_file": "a0.fir.json" } ],
 //!                     "g": [ { "row": 0, "col": 1, "file": "g01.wav", "manifest_file": "..." } ],
 //!                     "p": [ { "role": "FL", "file": "pFL.wav", "manifest_file": "..." } ] },
-//!   "ir": { ... `tspi-cal-ir-draft/v1` ... } | null,
+//!   "ir": { ... `khaen-cal-ir-draft/v1` ... } | null,
 //!   "protection": { "fallback": "identity_p_post", "triggers": ["graph_hash_mismatch","ir_stale"],
 //!                   "mute_on_exec_fault": true },
 //!   "output": { "format": "wav_f32" }

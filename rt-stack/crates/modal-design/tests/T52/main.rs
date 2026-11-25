@@ -1546,7 +1546,7 @@ fn t52_regularize_evidence_json_contract() {
     let outcome = regularize(&problem, &options).unwrap();
     let json = outcome.to_evidence_json();
     JsonSyntax::validate(&json).expect("evidence JSON must be syntactically valid");
-    assert!(json.contains("\"schema\":\"tspi-modal-regularize/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-modal-regularize/v1\""));
     assert!(json.contains("\"mode\":\"custom\""));
     assert!(json.contains("\"holdout_used_for_tuning\":false"));
     assert!(json.contains("\"cv_uses_only_design_positions\":true"));
@@ -1597,7 +1597,7 @@ fn t52_regularize_zero_plant_degenerate() {
 fn t52_regularize_static_guards() {
     let source = khaen_modal_design::regularize::regularize_source_text_for_guards();
     for required in [
-        "tspi-modal-regularize/v1",
+        "khaen-modal-regularize/v1",
         "WhitelistKind",
         "DiagOnly",
         "DiagAdjacent",
@@ -1738,7 +1738,7 @@ fn t52_regularize_known_fixture_dump() {
     let mut json = String::new();
     json.push('{');
     json.push_str(&format!(
-        "\"schema\":\"tspi-t52-fixture/v1\",\"m\":{m},\"taps\":{},\"fs\":{},\"grid_points\":{grid_len},",
+        "\"schema\":\"khaen-t52-fixture/v1\",\"m\":{m},\"taps\":{},\"fs\":{},\"grid_points\":{grid_len},",
         report.taps, report.sample_rate_hz
     ));
     json.push_str("\"grid\":[");

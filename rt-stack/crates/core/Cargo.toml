@@ -1,4 +1,4 @@
-# TSPI DSP core：ABI v1 / RT 类型 / plan / kernel scaffold（T06；leaf T07/T08/T09/T12/T23/T56）
+# KHAEN DSP core：ABI v1 / RT 类型 / plan / kernel scaffold（T06；leaf T07/T08/T09/T12/T23/T56）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-core"

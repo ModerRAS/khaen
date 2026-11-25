@@ -12,7 +12,7 @@
 //!
 //! 本文件是集成测试 target（cargo 自动发现 tests/<dir>/main.rs，与 tests/T57 同模式；
 //! 不改 public_registration.rs / lib.rs / Cargo.toml）。布局输入为真实 overlay
-//! `audio/overlay/etc/tspi-audio/layout-presets.yml`（include_str! 绑定），不写临时文件。
+//! `audio/overlay/etc/khaen-audio/layout-presets.yml`（include_str! 绑定），不写临时文件。
 
 use khaen_compat::channel_map::{
     center_downmix_gain_linear_f64, center_downmix_worst_case_added_db, CenterDownmixConfig,
@@ -24,7 +24,7 @@ use khaen_compat::channel_map::{
 use khaen_compat::roles::LayoutPresets;
 
 const OVERLAY: &str =
-    include_str!("../../../../../audio/overlay/etc/tspi-audio/layout-presets.yml");
+    include_str!("../../../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
 
 fn presets() -> LayoutPresets {
     LayoutPresets::parse_overlay(OVERLAY.as_bytes()).expect("overlay layout-presets 解析失败")

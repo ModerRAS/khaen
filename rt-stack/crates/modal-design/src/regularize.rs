@@ -3,7 +3,7 @@
 //!
 //! ## 权威契约（只读输入，禁止在本文件改写）
 //!
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T52：design 内 CV、固定 3-4 白名单、lambda/gain
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T52：design 内 CV、固定 3-4 白名单、lambda/gain
 //!   headroom 与先验、P>=M 适用边界标记、holdout 不调参；deps T51（solve）完成。
 //! - scratch/lead/planner/DSP-HOST-DECISION.md §2.5：先冻结 P_post 基线，再以 H_eff 做真实 5x5
 //!   低频减尾/抑模态；**正则、design 内 CV、固定白名单/带限、因果 D/Delta、增益/相干和/时域峰值
@@ -113,11 +113,11 @@ use khaen_core::rt::MAX_LOW_BAND_PARTICIPANTS;
 // ===========================================================================
 
 /// 正则产物 schema（T52 设计侧/离线产物；不是实测或已应用）。
-pub const REGULARIZE_SCHEMA: &str = "tspi-modal-regularize/v1";
+pub const REGULARIZE_SCHEMA: &str = "khaen-modal-regularize/v1";
 /// 正则产物 hash domain。
-pub const REGULARIZE_HASH_DOMAIN: &str = "tspi-modal-regularize/v1";
+pub const REGULARIZE_HASH_DOMAIN: &str = "khaen-modal-regularize/v1";
 /// 先验 hash domain（与产物 hash 分离）。
-pub const REGULARIZE_PRIOR_HASH_DOMAIN: &str = "tspi-modal-regularize-prior/v1";
+pub const REGULARIZE_PRIOR_HASH_DOMAIN: &str = "khaen-modal-regularize-prior/v1";
 
 /// 固定 lambda 扫描网格（按 plant 尺度归一后使用；0 = 纯最小二乘基线）。
 pub const LAMBDA_GRID: [f64; 8] = [0.0, 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0];
@@ -3388,7 +3388,7 @@ pub fn regularize_from_target_plant(
 // ===========================================================================
 
 impl RegularizeOutcome {
-    /// 证据 JSON（schema tspi-modal-regularize/v1；确定性、无时间戳；predicted-only）。
+    /// 证据 JSON（schema khaen-modal-regularize/v1；确定性、无时间戳；predicted-only）。
     pub fn to_evidence_json(&self) -> String {
         let report = &self.report;
         let mut json = String::new();

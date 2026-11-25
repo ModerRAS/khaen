@@ -66,7 +66,7 @@ fn t68_write(dir: &Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
-/// 与旧工具同形的 analysis JSON（schema tspi-channel-measurement/v1；64 点 1/12 oct）。
+/// 与旧工具同形的 analysis JSON（schema khaen-channel-measurement/v1；64 点 1/12 oct）。
 fn t68_analysis_json(channel: u64, sr: u32, delay: f64) -> String {
     let mut fr = String::new();
     let mut index = 0;
@@ -86,7 +86,7 @@ fn t68_analysis_json(channel: u64, sr: u32, delay: f64) -> String {
         index += 1;
     }
     format!(
-        "{{\"schema\":\"tspi-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay:.6},\"snr_band_db\":14.2,\"polarity_confidence\":\"low\",\"meta\":{{\"sample_rate\":{sr},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
+        "{{\"schema\":\"khaen-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay:.6},\"snr_band_db\":14.2,\"polarity_confidence\":\"low\",\"meta\":{{\"sample_rate\":{sr},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
     )
 }
 
@@ -170,7 +170,7 @@ fn t68_expected_plan_coeff_sha(injected: &GPathInput, d: u32) -> String {
         coeffs[d as usize] += 1.0;
     }
     let f32s: Vec<f32> = coeffs.iter().map(|value| *value as f32).collect();
-    let mut canonical = String::from("tspi-plan-path-coeffs/v1\n");
+    let mut canonical = String::from("khaen-plan-path-coeffs/v1\n");
     for value in &f32s {
         canonical.push_str(&format!("{value:e}\n"));
     }
@@ -216,7 +216,7 @@ fn t68_injected_paths(l_g: u32) -> Vec<GPathInput> {
     paths
 }
 
-/// 写一个 tspi-cal-g-paths/v1 文件并用生产 loader 读回（覆盖注入文件解析路径）。
+/// 写一个 khaen-cal-g-paths/v1 文件并用生产 loader 读回（覆盖注入文件解析路径）。
 fn t68_g_paths_file(dir: &Path, l_g: u32) -> InjectedGPaths {
     let paths = t68_injected_paths(l_g);
     let entries: Vec<JsonValue> = paths
@@ -238,7 +238,7 @@ fn t68_g_paths_file(dir: &Path, l_g: u32) -> InjectedGPaths {
         })
         .collect();
     let document = json_object(vec![
-        ("schema", JsonValue::String("tspi-cal-g-paths/v1".to_string())),
+        ("schema", JsonValue::String("khaen-cal-g-paths/v1".to_string())),
         ("l_g", JsonValue::UInt(l_g as u64)),
         ("low_band_d", JsonValue::UInt(0)),
         (

@@ -201,7 +201,11 @@ mod tests {
         let circ = irfft(&prod, 8);
         let linear = [0.5, 0.0, -2.25, 1.75];
         for (i, want) in linear.iter().enumerate() {
-            assert!((circ[i] - want).abs() < 1e-12, "i={i} got {} want {want}", circ[i]);
+            assert!(
+                (circ[i] - want).abs() < 1e-12,
+                "i={i} got {} want {want}",
+                circ[i]
+            );
         }
     }
 }

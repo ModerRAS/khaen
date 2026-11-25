@@ -7,15 +7,15 @@
 # 才 exec host，保证 NSP-first；NSP 会话中断/重启后 systemd 重启本 unit，仍先等流。
 #
 # 环境变量（unit 注入）：
-#   TSPI_HOST_CONFIG  默认 /etc/tspi-rt-stack/rt-host-nsp7.toml
-#   TSPI_HOST_BIN     默认 /usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host
-#   TSPI_AES67_IFACE  默认 enp2s0
-#   TSPI_AES67_PORT   默认 5004
+#   KHAEN_HOST_CONFIG  默认 /etc/khaen-rt-stack/rt-host-nsp7.toml
+#   KHAEN_HOST_BIN     默认 /usr/local/lib/khaen-rt-stack/f510ed64/khaen-rt-host
+#   KHAEN_AES67_IFACE  默认 enp2s0
+#   KHAEN_AES67_PORT   默认 5004
 set -u
-IFACE="${TSPI_AES67_IFACE:-enp2s0}"
-PORT="${TSPI_AES67_PORT:-5004}"
-CFG="${TSPI_HOST_CONFIG:-/etc/tspi-rt-stack/rt-host-nsp7.toml}"
-BIN="${TSPI_HOST_BIN:-/usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host}"
+IFACE="${KHAEN_AES67_IFACE:-enp2s0}"
+PORT="${KHAEN_AES67_PORT:-5004}"
+CFG="${KHAEN_HOST_CONFIG:-/etc/khaen-rt-stack/rt-host-nsp7.toml}"
+BIN="${KHAEN_HOST_BIN:-/usr/local/lib/khaen-rt-stack/f510ed64/khaen-rt-host}"
 log() { echo "nsp7-wait-stream: $(date -Is) $*"; }
 
 trap 'log "SIGTERM while waiting; exit 0"; exit 0' TERM INT

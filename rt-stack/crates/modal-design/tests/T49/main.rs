@@ -502,7 +502,7 @@ fn make_session(spec: &Spec) -> IngestSession {
         },
         room_temperature_c: 22.0,
         tool: ToolInfo {
-            name: "tspi-audio-daemon".to_string(),
+            name: "khaen-audio-daemon".to_string(),
             version: "0.1.0".to_string(),
         },
         created_unix: Some(1_794_725_000),
@@ -1929,7 +1929,7 @@ fn json_session(session: &IngestSession) -> String {
         None => String::new(),
     };
     format!(
-        "{{\"schema\":\"tspi-mimo-measurement/v1\",\"session_id\":\"{}\",\"layout\":\"{}\",\"sample_rate_hz\":{},\"block_frames\":128,\"participants\":[{}],\"speakers\":[{}],\"mic\":{{\"model\":\"{}\",\"serial\":\"{}\",\"cal_sha256\":\"{}\",\"orientation\":\"{}\",\"clock_domain\":\"{}\"}},\"playback\":{{\"device\":\"{}\",\"channels\":{},\"sample_format\":\"{}\"}},\"capture\":{{\"device\":\"{}\",\"channels\":{},\"sample_format\":\"{}\",\"pre_seconds\":{},\"post_seconds\":{}}},\"stimulus\":{{\"kind\":\"{}\",\"start_hz\":{},\"end_hz\":{},\"seconds\":{},\"level_dbfs\":{},\"fade_ms\":{},\"repeats\":{},\"repeat_gap_seconds\":{}}},\"room_temperature_c\":{},\"tool\":{{\"name\":\"{}\",\"version\":\"{}\"}},\"created_unix\":{}{}}}",
+        "{{\"schema\":\"khaen-mimo-measurement/v1\",\"session_id\":\"{}\",\"layout\":\"{}\",\"sample_rate_hz\":{},\"block_frames\":128,\"participants\":[{}],\"speakers\":[{}],\"mic\":{{\"model\":\"{}\",\"serial\":\"{}\",\"cal_sha256\":\"{}\",\"orientation\":\"{}\",\"clock_domain\":\"{}\"}},\"playback\":{{\"device\":\"{}\",\"channels\":{},\"sample_format\":\"{}\"}},\"capture\":{{\"device\":\"{}\",\"channels\":{},\"sample_format\":\"{}\",\"pre_seconds\":{},\"post_seconds\":{}}},\"stimulus\":{{\"kind\":\"{}\",\"start_hz\":{},\"end_hz\":{},\"seconds\":{},\"level_dbfs\":{},\"fade_ms\":{},\"repeats\":{},\"repeat_gap_seconds\":{}}},\"room_temperature_c\":{},\"tool\":{{\"name\":\"{}\",\"version\":\"{}\"}},\"created_unix\":{}{}}}",
         session.session_id,
         session.layout,
         session.sample_rate_hz,
@@ -1966,7 +1966,7 @@ fn json_session(session: &IngestSession) -> String {
 
 fn json_position(position: &IngestPosition) -> String {
     format!(
-        "{{\"schema\":\"tspi-mimo-position/v1\",\"name\":\"{}\",\"role\":\"{}\",\"weight\":{},\"mic_orientation\":\"90deg\"}}",
+        "{{\"schema\":\"khaen-mimo-position/v1\",\"name\":\"{}\",\"role\":\"{}\",\"weight\":{},\"mic_orientation\":\"90deg\"}}",
         position.meta.name,
         position.meta.role.as_str(),
         position.meta.weight
@@ -1981,7 +1981,7 @@ fn json_diag(diag: &TimebaseDiag) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"schema\":\"tspi-mimo-diag/v1\",\"session_id\":\"{}\",\"epoch_id\":{},\"graph_id\":\"{}\",\"speaker\":\"{}\",\"channel\":{},\"slot\":{},\"capture_file\":\"{}\",\"render_frame_index\":{},\"capture_sample_index\":{},\"nominal_start\":{},\"actual_start\":{},\"lag_samples\":{},\"repeat_starts\":[{}],\"repeats\":{},\"clock\":{{\"clock_ppm\":{},\"clock_ppm_uncertainty_ppm\":{},\"drift_significant\":{},\"clock_ppm_ok\":{},\"correction\":\"{}\"}},\"onset_invalid\":{}}}",
+        "{{\"schema\":\"khaen-mimo-diag/v1\",\"session_id\":\"{}\",\"epoch_id\":{},\"graph_id\":\"{}\",\"speaker\":\"{}\",\"channel\":{},\"slot\":{},\"capture_file\":\"{}\",\"render_frame_index\":{},\"capture_sample_index\":{},\"nominal_start\":{},\"actual_start\":{},\"lag_samples\":{},\"repeat_starts\":[{}],\"repeats\":{},\"clock\":{{\"clock_ppm\":{},\"clock_ppm_uncertainty_ppm\":{},\"drift_significant\":{},\"clock_ppm_ok\":{},\"correction\":\"{}\"}},\"onset_invalid\":{}}}",
         diag.session_id,
         diag.epoch_id,
         diag.graph_id,
@@ -2018,7 +2018,7 @@ fn json_analysis(analysis: &SourceAnalysis) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"schema\":\"tspi-channel-measurement/v1\",\"channel\":{},\"delay_samples\":{},\"delay_ms\":{},\"delay_coarse_samples\":{},\"polarity\":{},\"peak_db\":{},\"phase_1k_deg\":{},\"snr_db\":{},\"phase_ref\":\"{}\",\"fr\":[{}],\"meta\":{{\"schema\":\"khaen-calibration-meta/v1\",\"sample_rate\":{},\"channels\":{},\"sweep_start_hz\":{},\"sweep_end_hz\":{},\"sweep_seconds\":{},\"level_db\":{},\"pre_seconds\":{},\"post_seconds\":{},\"playback_device\":\"{}\",\"playback_channels\":{},\"capture_device\":\"{}\",\"capture_channels\":{},\"created_unix\":{}}}}}",
+        "{{\"schema\":\"khaen-channel-measurement/v1\",\"channel\":{},\"delay_samples\":{},\"delay_ms\":{},\"delay_coarse_samples\":{},\"polarity\":{},\"peak_db\":{},\"phase_1k_deg\":{},\"snr_db\":{},\"phase_ref\":\"{}\",\"fr\":[{}],\"meta\":{{\"schema\":\"khaen-calibration-meta/v1\",\"sample_rate\":{},\"channels\":{},\"sweep_start_hz\":{},\"sweep_end_hz\":{},\"sweep_seconds\":{},\"level_db\":{},\"pre_seconds\":{},\"post_seconds\":{},\"playback_device\":\"{}\",\"playback_channels\":{},\"capture_device\":\"{}\",\"capture_channels\":{},\"created_unix\":{}}}}}",
         analysis.channel,
         analysis.delay_samples,
         analysis.delay_ms,

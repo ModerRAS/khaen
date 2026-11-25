@@ -1,6 +1,6 @@
 # 上混算法与参数说明（2.0 → 4.1.2 / 5.3.2）
 
-本文描述 tspi-upmix 生成的 DSP 拓扑、数学定义、参数含义，以及哪些地方存在/不存在
+本文描述 khaen-upmix 生成的 DSP 拓扑、数学定义、参数含义，以及哪些地方存在/不存在
 梳状与相位抵消（**跨通道梳状仍存在**，见 §4）。实现全部落在 CamillaDSP 的 **Mixer + Filter** 上（无自研 MIMO 引擎）。
 
 ## 1. 总体拓扑
@@ -20,14 +20,14 @@
 
 ## 2. 输入/输出布局
 
-输入固定 `pc-2ch`（FL=ch0, FR=ch1）。输出布局读取 `/etc/tspi-audio/layout-presets.yml`：
+输入固定 `pc-2ch`（FL=ch0, FR=ch1）。输出布局读取 `/etc/khaen-audio/layout-presets.yml`：
 
 | 布局 | 角色与输出通道（0-based） |
 | --- | --- |
 | 4.1.2 | FL=0 FR=1 SL=2 SR=3 HFL=4 HFR=5 SUB1=7（ch6 空；8 个逻辑槽位，设备仍 MOTU 22ch） |
 | 5.3.2 | FL=0 FR=1 C=2 SL=3 SR=4 SUB1=5 SUB2=6 SUB3=7 HFL=8 HFR=9 |
 
-- **唯一真相**：以上映射以板端 `audio/overlay/etc/tspi-audio/layout-presets.yml` 为准（task-19 裁决：4.1.2 为 HFL4/HFR5/SUB1=7，ch6 空；ch6 保留无更多推导，按板端部署表执行）。
+- **唯一真相**：以上映射以板端 `audio/overlay/etc/khaen-audio/layout-presets.yml` 为准（task-19 裁决：4.1.2 为 HFL4/HFR5/SUB1=7，ch6 空；ch6 保留无更多推导，按板端部署表执行）。
 - **逻辑声道 vs 物理设备**：channelmap profile 的 `output.channels` 是逻辑声道数（4.1.2=8、5.3.2=10）；独立 CamillaDSP 配置固定按 MOTU 22ch 打开，其余设备通道恒静音（P2-6）。
 
 ## 3. 各通道合成

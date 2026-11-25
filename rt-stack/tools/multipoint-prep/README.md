@@ -7,8 +7,8 @@
 ## 1. 它解决什么
 
 旧工具 `khaen-calibrate measure-multi` 每个话筒位置产出一组
-`<CH>-chNN.analysis.json` / `<CH>-chNN.diag.json`；新栈 `tspi-cal` 的 measured 设计输入是
-spec v2（`tspi-cal-measured-design/v2`，见 `rt-stack/spec/measured-design-v2.md`）。
+`<CH>-chNN.analysis.json` / `<CH>-chNN.diag.json`；新栈 `khaen-cal` 的 measured 设计输入是
+spec v2（`khaen-cal-measured-design/v2`，见 `rt-stack/spec/measured-design-v2.md`）。
 本工具把“按位置命名的 analysis 目录”转成 spec v2 + sha256 manifest，并在生成前做 fail-closed
 质量门检查（schema/fs/fr 频点/SNR/repeats/clock_ppm/onset/90deg/T6 点数/时钟一致性）。
 
@@ -31,7 +31,7 @@ spec v2（`tspi-cal-measured-design/v2`，见 `rt-stack/spec/measured-design-v2.
 
 位置角色默认由 label 前缀推断：`D*`=design、`V*`=validation；也可用
 `--design-labels/--validation-labels` 或窗口前冻结的 `--positions` 表
-（`tspi-cal-multipoint-positions/v1`，含 label/role/weight/mic_orientation）。
+（`khaen-cal-multipoint-positions/v1`，含 label/role/weight/mic_orientation）。
 
 ## 3. 命令
 
@@ -58,7 +58,7 @@ spec v2（`tspi-cal-measured-design/v2`，见 `rt-stack/spec/measured-design-v2.
 | 检查 | 门槛 | 错误码 |
 | --- | --- | --- |
 | T6 最低点数 | design>=6 + validation>=3（pilot 需显式 `--allow-below-t6`） | `E_MP_T6` |
-| analysis schema | `tspi-channel-measurement/v1` | `E_MP_ANALYSIS` |
+| analysis schema | `khaen-channel-measurement/v1` | `E_MP_ANALYSIS` |
 | 采样率 | `meta.sample_rate == spec.sample_rate_hz`（同一 session） | `E_MP_ANALYSIS` |
 | 频响 | fr >=8 点、频率单调、频带 >2:1 | `E_MP_ANALYSIS` |
 | SNR | 默认 >=25 dB（analysis `snr_band_db` 优先，否则 `snr_db`）；降门会记 warning | `E_MP_QUALITY` |
@@ -74,7 +74,7 @@ spec v2（`tspi-cal-measured-design/v2`，见 `rt-stack/spec/measured-design-v2.
 
 ## 5. 输出
 
-- `spec.json`：`tspi-cal-measured-design/v2`（analysis/diag 路径相对 spec 目录、POSIX 分隔符）；
+- `spec.json`：`khaen-cal-measured-design/v2`（analysis/diag 路径相对 spec 目录、POSIX 分隔符）；
   `validation = independent_validation_positions`；design/validation 分列。
 - `spec-manifest.json`：spec sha256、逐位置逐通道 analysis/diag sha256、points、delay、
   snr、repeats、clock_ppm、T6 点数状态、warnings、`simulated` 标记。

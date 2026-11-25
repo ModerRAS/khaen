@@ -40,7 +40,9 @@ fn main() {
         "solve" => run_solve(&opts),
         "artifact-gate" => run_artifact_gate(&opts),
         "measured-design" => run_measured_design(&opts),
-        other => Err(format!("unknown subcommand {other:?} (solve|artifact-gate|measured-design)")),
+        other => Err(format!(
+            "unknown subcommand {other:?} (solve|artifact-gate|measured-design)"
+        )),
     };
     match result {
         Ok(()) => {}
@@ -76,7 +78,12 @@ impl Default for Args {
             fit_hi: 129.5,
             max_iterations: 800,
             spec: None,
-            whitelists: vec![WhitelistKind::DiagOnly, WhitelistKind::DiagAdjacent, WhitelistKind::DiagSub1, WhitelistKind::Full],
+            whitelists: vec![
+                WhitelistKind::DiagOnly,
+                WhitelistKind::DiagAdjacent,
+                WhitelistKind::DiagSub1,
+                WhitelistKind::Full,
+            ],
         }
     }
 }
@@ -152,7 +159,13 @@ fn read_matrix(path: &Path) -> Result<Matrix, String> {
     for (line_no, line) in lines.enumerate() {
         let fields: Vec<&str> = line.split(',').collect();
         if fields.len() != 1 + 2 * 5 {
-            return Err(format!("{}:{}: expected {} fields, got {}", path.display(), line_no + 2, 11, fields.len()));
+            return Err(format!(
+                "{}:{}: expected {} fields, got {}",
+                path.display(),
+                line_no + 2,
+                11,
+                fields.len()
+            ));
         }
         let freq: f64 = fields[0].parse().map_err(|e| format!("freq parse: {e}"))?;
         if let Some(last) = freq_hz.last() {
@@ -160,11 +173,23 @@ fn read_matrix(path: &Path) -> Result<Matrix, String> {
                 return Err(format!("grid not strictly increasing at {}", line_no + 2));
             }
         }
-        let mut row = [ComplexPoint { freq_hz: freq, re: 0.0, im: 0.0 }; 5];
+        let mut row = [ComplexPoint {
+            freq_hz: freq,
+            re: 0.0,
+            im: 0.0,
+        }; 5];
         for (n, slot) in row.iter_mut().enumerate() {
-            let re: f64 = fields[1 + 2 * n].parse().map_err(|e| format!("re parse: {e}"))?;
-            let im: f64 = fields[2 + 2 * n].parse().map_err(|e| format!("im parse: {e}"))?;
-            *slot = ComplexPoint { freq_hz: freq, re, im };
+            let re: f64 = fields[1 + 2 * n]
+                .parse()
+                .map_err(|e| format!("re parse: {e}"))?;
+            let im: f64 = fields[2 + 2 * n]
+                .parse()
+                .map_err(|e| format!("im parse: {e}"))?;
+            *slot = ComplexPoint {
+                freq_hz: freq,
+                re,
+                im,
+            };
         }
         freq_hz.push(freq);
         values.push(row);
@@ -205,7 +230,10 @@ fn run_solve(args: &Args) -> Result<(), String> {
         return Err("H is all zeros".to_string());
     }
     let h = {
-        let mut m = Matrix { freq_hz: h.freq_hz.clone(), values: h.values.clone() };
+        let mut m = Matrix {
+            freq_hz: h.freq_hz.clone(),
+            values: h.values.clone(),
+        };
         for row in m.values.iter_mut() {
             for value in row.iter_mut() {
                 value.re /= scale;
@@ -215,7 +243,10 @@ fn run_solve(args: &Args) -> Result<(), String> {
         m
     };
     let target = {
-        let mut m = Matrix { freq_hz: target.freq_hz.clone(), values: target.values.clone() };
+        let mut m = Matrix {
+            freq_hz: target.freq_hz.clone(),
+            values: target.values.clone(),
+        };
         for row in m.values.iter_mut() {
             for value in row.iter_mut() {
                 value.re /= scale;
@@ -225,12 +256,19 @@ fn run_solve(args: &Args) -> Result<(), String> {
         m
     };
 
-    let mut h_eff: Vec<Vec<ComplexPoint>> = (0..5).map(|_| Vec::with_capacity(h.freq_hz.len())).collect();
-    let mut target_rows: Vec<Vec<ComplexPoint>> =
-        (0..5).map(|_| Vec::with_capacity(h.freq_hz.len())).collect();
+    let mut h_eff: Vec<Vec<ComplexPoint>> = (0..5)
+        .map(|_| Vec::with_capacity(h.freq_hz.len()))
+        .collect();
+    let mut target_rows: Vec<Vec<ComplexPoint>> = (0..5)
+        .map(|_| Vec::with_capacity(h.freq_hz.len()))
+        .collect();
     for (index, freq) in h.freq_hz.iter().copied().enumerate() {
         for n in 0..5 {
-            h_eff[n].push(ComplexPoint { freq_hz: freq, re: h.values[index][n].re, im: h.values[index][n].im });
+            h_eff[n].push(ComplexPoint {
+                freq_hz: freq,
+                re: h.values[index][n].re,
+                im: h.values[index][n].im,
+            });
             target_rows[n].push(ComplexPoint {
                 freq_hz: freq,
                 re: target.values[index][n].re,
@@ -275,10 +313,18 @@ fn run_solve(args: &Args) -> Result<(), String> {
     write_regularize_report(&args.out_dir, &reg)?;
     if let Some(solution) = reg.solution.as_ref() {
         write_g(&args.out_dir, &solution.coeffs_f64, args.taps)?;
-        write_predicted(&args.out_dir, &problem, &h, &target, &solution.coeffs_f64, args.taps)?;
+        write_predicted(
+            &args.out_dir,
+            &problem,
+            &h,
+            &target,
+            &solution.coeffs_f64,
+            args.taps,
+        )?;
     }
     write_meta(&args.out_dir, args, &problem, &base, &reg, scale)?;
-    println!("[{}] solve status={} residual_max_db(fit)={:.3} reg deliverable={} selected={} lambda={}",
+    println!(
+        "[{}] solve status={} residual_max_db(fit)={:.3} reg deliverable={} selected={} lambda={}",
         args.tag,
         base.report.status.as_str(),
         base.report.predicted_fit_band_residual_max_db,
@@ -289,11 +335,18 @@ fn run_solve(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-fn write_solve_report(dir: &Path, outcome: &SolveOutcome, problem: &SolveProblem) -> Result<(), String> {
+fn write_solve_report(
+    dir: &Path,
+    outcome: &SolveOutcome,
+    problem: &SolveProblem,
+) -> Result<(), String> {
     let report = &outcome.report;
     let mut text = String::new();
     text.push_str("{\n");
-    let _ = writeln!(text, "  \"schema\": \"tspi-g-singlepoint-solve-report/v1\",");
+    let _ = writeln!(
+        text,
+        "  \"schema\": \"khaen-g-singlepoint-solve-report/v1\","
+    );
     let _ = writeln!(text, "  \"scope\": \"SINGLE_POINT_NOT_SPATIAL\",");
     let _ = writeln!(text, "  \"mode\": \"{}\",", report.mode.as_str());
     let _ = writeln!(text, "  \"status\": \"{}\",", report.status.as_str());
@@ -301,54 +354,116 @@ fn write_solve_report(dir: &Path, outcome: &SolveOutcome, problem: &SolveProblem
     let _ = writeln!(text, "  \"taps\": {},", report.taps);
     let _ = writeln!(text, "  \"delay_samples\": {},", report.delay_samples);
     let _ = writeln!(text, "  \"sample_rate_hz\": {},", report.sample_rate_hz);
-    let _ = writeln!(text, "  \"fit_band_hz\": [{}, {}],", report.fit_band_hz.0, report.fit_band_hz.1);
+    let _ = writeln!(
+        text,
+        "  \"fit_band_hz\": [{}, {}],",
+        report.fit_band_hz.0, report.fit_band_hz.1
+    );
     let _ = writeln!(text, "  \"band_points\": {},", report.band_points);
     let _ = writeln!(text, "  \"grid_points\": {},", report.grid_points);
     let _ = writeln!(text, "  \"design_positions\": {},", report.design_positions);
     let _ = writeln!(text, "  \"columns\": [");
     for (index, column) in report.columns.iter().enumerate() {
-        let comma = if index + 1 == report.columns.len() { "" } else { "," };
+        let comma = if index + 1 == report.columns.len() {
+            ""
+        } else {
+            ","
+        };
         let _ = writeln!(text,
             "    {{\"input_dense\": {}, \"free_paths\": {}, \"unknowns\": {}, \"iterations\": {}, \"relative_residual\": {:.9}, \"converged\": {}, \"stop_reason\": \"{}\"}}{}",
             column.input_dense, column.free_paths, column.unknowns, column.iterations,
             column.relative_residual, column.converged, column.stop_reason, comma);
     }
     text.push_str("  ],\n");
-    let _ = writeln!(text, "  \"relative_residual_max\": {:.9},", report.relative_residual_max);
-    let _ = writeln!(text, "  \"predicted_design_residual_max_db\": {:.6},", report.predicted_design_residual_max_db);
-    let _ = writeln!(text, "  \"predicted_fit_band_residual_max_db\": {:.6},", report.predicted_fit_band_residual_max_db);
-    let _ = writeln!(text, "  \"improvement_band_residual_max_db\": {:.6},", report.predicted_design_residual_max_db);
+    let _ = writeln!(
+        text,
+        "  \"relative_residual_max\": {:.9},",
+        report.relative_residual_max
+    );
+    let _ = writeln!(
+        text,
+        "  \"predicted_design_residual_max_db\": {:.6},",
+        report.predicted_design_residual_max_db
+    );
+    let _ = writeln!(
+        text,
+        "  \"predicted_fit_band_residual_max_db\": {:.6},",
+        report.predicted_fit_band_residual_max_db
+    );
+    let _ = writeln!(
+        text,
+        "  \"improvement_band_residual_max_db\": {:.6},",
+        report.predicted_design_residual_max_db
+    );
     match &report.predicted_residual_worst {
         Some((label, role, db)) => {
             let _ = writeln!(text, "  \"predicted_residual_worst\": {{\"position\": \"{}\", \"role\": \"{}\", \"db\": {:.6}}},", label, role, db);
         }
         None => text.push_str("  \"predicted_residual_worst\": null,\n"),
     }
-    let _ = writeln!(text, "  \"correction_coeff_max_db\": {},", report.correction_coeff_max_db.map(|v| format!("{v:.6}")).unwrap_or("null".to_string()));
+    let _ = writeln!(
+        text,
+        "  \"correction_coeff_max_db\": {},",
+        report
+            .correction_coeff_max_db
+            .map(|v| format!("{v:.6}"))
+            .unwrap_or("null".to_string())
+    );
     let _ = writeln!(text, "  \"offdiag_max_db\": {:.6},", report.offdiag_max_db);
-    let _ = writeln!(text, "  \"diag_deviation_max_db\": {:.6},", report.diag_deviation_max_db);
-    let _ = writeln!(text, "  \"preserve_expected_identity\": {},", report.preserve_expected_identity);
+    let _ = writeln!(
+        text,
+        "  \"diag_deviation_max_db\": {:.6},",
+        report.diag_deviation_max_db
+    );
+    let _ = writeln!(
+        text,
+        "  \"preserve_expected_identity\": {},",
+        report.preserve_expected_identity
+    );
     let ident = &report.identifiability;
     let _ = writeln!(text, "  \"identifiability\": {{\"participants\": {}, \"design_positions\": {}, \"per_frequency_rank_min\": {}, \"per_frequency_rank_max\": {}, \"position_deficit\": {}, \"condition_max\": {}, \"fir_rank_bound\": {}, \"unknowns_max_per_input\": {}, \"potentially_full_column_rank\": {}, \"underdetermined\": {}}},",
         ident.participants, ident.design_positions, ident.per_frequency_rank_min, ident.per_frequency_rank_max,
         ident.position_deficit,
         ident.condition_max.map(|v| format!("{v:.6}")).unwrap_or("null".to_string()),
         ident.fir_rank_bound, ident.unknowns_max_per_input, ident.potentially_full_column_rank, ident.underdetermined);
-    let _ = writeln!(text, "  \"resource\": {{\"within_limits\": {}, \"work_used\": {}, \"estimated_work\": {}}},",
-        report.resource.within_limits, report.resource.work_used, report.resource.estimated_work);
+    let _ = writeln!(
+        text,
+        "  \"resource\": {{\"within_limits\": {}, \"work_used\": {}, \"estimated_work\": {}}},",
+        report.resource.within_limits, report.resource.work_used, report.resource.estimated_work
+    );
     let _ = writeln!(text, "  \"claims\": \"{}\",", escape(report.claims));
     text.push_str("  \"warnings\": [");
     for (index, warning) in report.warnings.iter().enumerate() {
-        if index > 0 { text.push_str(", "); }
-        let _ = write!(text, "{{\"code\": \"{}\", \"detail\": \"{}\"}}", warning.code, escape(&warning.message));
+        if index > 0 {
+            text.push_str(", ");
+        }
+        let _ = write!(
+            text,
+            "{{\"code\": \"{}\", \"detail\": \"{}\"}}",
+            warning.code,
+            escape(&warning.message)
+        );
     }
     text.push_str("],\n");
     let _ = writeln!(text, "  \"applied\": {},", report.applied);
-    let _ = writeln!(text, "  \"post_apply_measurement\": \"{}\",", report.post_apply_measurement);
-    let _ = writeln!(text, "  \"runtime_validation\": \"{}\",", report.runtime_validation);
-    let _ = writeln!(text, "  \"solution_present\": {}", outcome.solution.is_some());
+    let _ = writeln!(
+        text,
+        "  \"post_apply_measurement\": \"{}\",",
+        report.post_apply_measurement
+    );
+    let _ = writeln!(
+        text,
+        "  \"runtime_validation\": \"{}\",",
+        report.runtime_validation
+    );
+    let _ = writeln!(
+        text,
+        "  \"solution_present\": {}",
+        outcome.solution.is_some()
+    );
     text.push_str("}\n");
-    fs::write(dir.join("solve_report.json"), text).map_err(|e| format!("write solve_report: {e}"))?;
+    fs::write(dir.join("solve_report.json"), text)
+        .map_err(|e| format!("write solve_report: {e}"))?;
     let _ = problem;
     Ok(())
 }
@@ -357,7 +472,10 @@ fn write_regularize_report(dir: &Path, outcome: &RegularizeOutcome) -> Result<()
     let report = &outcome.report;
     let mut text = String::new();
     text.push_str("{\n");
-    let _ = writeln!(text, "  \"schema\": \"tspi-g-singlepoint-regularize-report/v1\",");
+    let _ = writeln!(
+        text,
+        "  \"schema\": \"khaen-g-singlepoint-regularize-report/v1\","
+    );
     let _ = writeln!(text, "  \"scope\": \"SINGLE_POINT_NOT_SPATIAL\",");
     let _ = writeln!(text, "  \"mode\": \"{}\",", report.mode);
     let _ = writeln!(text, "  \"deliverable\": {},", report.deliverable);
@@ -374,10 +492,18 @@ fn write_regularize_report(dir: &Path, outcome: &RegularizeOutcome) -> Result<()
         sel.fallback_used,
         sel.l_curve_corner_lambda.map(|v| format!("{v}")).unwrap_or("null".to_string()));
     let scan = &report.lambda_scan;
-    let _ = writeln!(text, "  \"lambda_scan_whitelist\": \"{}\",", scan.scan_whitelist.as_str());
+    let _ = writeln!(
+        text,
+        "  \"lambda_scan_whitelist\": \"{}\",",
+        scan.scan_whitelist.as_str()
+    );
     let _ = writeln!(text, "  \"lambda_scan\": [");
     for (index, point) in scan.points.iter().enumerate() {
-        let comma = if index + 1 == scan.points.len() { "" } else { "," };
+        let comma = if index + 1 == scan.points.len() {
+            ""
+        } else {
+            ","
+        };
         let _ = writeln!(text,
             "    {{\"lambda\": {}, \"lambda_used\": {:.9}, \"design_residual_norm\": {:.9}, \"solution_norm\": {:.9}, \"fit_band_max_db\": {:.6}, \"improvement_band_max_db\": {:.6}, \"solve_status\": \"{}\", \"headroom_feasible\": {}}}{}",
             point.lambda, point.lambda_used, point.design_residual_norm, point.solution_norm,
@@ -387,7 +513,11 @@ fn write_regularize_report(dir: &Path, outcome: &RegularizeOutcome) -> Result<()
     text.push_str("  ],\n");
     let _ = writeln!(text, "  \"candidates\": [");
     for (index, candidate) in report.candidates.iter().enumerate() {
-        let comma = if index + 1 == report.candidates.len() { "" } else { "," };
+        let comma = if index + 1 == report.candidates.len() {
+            ""
+        } else {
+            ","
+        };
         let _ = writeln!(text,
             "    {{\"whitelist\": \"{}\", \"free_paths\": {}, \"lambda\": {}, \"lambda_used\": {:.9}, \"cv_valid\": {}, \"cv_rank\": {}, \"per_frequency_rank_bound\": {}, \"fir_rank_bound\": {}, \"per_frequency_full_rank_necessary\": {}, \"fir_rank_necessary\": {}}}{}",
             candidate.whitelist.as_str(), candidate.free_paths, candidate.lambda, candidate.lambda_used,
@@ -408,23 +538,59 @@ fn write_regularize_report(dir: &Path, outcome: &RegularizeOutcome) -> Result<()
         headroom.max_diagonal_gain_db, headroom.correction_cap_db, headroom.diagonal_cap_db,
         headroom.tolerance_db);
     let _ = writeln!(text, "  \"prior_kind\": \"{}\",", report.prior_kind);
-    let _ = writeln!(text, "  \"prior_distance_norm\": {:.9},", report.prior_distance_norm);
-    let _ = writeln!(text, "  \"final_solve_status\": \"{}\",", report.final_solve_status);
-    let _ = writeln!(text, "  \"solution_hash\": {},", opt_str(&report.solution_hash));
-    let _ = writeln!(text, "  \"coeffs_sha256\": {},", opt_str(&report.coeffs_sha256));
-    let _ = writeln!(text, "  \"base_solve_hash\": {},", opt_str(&report.base_solve_hash));
+    let _ = writeln!(
+        text,
+        "  \"prior_distance_norm\": {:.9},",
+        report.prior_distance_norm
+    );
+    let _ = writeln!(
+        text,
+        "  \"final_solve_status\": \"{}\",",
+        report.final_solve_status
+    );
+    let _ = writeln!(
+        text,
+        "  \"solution_hash\": {},",
+        opt_str(&report.solution_hash)
+    );
+    let _ = writeln!(
+        text,
+        "  \"coeffs_sha256\": {},",
+        opt_str(&report.coeffs_sha256)
+    );
+    let _ = writeln!(
+        text,
+        "  \"base_solve_hash\": {},",
+        opt_str(&report.base_solve_hash)
+    );
     let _ = writeln!(text, "  \"applied\": {},", report.applied);
-    let _ = writeln!(text, "  \"post_apply_measurement\": \"{}\",", report.post_apply_measurement);
-    let _ = writeln!(text, "  \"runtime_validation\": \"{}\",", report.runtime_validation);
+    let _ = writeln!(
+        text,
+        "  \"post_apply_measurement\": \"{}\",",
+        report.post_apply_measurement
+    );
+    let _ = writeln!(
+        text,
+        "  \"runtime_validation\": \"{}\",",
+        report.runtime_validation
+    );
     let _ = writeln!(text, "  \"claims\": \"{}\",", escape(report.claims));
     text.push_str("  \"warnings\": [");
     for (index, warning) in report.warnings.iter().enumerate() {
-        if index > 0 { text.push_str(", "); }
-        let _ = write!(text, "{{\"code\": \"{}\", \"detail\": \"{}\"}}", warning.code, escape(&warning.message));
+        if index > 0 {
+            text.push_str(", ");
+        }
+        let _ = write!(
+            text,
+            "{{\"code\": \"{}\", \"detail\": \"{}\"}}",
+            warning.code,
+            escape(&warning.message)
+        );
     }
     text.push_str("]\n");
     text.push_str("}\n");
-    fs::write(dir.join("regularize_report.json"), text).map_err(|e| format!("write regularize_report: {e}"))?;
+    fs::write(dir.join("regularize_report.json"), text)
+        .map_err(|e| format!("write regularize_report: {e}"))?;
     Ok(())
 }
 
@@ -439,12 +605,23 @@ fn write_g(dir: &Path, coeffs: &[f64], taps: usize) -> Result<(), String> {
     let mut text = String::from("out_role,in_role,tap,coeff\n");
     let m = ROLES.len();
     if coeffs.len() != m * m * taps {
-        return Err(format!("coeff layout mismatch: {} != {}", coeffs.len(), m * m * taps));
+        return Err(format!(
+            "coeff layout mismatch: {} != {}",
+            coeffs.len(),
+            m * m * taps
+        ));
     }
     for out in 0..m {
         for input in 0..m {
             for tap in 0..taps {
-                let _ = writeln!(text, "{},{},{},{}", ROLES[out], ROLES[input], tap, coeffs[(out * m + input) * taps + tap]);
+                let _ = writeln!(
+                    text,
+                    "{},{},{},{}",
+                    ROLES[out],
+                    ROLES[input],
+                    tap,
+                    coeffs[(out * m + input) * taps + tap]
+                );
             }
         }
     }
@@ -494,7 +671,11 @@ fn write_predicted(
             let tv = target.values[freq_index][input];
             let err = ((pred.0 - tv.re).hypot(pred.1 - tv.im)) / tv.re.hypot(tv.im).max(1e-12);
             let err_db = 20.0 * err.max(1e-12).log10();
-            let _ = writeln!(text, "{},{},{},{},{},{},{}", freq, ROLES[input], pred.0, pred.1, tv.re, tv.im, err_db);
+            let _ = writeln!(
+                text,
+                "{},{},{},{},{},{},{}",
+                freq, ROLES[input], pred.0, pred.1, tv.re, tv.im, err_db
+            );
         }
     }
     let _ = problem;
@@ -512,37 +693,119 @@ fn write_meta(
 ) -> Result<(), String> {
     let mut text = String::new();
     text.push_str("{\n");
-    let _ = writeln!(text, "  \"schema\": \"tspi-g-singlepoint-meta/v1\",");
+    let _ = writeln!(text, "  \"schema\": \"khaen-g-singlepoint-meta/v1\",");
     let _ = writeln!(text, "  \"tag\": \"{}\",", escape(&args.tag));
     let _ = writeln!(text, "  \"scope\": \"SINGLE_POINT_NOT_SPATIAL\",");
-    let _ = writeln!(text, "  \"h_file\": \"{}\",", escape(&args.h_file.display().to_string()));
-    let _ = writeln!(text, "  \"target_file\": \"{}\",", escape(&args.target_file.as_ref().map(|p| p.display().to_string()).unwrap_or_default()));
-    let _ = writeln!(text, "  \"roles\": [{}],", ROLES.iter().map(|r| format!("\"{r}\"")).collect::<Vec<_>>().join(", "));
+    let _ = writeln!(
+        text,
+        "  \"h_file\": \"{}\",",
+        escape(&args.h_file.display().to_string())
+    );
+    let _ = writeln!(
+        text,
+        "  \"target_file\": \"{}\",",
+        escape(
+            &args
+                .target_file
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        )
+    );
+    let _ = writeln!(
+        text,
+        "  \"roles\": [{}],",
+        ROLES
+            .iter()
+            .map(|r| format!("\"{r}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let _ = writeln!(text, "  \"design_positions\": {},", problem.positions.len());
     let _ = writeln!(text, "  \"m\": {},", problem.m());
     let _ = writeln!(text, "  \"taps\": {},", args.taps);
     let _ = writeln!(text, "  \"input_scale_c_max_H\": {:.9},", input_scale);
     let _ = writeln!(text, "  \"input_scale_note\": \"H and target divided by c=max|H|; G and relative residual dB are invariant to this scalar\",");
-    let _ = writeln!(text, "  \"fit_band_hz\": [{}, {}],", args.fit_lo, args.fit_hi);
+    let _ = writeln!(
+        text,
+        "  \"fit_band_hz\": [{}, {}],",
+        args.fit_lo, args.fit_hi
+    );
     let _ = writeln!(text, "  \"grid_points\": {},", problem.grid_hz.len());
-    let _ = writeln!(text, "  \"target_semantics\": \"{}\",", if args.target_file.is_some() {
-        "PROBE_TARGET = measured H_eff x |H_S2_PEQ(f)| (magnitude-only); NOT a T50 target; no decay claim"
-    } else {
-        "PRESERVE_SEMANTICS_TARGET = measured H_eff (target == H_eff, same as T50 preserve definition)"
-    });
-    let _ = writeln!(text, "  \"solve_status\": \"{}\",", base.report.status.as_str());
-    let _ = writeln!(text, "  \"solve_predicted_fit_band_residual_max_db\": {:.6},", base.report.predicted_fit_band_residual_max_db);
-    let _ = writeln!(text, "  \"solve_predicted_improvement_band_residual_max_db\": {:.6},", base.report.predicted_design_residual_max_db);
-    let _ = writeln!(text, "  \"regularize_deliverable\": {},", reg.report.deliverable);
-    let _ = writeln!(text, "  \"regularize_applicability\": \"{}\",", reg.report.applicability.status);
-    let _ = writeln!(text, "  \"selected_whitelist\": \"{}\",", reg.report.selection.selected_whitelist.as_str());
-    let _ = writeln!(text, "  \"selected_lambda\": {},", reg.report.selection.selected_lambda);
-    let _ = writeln!(text, "  \"selected_lambda_used\": {:.9},", reg.report.selection.selected_lambda_used);
-    let _ = writeln!(text, "  \"final_residual_fit_band_max_db\": {:.6},", reg.report.final_residual.fit_band_max_db);
-    let _ = writeln!(text, "  \"final_residual_improvement_band_max_db\": {:.6},", reg.report.final_residual.improvement_band_max_db);
-    let _ = writeln!(text, "  \"solution_norm_selected\": {:.9},", reg.report.prior_distance_norm);
-    let _ = writeln!(text, "  \"coeffs_sha256\": {},", opt_str(&reg.report.coeffs_sha256));
-    let _ = writeln!(text, "  \"solution_hash\": {},", opt_str(&reg.report.solution_hash));
+    let _ = writeln!(
+        text,
+        "  \"target_semantics\": \"{}\",",
+        if args.target_file.is_some() {
+            "PROBE_TARGET = measured H_eff x |H_S2_PEQ(f)| (magnitude-only); NOT a T50 target; no decay claim"
+        } else {
+            "PRESERVE_SEMANTICS_TARGET = measured H_eff (target == H_eff, same as T50 preserve definition)"
+        }
+    );
+    let _ = writeln!(
+        text,
+        "  \"solve_status\": \"{}\",",
+        base.report.status.as_str()
+    );
+    let _ = writeln!(
+        text,
+        "  \"solve_predicted_fit_band_residual_max_db\": {:.6},",
+        base.report.predicted_fit_band_residual_max_db
+    );
+    let _ = writeln!(
+        text,
+        "  \"solve_predicted_improvement_band_residual_max_db\": {:.6},",
+        base.report.predicted_design_residual_max_db
+    );
+    let _ = writeln!(
+        text,
+        "  \"regularize_deliverable\": {},",
+        reg.report.deliverable
+    );
+    let _ = writeln!(
+        text,
+        "  \"regularize_applicability\": \"{}\",",
+        reg.report.applicability.status
+    );
+    let _ = writeln!(
+        text,
+        "  \"selected_whitelist\": \"{}\",",
+        reg.report.selection.selected_whitelist.as_str()
+    );
+    let _ = writeln!(
+        text,
+        "  \"selected_lambda\": {},",
+        reg.report.selection.selected_lambda
+    );
+    let _ = writeln!(
+        text,
+        "  \"selected_lambda_used\": {:.9},",
+        reg.report.selection.selected_lambda_used
+    );
+    let _ = writeln!(
+        text,
+        "  \"final_residual_fit_band_max_db\": {:.6},",
+        reg.report.final_residual.fit_band_max_db
+    );
+    let _ = writeln!(
+        text,
+        "  \"final_residual_improvement_band_max_db\": {:.6},",
+        reg.report.final_residual.improvement_band_max_db
+    );
+    let _ = writeln!(
+        text,
+        "  \"solution_norm_selected\": {:.9},",
+        reg.report.prior_distance_norm
+    );
+    let _ = writeln!(
+        text,
+        "  \"coeffs_sha256\": {},",
+        opt_str(&reg.report.coeffs_sha256)
+    );
+    let _ = writeln!(
+        text,
+        "  \"solution_hash\": {},",
+        opt_str(&reg.report.solution_hash)
+    );
     let _ = writeln!(text, "  \"applied\": false,");
     let _ = writeln!(text, "  \"measured\": false,");
     let _ = writeln!(text, "  \"post_apply_measurement\": \"not_requested\",");
@@ -558,24 +821,44 @@ fn write_meta(
 // ---------------------------------------------------------------------------
 
 fn run_artifact_gate(args: &Args) -> Result<(), String> {
-    let dir = if args.out_dir.as_os_str().is_empty() { PathBuf::from(".") } else { args.out_dir.clone() };
+    let dir = if args.out_dir.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        args.out_dir.clone()
+    };
     fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
     let hash = "a".repeat(64);
     let incomplete = ArtifactBinding::from_parts(
-        hash.clone(), hash.clone(), hash.clone(), hash.clone(), hash.clone(),
-        hash.clone(), hash.clone(), "INCOMPLETE",
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        "INCOMPLETE",
     );
     let ready = ArtifactBinding::from_parts(
-        hash.clone(), hash.clone(), hash.clone(), hash.clone(), hash.clone(),
-        hash.clone(), hash.clone(), "READY",
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        hash.clone(),
+        "READY",
     );
     let incomplete_result = incomplete.validate();
     let ready_result = ready.validate();
     let mut text = String::new();
     text.push_str("{\n");
-    text.push_str("  \"schema\": \"tspi-g-singlepoint-artifact-gate-demo/v1\",\n");
+    text.push_str("  \"schema\": \"khaen-g-singlepoint-artifact-gate-demo/v1\",\n");
     text.push_str("  \"purpose\": \"T54 artifact status gate is the first design-side blocker for a measured single-point path: status INCOMPLETE must be refused by compile_apply::compile_plan (CompileApplyRequest::validate -> artifact.validate)\",\n");
-    let _ = writeln!(text, "  \"incomplete_status_refused\": {},", incomplete_result.is_err());
+    let _ = writeln!(
+        text,
+        "  \"incomplete_status_refused\": {},",
+        incomplete_result.is_err()
+    );
     match &incomplete_result {
         Ok(()) => text.push_str("  \"incomplete_error\": null,\n"),
         Err(error) => {
@@ -583,17 +866,31 @@ fn run_artifact_gate(args: &Args) -> Result<(), String> {
                 error.code(), escape(error.field()), escape(error.detail()));
         }
     }
-    let _ = writeln!(text, "  \"ready_status_accepted\": {},", ready_result.is_ok());
+    let _ = writeln!(
+        text,
+        "  \"ready_status_accepted\": {},",
+        ready_result.is_ok()
+    );
     match &ready_result {
         Ok(()) => text.push_str("  \"ready_error\": null,\n"),
         Err(error) => {
-            let _ = writeln!(text, "  \"ready_error\": {{\"code\": \"{}\", \"detail\": \"{}\"}},", error.code(), escape(&error.detail().to_string()));
+            let _ = writeln!(
+                text,
+                "  \"ready_error\": {{\"code\": \"{}\", \"detail\": \"{}\"}},",
+                error.code(),
+                escape(&error.detail().to_string())
+            );
         }
     }
     text.push_str("  \"note\": \"READY here is only a status-literal control on synthetic hashes; this harness never writes/claims a real READY artifact and never runs compile for the measured design\"\n");
     text.push_str("}\n");
-    fs::write(dir.join("artifact_gate.json"), text).map_err(|e| format!("write artifact_gate: {e}"))?;
-    println!("artifact gate: INCOMPLETE refused={} READY accepted={}", incomplete_result.is_err(), ready_result.is_ok());
+    fs::write(dir.join("artifact_gate.json"), text)
+        .map_err(|e| format!("write artifact_gate: {e}"))?;
+    println!(
+        "artifact gate: INCOMPLETE refused={} READY accepted={}",
+        incomplete_result.is_err(),
+        ready_result.is_ok()
+    );
     Ok(())
 }
 
@@ -602,9 +899,13 @@ fn run_artifact_gate(args: &Args) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 fn run_measured_design(args: &Args) -> Result<(), String> {
-    let spec_path = args.spec.as_ref().ok_or("measured-design needs --spec FILE")?;
+    let spec_path = args
+        .spec
+        .as_ref()
+        .ok_or("measured-design needs --spec FILE")?;
     let spec = load_measured_spec(spec_path).map_err(|e| format!("load_measured_spec: {e}"))?;
-    let measured = build_measured_design(&spec).map_err(|e| format!("build_measured_design: {e}"))?;
+    let measured =
+        build_measured_design(&spec).map_err(|e| format!("build_measured_design: {e}"))?;
     let dir = &args.out_dir;
     fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
     fs::write(dir.join("measured_summary.json"), &measured.summary_json)
@@ -612,37 +913,87 @@ fn run_measured_design(args: &Args) -> Result<(), String> {
     let design = &measured.design;
     let artifact_status = design.artifact.status.clone();
     let artifact_validate = design.artifact.validate();
-    let diag_paths = design.g_paths.iter().filter(|path| path.diag_baseline).count();
+    let diag_paths = design
+        .g_paths
+        .iter()
+        .filter(|path| path.diag_baseline)
+        .count();
     let mut text = String::new();
     text.push_str("{\n");
-    text.push_str("  \"schema\": \"tspi-g-singlepoint-measured-design-probe/v1\",\n");
-    let _ = writeln!(text, "  \"spec\": \"{}\",", escape(&spec_path.display().to_string()));
-    let _ = writeln!(text, "  \"design_source\": \"{}\",", escape(&design.design_source));
+    text.push_str("  \"schema\": \"khaen-g-singlepoint-measured-design-probe/v1\",\n");
+    let _ = writeln!(
+        text,
+        "  \"spec\": \"{}\",",
+        escape(&spec_path.display().to_string())
+    );
+    let _ = writeln!(
+        text,
+        "  \"design_source\": \"{}\",",
+        escape(&design.design_source)
+    );
     let _ = writeln!(text, "  \"measured\": {},", design.measured);
     let _ = writeln!(text, "  \"layout\": \"{}\",", escape(&spec.layout));
-    let _ = writeln!(text, "  \"roles\": [{}],", spec.roles.iter().map(|r| format!("\"{}\"", escape(&r.role_id))).collect::<Vec<_>>().join(", "));
-    let _ = writeln!(text, "  \"artifact_status\": \"{}\",", escape(&artifact_status));
-    let _ = writeln!(text, "  \"artifact_ready\": {},", design.artifact.is_ready());
-    let _ = writeln!(text, "  \"artifact_validate_error\": {},", match &artifact_validate {
-        Ok(()) => "null".to_string(),
-        Err(error) => format!("{{\"code\": \"{}\", \"detail\": \"{}\"}}", error.code(), escape(&error.detail().to_string())),
-    });
+    let _ = writeln!(
+        text,
+        "  \"roles\": [{}],",
+        spec.roles
+            .iter()
+            .map(|r| format!("\"{}\"", escape(&r.role_id)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let _ = writeln!(
+        text,
+        "  \"artifact_status\": \"{}\",",
+        escape(&artifact_status)
+    );
+    let _ = writeln!(
+        text,
+        "  \"artifact_ready\": {},",
+        design.artifact.is_ready()
+    );
+    let _ = writeln!(
+        text,
+        "  \"artifact_validate_error\": {},",
+        match &artifact_validate {
+            Ok(()) => "null".to_string(),
+            Err(error) => format!(
+                "{{\"code\": \"{}\", \"detail\": \"{}\"}}",
+                error.code(),
+                escape(&error.detail().to_string())
+            ),
+        }
+    );
     let _ = writeln!(text, "  \"g_paths\": {},", design.g_paths.len());
     let _ = writeln!(text, "  \"g_diagonal_paths\": {},", diag_paths);
     let _ = writeln!(text, "  \"compile_l_g\": {},", design.compile.l_g);
     let _ = writeln!(text, "  \"compile_l_p\": {},", design.compile.l_p);
-    let _ = writeln!(text, "  \"compile_low_band_d\": {},", design.compile.low_band_d);
-    let _ = writeln!(text, "  \"g_is_identity\": {},", design.g_paths.iter().all(|path| {
-        let is_diag = path.diag_baseline;
-        let head_ok = if is_diag { path.coeffs.first().copied() == Some(1.0) } else { path.coeffs.first().copied() == Some(0.0) };
-        let rest_zero = path.coeffs.iter().skip(1).all(|value| *value == 0.0);
-        (is_diag && head_ok && rest_zero) || (!is_diag && path.coeffs.iter().all(|value| *value == 0.0))
-    }));
+    let _ = writeln!(
+        text,
+        "  \"compile_low_band_d\": {},",
+        design.compile.low_band_d
+    );
+    let _ = writeln!(
+        text,
+        "  \"g_is_identity\": {},",
+        design.g_paths.iter().all(|path| {
+            let is_diag = path.diag_baseline;
+            let head_ok = if is_diag {
+                path.coeffs.first().copied() == Some(1.0)
+            } else {
+                path.coeffs.first().copied() == Some(0.0)
+            };
+            let rest_zero = path.coeffs.iter().skip(1).all(|value| *value == 0.0);
+            (is_diag && head_ok && rest_zero)
+                || (!is_diag && path.coeffs.iter().all(|value| *value == 0.0))
+        })
+    );
     let _ = writeln!(text, "  \"measurement_digest_in_summary\": true,");
     text.push_str("  \"notes\": [\"measured path 硬接 identity G + INCOMPLETE artifact（measured_design.rs:765-804）；本 probe 证明 G 注入入口 NOT_WIRED\"],\n");
     text.push_str("  \"g_injection_wired\": false\n");
     text.push_str("}\n");
-    fs::write(dir.join("measured_probe.json"), text).map_err(|e| format!("write measured_probe: {e}"))?;
+    fs::write(dir.join("measured_probe.json"), text)
+        .map_err(|e| format!("write measured_probe: {e}"))?;
     println!("measured design: artifact_status={} artifact_ready={} g_paths={} l_g={} g_is_identity=unknown",
         artifact_status, design.artifact.is_ready(), design.g_paths.len(), design.compile.l_g);
     Ok(())

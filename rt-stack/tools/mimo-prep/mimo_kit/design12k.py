@@ -14,7 +14,7 @@ guarded generation/packaging path:
                           params.json (byte-identical to the delivered artifact)
                           g12_v2_4096.f32 + g12_v2_4096.f64.npz (f32<->f64 content binding)
                           resamp95.f32, design-summary.json, design-script.py
-                          provenance.json (tspi-mimo-12k-artifact-provenance/v1)
+                          provenance.json (khaen-mimo-12k-artifact-provenance/v1)
                         then it must pass provenance.g12_artifact_guard() or raise.
   make_synthetic_fixture()  builds the negative fixture from the dry-run synthetic H;
                         the guard must REFUSE it (markers, dry-run source, content sha).
@@ -92,7 +92,7 @@ def load_design_module(design_script=None):
     path = os.path.abspath(design_script or DELIVERED_DESIGN_SCRIPT)
     if not os.path.isfile(path):
         raise FileNotFoundError("delivered 12k design script not found: %s" % path)
-    spec = importlib.util.spec_from_file_location("tspi_design12k_delivered", path)
+    spec = importlib.util.spec_from_file_location("khaen_design12k_delivered", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

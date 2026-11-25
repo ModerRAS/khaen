@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1220">
-  <title>泰山派音频管理 · tspi-audio-web</title>
+  <title>泰山派音频管理 · khaen-audio-web</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -23,9 +23,9 @@
       </form>
       <details class="login-help">
         <summary>忘记密码 / 使用 token（恢复兜底）</summary>
-        <p>token 保留为恢复/CLI 兜底，填在下面可直接登录（不需要密码）。默认在设备 <code>/etc/tspi-audio-web/config.toml</code>；查看：</p>
-        <pre>sudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token
-sudo journalctl -u tspi-audio-web -b | grep -i "token"</pre>
+        <p>token 保留为恢复/CLI 兜底，填在下面可直接登录（不需要密码）。默认在设备 <code>/etc/khaen-audio-web/config.toml</code>；查看：</p>
+        <pre>sudo khaen-audio-web --config /etc/khaen-audio-web/config.toml --print-token
+sudo journalctl -u khaen-audio-web -b | grep -i "token"</pre>
         <input id="login-token" name="token" type="password" placeholder="可选：访问 token" autocomplete="off">
         <p>mock 模式 token 为 <code>mock-token</code>。管理密码需在首次打开时设置；已设置后不能重复 setup。</p>
       </details>
@@ -48,7 +48,7 @@ sudo journalctl -u tspi-audio-web -b | grep -i "token"</pre>
         <button id="setup-submit" class="btn primary block" type="submit" style="margin-top:10px">设置并进入</button>
         <p id="setup-error" class="error-text" role="alert"></p>
       </form>
-      <p class="footnote">首设无认证是局域网便利与安全的折中：请仅在可信网络完成设置；设置后写 /etc/tspi-audio-web/auth.json（0600，Argon2id）。</p>
+      <p class="footnote">首设无认证是局域网便利与安全的折中：请仅在可信网络完成设置；设置后写 /etc/khaen-audio-web/auth.json（0600，Argon2id）。</p>
     </div>
   </div>
 
@@ -59,7 +59,7 @@ sudo journalctl -u tspi-audio-web -b | grep -i "token"</pre>
         <span class="brand-mark small" aria-hidden="true"></span>
         <div class="brand-text">
           <strong>泰山派音频管理</strong>
-          <span id="app-subtitle" class="muted">tspi-audio-web <span id="app-version"></span></span>
+          <span id="app-subtitle" class="muted">khaen-audio-web <span id="app-version"></span></span>
         </div>
         <span id="mock-badge" class="badge warn" hidden>MOCK</span>
       </div>
@@ -96,7 +96,7 @@ sudo journalctl -u tspi-audio-web -b | grep -i "token"</pre>
     </main>
 
     <footer class="footer">
-      <span>tspi-audio-web <span id="footer-version"></span> · 泰山派3M 音频 DSP 设备管理</span>
+      <span>khaen-audio-web <span id="footer-version"></span> · 泰山派3M 音频 DSP 设备管理</span>
       <span class="muted">端口 80（默认，无需记端口）/ 局域网管理 / 非 HTTPS 时请仅在可信网络使用</span>
     </footer>
   </div>

@@ -1329,7 +1329,7 @@ fn t66_apply_events_and_summary_are_exported() {
 /// T64 报告夹具的 program peak 基准（= PeqFitOptions::default 的 program_peak_reference_dbfs）。
 const T64_REPORT_PROGRAM_PEAK_DBFS: f64 = -18.0;
 
-/// 由 P FIR 生成一条与 T64 `tspi-peq-fit/v1` 同形的 channel 报告（D7 字段子集）。
+/// 由 P FIR 生成一条与 T64 `khaen-peq-fit/v1` 同形的 channel 报告（D7 字段子集）。
 fn t64_report_channel(
     name: &str,
     p_fir: &[f64],

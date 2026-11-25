@@ -90,10 +90,10 @@ function updateMeasureLive() {
 }
 async function runMeasure(isRemeasure) {
   if (state.measure.running) return;
-  if (TSPI_LIVE && !isRemeasure) {
+  if (KHAEN_LIVE && !isRemeasure) {
     state.measure.running = true;
     try {
-      const response = await tspiPostJob('measure');
+      const response = await khaenPostJob('measure');
       state.measure.liveAck = !!response && response.state !== 'failed';
       state.measure.progressText = response && response.progress_text ? response.progress_text : '';
       const sweet = state.points.find(p => p.sweet && p.on);

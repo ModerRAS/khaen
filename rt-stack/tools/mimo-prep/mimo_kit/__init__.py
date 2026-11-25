@@ -1,4 +1,4 @@
-"""mimo_kit -- fixed TSPI MIMO planrt analysis kit (task-249, 2026-11-19).
+"""mimo_kit -- fixed KHAEN MIMO planrt analysis kit (task-249, 2026-11-19).
 
 Modules:
   s24.py              byte-exact S24_3LE helpers (stdlib)

@@ -1,7 +1,7 @@
 {
-  "schema": "tspi-reference-verify-report/v1",
+  "schema": "khaen-reference-verify-report/v1",
   "generator": "tools/verify_reference.py",
-  "reference_root": "C:\\work\\projects\\tspi-audio-dsp\\rt-stack\\reference",
+  "reference_root": "C:\\work\\projects\\khaen-audio-dsp\\rt-stack\\reference",
   "fixtures": [
     {
       "id": "C01_identity_d0_1x1",
@@ -266,7 +266,7 @@
       "id": "T03-INDEX-SCHEMA",
       "description": "fixtures/index.json schema",
       "result": "PASS",
-      "detail": "got 'tspi-reference-fixtures-index/v1'"
+      "detail": "got 'khaen-reference-fixtures-index/v1'"
     },
     {
       "id": "T03-INDEX-LIST",

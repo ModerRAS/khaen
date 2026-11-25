@@ -1,4 +1,4 @@
-//! TSPI Windows user-space AES67 sender + minimal loopback receiver.
+//! KHAEN Windows user-space AES67 sender + minimal loopback receiver.
 //!
 //! Design goals (task-236):
 //! - Windows user mode only: no ASIO driver, no virtual sound card installation.

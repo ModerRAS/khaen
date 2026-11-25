@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REF_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = REF_ROOT.parents[1]          # projects/tspi-audio-dsp
+PROJECT_ROOT = REF_ROOT.parents[1]          # projects/khaen-audio-dsp
 EVID = REF_ROOT / "evidence" / "T03"
 MANIFEST = EVID / "manifest.json"
 
@@ -40,11 +40,11 @@ def file_entry(path: Path, role: str) -> dict:
 
 # authority / context inputs (read-only in this task)
 EXTERNAL_INPUTS = [
-    ("scratch/lead/planner/TSPI-RT-STACK-WBS.md", "authority: WBS task table T03 row + write-scope/DoD discipline"),
+    ("scratch/lead/planner/KHAEN-RT-STACK-WBS.md", "authority: WBS task table T03 row + write-scope/DoD discipline"),
     ("scratch/lead/planner/DSP-HOST-DECISION.md", "authority: unified model / FIR / calibration / RT spec"),
     ("scratch/lead/planner/DSP-HOST-CPU-BUDGET.md", "authority: F_ji = P_j*G_ji*A_i and fused-length arithmetic"),
     ("calibration-spec/CONTRACT.md", "context: khaen-calibration/v1 delay/polarity/PEQ semantics"),
-    ("audio/overlay/etc/tspi-audio/layout-presets.yml", "context: 4.1.2 role->DAC mapping (line 219)"),
+    ("audio/overlay/etc/khaen-audio/layout-presets.yml", "context: 4.1.2 role->DAC mapping (line 219)"),
     ("upmix/examples/profiles/upmix-4.1.2-movie.yml", "context: existing channelmap v2 4.1.2 profile/roles"),
     ("web/docs/API.md", "context: existing REST/channelmap surface (compat boundary)"),
     ("docs/E2E-ACCEPTANCE.md", "context: G=I / pre-declared D and f32-vs-f64 engineering defaults"),
@@ -195,13 +195,13 @@ def main() -> int:
     if verify_summary is not None:
         ok = ok and verify_summary["passed"] and verify_summary["failures"] == 0
     manifest = dict(
-        schema="tspi-reference-evidence/v1",
+        schema="khaen-reference-evidence/v1",
         task=dict(
             wbs="T03",
             team_task="task-23",
             role="rt-reference",
             title="P0 独立 f64 参考规范 / 手算 impulse 向量与夹具（含 offdiag/尾/D）",
-            write_scope=["projects/tspi-audio-dsp/rt-stack/reference"],
+            write_scope=["projects/khaen-audio-dsp/rt-stack/reference"],
             status="COMPLETE_PENDING_REVIEW" if ok else "FAILED",
         ),
         generated_at_utc=generated_at,
@@ -227,7 +227,7 @@ def main() -> int:
             "真实测量数据/H_raw/房间模态效果未涉及（P0 仅数学参考）。",
         ],
         assumptions=[
-            "以 2026-11-16 版 TSPI-RT-STACK-WBS.md（sha256 见 inputs_external）与 DSP-HOST-DECISION.md 为准。",
+            "以 2026-11-16 版 KHAEN-RT-STACK-WBS.md（sha256 见 inputs_external）与 DSP-HOST-DECISION.md 为准。",
             "4.1.2 角色顺序按 audio/overlay layout-presets 第 219 行：0-based FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7，ch6 未用（8 容器/7 角色）。",
             "D 计入 G 支撑：L_G = max(D+1, 1+max_g_tap)，L_F = L_A+L_G+L_P-2，L_out = L_in+L_F-1。",
             "流式契约：尾部补 L_F-1 个零并按 B 分块，拼接截断到 L_out，与离线逐样本一致。",

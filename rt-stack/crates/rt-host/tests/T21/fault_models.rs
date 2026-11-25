@@ -12,7 +12,7 @@ use core::mem::needs_drop;
 
 use crate::admission::{AdmissionEnv, AdmissionReport, MemoryPlan};
 use khaen_core::rt::MAX_OUTPUT_CHANNELS;
-use khaen_core::workers::{ack_mask, TspiRtControlV1};
+use khaen_core::workers::{ack_mask, KhaenRtControlV1};
 
 // ---------------------------------------------------------------------------
 // 夹具
@@ -307,7 +307,7 @@ fn t21_watchdog_two_worker_profile() {
 
 #[test]
 fn t21_watchdog_stale_boundary_sets_safety_request() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     // 首次采样：建立 last_heartbeat=0。
     assert_eq!(watchdog.observe(&ctl), WatchdogAction::None);
@@ -325,7 +325,7 @@ fn t21_watchdog_stale_boundary_sets_safety_request() {
 
 #[test]
 fn t21_watchdog_heartbeat_advance_resets_stale_counter() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     assert_eq!(watchdog.observe(&ctl), WatchdogAction::None);
     assert_eq!(watchdog.observe(&ctl), WatchdogAction::None);
@@ -337,7 +337,7 @@ fn t21_watchdog_heartbeat_advance_resets_stale_counter() {
 
 #[test]
 fn t21_watchdog_epoch_change_resets_stale_without_mute() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     assert_eq!(watchdog.observe(&ctl), WatchdogAction::None);
     assert_eq!(watchdog.observe(&ctl), WatchdogAction::None);
@@ -350,7 +350,7 @@ fn t21_watchdog_epoch_change_resets_stale_without_mute() {
 
 #[test]
 fn t21_watchdog_latch_is_not_auto_cleared_by_heartbeat() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     for _ in 0..4 {
         let _ = watchdog.observe(&ctl);
@@ -368,7 +368,7 @@ fn t21_watchdog_latch_is_not_auto_cleared_by_heartbeat() {
 
 #[test]
 fn t21_watchdog_reset_requires_readmission_ticket() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     for _ in 0..4 {
         let _ = watchdog.observe(&ctl);
@@ -389,7 +389,7 @@ fn t21_watchdog_reset_requires_readmission_ticket() {
 
 #[test]
 fn t21_watchdog_sample_validation_rejects_bad_expected_workers() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let bad = WatchdogSample {
         expected_workers: 3,
@@ -402,7 +402,7 @@ fn t21_watchdog_sample_validation_rejects_bad_expected_workers() {
 
 #[test]
 fn t21_watchdog_sample_validation_rejects_stray_mask_bits() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     // expected=2 但 ack 位图含 bit2 → ABI fault。
     let bad = WatchdogSample::ok(1, 0, RT_WORKERS_FALLBACK, 0x7, 0x3);
@@ -414,7 +414,7 @@ fn t21_watchdog_sample_validation_rejects_stray_mask_bits() {
 
 #[test]
 fn t21_watchdog_worker_lost_requests_fault_after_threshold() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let sample = WatchdogSample {
         worker_alive_mask: 0b1011, // worker 2 失联
@@ -431,7 +431,7 @@ fn t21_watchdog_worker_lost_requests_fault_after_threshold() {
 
 #[test]
 fn t21_watchdog_worker_alive_resets_lost_counter() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let lost = WatchdogSample {
         worker_alive_mask: 0b1110,
@@ -446,7 +446,7 @@ fn t21_watchdog_worker_alive_resets_lost_counter() {
 
 #[test]
 fn t21_watchdog_lost_core_mask_counts_as_worker_lost() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let sample = WatchdogSample {
         lost_core_mask: 0b0100,
@@ -461,7 +461,7 @@ fn t21_watchdog_lost_core_mask_counts_as_worker_lost() {
 
 #[test]
 fn t21_watchdog_swap_ack_stall_requests_fault() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let stalled = WatchdogSample::ok(1, 0, RT_WORKERS, 0b0111, 0xF);
     assert_eq!(
@@ -477,7 +477,7 @@ fn t21_watchdog_swap_ack_stall_requests_fault() {
 
 #[test]
 fn t21_watchdog_full_swap_ack_resets_stall_counter() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let stalled = WatchdogSample::ok(1, 0, RT_WORKERS, 0b0111, 0xF);
     assert_eq!(
@@ -498,7 +498,7 @@ fn t21_watchdog_full_swap_ack_resets_stall_counter() {
 
 #[test]
 fn t21_watchdog_device_lost_requests_mute() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let sample = WatchdogSample {
         device_lost: true,
@@ -514,7 +514,7 @@ fn t21_watchdog_device_lost_requests_mute() {
 
 #[test]
 fn t21_watchdog_only_escalates_mute_to_fault() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     for _ in 0..4 {
         let _ = watchdog.observe(&ctl);
@@ -543,7 +543,7 @@ fn t21_watchdog_only_escalates_mute_to_fault() {
 
 #[test]
 fn t21_watchdog_two_worker_ack_mask_not_hardcoded_all() {
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     // expected=2，all-ack=0x3（不是 0xF）；0x3 完成 → 无动作。
     let complete = WatchdogSample::ok(1, 0, RT_WORKERS_FALLBACK, 0x3, 0x3);
@@ -1324,7 +1324,7 @@ fn t21_safety_recovery_requires_ticket_and_writes_exit_event() {
     assert_eq!(supervisor.recover(&ticket, 3), RtStatus::RT_E_SLOT_STATE);
     assert_eq!(supervisor.safety.mode(), SafetyMode::Normal);
     // 退出事件在 control lane。
-    let mut events = [TspiEventV1::ZERO; 8];
+    let mut events = [KhaenEventV1::ZERO; 8];
     let count = supervisor.drain_events(&mut events);
     let mut found_exit = false;
     let mut index = 0usize;
@@ -1393,7 +1393,7 @@ fn t21_supervisor_service_watchdog_mutes_and_keeps_quarantine() {
     let mut supervisor = supervisor_with_safety_output();
     let block = handle_of(&supervisor.quarantine, 1, 2, 3, 0xF);
     assert_eq!(supervisor.quarantine.retained(), 1);
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     let mut watchdog = watchdog_with_small_thresholds();
     let mut action = WatchdogAction::None;
     let mut index = 0u32;
@@ -1470,7 +1470,7 @@ fn t21_supervisor_ack_slot_exhausted_mutes_and_forbids_release() {
     assert_eq!(supervisor.quarantine.retained(), 1);
     assert!(supervisor.quarantine.is_occupied(block));
     assert_eq!(supervisor.counters.snapshot().ack_slot_exhausted, 1);
-    let mut all = [TspiEventV1::ZERO; 8];
+    let mut all = [KhaenEventV1::ZERO; 8];
     let count = supervisor.drain_events(&mut all);
     let mut found = false;
     let mut index = 0usize;
@@ -1522,7 +1522,7 @@ fn t21_supervisor_late_streak_enters_admitted_fallback() {
 #[test]
 fn t21_supervisor_service_control_request_from_ctl() {
     let mut supervisor = supervisor_with_safety_output();
-    let mut ctl = TspiRtControlV1::new();
+    let mut ctl = KhaenRtControlV1::new();
     ctl.safety_request.store(1, Ordering::Release);
     ctl.safety_reason = RtStatus::RT_E_DEVICE_LOST.0;
     assert_eq!(supervisor.service_control_request(&ctl, 1, 1), RtStatus::OK);
@@ -1593,7 +1593,7 @@ fn t21_supervisor_record_paths_fill_hist_and_counters() {
 #[test]
 fn t21_event_lane_fifo_seq_lane_and_drop() {
     let mut lane = EventRingLane::new(LANE_CAPTURE);
-    let mut event = TspiEventV1::ZERO;
+    let mut event = KhaenEventV1::ZERO;
     event.kind = EV_WORKER_LOST;
     event.severity = SEVERITY_FATAL;
     let mut index = 0u64;
@@ -1622,7 +1622,7 @@ fn t21_event_lane_fifo_seq_lane_and_drop() {
 #[test]
 fn t21_event_lanes_isolate_and_count_dropped() {
     let mut events = EventLanes::new();
-    let mut event = TspiEventV1::ZERO;
+    let mut event = KhaenEventV1::ZERO;
     event.lane = LANE_WATCHDOG;
     event.kind = EV_WATCHDOG_MUTE;
     assert!(events.push(&event));
@@ -1698,7 +1698,7 @@ fn t21_supervisor_drain_events_returns_quarantine_and_mute_events() {
         Err(status) => panic!("quarantine block must enter, got {:?}", status),
     };
     assert_eq!(supervisor.on_late_streak(4, 5), RtStatus::OK);
-    let mut events = [TspiEventV1::ZERO; 16];
+    let mut events = [KhaenEventV1::ZERO; 16];
     let count = supervisor.drain_events(&mut events);
     assert!(count >= 2);
     let mut saw_quarantine = false;

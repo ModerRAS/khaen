@@ -11,7 +11,7 @@
   cargo test -p khaen-rt-host --offline swap -- --list   # t20_ 计数可复算（91 tests；swap 过滤共 94 = 91 T20 + 3 T21 命名含 swap）
   ```
 - 全部离线：admission 用 `MockMemory`（不执行真实 mlockall/getrlimit）、不打开 ALSA/设备、
-  不起 RT 线程；crossfade/retire 用栈上 `TspiRtControlV1`/`TspiSwapAckV1`/夹具 plan 字节。
+  不起 RT 线程；crossfade/retire 用栈上 `KhaenRtControlV1`/`KhaenSwapAckV1`/夹具 plan 字节。
 
 ## 覆盖（core-v1 条款 → 测试组）
 

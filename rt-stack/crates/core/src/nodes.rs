@@ -19,7 +19,7 @@
 //!   （由 kernel 零填与计划报告共同保证）。任何 Mixer/上混/下混节点都不存在，未知节点类型
 //!   在配置层即拒收（ERR_UNSUPPORTED/ERR_ROLES）。
 //! - **不得按 role 名硬编码**：角色身份 = 索引（roles[i]）；RoleConfig::name 只用于
-//!   TspiRoleV1.name_hash（CRC-32C）等 CTL 元数据，不参与任何校验/滤波/路由决策。
+//!   KhaenRoleV1.name_hash（CRC-32C）等 CTL 元数据，不参与任何校验/滤波/路由决策。
 //!   高度（HFL/HFR）不获得任何默认 HP/LP/人工 delay：没有显式 FIR 段就是 identity delta。
 //! - **配置驱动**：所有滤波系数/时延/极性/增益/IIR 段/volume/保护参数都来自配置；
 //!   本模块不发明默认阈值（compat-matrix P14：limiter attack/lookahead/true-peak、
@@ -60,7 +60,7 @@
 //!
 //! 权威输入（只读）：spec/core-v1.md §7/§9/§11.10/§13、spec/fir-toolbox.md §4/§5、
 //! spec/compat-matrix.md §8（P01–P14）、scratch/lead/planner/DSP-HOST-DECISION.md §1/§3/§5、
-//! scratch/lead/planner/TSPI-RT-STACK-WBS.md §1/§7。
+//! scratch/lead/planner/KHAEN-RT-STACK-WBS.md §1/§7。
 
 use crate::compile::{
     compile, convolve_linear, design_delay_to_plan, CompileInput, CompileOptions, CompileReport,
@@ -127,20 +127,20 @@ pub const ROLE_DELAY_MAX_MS: f64 = 200.0;
 /// role 名元数据字节上限（ABI ctl_meta 用 u16 name_len）。
 pub const ROLE_NAME_BYTES_MAX: usize = u16::MAX as usize;
 
-/// TspiDiagFirV1.flags bit0：protection（本模块保护是独立节点，输出对角 FIR 不置位）。
+/// KhaenDiagFirV1.flags bit0：protection（本模块保护是独立节点，输出对角 FIR 不置位）。
 pub const DIAG_FLAG_PROTECTION: u16 = 1 << 0;
-/// TspiDiagFirV1.flags bit1：limiter（同上，独立节点）。
+/// KhaenDiagFirV1.flags bit1：limiter（同上，独立节点）。
 pub const DIAG_FLAG_LIMITER: u16 = 1 << 1;
-/// TspiDiagFirV1.flags bit2：本对角 FIR 含 crossover 段。
+/// KhaenDiagFirV1.flags bit2：本对角 FIR 含 crossover 段。
 pub const DIAG_FLAG_CROSSOVER: u16 = 1 << 2;
-/// TspiDiagFirV1.flags bit3：本对角 FIR 含输出目标 FIR 段。
+/// KhaenDiagFirV1.flags bit3：本对角 FIR 含输出目标 FIR 段。
 pub const DIAG_FLAG_TARGET: u16 = 1 << 3;
-/// TspiDiagFirV1.flags bit4：本对角 FIR 含 phase/delay/polarity FIR 段。
+/// KhaenDiagFirV1.flags bit4：本对角 FIR 含 phase/delay/polarity FIR 段。
 pub const DIAG_FLAG_PHASE_DELAY_POLARITY: u16 = 1 << 4;
 
-/// TspiRoleV1.flags bit0：角色 enabled。
+/// KhaenRoleV1.flags bit0：角色 enabled。
 pub const ROLE_FLAG_ENABLED: u16 = 1 << 0;
-/// TspiRoleV1.flags bit1：角色无节目源，必须逐样本零填。
+/// KhaenRoleV1.flags bit1：角色无节目源，必须逐样本零填。
 pub const ROLE_FLAG_ZERO_FILL: u16 = 1 << 1;
 
 const _: () = {
@@ -293,7 +293,7 @@ impl FirSegmentKind {
         }
     }
 
-    /// TspiDiagFirV1.flags 位。
+    /// KhaenDiagFirV1.flags 位。
     pub const fn diag_flag(self) -> u16 {
         match self {
             FirSegmentKind::Crossover => DIAG_FLAG_CROSSOVER,
@@ -1803,12 +1803,12 @@ pub struct PlanNode {
     pub role: Option<u16>,
 }
 
-/// 输出对角 FIR 计划投影（TspiDiagFirV1 语义 + v1.1 delay_q16）。
+/// 输出对角 FIR 计划投影（KhaenDiagFirV1 语义 + v1.1 delay_q16）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiagFirPlan {
     /// 容器物理输出索引（= role.out_index；按升序排列）。
     pub out_index: u16,
-    /// TspiDiagFirV1.flags（本模块只置 crossover/target/phase 位）。
+    /// KhaenDiagFirV1.flags（本模块只置 crossover/target/phase 位）。
     pub flags: u16,
     /// 声明支撑（= plan 公共 L_P；系数已零填到该长度）。
     pub taps: u32,
@@ -1822,14 +1822,14 @@ pub struct DiagFirPlan {
     pub coeffs_f32: Vec<f32>,
 }
 
-/// role 计划投影（TspiRoleV1 语义 + v1.1 delay_q16；gain/polarity 已折叠）。
+/// role 计划投影（KhaenRoleV1 语义 + v1.1 delay_q16；gain/polarity 已折叠）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct RolePlan {
     /// role_id（= 配置索引）。
     pub role_id: u16,
     /// 容器输出索引。
     pub out_index: u16,
-    /// TspiRoleV1.flags（enabled/zero_fill）。
+    /// KhaenRoleV1.flags（enabled/zero_fill）。
     pub flags: u16,
     /// 角色级整数延迟。
     pub delay_samples: u32,
@@ -2387,7 +2387,7 @@ pub fn scatter_zero_fill_containers(scatter: &[u16], container_channels: u16) ->
         .collect()
 }
 
-/// CRC-32C（Castagnoli；TspiRoleV1.name_hash 口径；空输入 = 0）。
+/// CRC-32C（Castagnoli；KhaenRoleV1.name_hash 口径；空输入 = 0）。
 pub fn crc32c(bytes: &[u8]) -> u32 {
     let mut crc = 0xFFFF_FFFFu32;
     for &byte in bytes {

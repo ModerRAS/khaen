@@ -4,17 +4,17 @@
 # 检查项（全部必须 PASS，否则 exit 3 且不进入退役）：
 #   A 授权窗口有效（live 时；scope 含 preflight）
 #   B 新栈 release 已安装且 manifest/hash/架构校验通过（可执行 aarch64 ELF）
-#   C 新栈 unit + /etc/tspi-rt-stack/{rt-host.toml,rt-daemon.toml,*.env} 已安装；host/daemon 尚未 active
-#   D 旧栈处于 audio-off：旧音频 unit（含保留 AoIP/PTP）全部 inactive；无 camilladsp/tspi-upmix 进程
-#   E /run/tspi/mode 不是 dante/aes67；旧 C 激活入口存在（将被 retire 清理）或已退役
+#   C 新栈 unit + /etc/khaen-rt-stack/{rt-host.toml,rt-daemon.toml,*.env} 已安装；host/daemon 尚未 active
+#   D 旧栈处于 audio-off：旧音频 unit（含保留 AoIP/PTP）全部 inactive；无 camilladsp/khaen-upmix 进程
+#   E /run/khaen/mode 不是 dante/aes67；旧 C 激活入口存在（将被 retire 清理）或已退役
 #   F 设备存在：/proc/asound/cards 含 MOTU card id（UltraLitemk5）
 #   G 回退素材：已有自研 last-good，或显式 --allow-first-switch（首次切换回退=mute）
 #   H 磁盘/时间：/opt 与 /var/lib 余量 >= 512MB；NTP 同步或显式记录 NOT_VERIFIED
 #   J IRQ 亲和持久化（task-192）：依赖 IRQ(58/56/57) 的 /proc/irq 节点存在；完整模式还要求
-#     irqbalance 未 enabled/active、tspi-irq-affinity.service + irq-affinity.env 已安装、
+#     irqbalance 未 enabled/active、khaen-irq-affinity.service + irq-affinity.env 已安装、
 #     当前 effective 亲和已在 A53 且 T45 IRQ 放置前置 PASS（04 install 已停 irqbalance 并写 pin）。
 #     B1（2026-11-20 板窗）：完整模式另要求 oneshot 含 ExecStartPre=irq-affinity-pin wait（开机先等 IRQ 节点），
-#     且无遗留 live-only drop-in（tspi-irq-affinity.service.d/10-wait-irq.conf；04 安装时会迁移）。
+#     且无遗留 live-only drop-in（khaen-irq-affinity.service.d/10-wait-irq.conf；04 安装时会迁移）。
 #
 # 两段使用（F-40 修复）：
 #   --pre-install  只跑不依赖新 release 的只读门（A/D/E/F/G/H/J-存在性）；05 在 04 install **之前**调用，
@@ -64,10 +64,10 @@ if [ "$DRY_RUN" = "1" ]; then
   log "  A 授权窗口校验（live）"
   if [ "$PRE_INSTALL" = "0" ]; then
     log "  B release 已装 + manifest/hash/arch 校验（py lib/release_manifest.py verify ... --require-arch aarch64）"
-    log "  C 新栈 unit + /etc/tspi-rt-stack/{rt-host,rt-daemon}.{toml,env} 已安装/可加载/未 active：${NEW_STACK_UNITS[*]}"
+    log "  C 新栈 unit + /etc/khaen-rt-stack/{rt-host,rt-daemon}.{toml,env} 已安装/可加载/未 active：${NEW_STACK_UNITS[*]}"
   fi
   log "  D 旧 C/编排/AoIP units inactive + 无 ${C_PROCESS_PATTERNS[*]} 进程（旧 web 允许 active）"
-  log "  E /run/tspi/mode 非 dante/aes67"
+  log "  E /run/khaen/mode 非 dante/aes67"
   log "  F /proc/asound/cards 含 MOTU card id"
   log "  G 自研 last-good 存在 或 --allow-first-switch"
   log "  H /opt /var/lib 余量 + 时间同步"
@@ -76,8 +76,8 @@ if [ "$DRY_RUN" = "1" ]; then
   fi
   log "  J IRQ 亲和持久化：依赖 IRQ(58/56/57) 的 /proc/irq 节点存在（pre-install 仅存在性；04 安装时 disable+stop irqbalance 并写 pin）"
   if [ "$PRE_INSTALL" = "0" ]; then
-    log "  J （完整门）irqbalance 未 enabled/active；tspi-irq-affinity.service + irq-affinity.env 已安装；IRQ effective 已在 A53 + T45 IRQ 放置前置（lib/irq_affinity.py，非 plan() 本体）"
-    log "  J （完整门）B1 开机竞态防护：已装 tspi-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait；无遗留 live-only drop-in"
+    log "  J （完整门）irqbalance 未 enabled/active；khaen-irq-affinity.service + irq-affinity.env 已安装；IRQ effective 已在 A53 + T45 IRQ 放置前置（lib/irq_affinity.py，非 plan() 本体）"
+    log "  J （完整门）B1 开机竞态防护：已装 khaen-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait；无遗留 live-only drop-in"
   fi
   exit 0
 fi
@@ -89,7 +89,7 @@ if [ "$PRE_INSTALL" = "0" ]; then
 # ---- B release ---------------------------------------------------------------
 REL="$(current_release_dir 2>/dev/null || true)"
 if [ -z "$REL" ]; then
-  fail "B 新栈 current release 不存在（先 04-install-release.sh）；${TSPI_STACK_PREFIX}/current"
+  fail "B 新栈 current release 不存在（先 04-install-release.sh）；${KHAEN_STACK_PREFIX}/current"
 else
   if [ ! -f "$REL/manifest.json" ]; then
     fail "B release 缺 manifest.json: $REL"
@@ -122,10 +122,10 @@ for u in "${NEW_STACK_UNITS[@]}"; do
 done
 # F-18/T28-P0-2：host/daemon 的配置必须已由 04 安装；否则 host 启动即退、preflight 会放行一份必失败的配置。
 for f in rt-host.toml rt-daemon.toml rt-host.env rt-daemon.env; do
-  if [ -f "$(p "$TSPI_ETC/$f")" ]; then
-    pass "C 配置已安装: $TSPI_ETC/$f"
+  if [ -f "$(p "$KHAEN_ETC/$f")" ]; then
+    pass "C 配置已安装: $KHAEN_ETC/$f"
   else
-    fail "C 缺少配置 $TSPI_ETC/$f（04-install-release.sh 只装 env 不装 toml 的旧缺陷，见 T28-P0-2）"
+    fail "C 缺少配置 $KHAEN_ETC/$f（04-install-release.sh 只装 env 不装 toml 的旧缺陷，见 T28-P0-2）"
   fi
 done
 fi # PRE_INSTALL=0（依赖新 release 的 B/C）
@@ -140,23 +140,23 @@ if [ "${#BUSY[@]}" -gt 0 ]; then
 else
   pass "D 旧 C/编排/AoIP unit 全部 inactive（旧 web 允许 active，03-retire-c 会停）"
 fi
-PROCS="$(pgrep -a -f 'camilladsp|tspi-upmix' 2>/dev/null || true)"
+PROCS="$(pgrep -a -f 'camilladsp|khaen-upmix' 2>/dev/null || true)"
 if [ -n "$PROCS" ]; then
   fail "D 仍存在旧 C 进程（preflight 不代停，需在窗口内由 03-retire-c 处理；先确认 S1 已置 off）：$(printf '%s' "$PROCS" | head -n 3 | tr '\n' ' ')"
 else
-  pass "D 无 camilladsp/tspi-upmix 进程"
+  pass "D 无 camilladsp/khaen-upmix 进程"
 fi
 
 # ---- E 模式/入口 -------------------------------------------------------------
-MODE_FILE="$(p /run/tspi/mode)"
+MODE_FILE="$(p /run/khaen/mode)"
 if [ -f "$MODE_FILE" ]; then
   MODE="$(tr -d '[:space:]' < "$MODE_FILE" 2>/dev/null || true)"
   case "$MODE" in
-    dante|aes67) fail "E /run/tspi/mode=$MODE（音频模式仍开启；必须在 off 后切换）" ;;
-    *) pass "E /run/tspi/mode=${MODE:-unknown}（非 dante/aes67）" ;;
+    dante|aes67) fail "E /run/khaen/mode=$MODE（音频模式仍开启；必须在 off 后切换）" ;;
+    *) pass "E /run/khaen/mode=${MODE:-unknown}（非 dante/aes67）" ;;
   esac
 else
-  pass "E /run/tspi/mode 不存在（audio-off 语义）"
+  pass "E /run/khaen/mode 不存在（audio-off 语义）"
 fi
 ENTRY="$(c_entry_present || true)"
 if [ -n "$ENTRY" ]; then
@@ -175,7 +175,7 @@ else
 fi
 
 # ---- G 回退素材 ---------------------------------------------------------------
-LG="$(p "$TSPI_STATE_DIR/last-good.json")"
+LG="$(p "$KHAEN_STATE_DIR/last-good.json")"
 if [ -f "$LG" ]; then
   pass "G 自研 last-good 存在: $LG"
 elif [ "$ALLOW_FIRST" = "1" ]; then
@@ -188,42 +188,42 @@ fi
 if [ "$ROOT" != "/" ]; then
   soft "I --root fixture：跳过 host-level MOTU 48k keeper/192k 检查（T71 live ROOT=/ 才为硬门）"
 else
-if sunit_exists tspi-motu-48k-keeper.timer; then
-  KSTATE="$(sunit_enabled_state tspi-motu-48k-keeper.timer)"
+if sunit_exists khaen-motu-48k-keeper.timer; then
+  KSTATE="$(sunit_enabled_state khaen-motu-48k-keeper.timer)"
   case "$KSTATE" in
     enabled|enabled-runtime) pass "I MOTU 48k keeper timer 已安装且 enabled（$KSTATE）" ;;
     *) fail "I MOTU 48k keeper timer 未 enabled（state=${KSTATE:-unknown}）；开机/重枚举后 48k 无保证" ;;
   esac
 else
-  fail "I tspi-motu-48k-keeper.timer 未安装（04-install-release.sh 未完成或 unit 缺失）"
+  fail "I khaen-motu-48k-keeper.timer 未安装（04-install-release.sh 未完成或 unit 缺失）"
 fi
-if [ -x "$(p /usr/local/lib/tspi/motu-48k-keeper)" ]; then
-  pass "I MOTU 48k keeper 脚本可执行: /usr/local/lib/tspi/motu-48k-keeper"
+if [ -x "$(p /usr/local/lib/khaen/motu-48k-keeper)" ]; then
+  pass "I MOTU 48k keeper 脚本可执行: /usr/local/lib/khaen/motu-48k-keeper"
 else
-  fail "I 缺少 /usr/local/lib/tspi/motu-48k-keeper（静音 1s 48k keeper）"
+  fail "I 缺少 /usr/local/lib/khaen/motu-48k-keeper（静音 1s 48k keeper）"
 fi
 # F-43：192k 硬失败必须覆盖新栈 toml（F-18 后 04 会安装它），并同时拒绝 176.4k。
 BAD192=""
-for f in /run/tspi/config.json /etc/tspi-audio/default.env /etc/khaen-audio-web/config.toml \
-         "$TSPI_ETC/rt-host.env" "$TSPI_ETC/rt-host.toml" "$TSPI_ETC/rt-daemon.toml"; do
+for f in /run/khaen/config.json /etc/khaen-audio/default.env /etc/khaen-audio-web/config.toml \
+         "$KHAEN_ETC/rt-host.env" "$KHAEN_ETC/rt-host.toml" "$KHAEN_ETC/rt-daemon.toml"; do
   [ -f "$(p "$f")" ] || continue
   if grep -qE '192000|192_000|176400|176_400' "$(p "$f")" 2>/dev/null; then BAD192="$BAD192 $f"; fi
 done
 if [ -z "$BAD192" ]; then
-  pass "I 运行配置无 192000/176400（/run/tspi、tspi-audio、khaen-audio-web、rt-host.env/toml、rt-daemon.toml）"
+  pass "I 运行配置无 192000/176400（/run/khaen、khaen-audio、khaen-audio-web、rt-host.env/toml、rt-daemon.toml）"
 else
   fail "I 运行配置仍含 192000/176400:$BAD192（禁 176.4/192k；先改为 48000/96000）"
 fi
 # F-43：udev 规则缺失时设备重枚举后 48k 无保证 → I 门失败（04 也必须硬失败）。
-if [ -f "$(p /etc/udev/rules.d/95-tspi-motu-48k-keeper.rules)" ]; then
+if [ -f "$(p /etc/udev/rules.d/95-khaen-motu-48k-keeper.rules)" ]; then
   pass "I MOTU 48k keeper udev 规则已安装"
 else
-  fail "I 缺少 /etc/udev/rules.d/95-tspi-motu-48k-keeper.rules（T28-P0 回归：udev 安装失败曾只 warn）"
+  fail "I 缺少 /etc/udev/rules.d/95-khaen-motu-48k-keeper.rules（T28-P0 回归：udev 安装失败曾只 warn）"
 fi
 # F-07：已安装程序里的 '192000' 字面量不一定是支持路径——拒绝实现本身会在错误文本里写 192000
-# （overlay tspi-channelmap/tspi-upmix 的 E_CM_FS_192K_DISABLED / E_UP_FS_192K_DISABLED）。
+# （overlay khaen-channelmap/khaen-upmix 的 E_CM_FS_192K_DISABLED / E_UP_FS_192K_DISABLED）。
 # 先认稳定拒绝码/禁用措辞，只有在没有拒绝证据时才记软警告。
-for f in /usr/local/bin/tspi-channelmap /usr/local/bin/tspi-upmix /usr/local/bin/khaen-audio-web; do
+for f in /usr/local/bin/khaen-channelmap /usr/local/bin/khaen-upmix /usr/local/bin/khaen-audio-web; do
   fp="$(p "$f")"; [ -f "$fp" ] || continue
   if grep -aqE 'E_UP_FS_192K_DISABLED|E_CM_FS_192K_DISABLED' "$fp"; then
     pass "I $f 已实现 176.4/192k 拒绝（稳定错误码；F-07）"
@@ -256,7 +256,7 @@ if [ "$PRE_INSTALL" = "1" ]; then
     log "J $IRQ_BALANCE_UNIT 未安装（无自动均衡；跳过停用）"
   fi
   if [ -f "$DEPLOY_ROOT/config/irq-affinity-pin" ]; then
-    pass "J deploy 提供 irq-affinity-pin（04 install 将安装到 /usr/local/lib/tspi/）"
+    pass "J deploy 提供 irq-affinity-pin（04 install 将安装到 /usr/local/lib/khaen/）"
   else
     fail "J deploy 缺 config/irq-affinity-pin（IRQ 持久化不可用）"
   fi
@@ -276,15 +276,15 @@ else
     else
       pass "J $IRQ_BALANCE_UNIT 未安装（无自动均衡）"
     fi
-    if sunit_exists tspi-irq-affinity.service; then
-      pass "J tspi-irq-affinity.service 已安装（Before=khaen-rt-host.service 钉核 oneshot）"
+    if sunit_exists khaen-irq-affinity.service; then
+      pass "J khaen-irq-affinity.service 已安装（Before=khaen-rt-host.service 钉核 oneshot）"
     else
-      fail "J tspi-irq-affinity.service 未安装（旧 bundle？重新 make-release-bundle）"
+      fail "J khaen-irq-affinity.service 未安装（旧 bundle？重新 make-release-bundle）"
     fi
-    if [ -f "$(p "$TSPI_ETC/irq-affinity.env")" ]; then
-      pass "J IRQ 配置已安装: $TSPI_ETC/irq-affinity.env"
+    if [ -f "$(p "$KHAEN_ETC/irq-affinity.env")" ]; then
+      pass "J IRQ 配置已安装: $KHAEN_ETC/irq-affinity.env"
     else
-      fail "J 缺 $TSPI_ETC/irq-affinity.env（04 install 未落盘 pin 配置）"
+      fail "J 缺 $KHAEN_ETC/irq-affinity.env（04 install 未落盘 pin 配置）"
     fi
     if out="$(py "$DEPLOY_ROOT/lib/irq_affinity.py" check --root "$ROOT" --pins "$IRQ_PINS" --t45-map "$IRQ_T45_MAP" --dsp-cpus "$IRQ_DSP_CPUS" 2>&1)"; then
       pass "J IRQ effective 已在 A53 + T45 IRQ 放置前置 PASS（lib/irq_affinity.py；${IRQ_PINS}）"
@@ -293,13 +293,13 @@ else
     fi
   fi
   # B1（2026-11-20 板窗）：开机竞态防护必须已装到板上（否则重启后 IRQ56/57 晚到 → host 不启动）
-  BOOTWAIT_UNIT="$(p "$TSPI_SYSTEMD_DIR/tspi-irq-affinity.service")"
-  if [ -f "$BOOTWAIT_UNIT" ] && grep -q '^ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait' "$BOOTWAIT_UNIT"; then
-    pass "J B1 开机竞态防护已安装：tspi-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait"
+  BOOTWAIT_UNIT="$(p "$KHAEN_SYSTEMD_DIR/khaen-irq-affinity.service")"
+  if [ -f "$BOOTWAIT_UNIT" ] && grep -q '^ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait' "$BOOTWAIT_UNIT"; then
+    pass "J B1 开机竞态防护已安装：khaen-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait"
   else
     fail "J B1 开机竞态防护缺失：$BOOTWAIT_UNIT 无 ExecStartPre=irq-affinity-pin wait（重启后 IRQ56/57 晚到会使 host 不启动；重打 bundle 并重跑 04）"
   fi
-  LEGACY_DROPIN="$(p "$TSPI_SYSTEMD_DIR/tspi-irq-affinity.service.d/10-wait-irq.conf")"
+  LEGACY_DROPIN="$(p "$KHAEN_SYSTEMD_DIR/khaen-irq-affinity.service.d/10-wait-irq.conf")"
   if [ -e "$LEGACY_DROPIN" ]; then
     fail "J 遗留 B1 live-only drop-in 仍存在：$LEGACY_DROPIN（语义已并入 unit；重跑 04 会迁移到 evidence/migrated-dropins/）"
   else

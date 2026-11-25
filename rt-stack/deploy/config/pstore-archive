@@ -3,13 +3,13 @@
 # 为什么：ramoops 在 DRAM（0x40110000），**冷断电会把它一起抹掉**，而它又只能在启动后读。
 # 所以只要板子还能起来，必须先归档；空的也要记一笔（"空"本身就是"没有 panic"的证据）。
 set -u
-OUT=/var/log/tspi/pstore
+OUT=/var/log/khaen/pstore
 mkdir -p "$OUT" 2>/dev/null || true
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | cut -c1-8)
 DEST="$OUT/$STAMP-$BOOT"
 SRC=/sys/fs/pstore
-say() { logger -t tspi-pstore-archive -- "$*"; }
+say() { logger -t khaen-pstore-archive -- "$*"; }
 
 files=$(ls -A "$SRC" 2>/dev/null | tr '\n' ' ')
 say "scan src=$SRC files=[${files:-none}] boot_id=$BOOT"
@@ -31,7 +31,7 @@ if [ -n "${files:-}" ]; then
   done
   # 归档成功后清空 pstore，避免下次被覆盖/混淆（内容已落盘）
   if [ -s "$DEST/INDEX.txt" ] && ls "$DEST" | grep -qv '^INDEX.txt$'; then
-    ( command -v systemd-cat >/dev/null && echo "pstore archived" | systemd-cat -t tspi-pstore-archive ) 2>/dev/null || true
+    ( command -v systemd-cat >/dev/null && echo "pstore archived" | systemd-cat -t khaen-pstore-archive ) 2>/dev/null || true
     rm -f "$SRC"/* 2>/dev/null || true
     say "pstore cleared after archive"
   fi

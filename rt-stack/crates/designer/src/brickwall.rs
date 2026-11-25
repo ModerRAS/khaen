@@ -24,7 +24,7 @@
 //! - 不实现 least_squares/remez 方法：method 字段保留全枚举，但非 kaiser_windowed_sinc 一律显式
 //!   E_FIR_FAMILY 拒绝（不冒充等波纹），理由同 T10 对 linear 的 least_squares 处理：DoD 只要求
 //!   有限近似，伪造未实现方法的系数等于静默降级。
-//! - 不生成 WAV/manifest（tspi-fir/v1 产物与 T55 报告字段归 T55），不做 target 导入（T11）、
+//! - 不生成 WAV/manifest（khaen-fir/v1 产物与 T55 报告字段归 T55），不做 target 导入（T11）、
 //!   P/G 融合（T12）与 RT 运行（本文件零 RT 路径、零板端动作）。
 //! - 15/25/40 ms 整链延迟预算与 profile 准入归 T55/T56：本模块只报 delay_ms 事实与 taps profile 分类，
 //!   不宣称“满足整链预算”。
@@ -970,7 +970,7 @@ pub fn validate(spec: &BrickwallSpec) -> Result<ValidatedBrickwallSpec, Brickwal
 // 设计
 // ---------------------------------------------------------------------------
 
-/// brickwall 设计产物（tspi-fir/v1 manifest 的系数源；WAV/manifest 归 T55）。
+/// brickwall 设计产物（khaen-fir/v1 manifest 的系数源；WAV/manifest 归 T55）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct BrickwallDesign {
     /// 原参数。

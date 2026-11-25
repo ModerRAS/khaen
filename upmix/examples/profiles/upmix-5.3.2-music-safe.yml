@@ -1,8 +1,8 @@
-# tspi-upmix 生成：upmix-5.3.2-music-safe
+# khaen-upmix 生成：upmix-5.3.2-music-safe
 # 中置轻提取（-6dB），环绕/高度低电平；3 个 SUB 同信号（可按房间微调）；safe：环绕/高度全用 mid 合成（无源反相）
-# 输入 pc-2ch（2ch）-> 输出 5.3.2（10ch）；schema tspi-channelmap/v2；tspi-upmix 1.2.0
-# 参数：中置 = mid=(L+R)/2 每源 -6.02 dB，角色增益 -6.0 dB；环绕 = (L-R)/2 差信号（每源 -6.02 dB，L/R 反相）总增益 -6.0 dB + 延迟 15.0 ms；高度 = mid=(L+R)/2 + 全频（不做高通/低通）（无人工去相关延迟）；低音管理（简化：仅 FL/FR mid 进 SUB，非完整矩阵 BM）：FL/FR 高通 80 Hz LR4；SUB1/SUB2/SUB3 = 低通 80 Hz LR4（源 -6.02 dB）；C/SL/SR 低频不汇总（redirect_from 仅校验不生效，真矩阵 BM 待做）；注意：环绕含 sources[].inverted——当前 tspi-channelmap 渲染器会丢弃（已知缺陷）；旧镜像应走独立 CamillaDSP 配置（tspi-upmix apply）或先打 patches/ 补丁；*-safe 只去掉源反相，不能绕过 bug A（Filter step 配对错误）；去相关：仅固定延迟（左右对称）；需要扩散感用 wide 预设或 decor.mode=allpass；safe 变体：只去掉 sources[].inverted（源反相）依赖；**不能绕过旧渲染器 bug A**（Filter step 的 channels/names 配对错，所有 per-role 滤波都会互相叠加）。旧镜像（<OEM v5）唯一可用路径=独立 CamillaDSP 配置（tspi-upmix apply）或先打 patches/ 补丁；safe 只用于“不想用源反相”的听感取舍。
-schema: tspi-channelmap/v2
+# 输入 pc-2ch（2ch）-> 输出 5.3.2（10ch）；schema khaen-channelmap/v2；khaen-upmix 1.2.0
+# 参数：中置 = mid=(L+R)/2 每源 -6.02 dB，角色增益 -6.0 dB；环绕 = (L-R)/2 差信号（每源 -6.02 dB，L/R 反相）总增益 -6.0 dB + 延迟 15.0 ms；高度 = mid=(L+R)/2 + 全频（不做高通/低通）（无人工去相关延迟）；低音管理（简化：仅 FL/FR mid 进 SUB，非完整矩阵 BM）：FL/FR 高通 80 Hz LR4；SUB1/SUB2/SUB3 = 低通 80 Hz LR4（源 -6.02 dB）；C/SL/SR 低频不汇总（redirect_from 仅校验不生效，真矩阵 BM 待做）；注意：环绕含 sources[].inverted——当前 khaen-channelmap 渲染器会丢弃（已知缺陷）；旧镜像应走独立 CamillaDSP 配置（khaen-upmix apply）或先打 patches/ 补丁；*-safe 只去掉源反相，不能绕过 bug A（Filter step 配对错误）；去相关：仅固定延迟（左右对称）；需要扩散感用 wide 预设或 decor.mode=allpass；safe 变体：只去掉 sources[].inverted（源反相）依赖；**不能绕过旧渲染器 bug A**（Filter step 的 channels/names 配对错，所有 per-role 滤波都会互相叠加）。旧镜像（<OEM v5）唯一可用路径=独立 CamillaDSP 配置（khaen-upmix apply）或先打 patches/ 补丁；safe 只用于“不想用源反相”的听感取舍。
+schema: khaen-channelmap/v2
 version: 2
 profile:
   name: upmix-5.3.2-music-safe

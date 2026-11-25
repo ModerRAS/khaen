@@ -4,7 +4,7 @@
 //!
 //! - **AES67 端点**：复用已有 aes67-daemon（RAVENNA/AES67，PTPv2 slave，B1 默认）
 //!   与 MergingRavennaALSA.ko 暴露的 ALSA capture 卡。本模块只做端点选择/校验：
-//!   从 /proc/asound/cards 文本按稳定 card id（RAVENNA，可用 TSPI_RAVENNA_CARD_ID
+//!   从 /proc/asound/cards 文本按稳定 card id（RAVENNA，可用 KHAEN_RAVENNA_CARD_ID
 //!   覆盖）解析出 hw:<card>,0（复用 T17 alsa::ResolvedDevice/find_card_index，
 //!   禁止写死 card 号）；解析已有 daemon/SAP 交付的 **SDP** 文本（只读解析，不生成、
 //!   不发送 RTSP/SAP/RTP，不实现 RTP 协议栈），校验 AES67 媒体面：L24/L16 @48k、
@@ -72,7 +72,7 @@
 //! scratch/lead/planner/DSP-HOST-DECISION.md §6、docs/h16-aip-research.md C4/C6/C7/C8、
 //! docs/h16-2ch-in-714.md §5、audio/overlay/etc/{aes67-daemon/daemon.conf,asound.conf,
 //! statime/inferno-ptpv1.toml,camilladsp/aes67.yml,camilladsp/dante.yml}、
-//! audio/overlay/usr/local/bin/tspi-mode（dante: inferno/S32_LE/96k；aes67:
+//! audio/overlay/usr/local/bin/khaen-mode（dante: inferno/S32_LE/96k；aes67:
 //! hw:RAVENNA,0/S32_LE/48k）、rt-stack/evidence/baseline/board-evidence/
 //! aoip-halfcheck-REPORT-20261116-1949.md、scratch/lead/inferno/inferno2pipe
 //! （native i32 交错写出）。
@@ -108,9 +108,9 @@ pub const AES67_PTIME_MAX_US: u32 = 1_000;
 pub const AES67_PTP_DOMAIN_DEFAULT: u8 = 0;
 /// AES67 默认 RTP 端口（daemon.conf rtp_port: 5004；仅作 profile 参考，不写死校验）。
 pub const AES67_RTP_PORT_DEFAULT: u16 = 5_004;
-/// RAVENNA ALSA 卡的稳定 card id 默认值（tspi-mode 用 TSPI_RAVENNA_CARD_ID 覆盖）。
+/// RAVENNA ALSA 卡的稳定 card id 默认值（khaen-mode 用 KHAEN_RAVENNA_CARD_ID 覆盖）。
 pub const AES67_CARD_ID_DEFAULT: &str = "RAVENNA";
-/// Inferno ALSA 插件 PCM 名（/etc/asound.conf 定义 pcm.inferno；tspi-mode dante 模式）。
+/// Inferno ALSA 插件 PCM 名（/etc/asound.conf 定义 pcm.inferno；khaen-mode dante 模式）。
 pub const INFERNO_ALSA_DEVICE: &str = "inferno";
 /// Inferno PTPv1 虚拟钟导出路径（statime usrvclock-path 默认值）。
 pub const INFERNO_CLOCK_PATH_DEFAULT: &str = "/tmp/ptp-usrvclock";
@@ -1278,7 +1278,7 @@ pub fn validate_aes67_service(
 // Inferno/Dante 端点环境（已有 ALSA 插件 / inferno2pipe；不解析协议）
 // ---------------------------------------------------------------------------
 
-/// Inferno ALSA 插件 / inferno2pipe 所需环境事实（tspi-mode 渲染 camilladsp.env）。
+/// Inferno ALSA 插件 / inferno2pipe 所需环境事实（khaen-mode 渲染 camilladsp.env）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InfernoEnv<'a> {
     /// device id（16 hex；auto 表示由 MAC 派生 + 0000）。
@@ -1503,7 +1503,7 @@ impl<'a> AoipEndpointSpec<'a> {
                 match (self.protocol, self.alsa_device) {
                     (AoipProtocol::Aes67, Some(AlsaDevice::Hw(device))) => {
                         if device.device_index != 0 {
-                            // tspi-mode 固定 hw:<RAVENNA>,0；其它 device 不经既有链路。
+                            // khaen-mode 固定 hw:<RAVENNA>,0；其它 device 不经既有链路。
                             return Err(AoipError::DeviceParams);
                         }
                     }

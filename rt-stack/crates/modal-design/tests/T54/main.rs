@@ -858,7 +858,7 @@ fn t54_artifact_ready_manifest_contract() {
     assert!(!manifest.contains("NaN"), "manifest must not contain NaN");
     assert!(!manifest.contains("inf"), "manifest must not contain inf");
     assert!(manifest.contains("\"status\":\"READY\""));
-    assert!(manifest.contains("\"schema\":\"tspi-modal-artifact/v1\""));
+    assert!(manifest.contains("\"schema\":\"khaen-modal-artifact/v1\""));
     bundle.verify().expect("READY artifact must self-verify");
 }
 
@@ -1758,7 +1758,7 @@ fn t54_artifact_write_to_dir() {
     let bundle = regularized_artifact(&fx);
     // R:\Temp may be read-only in this workspace; fall back to the build tree when the system
     // temp dir is not writable. Neither location is inside the repository source tree.
-    let name = format!("tspi-t54-artifact-{}", std::process::id());
+    let name = format!("khaen-t54-artifact-{}", std::process::id());
     let temp_candidate = std::env::temp_dir().join(&name);
     let dir = if fs::create_dir_all(&temp_candidate).is_ok() {
         temp_candidate

@@ -80,8 +80,8 @@ fn json_text(value: &JsonValue) -> String {
 
 #[test]
 fn content_contract_constants_frozen() {
-    assert_eq!(INPUT_CONTENT_SCHEMA, "tspi-input-content/v1");
-    assert_eq!(INPUT_MODE_SCHEMA, "tspi-input-mode/v1");
+    assert_eq!(INPUT_CONTENT_SCHEMA, "khaen-input-content/v1");
+    assert_eq!(INPUT_MODE_SCHEMA, "khaen-input-mode/v1");
     assert_eq!(INPUT_MODE_CHOICES, ["auto", "stereo", "multichannel"]);
     assert_eq!(DEFAULT_THRESHOLD_DB, -50.0);
     assert_eq!(DEFAULT_HYSTERESIS_DB, 6.0);
@@ -105,12 +105,12 @@ fn content_p1_policy_constants_frozen() {
     assert!(!P1_CONTENT_UPMMIX_SUPPORTED);
     assert_eq!(P1_NO_CONTENT_UPMMIX_REASON, "p1-no-content-upmix");
     assert_eq!(P1_INPUT_MODE_STATUS, "not_supported");
-    assert_eq!(P1_RETIRED_CONTENT_UNIT, "tspi-upmix-autodetect.service");
+    assert_eq!(P1_RETIRED_CONTENT_UNIT, "khaen-upmix-autodetect.service");
     assert_eq!(
         P1_RETIRED_CONTENT_UNIT_CAMILLA_DEPS,
         [
-            "Wants=tspi-camilladsp.service",
-            "After=tspi-camilladsp.service"
+            "Wants=khaen-camilladsp.service",
+            "After=khaen-camilladsp.service"
         ]
     );
     assert_eq!(P1_FORBIDDEN_CONTENT_FEATURES.len(), 3);
@@ -304,7 +304,7 @@ fn content_uses_t24_contract_constants_and_commands() {
 
 #[test]
 fn content_h16_role_index_matches_overlay_preset() {
-    let path = project_file("../../../audio/overlay/etc/tspi-audio/layout-presets.yml");
+    let path = project_file("../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
     assert!(path.exists(), "overlay layout preset missing: {path:?}");
     let text = read_lossy(&path);
     assert!(text.contains("h16-7.1.4"));
@@ -1074,7 +1074,7 @@ fn content_input_mode_override_json_roundtrip() {
     let json = override_file.to_json();
     assert_eq!(
         json.get("schema").and_then(JsonValue::as_str),
-        Some("tspi-input-mode/v1")
+        Some("khaen-input-mode/v1")
     );
     assert_eq!(
         json.get("mode").and_then(JsonValue::as_str),
@@ -1087,11 +1087,11 @@ fn content_input_mode_override_json_roundtrip() {
 
 #[test]
 fn content_input_mode_override_force_alias_normalized() {
-    let value = json_parse("{\"schema\":\"tspi-input-mode/v1\",\"mode\":\"force-multichannel\"}")
+    let value = json_parse("{\"schema\":\"khaen-input-mode/v1\",\"mode\":\"force-multichannel\"}")
         .expect("parse");
     let override_file = InputModeOverride::from_json(&value).expect("normalize");
     assert_eq!(override_file.mode, ContentMode::Multichannel);
-    let value = json_parse("{\"schema\":\"tspi-input-mode/v1\",\"mode\":\" FORCE-STEREO \"}")
+    let value = json_parse("{\"schema\":\"khaen-input-mode/v1\",\"mode\":\" FORCE-STEREO \"}")
         .expect("parse");
     let override_file = InputModeOverride::from_json(&value).expect("normalize");
     assert_eq!(override_file.mode, ContentMode::Stereo);
@@ -1100,18 +1100,18 @@ fn content_input_mode_override_force_alias_normalized() {
 #[test]
 fn content_input_mode_override_negative_matrix() {
     let unknown =
-        json_parse("{\"schema\":\"tspi-input-mode/v1\",\"mode\":\"5.1\"}").expect("parse");
+        json_parse("{\"schema\":\"khaen-input-mode/v1\",\"mode\":\"5.1\"}").expect("parse");
     assert_eq!(
         InputModeOverride::from_json(&unknown).unwrap_err().code(),
         ContentErrorCode::UnknownContentMode
     );
-    let missing = json_parse("{\"schema\":\"tspi-input-mode/v1\"}").expect("parse");
+    let missing = json_parse("{\"schema\":\"khaen-input-mode/v1\"}").expect("parse");
     assert_eq!(
         InputModeOverride::from_json(&missing).unwrap_err().code(),
         ContentErrorCode::MissingField
     );
     let wrong_schema =
-        json_parse("{\"schema\":\"tspi-input-mode/v2\",\"mode\":\"auto\"}").expect("parse");
+        json_parse("{\"schema\":\"khaen-input-mode/v2\",\"mode\":\"auto\"}").expect("parse");
     assert_eq!(
         InputModeOverride::from_json(&wrong_schema)
             .unwrap_err()
@@ -1129,7 +1129,7 @@ fn content_input_mode_override_negative_matrix() {
 #[test]
 fn content_input_mode_override_metadata_optional_and_unknown_keys_ignored() {
     let value = json_parse(
-        "{\"schema\":\"tspi-input-mode/v1\",\"mode\":\"auto\",\"updated_by\":\"cli\",\"x_extra\":1}",
+        "{\"schema\":\"khaen-input-mode/v1\",\"mode\":\"auto\",\"updated_by\":\"cli\",\"x_extra\":1}",
     )
     .expect("parse");
     let override_file = InputModeOverride::from_json(&value).expect("parse");
@@ -1484,7 +1484,7 @@ fn content_state_json_field_order_and_types() {
     );
     assert_eq!(
         json.get("schema").and_then(JsonValue::as_str),
-        Some("tspi-input-content/v1")
+        Some("khaen-input-content/v1")
     );
     assert_eq!(
         json.get("content_mode").and_then(JsonValue::as_str),
@@ -1548,7 +1548,7 @@ fn content_state_from_json_schema_mismatch() {
                 if key == "schema" {
                     (
                         key.clone(),
-                        JsonValue::String("tspi-input-content/v2".into()),
+                        JsonValue::String("khaen-input-content/v2".into()),
                     )
                 } else {
                     (key.clone(), value.clone())
@@ -1789,14 +1789,14 @@ fn content_p1_legacy_status_input_content_is_null() {
 #[test]
 fn content_p1_retired_unit_evidence() {
     let path =
-        project_file("../../../audio/overlay/etc/systemd/system/tspi-upmix-autodetect.service");
+        project_file("../../../audio/overlay/etc/systemd/system/khaen-upmix-autodetect.service");
     assert!(path.exists(), "retired S1 unit missing: {path:?}");
     assert_eq!(
         path.file_name().and_then(|name| name.to_str()),
         Some(P1_RETIRED_CONTENT_UNIT)
     );
     let text = read_lossy(&path);
-    assert!(text.contains("tspi-upmix"));
+    assert!(text.contains("khaen-upmix"));
     for marker in P1_RETIRED_CONTENT_UNIT_CAMILLA_DEPS {
         assert!(
             text.contains(marker),
@@ -1807,8 +1807,8 @@ fn content_p1_retired_unit_evidence() {
     assert!(text.contains("autodetect"));
     assert!(text.contains("--hold-ms 2500"));
     assert!(text.contains("--startup-freeze-ms 2500"));
-    assert!(text.contains("/run/tspi/input-content.json"));
-    assert!(text.contains("/etc/tspi-audio/input-mode.json"));
+    assert!(text.contains("/run/khaen/input-content.json"));
+    assert!(text.contains("/etc/khaen-audio/input-mode.json"));
 }
 
 #[test]
@@ -1816,11 +1816,11 @@ fn content_p1_retired_unit_name_and_dependencies_frozen() {
     assert!(P1_RETIRED_CONTENT_UNIT.ends_with(".service"));
     assert_eq!(
         P1_RETIRED_CONTENT_UNIT_CAMILLA_DEPS[0],
-        "Wants=tspi-camilladsp.service"
+        "Wants=khaen-camilladsp.service"
     );
     assert_eq!(
         P1_RETIRED_CONTENT_UNIT_CAMILLA_DEPS[1],
-        "After=tspi-camilladsp.service"
+        "After=khaen-camilladsp.service"
     );
     assert_eq!(P1_FORBIDDEN_CONTENT_FEATURES.len(), 3);
     assert!(!P1_CONTENT_UPMMIX_SUPPORTED);

@@ -23,7 +23,7 @@
 //!    artifact 目录重建 plan + quality 摘要并校验 plan hash/stale，不重放采集。
 //!
 //! 权威契约（只读输入）：
-//! - WBS T63 行与 §1/§5/§6/§7（scratch/lead/planner/TSPI-RT-STACK-WBS.md）；
+//! - WBS T63 行与 §1/§5/§6/§7（scratch/lead/planner/KHAEN-RT-STACK-WBS.md）；
 //! - DSP-HOST-DECISION §2.1（UMIK 多点仅 label/role/weight 必填、坐标/朝向可选、
 //!   design/validation 独立、预声明测点/频带/质量掩码、不看 holdout 再挑点）与 §2.6
 //!   （job 状态机/可恢复/失败 last-good/mute）；

@@ -21,7 +21,7 @@
 //! ## task-200 扩展：缺中置内容适配（center-absent downmix；先证据后改）
 //!
 //! 中置内容消失的位置（证据：`rt-stack/evidence/center-downmix/LAYER-ANALYSIS.md`）：
-//! 4.1.2 输出布局 7 个角色没有 C（`audio/overlay/etc/tspi-audio/layout-presets.yml:219-229`），
+//! 4.1.2 输出布局 7 个角色没有 C（`audio/overlay/etc/khaen-audio/layout-presets.yml:219-229`），
 //! 5.1 内容的 C 声道在 plan 的 A_map「选择/零填」处没有任何 role 可选中而被丢弃
 //! （core-v1 §1/§11.10、core/src/nodes.rs:17、calibration/src/compile_apply.rs:3046/3081
 //! 均冻结「plan 运行期禁止混音、A_map 每 role 至多一源且源唯一」）。

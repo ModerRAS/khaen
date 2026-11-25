@@ -14,7 +14,7 @@
 //!    `status=ok`、`plan.source=primary`、`plan.parse=t20-ok`、
 //!    `plan.header_crc32c=ok`、`swap.retire_ready=true`、`swap.synthetic=false`、
 //!    `swap.acks>=expected_workers`，再把 host 的真实 block all-ack 结果转换为
-//!    T66 `ApplySession::note_block_ack` 需要的 `TspiBlockAckV1`（字段来自 host 报告，
+//!    T66 `ApplySession::note_block_ack` 需要的 `KhaenBlockAckV1`（字段来自 host 报告，
 //!    **不是** T66 的 synthetic ack helper）；
 //! 4. policy：host 启动/校验/ack 任一失败 -> 返回稳定错误码，由 FitWiring 走
 //!    T66 rollback（last-good / safety mute），绝不写 applied version。
@@ -34,13 +34,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use khaen_compat::ws::{json_encode, json_object, json_parse, JsonValue};
-use khaen_core::abi::TspiBlockAckV1;
+use khaen_core::abi::KhaenBlockAckV1;
 
 use crate::compile_apply::CompiledPlan;
 use crate::job::sha256_hex;
 
 /// host apply 证据 schema。
-pub const HOST_APPLY_SCHEMA: &str = "tspi-cal-host-apply/v1";
+pub const HOST_APPLY_SCHEMA: &str = "khaen-cal-host-apply/v1";
 /// host plan 文件名。
 pub const HOST_PLAN_FILE: &str = "plan.bin";
 /// host manifest 文件名（T66 compile-report.json 原字节）。
@@ -64,7 +64,7 @@ pub const E_HOST_ACK: &str = "E_WIRING_HOST_ACK";
 /// rt-host plan-arena 应用配置（本 crate 只写文件/起进程，不打开设备）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostApplyConfig {
-    /// `khaen-rt-host` 可执行文件路径（默认 env TSPI_RT_HOST_BIN 或 "khaen-rt-host"）。
+    /// `khaen-rt-host` 可执行文件路径（默认 env KHAEN_RT_HOST_BIN 或 "khaen-rt-host"）。
     pub host_bin: PathBuf,
     /// ALSA backend："fake"（离线）或 "alsa"（板端真实设备；由 host 打开）。
     pub backend: String,
@@ -103,7 +103,7 @@ pub struct HostApplyConfig {
 
 impl Default for HostApplyConfig {
     fn default() -> Self {
-        let host_bin = std::env::var("TSPI_RT_HOST_BIN")
+        let host_bin = std::env::var("KHAEN_RT_HOST_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("khaen-rt-host"));
         HostApplyConfig {
@@ -244,7 +244,7 @@ impl HostApplyOutcome {
     ///
     /// 说明：host 的 swap 段由每个真实完成 block 的 `completed_block_ack` 汇总；
     /// 本函数只做 ABI 结构映射（三 phase 位图 = host acks 位图），不生成/放大任何 ack。
-    pub fn all_ack_block(&self, expected_workers: u8) -> Result<TspiBlockAckV1, String> {
+    pub fn all_ack_block(&self, expected_workers: u8) -> Result<KhaenBlockAckV1, String> {
         if !self.retire_ready || self.synthetic {
             return Err(format!(
                 "{E_HOST_ACK}: host 未给出真实 all-ack（retire_ready={} synthetic={}）",
@@ -264,7 +264,7 @@ impl HostApplyOutcome {
             ));
         }
         let block =
-            TspiBlockAckV1::new(self.all_ack_blocks, 0, self.plan_version, expected_workers);
+            KhaenBlockAckV1::new(self.all_ack_blocks, 0, self.plan_version, expected_workers);
         for phase in 0..block.phase_done.len() {
             block.phase_done[phase].store(mask, std::sync::atomic::Ordering::Release);
         }
@@ -305,7 +305,7 @@ impl HostApplyOutcome {
                 "note",
                 JsonValue::String(
                     "block all-ack 来自真实 khaen-rt-host plan-arena 运行（per-block completed_block_ack）；
-abi 映射为 TspiBlockAckV1 后喂 T66 ApplySession。backend=fake 时无真实声卡/声音；backend=alsa 属板端窗口。"
+abi 映射为 KhaenBlockAckV1 后喂 T66 ApplySession。backend=fake 时无真实声卡/声音；backend=alsa 属板端窗口。"
                         .to_string(),
                 ),
             ),
@@ -423,7 +423,7 @@ pub fn run_host_apply(
         .output()
         .map_err(|error| {
             format!(
-                "{E_HOST_RUN}: 启动 {} 失败：{error}（离线需 --host-bin 指向已构建的 khaen-rt-host；板端为 /opt/tspi-rt-stack/current/bin/khaen-rt-host）",
+                "{E_HOST_RUN}: 启动 {} 失败：{error}（离线需 --host-bin 指向已构建的 khaen-rt-host；板端为 /opt/khaen-rt-stack/current/bin/khaen-rt-host）",
                 config.host_bin.display()
             )
         })?;

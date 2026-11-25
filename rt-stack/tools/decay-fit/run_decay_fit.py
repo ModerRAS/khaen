@@ -289,7 +289,7 @@ def main(argv=None):
     sugg = O.build_suggestions(band_results, gate_by_band, energy_db, eff)
 
     results = {
-        "schema": "tspi-decay-fit/v1",
+        "schema": "khaen-decay-fit/v1",
         "task": "decay-fit-20261121: 125/200 Hz two-stage decay fit (offline, no sound card)",
         "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "tool": {"name": "decay-fit", "version": "1.0.0", "path": "rt-stack/tools/decay-fit"},
@@ -386,7 +386,7 @@ def main(argv=None):
         code_sha[rel] = sha256_file(os.path.join(HERE, rel.replace("/", os.sep)))
     code_sha["ir-diag/irdiag/metrics.py"] = sha256_file(
         os.path.abspath(os.path.join(HERE, "..", "ir-diag", "irdiag", "metrics.py")))
-    manifest = {"schema": "tspi-decay-fit-manifest/v1",
+    manifest = {"schema": "khaen-decay-fit-manifest/v1",
                 "generated_at": results["generated_at"],
                 "code_sha256": code_sha,
                 "captures": [{"tag": i["tag"], "sha256": i["capture_sha256"],

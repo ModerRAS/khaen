@@ -11,7 +11,7 @@ from . import metrics as M
 CODE_FILES = ["irdiag/excitation.py", "irdiag/metrics.py", "irdiag/analysis.py",
               "irdiag/pipeline.py", "irdiag/report.py", "run_ir_diag.py"]
 MANIFEST_PARAMS = {
-    "schema": "tspi-ir-diag-analysis-manifest/v1",
+    "schema": "khaen-ir-diag-analysis-manifest/v1",
     "spec": "rt-stack/spec/mimo-single-point-diag-v1.md (v1.2)",
     "fs_hz": 48000,
     "capture_format": "2ch interleaved S24_3LE @48k, channel 0 analysed (ch1 is an identical copy)",

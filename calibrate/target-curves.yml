@@ -1,4 +1,4 @@
-schema: tspi-target-curve/v1
+schema: khaen-target-curve/v1
 default: flat
 curves:
   # D4（2026-11-17）：内置只保留 flat + tilt10；旧 tilt(-3dB@16k) 已删除/superseded。

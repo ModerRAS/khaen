@@ -9,7 +9,7 @@
 use super::*;
 use core::mem::needs_drop;
 use khaen_core::abi::{
-    TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, ABI_VERSION, TSPI_PLAN_MAGIC,
+    KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1, ABI_VERSION, KHAEN_PLAN_MAGIC,
 };
 use khaen_core::rt::{
     PlanView, RtStatus, BLOCK_SIZES, MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_MATRIX_PATHS,
@@ -33,15 +33,15 @@ const COEFF_BYTES: usize = PATHS * PATH_TAPS as usize * 4 + DIAGS * DIAG_TAPS as
 // ---------------------------------------------------------------------------
 
 struct Fixture {
-    header: TspiPlanHeaderV1,
-    paths: Vec<TspiPathV1>,
-    diags: Vec<TspiDiagFirV1>,
-    roles: Vec<TspiRoleV1>,
+    header: KhaenPlanHeaderV1,
+    paths: Vec<KhaenPathV1>,
+    diags: Vec<KhaenDiagFirV1>,
+    roles: Vec<KhaenRoleV1>,
     coeffs: Vec<u8>,
 }
 
-fn path(in_index: u16, out_index: u16, taps: u32) -> TspiPathV1 {
-    TspiPathV1 {
+fn path(in_index: u16, out_index: u16, taps: u32) -> KhaenPathV1 {
+    KhaenPathV1 {
         in_index,
         out_index,
         taps,
@@ -55,8 +55,8 @@ fn path(in_index: u16, out_index: u16, taps: u32) -> TspiPathV1 {
     }
 }
 
-fn diag(out_index: u16, taps: u32) -> TspiDiagFirV1 {
-    TspiDiagFirV1 {
+fn diag(out_index: u16, taps: u32) -> KhaenDiagFirV1 {
+    KhaenDiagFirV1 {
         out_index,
         flags: 0,
         taps,
@@ -68,8 +68,8 @@ fn diag(out_index: u16, taps: u32) -> TspiDiagFirV1 {
     }
 }
 
-fn role(role_id: u16, out_index: u16) -> TspiRoleV1 {
-    TspiRoleV1 {
+fn role(role_id: u16, out_index: u16) -> KhaenRoleV1 {
+    KhaenRoleV1 {
         role_id,
         out_index,
         flags: 1,
@@ -88,12 +88,12 @@ fn role(role_id: u16, out_index: u16) -> TspiRoleV1 {
 
 impl Fixture {
     fn header_for(
-        paths: &[TspiPathV1],
-        diags: &[TspiDiagFirV1],
-        roles: &[TspiRoleV1],
-    ) -> TspiPlanHeaderV1 {
-        TspiPlanHeaderV1 {
-            magic: TSPI_PLAN_MAGIC,
+        paths: &[KhaenPathV1],
+        diags: &[KhaenDiagFirV1],
+        roles: &[KhaenRoleV1],
+    ) -> KhaenPlanHeaderV1 {
+        KhaenPlanHeaderV1 {
+            magic: KHAEN_PLAN_MAGIC,
             abi_version: ABI_VERSION,
             header_size: 128,
             plan_version: 7,
@@ -135,8 +135,8 @@ impl Fixture {
                 paths.push(path(inp, out, PATH_TAPS));
             }
         }
-        let diags: Vec<TspiDiagFirV1> = (0..DIAGS as u16).map(|out| diag(out, DIAG_TAPS)).collect();
-        let roles: Vec<TspiRoleV1> = (0..ROLES as u16).map(|id| role(id, id)).collect();
+        let diags: Vec<KhaenDiagFirV1> = (0..DIAGS as u16).map(|out| diag(out, DIAG_TAPS)).collect();
+        let roles: Vec<KhaenRoleV1> = (0..ROLES as u16).map(|id| role(id, id)).collect();
         let header = Self::header_for(&paths, &diags, &roles);
         Self {
             header,
@@ -148,9 +148,9 @@ impl Fixture {
     }
 
     fn sparse() -> Self {
-        let paths: Vec<TspiPathV1> = Vec::new();
-        let diags: Vec<TspiDiagFirV1> = Vec::new();
-        let roles: Vec<TspiRoleV1> = Vec::new();
+        let paths: Vec<KhaenPathV1> = Vec::new();
+        let diags: Vec<KhaenDiagFirV1> = Vec::new();
+        let roles: Vec<KhaenRoleV1> = Vec::new();
         let mut header = Self::header_for(&paths, &diags, &roles);
         header.n_in = 2;
         header.n_out = 2;

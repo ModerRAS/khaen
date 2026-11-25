@@ -196,7 +196,7 @@ impl HMatrix {
 ## 10. `fixture`（ground-truth 加载/校验/H 矩阵/重渲染比对）
 
 ```rust
-pub const FIXTURE_FORMAT_V1: &str = "tspi-roomforge-mimo-fixture/v1";
+pub const FIXTURE_FORMAT_V1: &str = "khaen-roomforge-mimo-fixture/v1";
 pub const RERENDER_TOLERANCE: f64 = 1e-5;
 
 pub struct RirSpec { pub format: String, pub channels: u16, pub length_samples: usize,
@@ -383,9 +383,9 @@ cd rt-stack
 cargo test -p khaen-room-sim --offline
 
 # 生成夹具的 5 场景 load + h_matrix + rerender_check（默认 ignored；需要夹具已生成）。
-# 注意：TSPI_ROOM_SIM_VALIDATION 是「输出 JSON 文件路径」，不是目录！
-$env:TSPI_ROOM_SIM_FIXTURES   = '...\mimo-opt-20261122\fixtures'
-$env:TSPI_ROOM_SIM_VALIDATION = '...\mimo-opt-20261122\validation\room-sim-render-check.json'
+# 注意：KHAEN_ROOM_SIM_VALIDATION 是「输出 JSON 文件路径」，不是目录！
+$env:KHAEN_ROOM_SIM_FIXTURES   = '...\mimo-opt-20261122\fixtures'
+$env:KHAEN_ROOM_SIM_VALIDATION = '...\mimo-opt-20261122\validation\room-sim-render-check.json'
 cargo test -p khaen-room-sim --test fixtures_validation --offline -- --ignored --nocapture
 ```
 

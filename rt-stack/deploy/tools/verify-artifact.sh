@@ -87,14 +87,14 @@ if [ "$DO_SELFTEST" = "1" ]; then
   if [ -z "$QEMU" ] || [ ! -x "$QEMU" ]; then warn "--selftest 但 qemu 不可用"; SELFTEST_JSON='"qemu_missing"'
   elif [ -z "$SYSROOT" ]; then warn "--selftest 需要 --sysroot"; SELFTEST_JSON='"sysroot_missing"'
   else
-    if "$QEMU" -L "$SYSROOT" "$BIN" selftest > /tmp/tspi-artifact-selftest.json 2>/tmp/tspi-artifact-selftest.err; then
-      pass "qemu selftest PASS"; SELFTEST_JSON="$(cat /tmp/tspi-artifact-selftest.json)"
+    if "$QEMU" -L "$SYSROOT" "$BIN" selftest > /tmp/khaen-artifact-selftest.json 2>/tmp/khaen-artifact-selftest.err; then
+      pass "qemu selftest PASS"; SELFTEST_JSON="$(cat /tmp/khaen-artifact-selftest.json)"
     else
       fail "qemu selftest FAIL"; SELFTEST_JSON='"fail"'
     fi
   fi
 fi
-JSON="{\"schema\":\"tspi-rt-stack/artifact-check/v1\",\"binary\":\"$(basename "$BIN")\",\"size\":$SIZE,\"sha256\":\"$SHA\",\"elf_class\":\"$CLASS\",\"machine\":\"$MACHINE\",\"type\":\"$ETYPE\",\"interp\":\"$INTERP\",\"needed\":[$(printf '%s' "$NEEDED" | sed 's/.*/"&"/' | paste -sd, -)],\"glibc_max\":\"$GLIBC_MAX\",\"alsa_version_max\":\"$ALSA_VER\",\"selftest\":$SELFTEST_JSON,\"fails\":$FAILS,\"warns\":$WARNS}"
+JSON="{\"schema\":\"khaen-rt-stack/artifact-check/v1\",\"binary\":\"$(basename "$BIN")\",\"size\":$SIZE,\"sha256\":\"$SHA\",\"elf_class\":\"$CLASS\",\"machine\":\"$MACHINE\",\"type\":\"$ETYPE\",\"interp\":\"$INTERP\",\"needed\":[$(printf '%s' "$NEEDED" | sed 's/.*/"&"/' | paste -sd, -)],\"glibc_max\":\"$GLIBC_MAX\",\"alsa_version_max\":\"$ALSA_VER\",\"selftest\":$SELFTEST_JSON,\"fails\":$FAILS,\"warns\":$WARNS}"
 if [ -n "$JSON_OUT" ]; then printf '%s\n' "$JSON" > "$JSON_OUT"; fi
 say "json: $JSON"
 say "RESULT: $( [ "$FAILS" -eq 0 ] && echo PASS || echo FAIL ) fails=$FAILS warns=$WARNS"

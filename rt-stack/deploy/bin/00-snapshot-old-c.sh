@@ -3,12 +3,12 @@
 #
 # 不变量：本脚本不 stop/start/enable/disable 任何服务、不打开 PCM、不写设备、不改配置；
 #         只读 /proc、/sys、systemd 查询、sha256/stat、有界 journal/ss 查询。
-# 输出：证据目录（默认 /var/lib/tspi-rt-stack/evidence/<ts>-00-snapshot-old-c/）：
+# 输出：证据目录（默认 /var/lib/khaen-rt-stack/evidence/<ts>-00-snapshot-old-c/）：
 #   meta.tsv files.tsv units.tsv procs.tsv runtime.tsv raw/ commands.log snapshot.json MANIFEST.sha256
 # 退出码：0 成功；2 用法/缺命令；3 只读自检失败（快照期间状态变化）；7 环境不支持。
 #
 # 用法：
-#   sudo ./00-snapshot-old-c.sh --live --out /var/lib/tspi-rt-stack/evidence   # 真正采集
+#   sudo ./00-snapshot-old-c.sh --live --out /var/lib/khaen-rt-stack/evidence   # 真正采集
 #   ./00-snapshot-old-c.sh                 # 默认 dry-run：只打印将执行的只读命令
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,7 +36,7 @@ done
 if [ -n "$OUT_BASE" ]; then
   EVIDENCE_DIR="${OUT_BASE%/}/${RUN_TS}-00-snapshot-old-c"
 else
-  EVIDENCE_DIR="${TSPI_EVIDENCE_RUN:-$(p "$TSPI_EVIDENCE_BASE")/${RUN_TS}-00-snapshot-old-c}"
+  EVIDENCE_DIR="${KHAEN_EVIDENCE_RUN:-$(p "$KHAEN_EVIDENCE_BASE")/${RUN_TS}-00-snapshot-old-c}"
 fi
 RAW="$EVIDENCE_DIR/raw"
 CMDLOG="$EVIDENCE_DIR/commands.log"
@@ -82,7 +82,7 @@ raw_cap_sh() {  # name shell-string
 }
 unit_row() {
   local u="$1" a e note=""
-  a="$("$TSPI_SYSTEMCTL" is-active "$u" 2>/dev/null || true)"; [ -n "$a" ] || a="unknown"
+  a="$("$KHAEN_SYSTEMCTL" is-active "$u" 2>/dev/null || true)"; [ -n "$a" ] || a="unknown"
   e="$(sunit_enabled_state "$u")"; [ -n "$e" ] || e="unknown"
   if ! sunit_exists "$u"; then note="NOT_PRESENT"; fi
   if [ "$DRY_RUN" = "1" ]; then log "[dry-run] unit $u active=$a enabled=$e $note"; return 0; fi
@@ -106,7 +106,7 @@ runtime_row() {
 # 完整性指纹：相关 unit active 集合 + /proc/asound/devices + /dev/snd 列表
 integrity_digest() {
   local units_digest asound_digest snd_digest
-  units_digest="$(for u in "${ALL_OLD_AUDIO_UNITS[@]}" "${NEW_STACK_UNITS[@]}"; do printf '%s=%s\n' "$u" "$("$TSPI_SYSTEMCTL" is-active "$u" 2>/dev/null || true)"; done | sha256sum | awk '{print $1}')"
+  units_digest="$(for u in "${ALL_OLD_AUDIO_UNITS[@]}" "${NEW_STACK_UNITS[@]}"; do printf '%s=%s\n' "$u" "$("$KHAEN_SYSTEMCTL" is-active "$u" 2>/dev/null || true)"; done | sha256sum | awk '{print $1}')"
   asound_digest="$(cat "$(p /proc/asound/devices)" 2>/dev/null | sha256sum | awk '{print $1}')"
   snd_digest="$(ls -la "$(p /dev/snd)" 2>/dev/null | sha256sum | awk '{print $1}')"
   printf '%s' "$units_digest$asound_digest$snd_digest" | sha256sum | awk '{print $1}'
@@ -137,14 +137,14 @@ meta integrity_before "$BEFORE_DIGEST"
 # ---------------------------------------------------------------------------
 # 2. unit 清单与状态（旧栈 9 + web + 新栈 + 可能的 socket/timer/drop-in）
 # ---------------------------------------------------------------------------
-raw_cap_sh unit_files "systemctl list-unit-files 'tspi-*' --no-pager 2>&1 || true"
-raw_cap_sh unit_list "systemctl list-units 'tspi-*' --all --no-pager 2>&1 || true"
-raw_cap_sh unit_cat "systemctl cat tspi-audio.target tspi-camilladsp.service tspi-statime-inferno.service tspi-aes67-daemon.service tspi-ravenna-lkm.service tspi-ptp4l-master.service tspi-phc2sys.service tspi-boot-mode.service tspi-upmix-autodetect.service khaen-audio-web.service 2>&1 || true"
+raw_cap_sh unit_files "systemctl list-unit-files 'khaen-*' --no-pager 2>&1 || true"
+raw_cap_sh unit_list "systemctl list-units 'khaen-*' --all --no-pager 2>&1 || true"
+raw_cap_sh unit_cat "systemctl cat khaen-audio.target khaen-camilladsp.service khaen-statime-inferno.service khaen-aes67-daemon.service khaen-ravenna-lkm.service khaen-ptp4l-master.service khaen-phc2sys.service khaen-boot-mode.service khaen-upmix-autodetect.service khaen-audio-web.service 2>&1 || true"
 raw_cap_sh wants "ls -la /etc/systemd/system/*.wants/ 2>/dev/null || true"
 for u in "${ALL_OLD_AUDIO_UNITS[@]}" "${NEW_STACK_UNITS[@]}"; do unit_row "$u"; done
 # socket/timer/drop-in 防 dependency 自动激活（bounded）
-raw_cap_sh sockets "systemctl list-unit-files 'tspi-*.socket' 'tspi-*.timer' --no-pager 2>&1 || true"
-raw_cap_sh dropins "find /etc/systemd/system -maxdepth 2 -path '*tspi-*.service.d/*.conf' -print 2>/dev/null | sort || true"
+raw_cap_sh sockets "systemctl list-unit-files 'khaen-*.socket' 'khaen-*.timer' --no-pager 2>&1 || true"
+raw_cap_sh dropins "find /etc/systemd/system -maxdepth 2 -path '*khaen-*.service.d/*.conf' -print 2>/dev/null | sort || true"
 
 # ---------------------------------------------------------------------------
 # 3. 进程快照（旧 C / 旧 web / 保留 AoIP 服务）
@@ -159,67 +159,67 @@ raw_cap_sh proc_holders "find /proc/[0-9]*/fd -maxdepth 1 -type l 2>/dev/null | 
 OLD_BINARIES=(
   /usr/local/bin/camilladsp
   /usr/local/bin/khaen-audio-web
-  /usr/local/bin/tspi-mode
-  /usr/local/bin/tspi-channelmap
-  /usr/local/bin/tspi-upmix
-  /usr/local/bin/tspi-ptp-status
+  /usr/local/bin/khaen-mode
+  /usr/local/bin/khaen-channelmap
+  /usr/local/bin/khaen-upmix
+  /usr/local/bin/khaen-ptp-status
   /usr/local/bin/statime
   /usr/local/bin/inferno2pipe
   /usr/local/bin/aes67-daemon
   /usr/sbin/ptp4l
   /usr/sbin/phc2sys
   /usr/sbin/pmc
-  /usr/local/lib/tspi/lib.sh
-  /usr/local/lib/tspi/ptp-status-hook
-  /usr/local/lib/tspi/ucm-backport-mk5.sh
+  /usr/local/lib/khaen/lib.sh
+  /usr/local/lib/khaen/ptp-status-hook
+  /usr/local/lib/khaen/ucm-backport-mk5.sh
   /usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_pcm_inferno.so
 )
 for b in "${OLD_BINARIES[@]}"; do file_row binary "$b"; done
 KVER="$(uname -r 2>/dev/null || true)"
 [ -n "$KVER" ] && file_row library "/lib/modules/$KVER/extra/MergingRavennaALSA.ko"
 for row in /usr/sbin/ptp4l /usr/sbin/phc2sys /usr/sbin/pmc; do file_row binary "$row"; done
-raw_cap_sh symlinks "for p in /usr/local/bin/camilladsp /usr/local/bin/khaen-audio-web /usr/local/bin/tspi-mode /usr/local/bin/tspi-upmix; do readlink -f \"\$p\" 2>/dev/null; done"
+raw_cap_sh symlinks "for p in /usr/local/bin/camilladsp /usr/local/bin/khaen-audio-web /usr/local/bin/khaen-mode /usr/local/bin/khaen-upmix; do readlink -f \"\$p\" 2>/dev/null; done"
 
 # ---------------------------------------------------------------------------
 # 5. 配置/unit/资产生成 sha256（旧栈 config；web auth 只 hash 不读内容）
 # ---------------------------------------------------------------------------
 OLD_CONFIGS=(
-  /etc/tspi-audio/layout-presets.yml
-  /etc/tspi-audio/channelmap.yml
-  /etc/tspi-audio/upmix/presets.yml
-  /etc/tspi-audio/input-mode.json
+  /etc/khaen-audio/layout-presets.yml
+  /etc/khaen-audio/channelmap.yml
+  /etc/khaen-audio/upmix/presets.yml
+  /etc/khaen-audio/input-mode.json
   /etc/camilladsp/dante.yml
   /etc/camilladsp/aes67.yml
   /etc/camilladsp/coeffs/README.md
-  /etc/default/tspi-audio
+  /etc/default/khaen-audio
   /etc/asound.conf
-  /etc/modprobe.d/tspi-audio.conf
+  /etc/modprobe.d/khaen-audio.conf
   /etc/ptp4l-master-aes67.conf
   /etc/statime/inferno-ptpv1.toml
   /etc/aes67-daemon/daemon.conf
-  /etc/security/limits.d/95-tspi-audio.conf
+  /etc/security/limits.d/95-khaen-audio.conf
   /etc/udev/rules.d/95-motu-ultralite-mk5.rules
-  /etc/tmpfiles.d/tspi-audio.conf
-  /etc/systemd/system/tspi-audio.target
-  /etc/systemd/system/tspi-camilladsp.service
-  /etc/systemd/system/tspi-upmix-autodetect.service
+  /etc/tmpfiles.d/khaen-audio.conf
+  /etc/systemd/system/khaen-audio.target
+  /etc/systemd/system/khaen-camilladsp.service
+  /etc/systemd/system/khaen-upmix-autodetect.service
   /etc/systemd/system/khaen-audio-web.service
   /etc/khaen-audio-web/config.toml
   /etc/khaen-audio-web/auth.json
 )
 for c in "${OLD_CONFIGS[@]}"; do file_row config "$c"; done
-raw_cap_sh tree_etc "find /etc/tspi-audio /etc/camilladsp /etc/khaen-audio-web -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort || true"
-raw_cap_sh tree_varlib "ls -la /var/lib/tspi/ 2>/dev/null; find /var/lib/tspi -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort | head -n 300 || true"
+raw_cap_sh tree_etc "find /etc/khaen-audio /etc/camilladsp /etc/khaen-audio-web -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort || true"
+raw_cap_sh tree_varlib "ls -la /var/lib/khaen/ 2>/dev/null; find /var/lib/khaen -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort | head -n 300 || true"
 raw_cap_sh pkg_versions "dpkg -l 2>/dev/null | grep -Ei 'alsa|boost|avahi|linuxptp|jq|statime' | head -n 120 || true"
-raw_cap_sh sha_release "sha256sum /etc/tspi-audio-manifest.txt 2>/dev/null || true"
+raw_cap_sh sha_release "sha256sum /etc/khaen-audio-manifest.txt 2>/dev/null || true"
 
 # ---------------------------------------------------------------------------
-# 6. 运行态（/run/tspi + /etc/tspi/last-mode + 新栈 last-good）
+# 6. 运行态（/run/khaen + /etc/khaen/last-mode + 新栈 last-good）
 # ---------------------------------------------------------------------------
-for f in "${C_ENTRY_FILES[@]}" /run/tspi/state.json /run/tspi/config.json /run/tspi/input-content.json /run/tspi/ptp-lock /var/lib/tspi-rt-stack/last-good.json; do
+for f in "${C_ENTRY_FILES[@]}" /run/khaen/state.json /run/khaen/config.json /run/khaen/input-content.json /run/khaen/ptp-lock /var/lib/khaen-rt-stack/last-good.json; do
   runtime_row "$f"
 done
-raw_cap_sh run_tspi "ls -la /run/tspi/ 2>/dev/null; for f in /run/tspi/mode /etc/tspi/last-mode; do echo \"== \$f\"; cat \"\$f\" 2>/dev/null || echo MISSING; done"
+raw_cap_sh run_khaen "ls -la /run/khaen/ 2>/dev/null; for f in /run/khaen/mode /etc/khaen/last-mode; do echo \"== \$f\"; cat \"\$f\" 2>/dev/null || echo MISSING; done"
 raw_cap_sh sockets_lsten "ss -ltnp 2>/dev/null | grep -E ':(80|1234|8080|8090)\\b' || true"
 
 # ---------------------------------------------------------------------------
@@ -237,7 +237,7 @@ raw_cap_sh net 'ip -br addr 2>/dev/null || true; ls -l /dev/ptp* 2>/dev/null || 
 # ---------------------------------------------------------------------------
 # 8. 有界 journal（只读；不清理/不改级别）
 # ---------------------------------------------------------------------------
-raw_cap_sh journal_c 'journalctl -u tspi-camilladsp --since "-24h" --no-pager -q 2>/dev/null | tail -n 80 || true'
+raw_cap_sh journal_c 'journalctl -u khaen-camilladsp --since "-24h" --no-pager -q 2>/dev/null | tail -n 80 || true'
 raw_cap_sh journal_web 'journalctl -u khaen-audio-web --since "-24h" --no-pager -q 2>/dev/null | tail -n 40 || true'
 
 # ---------------------------------------------------------------------------

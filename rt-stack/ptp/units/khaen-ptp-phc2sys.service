@@ -1,0 +1,35 @@
+[Unit]
+Description=KHAEN PTPv2 GM: phc2sys (system clock -> NIC PHC, TAI offset; skips cleanly without PHC)
+Documentation=man:phc2sys(8) file:///etc/khaen-ptp/ptp-master.env
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/khaen-ptp/ptp4l-master.conf
+PartOf=khaen-ptp.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/khaen-ptp/ptp-master.env
+ExecStart=/usr/local/lib/khaen/ptp-phc2sys-start
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=khaen-ptp
+RuntimeDirectoryMode=0755
+ReadWritePaths=/run/khaen-ptp
+Nice=-10
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+# CAP_SYS_TIME: clock_adjtime() on the PHC; CAP_NET_ADMIN/RAW: resolve the NIC/PHC pairing
+AmbientCapabilities=CAP_SYS_TIME CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_SYS_TIME CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectClock=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK AF_PACKET
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

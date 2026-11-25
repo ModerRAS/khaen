@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环：离线端到端自测（fake 合成数据）。
+"""KHAEN 校准批量闭环：离线端到端自测（fake 合成数据）。
 
 证明目标（对应 task-201 第 4 条）：
 1) plan 生成 + fail-closed 校验能拒绝非法配置（design<6、电平越窗、pilot 混入、cal sha 不符）。
@@ -20,7 +20,7 @@ import time
 
 from . import analysis, config as cfgmod, plan as planmod, runner
 
-SELFTEST_SCHEMA = "tspi-cal-batch-selftest/v1"
+SELFTEST_SCHEMA = "khaen-cal-batch-selftest/v1"
 
 
 def _base_config(repo_root: str, with_commands: bool = True) -> dict:
@@ -122,7 +122,7 @@ def _negative_plan_checks(cfg: dict, repo_root: str, checks: list) -> None:
 def run_selftest(outdir: str, keep: bool = False, scenarios=("improved", "worse", "flat")) -> dict:
     started = time.time()
     repo_root = cfgmod.repo_root_from(os.path.dirname(os.path.abspath(__file__)))
-    base_tmp = tempfile.mkdtemp(prefix="tspi-cal-batch-selftest-")
+    base_tmp = tempfile.mkdtemp(prefix="khaen-cal-batch-selftest-")
     checks = []
     results = {}
     errors = []
@@ -212,7 +212,7 @@ def run_selftest(outdir: str, keep: bool = False, scenarios=("improved", "worse"
     ok = len(errors) == 0 and all(c["ok"] for c in checks)
     result = {
         "schema": SELFTEST_SCHEMA,
-        "tool": "tspi-cal-batch",
+        "tool": "khaen-cal-batch",
         "created_at": analysis.plan_now(),
         "ok": ok,
         "checks_total": len(checks),

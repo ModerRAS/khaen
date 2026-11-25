@@ -1,12 +1,12 @@
 {
-  "schema": "tspi-cal-batch-config/v1",
+  "schema": "khaen-cal-batch-config/v1",
   "batch_label": "t6-batch-4.1.2",
   "selftest": false,
   "layout": "4.1.2",
   "fs": 48000,
   "drive_level_dbfs": -50.0,
   "rounds": 2,
-  "prep_dir": "/var/tmp/tspi-cal-batch/prep",
+  "prep_dir": "/var/tmp/khaen-cal-batch/prep",
   "restore_after_batch": false,
   "window": {
     "quiet_hours_ack": true,

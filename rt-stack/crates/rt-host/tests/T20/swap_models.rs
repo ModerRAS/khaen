@@ -43,7 +43,7 @@ fn push_u64(out: &mut Vec<u8>, value: u64) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
-fn header_bytes(header: &TspiPlanHeaderV1) -> [u8; 128] {
+fn header_bytes(header: &KhaenPlanHeaderV1) -> [u8; 128] {
     let mut out: Vec<u8> = Vec::with_capacity(128);
     push_u32(&mut out, header.magic); // 0
     push_u16(&mut out, header.abi_version); // 4
@@ -84,7 +84,7 @@ fn header_bytes(header: &TspiPlanHeaderV1) -> [u8; 128] {
     bytes
 }
 
-fn path_bytes(path: &TspiPathV1) -> [u8; 32] {
+fn path_bytes(path: &KhaenPathV1) -> [u8; 32] {
     let mut out: Vec<u8> = Vec::with_capacity(32);
     push_u16(&mut out, path.in_index);
     push_u16(&mut out, path.out_index);
@@ -101,7 +101,7 @@ fn path_bytes(path: &TspiPathV1) -> [u8; 32] {
     bytes
 }
 
-fn diag_bytes(diag: &TspiDiagFirV1) -> [u8; 32] {
+fn diag_bytes(diag: &KhaenDiagFirV1) -> [u8; 32] {
     let mut out: Vec<u8> = Vec::with_capacity(32);
     push_u16(&mut out, diag.out_index);
     push_u16(&mut out, diag.flags);
@@ -116,7 +116,7 @@ fn diag_bytes(diag: &TspiDiagFirV1) -> [u8; 32] {
     bytes
 }
 
-fn role_bytes(role: &TspiRoleV1) -> [u8; 32] {
+fn role_bytes(role: &KhaenRoleV1) -> [u8; 32] {
     let mut out: Vec<u8> = Vec::with_capacity(32);
     push_u16(&mut out, role.role_id);
     push_u16(&mut out, role.out_index);
@@ -142,8 +142,8 @@ fn make_path(
     taps: u32,
     delay: u32,
     coeff_offset: u64,
-) -> TspiPathV1 {
-    TspiPathV1 {
+) -> KhaenPathV1 {
+    KhaenPathV1 {
         in_index,
         out_index,
         taps,
@@ -157,8 +157,8 @@ fn make_path(
     }
 }
 
-fn make_diag(out_index: u16, taps: u32, delay: u32, coeff_offset: u64) -> TspiDiagFirV1 {
-    TspiDiagFirV1 {
+fn make_diag(out_index: u16, taps: u32, delay: u32, coeff_offset: u64) -> KhaenDiagFirV1 {
+    KhaenDiagFirV1 {
         out_index,
         flags: 1,
         taps,
@@ -170,8 +170,8 @@ fn make_diag(out_index: u16, taps: u32, delay: u32, coeff_offset: u64) -> TspiDi
     }
 }
 
-fn make_role(role_id: u16, out_index: u16, delay: u32) -> TspiRoleV1 {
-    TspiRoleV1 {
+fn make_role(role_id: u16, out_index: u16, delay: u32) -> KhaenRoleV1 {
+    KhaenRoleV1 {
         role_id,
         out_index,
         flags: 1,
@@ -189,10 +189,10 @@ fn make_role(role_id: u16, out_index: u16, delay: u32) -> TspiRoleV1 {
 }
 
 struct Fixture {
-    header: TspiPlanHeaderV1,
-    paths: Vec<TspiPathV1>,
-    diags: Vec<TspiDiagFirV1>,
-    roles: Vec<TspiRoleV1>,
+    header: KhaenPlanHeaderV1,
+    paths: Vec<KhaenPathV1>,
+    diags: Vec<KhaenDiagFirV1>,
+    roles: Vec<KhaenRoleV1>,
     coeffs: Vec<u8>,
     token_graph_id: [u8; 32],
 }
@@ -233,8 +233,8 @@ impl Fixture {
         let path_table_offset = 128u32;
         let diag_table_offset = path_table_offset + (PATH_COUNT * 32) as u32;
         let role_table_offset = diag_table_offset + (DIAG_COUNT * 32) as u32;
-        let header = TspiPlanHeaderV1 {
-            magic: TSPI_PLAN_MAGIC,
+        let header = KhaenPlanHeaderV1 {
+            magic: KHAEN_PLAN_MAGIC,
             abi_version: ABI_VERSION,
             header_size: 128,
             plan_version: 0,
@@ -367,12 +367,12 @@ fn two_worker_env() -> AdmissionEnv {
     env
 }
 
-fn control() -> TspiRtControlV1 {
-    TspiRtControlV1::new()
+fn control() -> KhaenRtControlV1 {
+    KhaenRtControlV1::new()
 }
 
-fn swap_ack() -> TspiSwapAckV1 {
-    TspiSwapAckV1::new()
+fn swap_ack() -> KhaenSwapAckV1 {
+    KhaenSwapAckV1::new()
 }
 
 fn admit_fixture(reg: &mut PlanRegistry, fixture: &Fixture) -> PlanVersion {
@@ -394,8 +394,8 @@ fn admit_fixture_mem(
 fn commit_fixture(
     reg: &mut PlanRegistry,
     fixture: &Fixture,
-    ctl: &mut TspiRtControlV1,
-    ack: &mut TspiSwapAckV1,
+    ctl: &mut KhaenRtControlV1,
+    ack: &mut KhaenSwapAckV1,
     epoch: u64,
 ) -> PlanVersion {
     let version = admit_fixture(reg, fixture);
@@ -413,7 +413,7 @@ fn commit_fixture(
 }
 
 /// 建好 current=v1 的注册表（v1 已提交，无旧图可 retire）。
-fn setup_current_v1() -> (PlanRegistry, TspiRtControlV1, TspiSwapAckV1, PlanVersion) {
+fn setup_current_v1() -> (PlanRegistry, KhaenRtControlV1, KhaenSwapAckV1, PlanVersion) {
     let mut reg = PlanRegistry::new();
     let mut ctl = control();
     let mut ack = swap_ack();
@@ -421,8 +421,8 @@ fn setup_current_v1() -> (PlanRegistry, TspiRtControlV1, TspiSwapAckV1, PlanVers
     (reg, ctl, ack, version)
 }
 
-fn all_ack_block(plan_version: PlanVersion, expected: u8) -> TspiBlockAckV1 {
-    let ack = TspiBlockAckV1::new(1, 0, plan_version, expected);
+fn all_ack_block(plan_version: PlanVersion, expected: u8) -> KhaenBlockAckV1 {
+    let ack = KhaenBlockAckV1::new(1, 0, plan_version, expected);
     let mask = ack_mask(expected);
     let mut phase = 0usize;
     while phase < SWAP_ACK_PHASES {
@@ -432,8 +432,8 @@ fn all_ack_block(plan_version: PlanVersion, expected: u8) -> TspiBlockAckV1 {
     ack
 }
 
-fn partial_block(plan_version: PlanVersion, expected: u8) -> TspiBlockAckV1 {
-    let ack = TspiBlockAckV1::new(2, 0, plan_version, expected);
+fn partial_block(plan_version: PlanVersion, expected: u8) -> KhaenBlockAckV1 {
+    let ack = KhaenBlockAckV1::new(2, 0, plan_version, expected);
     let mask = ack_mask(expected);
     ack.phase_done[0].store(mask, Ordering::Release);
     ack.phase_done[1].store(mask & 0b01, Ordering::Release);
@@ -446,71 +446,71 @@ fn partial_block(plan_version: PlanVersion, expected: u8) -> TspiBlockAckV1 {
 
 #[test]
 fn t20_swap_ack_layout_matches_spec() {
-    assert_eq!(size_of::<TspiSwapAckV1>(), SWAP_ACK_BYTES);
-    assert_eq!(align_of::<TspiSwapAckV1>(), 64);
-    assert_eq!(offset_of!(TspiSwapAckV1, plan_version), 0);
-    assert_eq!(offset_of!(TspiSwapAckV1, expected_workers), 4);
-    assert_eq!(offset_of!(TspiSwapAckV1, flags), 5);
-    assert_eq!(offset_of!(TspiSwapAckV1, reserved0), 6);
-    assert_eq!(offset_of!(TspiSwapAckV1, ack_mask), 8);
-    assert_eq!(offset_of!(TspiSwapAckV1, retire_ready), 12);
-    assert_eq!(offset_of!(TspiSwapAckV1, retire_epoch), 16);
-    assert_eq!(offset_of!(TspiSwapAckV1, next_plan_version), 24);
-    assert_eq!(offset_of!(TspiSwapAckV1, reserved1), 28);
-    assert_eq!(offset_of!(TspiSwapAckV1, old_plan_ptr), 32);
-    assert_eq!(offset_of!(TspiSwapAckV1, reserved2), 40);
-    assert_eq!(offset_of!(TspiSwapAckV1, reserved3), 48);
-    assert_eq!(offset_of!(TspiSwapAckV1, reserved4), 56);
+    assert_eq!(size_of::<KhaenSwapAckV1>(), SWAP_ACK_BYTES);
+    assert_eq!(align_of::<KhaenSwapAckV1>(), 64);
+    assert_eq!(offset_of!(KhaenSwapAckV1, plan_version), 0);
+    assert_eq!(offset_of!(KhaenSwapAckV1, expected_workers), 4);
+    assert_eq!(offset_of!(KhaenSwapAckV1, flags), 5);
+    assert_eq!(offset_of!(KhaenSwapAckV1, reserved0), 6);
+    assert_eq!(offset_of!(KhaenSwapAckV1, ack_mask), 8);
+    assert_eq!(offset_of!(KhaenSwapAckV1, retire_ready), 12);
+    assert_eq!(offset_of!(KhaenSwapAckV1, retire_epoch), 16);
+    assert_eq!(offset_of!(KhaenSwapAckV1, next_plan_version), 24);
+    assert_eq!(offset_of!(KhaenSwapAckV1, reserved1), 28);
+    assert_eq!(offset_of!(KhaenSwapAckV1, old_plan_ptr), 32);
+    assert_eq!(offset_of!(KhaenSwapAckV1, reserved2), 40);
+    assert_eq!(offset_of!(KhaenSwapAckV1, reserved3), 48);
+    assert_eq!(offset_of!(KhaenSwapAckV1, reserved4), 56);
 }
 
 #[test]
 fn t20_crossfade_budget_layout_matches_spec() {
-    assert_eq!(size_of::<TspiCrossfadeBudgetV1>(), CROSSFADE_BUDGET_BYTES);
-    assert_eq!(align_of::<TspiCrossfadeBudgetV1>(), 64);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, old_plan_version), 0);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, new_plan_version), 4);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, old_total_delay_q16), 8);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, new_total_delay_q16), 12);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, crossfade_frames), 16);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, flags), 20);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, peak_cpu_ns), 24);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, peak_ram_bytes), 32);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, available_cpu_ns), 40);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, available_ram_bytes), 48);
-    assert_eq!(offset_of!(TspiCrossfadeBudgetV1, reserved), 56);
+    assert_eq!(size_of::<KhaenCrossfadeBudgetV1>(), CROSSFADE_BUDGET_BYTES);
+    assert_eq!(align_of::<KhaenCrossfadeBudgetV1>(), 64);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, old_plan_version), 0);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, new_plan_version), 4);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, old_total_delay_q16), 8);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, new_total_delay_q16), 12);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, crossfade_frames), 16);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, flags), 20);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, peak_cpu_ns), 24);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, peak_ram_bytes), 32);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, available_cpu_ns), 40);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, available_ram_bytes), 48);
+    assert_eq!(offset_of!(KhaenCrossfadeBudgetV1, reserved), 56);
 }
 
 #[test]
 fn t20_rt_visible_types_have_no_drop() {
-    assert!(!needs_drop::<TspiSwapAckV1>());
-    assert!(!needs_drop::<TspiCrossfadeBudgetV1>());
+    assert!(!needs_drop::<KhaenSwapAckV1>());
+    assert!(!needs_drop::<KhaenCrossfadeBudgetV1>());
     assert!(!needs_drop::<GraphQuarantine>());
     assert!(!needs_drop::<RtStatus>());
     assert!(!needs_drop::<PlanVersion>());
     assert!(!needs_drop::<PlanView<'static>>());
-    assert!(!needs_drop::<TspiBlockAckV1>());
-    assert!(!needs_drop::<TspiRtControlV1>());
+    assert!(!needs_drop::<KhaenBlockAckV1>());
+    assert!(!needs_drop::<KhaenRtControlV1>());
 }
 
 #[test]
 fn t20_rt_entry_points_take_borrowed_rt_structs_only() {
     // 函数指针类型断言：RT 入口只接收 &RtControl/&SwapAck/&Quarantine/&mut BlockAck 等
     // 非拥有结构，返回 RtStatus/Result<PlanVersion,RtStatus>/Option 等 Copy 值（R-DROP-03/05）。
-    let commit: fn(&TspiRtControlV1) -> Result<PlanVersion, RtStatus> =
+    let commit: fn(&KhaenRtControlV1) -> Result<PlanVersion, RtStatus> =
         commit_swap_at_block_boundary;
-    let note_block: fn(&TspiSwapAckV1, &TspiBlockAckV1) -> RtStatus =
-        TspiSwapAckV1::note_block_all_ack;
-    let ack_worker: fn(&TspiSwapAckV1, u8) -> RtStatus = TspiSwapAckV1::ack_worker;
+    let note_block: fn(&KhaenSwapAckV1, &KhaenBlockAckV1) -> RtStatus =
+        KhaenSwapAckV1::note_block_all_ack;
+    let ack_worker: fn(&KhaenSwapAckV1, u8) -> RtStatus = KhaenSwapAckV1::ack_worker;
     let enter: fn(&GraphQuarantine, u64, PlanVersion, u64, u8) -> Result<usize, RtStatus> =
         GraphQuarantine::enter;
     let note: fn(&GraphQuarantine, usize, u8, PlanVersion, u64) -> RtStatus =
         GraphQuarantine::note_ack;
     let _ = (commit, note_block, ack_worker, enter, note);
     // RT 结构只携带旧 arena 的裸地址（u64），从不携带 Arc/引用所有权。
-    let ack = TspiSwapAckV1::new();
+    let ack = KhaenSwapAckV1::new();
     let _: u64 = ack.old_plan_ptr;
     // 空 ctl 上 commit 是 fail-closed（不是 panic）：IDLE -> ERR_SWITCH_BUSY(120)。
-    let ctl = TspiRtControlV1::new();
+    let ctl = KhaenRtControlV1::new();
     assert_eq!(
         commit_swap_at_block_boundary(&ctl).unwrap_err().code(),
         RtStatus::ERR_SWITCH_BUSY.code()
@@ -532,7 +532,7 @@ fn t20_graph_quarantine_constants_match_spec() {
 }
 
 // ---------------------------------------------------------------------------
-// B. TspiSwapAckV1（block-version + 4 worker ack；§7.3/§11.13）
+// B. KhaenSwapAckV1（block-version + 4 worker ack；§7.3/§11.13）
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -874,7 +874,7 @@ fn t20_admit_accepts_plan_abi_v2_without_iir() {
     // GAP-T66-3 向后/向前兼容：v2 且无 IIR 表（reserved3 全 0）等价 v1 语义，必须准入。
     let mut reg = PlanRegistry::new();
     let mut fixture = Fixture::canonical();
-    fixture.header.abi_version = khaen_core::abi::TSPI_PLAN_ABI_V2;
+    fixture.header.abi_version = khaen_core::abi::KHAEN_PLAN_ABI_V2;
     let version = admit_fixture(&mut reg, &fixture);
     assert_eq!(version, 1);
     assert!(reg.iir_entries(version).expect("v2 plan").is_empty());
@@ -1428,8 +1428,8 @@ fn quarantine_slot(reg: &PlanRegistry, version: PlanVersion) -> usize {
 /// 把 current 从 old 切到 new（admit+stage+arm+commit+complete），返回新版本。
 fn swap_current(
     reg: &mut PlanRegistry,
-    ctl: &mut TspiRtControlV1,
-    ack: &mut TspiSwapAckV1,
+    ctl: &mut KhaenRtControlV1,
+    ack: &mut KhaenSwapAckV1,
     fixture: &Fixture,
     epoch: u64,
 ) -> PlanVersion {
@@ -1608,7 +1608,7 @@ fn t20_rt_path_does_not_touch_arc_count() {
     let slot = quarantine_slot(&reg, old);
     assert_eq!(reg.arena_strong_count(old), Some(1));
     let block = all_ack_block(new, RT_WORKERS);
-    // 全部 RT 入口（&TspiSwapAckV1/&GraphQuarantine/&TspiBlockAckV1）都不改变强引用计数。
+    // 全部 RT 入口（&KhaenSwapAckV1/&GraphQuarantine/&KhaenBlockAckV1）都不改变强引用计数。
     assert_eq!(ack.ack_worker(0), RtStatus::OK);
     assert_eq!(
         note_worker_switched(&ack, reg.quarantine(), slot, 0, old, 10, new),
@@ -1721,7 +1721,7 @@ fn crossfade_budget_for(
     old: PlanVersion,
     fixture: &Fixture,
     frames: u32,
-) -> TspiCrossfadeBudgetV1 {
+) -> KhaenCrossfadeBudgetV1 {
     let env = base_env();
     let old_view = match reg.plan_view(old) {
         Some(view) => view,
@@ -1732,7 +1732,7 @@ fn crossfade_budget_for(
     let ram_lower = old_memory.graph_current_bytes + new_memory.graph_current_bytes;
     let min_cpu = t_block_ns_ceil(FS, BLOCK);
     let total = fixture.uniform_delay_q16() as u32;
-    TspiCrossfadeBudgetV1::new(
+    KhaenCrossfadeBudgetV1::new(
         0,
         0,
         total,
@@ -1747,7 +1747,7 @@ fn crossfade_budget_for(
 
 #[test]
 fn t20_crossfade_budget_validate_structure() {
-    let mut budget = TspiCrossfadeBudgetV1::new(1, 2, 0, 0, BLOCK as u32, 1, 1, 1, 1);
+    let mut budget = KhaenCrossfadeBudgetV1::new(1, 2, 0, 0, BLOCK as u32, 1, 1, 1, 1);
     assert!(budget.validate().is_ok());
     budget.flags = 4;
     assert_eq!(budget.validate(), ERR_CROSSFADE_BUDGET);

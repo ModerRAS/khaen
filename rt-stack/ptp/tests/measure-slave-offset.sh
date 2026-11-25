@@ -1,5 +1,5 @@
 #!/bin/bash
-# TSPI PTP slave-side offset/stability sampler (pmc based; no root needed).
+# KHAEN PTP slave-side offset/stability sampler (pmc based; no root needed).
 #
 # Samples a running linuxptp slave through its pmc UDS: CURRENT_DATA_SET.offsetFromMaster
 # (raw PTP measurement, independent of the slave servo) plus PORT_DATA_SET.portState, once per
@@ -91,7 +91,7 @@ if offs:
         'detrended_max_abs_ns': round(max(absr), 1),
     }
 summary = {
-    'schema': 'tspi-ptp/slave-offset-sampler/v1',
+    'schema': 'khaen-ptp/slave-offset-sampler/v1',
     'tag': tag,
     'interval_s': interval,
     'port_state_counts': {s: states.count(s) for s in sorted(set(states))},

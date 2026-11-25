@@ -179,8 +179,8 @@ impl FakePlane {
         Self {
             state: WsRunState::Running,
             stop_reason: WsStopReason::None,
-            config_path: "/run/tspi/graph.tspi.json".to_string(),
-            config_title: "tspi playback graph".to_string(),
+            config_path: "/run/khaen/graph.khaen.json".to_string(),
+            config_title: "khaen playback graph".to_string(),
             volume_db: -20.0,
             mute: false,
             capture_rate_hz: 48_000,
@@ -190,7 +190,7 @@ impl FakePlane {
             buffer: 512,
             rate_adjust: 1.5,
             rate_adjust_available: true,
-            config_document: "{\"schema\":\"tspi-graph/v1\"}".to_string(),
+            config_document: "{\"schema\":\"khaen-graph/v1\"}".to_string(),
             rms: vec![-23.5, -24.25],
             faders: [Some(0.0), Some(-120.0), None, None],
             actual: good_actual(7),
@@ -479,7 +479,7 @@ fn ws_w01_close_aborts_pending_prepare() {
     let prepared = send(
         &mut session,
         &mut plane,
-        "{\"PrepareConfigJson\":\"{\\\"schema\\\":\\\"tspi-graph/v1\\\"}\"}",
+        "{\"PrepareConfigJson\":\"{\\\"schema\\\":\\\"khaen-graph/v1\\\"}\"}",
     );
     assert_eq!(
         ok_value(&prepared)
@@ -716,7 +716,7 @@ fn ws_w05_get_version_is_new_stack_protocol() {
     let mut plane = FakePlane::new();
     let reply = send(&mut session, &mut plane, "\"GetVersion\"");
     let version = string_value(&reply);
-    assert_eq!(version, "tspi-ws/1");
+    assert_eq!(version, "khaen-ws/1");
     assert_eq!(version, WS_PROTOCOL_VERSION);
     assert_ne!(version, "CamillaDSP");
 }
@@ -782,11 +782,11 @@ fn ws_w07_get_stop_reason_done_is_not_error() {
 fn ws_w08_config_path_and_title() {
     let mut session = new_session();
     let mut plane = FakePlane::new();
-    plane.config_path = "/run/tspi/graph.json".to_string();
+    plane.config_path = "/run/khaen/graph.json".to_string();
     plane.config_title = "P1 graph".to_string();
     assert_eq!(
         string_value(&send(&mut session, &mut plane, "\"GetConfigFilePath\"")),
-        "/run/tspi/graph.json"
+        "/run/khaen/graph.json"
     );
     assert_eq!(
         string_value(&send(&mut session, &mut plane, "\"GetConfigTitle\"")),
@@ -914,11 +914,11 @@ fn ws_w14_rate_adjust_finite_passthrough() {
 fn ws_w15_get_config_returns_document_string() {
     let mut session = new_session();
     let mut plane = FakePlane::new();
-    plane.config_document = "{\"schema\":\"tspi-graph/v1\",\"version\":3}".to_string();
+    plane.config_document = "{\"schema\":\"khaen-graph/v1\",\"version\":3}".to_string();
     let reply = send(&mut session, &mut plane, "\"GetConfig\"");
     assert_eq!(
         string_value(&reply),
-        "{\"schema\":\"tspi-graph/v1\",\"version\":3}"
+        "{\"schema\":\"khaen-graph/v1\",\"version\":3}"
     );
 }
 
@@ -1187,7 +1187,7 @@ fn commit_request(payload: JsonValue) -> String {
     request_object("CommitConfig", payload)
 }
 
-const CONFIG: &str = "{\"schema\":\"tspi-graph/v1\",\"version\":1}";
+const CONFIG: &str = "{\"schema\":\"khaen-graph/v1\",\"version\":1}";
 
 #[test]
 fn ws_w16_set_config_json_returns_actual_ack_only_after_all_ack() {
@@ -1741,7 +1741,7 @@ fn ws_every_supported_command_dispatches() {
 #[test]
 fn ws_protocol_version_contract() {
     assert!(!WS_PROTOCOL_VERSION.is_empty());
-    assert!(WS_PROTOCOL_VERSION.starts_with("tspi-ws/"));
+    assert!(WS_PROTOCOL_VERSION.starts_with("khaen-ws/"));
     assert!(!PROCESSING_LOAD_HINT.is_empty());
 }
 

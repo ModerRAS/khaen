@@ -1,4 +1,4 @@
-//! TSPI 离线契约检查工具（crate khaen-rt-check；bin rt-check）——WBS T06。
+//! KHAEN 离线契约检查工具（crate khaen-rt-check；bin rt-check）——WBS T06。
 //!
 //! 子命令（core-v1 §12.2）：
 //! - abi-layout：§11 结构 size/align/offset + §3 时限/容量向量（T06 已实现）

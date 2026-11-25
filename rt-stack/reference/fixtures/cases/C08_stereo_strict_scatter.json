@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C08_stereo_strict_scatter",
   "title": "stereo_strict A_map (FL/FR only) over 4.1.2 roles, scatter to 8ch container",
   "tags": [

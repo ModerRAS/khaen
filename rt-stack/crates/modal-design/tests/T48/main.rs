@@ -229,7 +229,7 @@ impl Fixture {
             })
             .unwrap_or_else(|| std::env::temp_dir().join("t48-ingest-fixtures"));
         let root = base.join(format!(
-            "tspi-t48-{}-{}-{}",
+            "khaen-t48-{}-{}-{}",
             std::process::id(),
             unique,
             tag
@@ -385,7 +385,7 @@ impl Drop for Fixture {
 
 fn session_json() -> J {
     J::obj(vec![
-        ("schema", J::s("tspi-mimo-measurement/v1")),
+        ("schema", J::s("khaen-mimo-measurement/v1")),
         ("session_id", J::s(SESSION_ID)),
         ("layout", J::s("4.1.2")),
         ("sample_rate_hz", J::n(SAMPLE_RATE as f64)),
@@ -403,7 +403,7 @@ fn session_json() -> J {
         (
             "tool",
             J::obj(vec![
-                ("name", J::s("tspi-audio-daemon")),
+                ("name", J::s("khaen-audio-daemon")),
                 ("version", J::s("0.1.0")),
             ]),
         ),
@@ -499,7 +499,7 @@ fn position_fixture(dir: &'static str, name: &str, role: &str, weight: f64) -> P
     PositionFixture {
         dir,
         meta: J::obj(vec![
-            ("schema", J::s("tspi-mimo-position/v1")),
+            ("schema", J::s("khaen-mimo-position/v1")),
             ("name", J::s(name)),
             ("role", J::s(role)),
             ("weight", J::n(weight)),
@@ -519,7 +519,7 @@ fn position_fixture(dir: &'static str, name: &str, role: &str, weight: f64) -> P
 fn diag_json(speaker: &str, out_index: u32, slot: u32) -> J {
     let actual = slot_start(slot);
     J::obj(vec![
-        ("schema", J::s("tspi-mimo-diag/v1")),
+        ("schema", J::s("khaen-mimo-diag/v1")),
         ("session_id", J::s(SESSION_ID)),
         ("epoch_id", J::n(EPOCH_ID as f64)),
         ("graph_id", J::s(GRAPH_ID)),
@@ -557,7 +557,7 @@ fn diag_json(speaker: &str, out_index: u32, slot: u32) -> J {
 
 fn analysis_json(position: &str, weight: f64, out_index: u32) -> J {
     J::obj(vec![
-        ("schema", J::s("tspi-channel-measurement/v1")),
+        ("schema", J::s("khaen-channel-measurement/v1")),
         ("channel", J::n(out_index as f64)),
         ("delay_samples", J::n(12.5)),
         ("delay_ms", J::n(12.5 / SAMPLE_RATE as f64 * 1000.0)),
@@ -760,7 +760,7 @@ fn t48_ingest_rejects_session_schema_mismatch() {
     let mut fixture = Fixture::new("schema");
     fixture
         .session
-        .set("schema", J::s("tspi-mimo-measurement/v0"));
+        .set("schema", J::s("khaen-mimo-measurement/v0"));
     let root = fixture.materialize();
     let error = expect_err(&root, IngestErrorKind::Schema);
     assert_eq!(error.code(), "E_INGEST_SCHEMA");

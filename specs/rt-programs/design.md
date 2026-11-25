@@ -6,9 +6,9 @@
 
 ## 1. 结论
 
-这是一套客户端/服务端。服务端只有 `khaen-rt-host`：它一直运行，占着 MOTU，听 Unix socket。前台命令 `tspi-cal` 像 `docker` 那样连上、做完一件事、打印结果、退出，自己不占声卡。网页是另一个客户端：浏览器连 `tspi-rt-daemon`，daemon 把同一次请求转到同一只 socket，自己也不占声卡。两个客户端没有各自的校准状态，状态只在 host 里。
+这是一套客户端/服务端。服务端只有 `khaen-rt-host`：它一直运行，占着 MOTU，听 Unix socket。前台命令 `khaen-cal` 像 `docker` 那样连上、做完一件事、打印结果、退出，自己不占声卡。网页是另一个客户端：浏览器连 `khaen-rt-daemon`，daemon 把同一次请求转到同一只 socket，自己也不占声卡。两个客户端没有各自的校准状态，状态只在 host 里。
 
-用户说的校准播放和录音留在 `khaen-rt-host` 里。进程不退出。`TSPI_CAL_JOB_BACKEND=real` 时 daemon 发这些请求，不再对这次任务返回 503。socket 不在时，命令和网页都失败，不在本地另开一套播放。
+用户说的校准播放和录音留在 `khaen-rt-host` 里。进程不退出。`KHAEN_CAL_JOB_BACKEND=real` 时 daemon 发这些请求，不再对这次任务返回 503。socket 不在时，命令和网页都失败，不在本地另开一套播放。
 
 校准入口是和 AES67 并列的一种 capture 源。进入校准模式后，AES67 和其他节目输入停在 DSP 链之外，扫频按块送进同一条 graph、侧路和 ALSA。求解在 host 的非实时线程里调用已经落地的 `emperor` 库和目标 FIR。
 
@@ -20,8 +20,8 @@
 
 ```mermaid
 flowchart LR
-  cli["tspi-cal 命令"] --> sock["Unix socket"]
-  web["向导 / tspi-rt-daemon"] --> sock
+  cli["khaen-cal 命令"] --> sock["Unix socket"]
+  web["向导 / khaen-rt-daemon"] --> sock
   sock --> host["khaen-rt-host 一直运行"]
   host --> chain["校准入口进同一条 DSP 链"]
   chain --> motu["MOTU"]
@@ -34,7 +34,7 @@ host 增加一路进程内的虚拟输入，capture 源名叫 `cal`。它的位�
 
 这条虚拟输入不做内核回环设备。板上是 Linux，再加一块 loopback 声卡会多出一个时钟，扫频和播放对不齐。
 
-socket 缺省路径是 `/run/tspi-rt-stack/host.sock`，测试可以改。请求至少有：`enter`、`measure`、`solve`、`remeasure`、`leave`。`enter` 和 `remeasure` 在真实设备上必须带出声确认，否则 host 不切换输入。前台就是这些短命令：`tspi-cal enter`、`tspi-cal measure`、`tspi-cal solve`、`tspi-cal remeasure`、`tspi-cal leave`。每条连上 socket，送出同名请求，读完结果后退出。网页的每一步发的是同一组请求，不另定一套动作。
+socket 缺省路径是 `/run/khaen-rt-stack/host.sock`，测试可以改。请求至少有：`enter`、`measure`、`solve`、`remeasure`、`leave`。`enter` 和 `remeasure` 在真实设备上必须带出声确认，否则 host 不切换输入。前台就是这些短命令：`khaen-cal enter`、`khaen-cal measure`、`khaen-cal solve`、`khaen-cal remeasure`、`khaen-cal leave`。每条连上 socket，送出同名请求，读完结果后退出。网页的每一步发的是同一组请求，不另定一套动作。
 
 `measure` 在同一次校准模式里扫两遍，各写各的脉冲响应。对数扫频的时间按倍频程均分，5 秒的 20–20000 Hz 里，150 Hz 以下大约只有 1.5 秒；同样 5 秒只扫 20–500 Hz，这段大约有 3 秒。衰减要看到 −25 dB 或 −35 dB，用全频扫频的低频段不够。所以 20–500 Hz 只进 `design_channel`，20–20000 Hz 只用来设计目标 FIR。
 
@@ -54,7 +54,7 @@ socket 缺省路径是 `/run/tspi-rt-stack/host.sock`，测试可以改。请求
 
 `CalBackendMode::Real` 改为连接 host 的 Unix socket，不再返回「未接线」。这个 port 接受 `kind=emperor`。`kind=full` 和 `kind=retest` 在 real 模式下仍返回 400，原来那条独立闭环不从这里重跑。`synthetic` 和 `cli` 两种旧模式保持现在的行为。socket 连不上时，real 模式返回 503，并且不伪造一次测量。
 
-daemon 用 `TSPI_HOST_SOCK` 找到 socket，缺省 `/run/tspi-rt-stack/host.sock`。它自己不打开声卡，也不调用 `systemctl restart`。进度读 host 写在任务目录里的 `status.json`，结束读 `summary.json`。向导上的结论字段就是 `verdict`。`synthetic=true` 的回执继续显式带出，向导沿用现有的「实测 / 示意 / 目标」分列，不把示意曲线显示成 MOTU 已经在播这套系数。
+daemon 用 `KHAEN_HOST_SOCK` 找到 socket，缺省 `/run/khaen-rt-stack/host.sock`。它自己不打开声卡，也不调用 `systemctl restart`。进度读 host 写在任务目录里的 `status.json`，结束读 `summary.json`。向导上的结论字段就是 `verdict`。`synthetic=true` 的回执继续显式带出，向导沿用现有的「实测 / 示意 / 目标」分列，不把示意曲线显示成 MOTU 已经在播这套系数。
 
 `CAL_JOB_KINDS` 增加 `emperor`。`POST /api/calibration/jobs` 在现有字段外接受：
 
@@ -65,7 +65,7 @@ daemon 用 `TSPI_HOST_SOCK` 找到 socket，缺省 `/run/tspi-rt-stack/host.sock
 | `supports` | 字符串数组，缺省空。名字必须在 FL、FR、SL、SR、HFL、HFR、SUB1 里 |
 | `target` | `flat` 或 `tilt10`，缺省 `flat`。只在 `stage=solve` 时读取 |
 
-daemon 不再按 `TSPI_CAL_BIN` 去拉起一个会自己播声的 `tspi-cal`。`POST` 增加 `stage`，取 `measure`、`solve`、`remeasure`。`solve` 才需要 `f_hi` 和 `supports`。`measure` 与 `remeasure` 在 real 模式下还要 `audible_sweep_authorized=true`。这些字段原样送到 socket。
+daemon 不再按 `KHAEN_CAL_BIN` 去拉起一个会自己播声的 `khaen-cal`。`POST` 增加 `stage`，取 `measure`、`solve`、`remeasure`。`solve` 才需要 `f_hi` 和 `supports`。`measure` 与 `remeasure` 在 real 模式下还要 `audible_sweep_authorized=true`。这些字段原样送到 socket。
 
 向导八步和这次任务的关系：
 
@@ -96,7 +96,7 @@ soak 未结束时，本仓库的安装脚本和这条命令都不连接 sender-h
 
 ## 5. 收回 nsp16
 
-仓库里没有 `nsp16` 文件。实现的第一步是只读读取板上的 `/etc/systemd/system/khaen-rt-host-nsp16.service` 和 `/etc/tspi-rt-stack/rt-host-nsp16.toml`，与 `rt-stack/service/khaen-rt-host.service` 以及现有 host 配置模板对照。
+仓库里没有 `nsp16` 文件。实现的第一步是只读读取板上的 `/etc/systemd/system/khaen-rt-host-nsp16.service` 和 `/etc/khaen-rt-stack/rt-host-nsp16.toml`，与 `rt-stack/service/khaen-rt-host.service` 以及现有 host 配置模板对照。
 
 收进 `khaen-rt-host` 部署文件的，是当前 16 声道播放仍依赖、而通用模板里没有的项，例如双流 AES67、plan、声卡和通道散开。只改了服务名的行不收。只属于 `deploy/config/khaen-rt-host-nsp7.service` 的项不收，nsp7 文件保持原样。
 
@@ -108,7 +108,7 @@ soak 未结束时，本仓库的安装脚本和这条命令都不连接 sender-h
 
 | 范围 | 断言 |
 | --- | --- |
-| `tspi-cal emperor solve` 连到假 socket | 写出 `g_pp` 和 `target_fir_taps`。不写出 IIR 段。`verdict=PREDICTED_ONLY`，`synthetic=true`。侧路系数不进目标 FIR。命令随后退出。 |
+| `khaen-cal emperor solve` 连到假 socket | 写出 `g_pp` 和 `target_fir_taps`。不写出 IIR 段。`verdict=PREDICTED_ONLY`，`synthetic=true`。侧路系数不进目标 FIR。命令随后退出。 |
 | 真实设备请求缺出声确认 | host 保持原来的 capture 源，不打开 UMIK。 |
 | daemon real，假 socket | `stage=measure` 与 `stage=remeasure` 都会让 host 进入校准模式，并且不调用 `systemctl`。已授权时回执带 host 写出的 verdict，`synthetic=false`。 |
 | daemon real | `kind=full` 为 400。socket 可用时 `kind=emperor` 不再是 503。 |

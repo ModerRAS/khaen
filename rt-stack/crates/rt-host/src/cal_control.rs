@@ -624,13 +624,9 @@ impl CalControl {
             if let Some(mut side) = play.side.take() {
                 delay_block(&mut side.dry_hist, &mut side.dry_pos, &mut output[..block]);
                 let mut corr = std::mem::take(&mut side.corr);
-                let status = side.runtime.process_block_f32(
-                    &input[..block],
-                    block,
-                    &mut corr,
-                    block,
-                    block,
-                );
+                let status =
+                    side.runtime
+                        .process_block_f32(&input[..block], block, &mut corr, block, block);
                 if status.is_ok() {
                     for (sample, extra) in output[..block].iter_mut().zip(corr.iter()) {
                         *sample += *extra;
@@ -692,7 +688,11 @@ impl CalControl {
     fn fail(&self, error: &str) -> String {
         let body = self.status_json(false, "refused");
         let escaped = error.replace('\\', "\\\\").replace('"', "\\\"");
-        body.replacen("\"error\":\"refused\"", &format!("\"error\":\"{escaped}\""), 1)
+        body.replacen(
+            "\"error\":\"refused\"",
+            &format!("\"error\":\"{escaped}\""),
+            1,
+        )
     }
 
     fn status_json(&self, ok: bool, error: &str) -> String {
@@ -770,9 +770,9 @@ impl CalControl {
 }
 
 fn write_job_file(name: &str, body: &str) {
-    let dir = std::env::var("TSPI_CAL_DIR").unwrap_or_else(|_| {
+    let dir = std::env::var("KHAEN_CAL_DIR").unwrap_or_else(|_| {
         if cfg!(unix) {
-            "/run/tspi-rt-stack".to_string()
+            "/run/khaen-rt-stack".to_string()
         } else {
             return String::new();
         }
@@ -879,9 +879,9 @@ pub fn note_chain_block() {
     }
 }
 
-/// 默认 `/run/tspi-rt-stack/host.sock`，可用 `TSPI_HOST_SOCK` 换路径。
+/// 默认 `/run/khaen-rt-stack/host.sock`，可用 `KHAEN_HOST_SOCK` 换路径。
 pub fn socket_path() -> String {
-    std::env::var("TSPI_HOST_SOCK").unwrap_or_else(|_| "/run/tspi-rt-stack/host.sock".to_string())
+    std::env::var("KHAEN_HOST_SOCK").unwrap_or_else(|_| "/run/khaen-rt-stack/host.sock".to_string())
 }
 
 /// 在调用线程上绑定 socket，再把 accept 丢到后台。绑定失败不改变播放模式。
@@ -894,7 +894,7 @@ pub fn spawn_server() -> Result<(), String> {
     {
         let listener = bind_listener(&socket_path())?;
         std::thread::Builder::new()
-            .name("tspi-cal-sock".to_string())
+            .name("khaen-cal-sock".to_string())
             .spawn(move || accept_loop(listener, control))
             .map_err(|error| format!("校准 socket 线程启动失败：{error}"))?;
         Ok(())
@@ -1089,7 +1089,10 @@ mod tests {
         let control = CalControl::new();
         let response = control.handle(r#"{"op":"enter","audible":true}"#);
         assert!(response.contains("\"ok\":true"), "{response}");
-        assert!(response.contains("\"capture_source\":\"cal\""), "{response}");
+        assert!(
+            response.contains("\"capture_source\":\"cal\""),
+            "{response}"
+        );
         assert!(
             response.contains("\"program_input_reaches_dsp\":false"),
             "{response}"
@@ -1147,13 +1150,15 @@ mod tests {
     fn solve_exports_g_pp_and_target_fir_without_iir() {
         let control = CalControl::new();
         control.set_primary_ir(modal_ir());
-        let response =
-            control.handle(r#"{"op":"solve","f_hi":150,"supports":[],"target":"flat"}"#);
+        let response = control.handle(r#"{"op":"solve","f_hi":150,"supports":[],"target":"flat"}"#);
         assert!(response.contains("\"ok\":true"), "{response}");
         assert!(response.contains("\"g_pp\":["), "{response}");
         assert!(response.contains("\"target_fir_taps\":65"), "{response}");
         assert!(response.contains("\"iir_sections\":0"), "{response}");
-        assert!(response.contains("\"verdict\":\"PREDICTED_ONLY\""), "{response}");
+        assert!(
+            response.contains("\"verdict\":\"PREDICTED_ONLY\""),
+            "{response}"
+        );
         assert!(response.contains("\"synthetic\":true"), "{response}");
         assert!(!response.contains("biquad"), "{response}");
         assert!(response.contains("\"supports\":[]"), "{response}");
@@ -1295,13 +1300,21 @@ mod tests {
         control.pass.store(PASS_LOW_SIDE, Ordering::Release);
         control.apply_output(&input, block, &mut output, block, block);
         let scale = 10f32.powf(-6.0 / 20.0);
-        assert!(output[..block].iter().all(|sample| sample.abs() < 1e-4), "直通要先对齐延迟");
         assert!(
-            output[block..].iter().all(|sample| (*sample - 0.40 * scale).abs() < 1e-4),
+            output[..block].iter().all(|sample| sample.abs() < 1e-4),
+            "直通要先对齐延迟"
+        );
+        assert!(
+            output[block..]
+                .iter()
+                .all(|sample| (*sample - 0.40 * scale).abs() < 1e-4),
             "其余音箱乘同一个预衰减"
         );
         let stored = control.play.lock().expect("play");
-        assert!((stored.g[0] - 2.0).abs() < 1e-6, "系数仍是原值，不是被削过的");
+        assert!(
+            (stored.g[0] - 2.0).abs() < 1e-6,
+            "系数仍是原值，不是被削过的"
+        );
     }
 
     #[test]
@@ -1318,7 +1331,10 @@ mod tests {
             dc_tail = output;
         }
         let dc_mean = dc_tail.iter().sum::<f32>() / block as f32;
-        assert!((dc_mean - 1.0).abs() < 0.05, "直流增益应是 1，得到 {dc_mean}");
+        assert!(
+            (dc_mean - 1.0).abs() < 0.05,
+            "直流增益应是 1，得到 {dc_mean}"
+        );
 
         control.install_correction(&[1.0], &[0.0], 0.0, 0);
         let mut hf_tail = vec![0.0f32; block];
@@ -1331,12 +1347,15 @@ mod tests {
             hf_tail = output;
         }
         let hf_mean = hf_tail.iter().map(|sample| sample.abs()).sum::<f32>() / block as f32;
-        assert!(hf_mean < 0.05, "24 kHz 不应从 12 kHz 侧路漏出来，得到 {hf_mean}");
+        assert!(
+            hf_mean < 0.05,
+            "24 kHz 不应从 12 kHz 侧路漏出来，得到 {hf_mean}"
+        );
     }
 
     /// 全场每条测量都走真正的复测侧路。控制频段尾巴要比直通短。文件不在时跳过。
     #[ignore = "known failure under investigation, tracked in HANDOFF 2026-11-25"]
-#[test]
+    #[test]
     fn played_rew_side_path_shortens_the_control_band_tail() {
         let names = [
             "L-full",
@@ -1403,24 +1422,35 @@ mod tests {
         let mut rendered = Vec::with_capacity(ir.len());
         let mut offset = 0;
         while offset + block <= ir.len() {
-            let input: Vec<f32> = ir[offset..offset + block].iter().map(|value| *value as f32).collect();
+            let input: Vec<f32> = ir[offset..offset + block]
+                .iter()
+                .map(|value| *value as f32)
+                .collect();
             let mut output = input.clone();
             control.apply_output(&input, block, &mut output, block, block);
             rendered.extend_from_slice(&output);
             offset += block;
         }
-        let stored = control.play.lock().map_err(|_| "播放状态锁失败".to_string())?;
+        let stored = control
+            .play
+            .lock()
+            .map_err(|_| "播放状态锁失败".to_string())?;
         if stored.side.is_none() {
             return Err(format!("侧路没有装上，抽头 {}", designed.taps));
         }
         drop(stored);
         let delay = (RESAMP_TAPS - 1) + 4 * used.d12;
         let mut dry = vec![0.0f32; delay];
-        dry.extend(ir[..rendered.len().saturating_sub(delay)].iter().map(|value| *value as f32));
+        dry.extend(
+            ir[..rendered.len().saturating_sub(delay)]
+                .iter()
+                .map(|value| *value as f32),
+        );
         dry.truncate(rendered.len());
         let window_s = designed.tail_s.min(0.5);
         let (dry_peak, dry_energy) = control_band_tail_energy(&dry, used.f_lo, window_s, None);
-        let (_, played_energy) = control_band_tail_energy(&rendered, used.f_lo, window_s, Some(dry_peak));
+        let (_, played_energy) =
+            control_band_tail_energy(&rendered, used.f_lo, window_s, Some(dry_peak));
         let ratio = played_energy / dry_energy.max(1e-30);
         let played_db = 10.0 * ratio.max(1e-20).log10();
         let predicted_db = 10.0 * designed.predicted_tail_ratio.max(1e-20).log10();
@@ -1428,7 +1458,7 @@ mod tests {
     }
 
     #[ignore = "known failure under investigation, tracked in HANDOFF 2026-11-25"]
-#[test]
+    #[test]
     fn r_branch_keeps_the_12k_tail_cut() {
         let bytes = std::fs::read(r"C:\WorkSpace\Claw\scratch\lead\rew-room-20261123\R-full.f32")
             .unwrap_or_default();
@@ -1464,7 +1494,11 @@ mod tests {
         }
         let delay = (RESAMP_TAPS - 1) + 4 * used.d12;
         let mut dry = vec![0.0f32; delay];
-        dry.extend(signal[..rendered.len().saturating_sub(delay)].iter().copied());
+        dry.extend(
+            signal[..rendered.len().saturating_sub(delay)]
+                .iter()
+                .copied(),
+        );
         dry.truncate(rendered.len());
         let (peak, dry_energy) = control_band_tail_energy(&dry, used.f_lo, 0.5, None);
         let (_, played_energy) = control_band_tail_energy(&rendered, used.f_lo, 0.5, Some(peak));

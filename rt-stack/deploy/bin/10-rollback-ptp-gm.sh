@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# TSPI PTPv2 grandmaster add-on rollback (board-side, default dry-run).
+# KHAEN PTPv2 grandmaster add-on rollback (board-side, default dry-run).
 #
-# Default: stop + disable tspi-ptp.target/units and, when a previous release is recorded,
-# repoint /opt/tspi-rt-stack/ptp/current to it. Files/config stay in place (recoverable).
-# --remove: additionally delete the units, launcher wrappers, /etc/tspi-ptp and the PTP release
-# tree; existing configs are backed up under /var/lib/tspi-rt-stack/ptp-rollback-<ts>/ first.
+# Default: stop + disable khaen-ptp.target/units and, when a previous release is recorded,
+# repoint /opt/khaen-rt-stack/ptp/current to it. Files/config stay in place (recoverable).
+# --remove: additionally delete the units, launcher wrappers, /etc/khaen-ptp and the PTP release
+# tree; existing configs are backed up under /var/lib/khaen-rt-stack/ptp-rollback-<ts>/ first.
 #
 # Usage:
 #   ./10-rollback-ptp-gm.sh [--live --authorize WINDOW.json] [--remove] [--root STAGING]
@@ -15,12 +15,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/../lib/common.sh"
 
 REMOVE=0
-PTP_PREFIX="${TSPI_PTP_PREFIX:-$TSPI_STACK_PREFIX/ptp}"
-PTP_ETC="${TSPI_PTP_ETC:-/etc/tspi-ptp}"
-PTP_LIBDIR="${TSPI_PTP_LIBDIR:-/usr/local/lib/tspi}"
-RECORD_FILE="$TSPI_STATE_DIR/ptp-install.json"
-UNITS=(tspi-ptp-master.service tspi-ptp-phc2sys.service tspi-ptp.target)
-SERVICE_UNITS=(tspi-ptp-master.service tspi-ptp-phc2sys.service)
+PTP_PREFIX="${KHAEN_PTP_PREFIX:-$KHAEN_STACK_PREFIX/ptp}"
+PTP_ETC="${KHAEN_PTP_ETC:-/etc/khaen-ptp}"
+PTP_LIBDIR="${KHAEN_PTP_LIBDIR:-/usr/local/lib/khaen}"
+RECORD_FILE="$KHAEN_STATE_DIR/ptp-install.json"
+UNITS=(khaen-ptp-master.service khaen-ptp-phc2sys.service khaen-ptp.target)
+SERVICE_UNITS=(khaen-ptp-master.service khaen-ptp-phc2sys.service)
 
 usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 while [ $# -gt 0 ]; do
@@ -51,27 +51,27 @@ else
   fi
 fi
 
-BACKUP="$(p "$TSPI_STATE_DIR")/ptp-rollback-$(date +%Y%m%dT%H%M%S)"
+BACKUP="$(p "$KHAEN_STATE_DIR")/ptp-rollback-$(date +%Y%m%dT%H%M%S)"
 CURRENT="$(p "$PTP_PREFIX/current")"
 
 # ---- 1) stop + disable (never touches legacy/slave-only PTP owners) ----
-run "$TSPI_SYSTEMCTL" disable --now tspi-ptp.target
-for u in "${SERVICE_UNITS[@]}"; do run "$TSPI_SYSTEMCTL" stop "$u"; done
+run "$KHAEN_SYSTEMCTL" disable --now khaen-ptp.target
+for u in "${SERVICE_UNITS[@]}"; do run "$KHAEN_SYSTEMCTL" stop "$u"; done
 
 if [ "$REMOVE" = "1" ]; then
   # ---- 2a) full removal with evidence backup ----
   log "full removal：备份现有 unit/配置到 $BACKUP"
   run install -d -m 0755 "$BACKUP"
   for u in "${UNITS[@]}"; do
-    [ -f "$(p "$TSPI_SYSTEMD_DIR/$u")" ] && run cp -a "$(p "$TSPI_SYSTEMD_DIR/$u")" "$BACKUP/$u"
+    [ -f "$(p "$KHAEN_SYSTEMD_DIR/$u")" ] && run cp -a "$(p "$KHAEN_SYSTEMD_DIR/$u")" "$BACKUP/$u"
   done
-  [ -d "$(p "$PTP_ETC")" ] && run cp -a "$(p "$PTP_ETC")" "$BACKUP/etc-tspi-ptp"
-  for u in "${UNITS[@]}"; do run rm -f "$(p "$TSPI_SYSTEMD_DIR/$u")"; done
-  run "$TSPI_SYSTEMCTL" daemon-reload
+  [ -d "$(p "$PTP_ETC")" ] && run cp -a "$(p "$PTP_ETC")" "$BACKUP/etc-khaen-ptp"
+  for u in "${UNITS[@]}"; do run rm -f "$(p "$KHAEN_SYSTEMD_DIR/$u")"; done
+  run "$KHAEN_SYSTEMCTL" daemon-reload
   run rm -f "$(p "$PTP_LIBDIR/ptp-lib.sh")" "$(p "$PTP_LIBDIR/ptp-master-start")" "$(p "$PTP_LIBDIR/ptp-phc2sys-start")"
   run rm -rf "$(p "$PTP_PREFIX")"
   run rm -rf "$(p "$PTP_ETC")"
-  run rm -rf "$(p /run/tspi-ptp)"
+  run rm -rf "$(p /run/khaen-ptp)"
   log "已删除 units/wrappers/$(p "$PTP_PREFIX")/$(p "$PTP_ETC")（备份在 $BACKUP）"
 else
   # ---- 2b) stop/disable, optionally repoint current ----

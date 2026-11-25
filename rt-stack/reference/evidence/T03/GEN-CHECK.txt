@@ -1,5 +1,5 @@
 $ python.exe tools/gen_fixtures.py --check
-[cwd] C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack\reference
+[cwd] C:\WorkSpace\Claw\projects\khaen-audio-dsp\rt-stack\reference
 [exit_code] 0
 --- stdout ---
 OK: 14 fixtures + index are byte-identical to generated content

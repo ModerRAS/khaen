@@ -20,7 +20,7 @@ python3 gen-fir-wav.py --taps 4096 --rate 48000 --cutoff 2000 --mode highpass --
 ## 2. 示例配置（2 分频 → 4 路输出）
 
 `example-2way-crossover.yml`：2ch 输入 → 复制成 4 路 → 低通/高通 FIR → MOTU 通道 0..3
-（0/1 = Main 1-2，2/3 = Line 3-4）。用 `tspi-mode dante --chunksize ...` 后手工替换 /run 配置调试，
+（0/1 = Main 1-2，2/3 = Line 3-4）。用 `khaen-mode dante --chunksize ...` 后手工替换 /run 配置调试，
 或把它的 pipeline/filters 段合并进 `/etc/camilladsp/dante.yml` / `aes67.yml`。
 
 ## 3. 注意

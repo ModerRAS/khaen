@@ -5,8 +5,8 @@
 在板端运行：
   python3 board_time.py --workdir /tmp/upmix-test/run \
       --signals /tmp/upmix-test/signals \
-      --tspi-upmix /tmp/upmix-test/tspi-upmix \
-      --layout-presets /etc/tspi-audio/layout-presets.yml \
+      --khaen-upmix /tmp/upmix-test/khaen-upmix \
+      --layout-presets /etc/khaen-audio/layout-presets.yml \
       --camilladsp /usr/local/bin/camilladsp \
       --presets upmix-4.1.2-music,upmix-5.3.2-music \
       --chunksizes 128,256,512,1024,2048
@@ -58,8 +58,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--signals", required=True)
-    ap.add_argument("--tspi-upmix", required=True)
-    ap.add_argument("--layout-presets", default="/etc/tspi-audio/layout-presets.yml")
+    ap.add_argument("--khaen-upmix", required=True)
+    ap.add_argument("--layout-presets", default="/etc/khaen-audio/layout-presets.yml")
     ap.add_argument("--camilladsp", default="/usr/local/bin/camilladsp")
     ap.add_argument("--presets", default="upmix-4.1.2-music,upmix-5.3.2-music")
     ap.add_argument("--chunksizes", default="128,256,512,1024,2048")
@@ -79,7 +79,7 @@ def main():
     dur = audio_seconds(sig)
     presets = [p.strip() for p in args.presets.split(",") if p.strip()]
     chunksizes = [int(x) for x in args.chunksizes.split(",") if x.strip()]
-    upmix = [sys.executable, os.path.abspath(args.tspi_upmix),
+    upmix = [sys.executable, os.path.abspath(args.khaen_upmix),
              "--layout-presets", args.layout_presets]
 
     env = []

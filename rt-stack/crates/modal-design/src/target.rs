@@ -3,7 +3,7 @@
 //!
 //! ## 权威契约（只读输入，禁止在本文件改写）
 //!
-//! - `scratch/lead/planner/TSPI-RT-STACK-WBS.md` T50：拟合后冻结 P、H_eff=H_raw*P 与真实 5×5
+//! - `scratch/lead/planner/KHAEN-RT-STACK-WBS.md` T50：拟合后冻结 P、H_eff=H_raw*P 与真实 5×5
 //!   damping 目标；baseline tone 不双叠；stereo strict 受限 profile 单独求解验证。
 //! - `scratch/lead/planner/DSP-HOST-DECISION.md` §0/§1/§2.5：高度普通全频（无 HP/LP/人工 18 ms），
 //!   `mimo_participants` 显式 FL/FR/SL/SR/SUB1（5）来自任务边界；`y_p = H_raw,p P_post G A_map x`、
@@ -20,7 +20,7 @@
 //!   不测量、不签实测）。
 //! - `rt-stack/spec/core-v1.md`：T06 scaffold/RT 纪律、fs ∈ {44.1,48,88.2,96} kHz。
 //! - `crates/modal-design/src/{ingest,timebase}.rs`（T48/T49）：本文件消费其只读类型；T49
-//!   `tspi-modal-timebase/v2` 的 `CommonD0` 是**唯一**去相位输入，`H_raw` 已按 D0 去相位一次。
+//!   `khaen-modal-timebase/v2` 的 `CommonD0` 是**唯一**去相位输入，`H_raw` 已按 D0 去相位一次。
 //!
 //! ## 本文件做什么（T50 DoD）
 //!
@@ -73,8 +73,8 @@
 //!
 //! ## schema
 //!
-//! [TARGET_SCHEMA] `tspi-modal-target/v1`（目标矩阵 + 诊断 + 冻结基线/plant hash）；
-//! [PLANT_SCHEMA] `tspi-modal-plant/v1`（H_eff）；[P_FREEZE_SCHEMA] `tspi-modal-post-freeze/v1`
+//! [TARGET_SCHEMA] `khaen-modal-target/v1`（目标矩阵 + 诊断 + 冻结基线/plant hash）；
+//! [PLANT_SCHEMA] `khaen-modal-plant/v1`（H_eff）；[P_FREEZE_SCHEMA] `khaen-modal-post-freeze/v1`
 //! （冻结 P）。三者都是设计侧/离线产物，不代表实测或已应用。
 
 use crate::ingest::{sha256_hex, IngestSession, PositionRole};
@@ -88,22 +88,22 @@ use khaen_designer::modal_peq::{ChannelPeq, DesignMode, PeqLimits};
 // ===========================================================================
 
 /// 目标矩阵/诊断 schema（T50 产物；T51/T53/T54/T63/T66 消费）。
-pub const TARGET_SCHEMA: &str = "tspi-modal-target/v1";
+pub const TARGET_SCHEMA: &str = "khaen-modal-target/v1";
 /// H_eff plant schema。
-pub const PLANT_SCHEMA: &str = "tspi-modal-plant/v1";
+pub const PLANT_SCHEMA: &str = "khaen-modal-plant/v1";
 /// 冻结 P 基线 schema。
-pub const P_FREEZE_SCHEMA: &str = "tspi-modal-post-freeze/v1";
+pub const P_FREEZE_SCHEMA: &str = "khaen-modal-post-freeze/v1";
 
 /// P 冻结 hash domain（canonical 文本前缀；与 target/plant hash 域分离）。
-pub const POST_FREEZE_HASH_DOMAIN: &str = "tspi-modal-post-freeze/v1";
+pub const POST_FREEZE_HASH_DOMAIN: &str = "khaen-modal-post-freeze/v1";
 /// H_eff hash domain。
-pub const H_EFF_HASH_DOMAIN: &str = "tspi-modal-h-eff/v1";
+pub const H_EFF_HASH_DOMAIN: &str = "khaen-modal-h-eff/v1";
 /// 5×5（多声道）目标 hash domain。
-pub const TARGET_HASH_DOMAIN: &str = "tspi-modal-target-matrix/v1";
+pub const TARGET_HASH_DOMAIN: &str = "khaen-modal-target-matrix/v1";
 /// stereo strict 目标 hash domain（独立；禁止与 5×5 互相复用）。
-pub const STEREO_TARGET_HASH_DOMAIN: &str = "tspi-modal-stereo-strict-target/v1";
+pub const STEREO_TARGET_HASH_DOMAIN: &str = "khaen-modal-stereo-strict-target/v1";
 /// 目标曲线绑定 hash domain（curve_id 只绑定冻结基线）。
-pub const CURVE_BINDING_HASH_DOMAIN: &str = "tspi-modal-curve-binding/v1";
+pub const CURVE_BINDING_HASH_DOMAIN: &str = "khaen-modal-curve-binding/v1";
 
 /// P1 目标布局 id（唯一 overlay 预设语义；实际 role→DAC 由 T57 解析，本文件只消费显式映射）。
 pub const P1_LAYOUT_4_1_2: &str = "4.1.2";
@@ -5516,7 +5516,7 @@ fn json_number(value: f64) -> String {
 }
 
 impl TargetMatrix {
-    /// 报告/证据 JSON（schema tspi-modal-target/v1；确定性；无时间戳）。
+    /// 报告/证据 JSON（schema khaen-modal-target/v1；确定性；无时间戳）。
     pub fn to_evidence_json(&self) -> String {
         let mut json = String::new();
         json.push('{');

@@ -11,8 +11,8 @@
      2.0 容器在 pass 模式只有 FL/FR 有能量
 
 用法：
-  python3 tests/test_input_mode.py --tspi-upmix ./tspi-upmix \
-      --layout-presets /etc/tspi-audio/layout-presets.yml \
+  python3 tests/test_input_mode.py --khaen-upmix ./khaen-upmix \
+      --layout-presets /etc/khaen-audio/layout-presets.yml \
       --signals /tmp/container-signals [--camilladsp /usr/local/bin/camilladsp] \
       [--workdir /tmp/upmix-input-mode] [--preset upmix-4.1.2-music]
 """
@@ -119,7 +119,7 @@ def parse_json_output(out):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tspi-upmix", required=True)
+    ap.add_argument("--khaen-upmix", required=True)
     ap.add_argument("--layout-presets", required=True)
     ap.add_argument("--signals", required=True)
     ap.add_argument("--camilladsp", default=None)
@@ -129,7 +129,7 @@ def main():
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
     py = sys.executable
-    up = args.tspi_upmix
+    up = args.khaen_upmix
     signals = args.signals
     work = args.workdir or tempfile.mkdtemp(prefix="upmix-inputmode-")
     os.makedirs(work, exist_ok=True)
@@ -155,7 +155,7 @@ def main():
               doc.get("h16_internal_upmix"))
         check(doc.get("reason") == want_reason, "reason=%s (%s)" % (want_reason, fname),
               doc.get("reason"))
-        check(doc.get("schema") == "tspi-input-content/v1", "state schema")
+        check(doc.get("schema") == "khaen-input-content/v1", "state schema")
         check("rms_db" in doc and "threshold_db" in doc and "content_mode" in doc,
               "state 字段齐全 (%s)" % fname)
         check("container_layout" in doc and doc.get("container_layout") == args.input_layout,
@@ -180,7 +180,7 @@ def main():
         saved = json.load(open(modef, encoding="utf-8"))
     except Exception:
         saved = {}
-    check(saved.get("mode") == "stereo" and saved.get("schema") == "tspi-input-mode/v1",
+    check(saved.get("mode") == "stereo" and saved.get("schema") == "khaen-input-mode/v1",
           "覆盖文件内容", saved)
     rc, out, err = run(base + ["input-mode", "set", "force-multichannel", "--mode-file", modef,
                                "--state", statef])

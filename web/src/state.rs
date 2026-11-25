@@ -30,17 +30,17 @@ pub struct MockOptions {
     pub channelmap_preset: Option<String>,
     pub channelmap_apply_fails: bool,
     pub channelmap_preload: bool,
-    /// TSPI_MOCK_MOTU_APPLY_FAILS=1 时 CueMix 写入不落地并返回回滚结果。
+    /// KHAEN_MOCK_MOTU_APPLY_FAILS=1 时 CueMix 写入不落地并返回回滚结果。
     pub motu_apply_fails: bool,
 }
 
 impl MockOptions {
     /// 从环境变量读取（用于浏览器演示失败/回滚路径）：
-    /// - TSPI_MOCK_FAIL_START=inferno.service,statime.service
-    /// - TSPI_MOCK_FAIL_RESTART=...
-    /// - TSPI_MOCK_FAIL_APPLY=1
-    /// - TSPI_MOCK_STEP_DELAY_MS=150
-    /// - TSPI_MOCK_PERSISTED_MODE=dante
+    /// - KHAEN_MOCK_FAIL_START=inferno.service,statime.service
+    /// - KHAEN_MOCK_FAIL_RESTART=...
+    /// - KHAEN_MOCK_FAIL_APPLY=1
+    /// - KHAEN_MOCK_STEP_DELAY_MS=150
+    /// - KHAEN_MOCK_PERSISTED_MODE=dante
     pub fn from_env() -> Self {
         let split = |name: &str| -> Vec<String> {
             std::env::var(name)
@@ -53,26 +53,26 @@ impl MockOptions {
                 })
                 .unwrap_or_default()
         };
-        let persisted_mode = std::env::var("TSPI_MOCK_PERSISTED_MODE")
+        let persisted_mode = std::env::var("KHAEN_MOCK_PERSISTED_MODE")
             .ok()
             .and_then(|v| v.parse().ok());
         Self {
-            fail_start: split("TSPI_MOCK_FAIL_START"),
-            fail_restart: split("TSPI_MOCK_FAIL_RESTART"),
-            camilla_apply_fails: crate::config::env_truthy("TSPI_MOCK_FAIL_APPLY").unwrap_or(false),
-            switch_step_delay_ms: std::env::var("TSPI_MOCK_STEP_DELAY_MS")
+            fail_start: split("KHAEN_MOCK_FAIL_START"),
+            fail_restart: split("KHAEN_MOCK_FAIL_RESTART"),
+            camilla_apply_fails: crate::config::env_truthy("KHAEN_MOCK_FAIL_APPLY").unwrap_or(false),
+            switch_step_delay_ms: std::env::var("KHAEN_MOCK_STEP_DELAY_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(120),
             persisted_mode,
-            channelmap_preset: std::env::var("TSPI_MOCK_CHANNELMAP_PRESET")
+            channelmap_preset: std::env::var("KHAEN_MOCK_CHANNELMAP_PRESET")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
-            channelmap_apply_fails: crate::config::env_truthy("TSPI_MOCK_CHANNELMAP_FAIL_APPLY")
+            channelmap_apply_fails: crate::config::env_truthy("KHAEN_MOCK_CHANNELMAP_FAIL_APPLY")
                 .unwrap_or(false),
-            channelmap_preload: crate::config::env_truthy("TSPI_MOCK_CHANNELMAP_PRELOAD")
+            channelmap_preload: crate::config::env_truthy("KHAEN_MOCK_CHANNELMAP_PRELOAD")
                 .unwrap_or(false),
-            motu_apply_fails: crate::config::env_truthy("TSPI_MOCK_MOTU_APPLY_FAILS")
+            motu_apply_fails: crate::config::env_truthy("KHAEN_MOCK_MOTU_APPLY_FAILS")
                 .unwrap_or(false),
         }
     }

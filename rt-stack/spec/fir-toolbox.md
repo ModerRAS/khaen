@@ -1,9 +1,9 @@
-# TSPI RT-first DSP · FIR 工具箱与目标导入规范（tspi-fir-toolbox v1.2-draft）
+# KHAEN RT-first DSP · FIR 工具箱与目标导入规范（khaen-fir-toolbox v1.2-draft）
 
 > 状态：**草案 v1.2-draft，2026-11-17（v1.1 按独立评审 T04-review 修复 12/12；v1.2 含 Lead 裁决 errata A（fs/2 边界、HP 穿越判据、block 64/128 措辞）与 errata B（T39 crossover：fc≤0.2fs 生产硬上限/0.2–0.225 实验门、LR 0°/BW 180° 家族极性、AnalyticPhase 规范构造）；复审 PENDING；未实现/未跑代码/未板测）**（WBS T04 / 角色 fir-spec-author；任务 task-34/task-66/task-139）。
 > 写域（task-34 授权）：rt-stack/spec/fir-toolbox.md + rt-stack/evidence/T04/；不建 Cargo 根、不改任何现生产代码/文档/契约。
 > 消费方（future）：T10/T11/T33/T34/T35/T36/T37/T38/T39/T40/T41（设计器）、T12（融合/编译）、T13（校准适配）、T23（图节点）、T55（报告/独立 oracle）、T56（资源计划）、T60–T66（校准/daemon）。
-> 规范关键词：**必须/MUST**、**应/SHOULD**、**可/MAY**、**禁止/MUST NOT**。本规范中的 schema 名（tspi-fir/v1、tspi-target-draft/v1、tspi-modal-peq/v1）在实现任务完成前**不存在**，本文只定义语义。
+> 规范关键词：**必须/MUST**、**应/SHOULD**、**可/MAY**、**禁止/MUST NOT**。本规范中的 schema 名（khaen-fir/v1、khaen-target-draft/v1、khaen-modal-peq/v1）在实现任务完成前**不存在**，本文只定义语义。
 
 ## 0. 定位、范围与优先级
 
@@ -11,7 +11,7 @@
 
 1. 七类 FIR 预设家族（linear、min_fast、min_slow、apodizing、brickwall、corrected/lowdelay、nos）的**参数、参考构造、通带/阻带/相位/支撑/延迟/振铃判据与拒收边界**，使 T10/T33–T38 可按同一口径实现、T55 可独立复算、T12/T23 可消费。
 2. **10 段模态 PEQ（允许 IIR）**的数据模型、RBJ 系数语义（含 shelf S/Q 语义）、系数导出与“原图比对”验收、IIR 不硬截 FIR 的尾长判据，供 T41（及 T64 的 PEQ fit）实现。
-3. **目标导入**（tspi-target-draft/v1：CSV + sidecar 或单 JSON）的字段、单位、相位/展开/归一化/插值/端点/拒收语义，供 T11 实现、T13 适配、T37/T55 消费。
+3. **目标导入**（khaen-target-draft/v1：CSV + sidecar 或单 JSON）的字段、单位、相位/展开/归一化/插值/端点/拒收语义，供 T11 实现、T13 适配、T37/T55 消费。
 4. **运行边界**：每路径支撑上限、融合长度、延迟预算、P/G 行列方向、zero-padding 线性卷积、精度与确定性，供 T12/T56/T23/T55 使用。
 5. 相关工具（输出分频 LR/BW、phase/delay/polarity）的**最小契约**，供 T39/T40 引用；细节以其任务卡 DoD 为准。
 
@@ -107,7 +107,7 @@ T04 开工时与收尾时读取的上游文件哈希不同（Lead 在 2026-11-16
 | corrected | 修正/低延迟 | FIR | 显式幅相目标、可频变 GD | 复目标/房间修正/低延迟折中 |
 | nos | 直通/旁路 | 直通 | 无 | 显式 bypass，保护仍在图外执行 |
 
-## 2. 通用 FIR 系数产物与 manifest（tspi-fir/v1）
+## 2. 通用 FIR 系数产物与 manifest（khaen-fir/v1）
 
 ### 2.1 系数文件
 
@@ -116,11 +116,11 @@ T04 开工时与收尾时读取的上游文件哈希不同（Lead 在 2026-11-16
 - 长度上限：设计 16384 taps；运行准入见 §7.2（常规 4096）。禁止暗中截断/补零改变长度后仍写原声明。
 - 文件名建议 `<role>__<family>__<fs>__<taps>.wav`（不强制）；manifest 记录相对路径 + sha256。
 
-### 2.2 manifest JSON（tspi-fir/v1）
+### 2.2 manifest JSON（khaen-fir/v1）
 
 以下字段为规范性；未知字段：`x_` 前缀允许（warning），其它未知字段拒绝（E_FIR_SCHEMA）。
 
-    schema: "tspi-fir/v1"                     # 必填常量
+    schema: "khaen-fir/v1"                     # 必填常量
     tool: {name, version}                     # 必填
     created_unix: u64                         # 可选（不参与系数哈希）
     family: linear|min_fast|min_slow|apodizing|brickwall|corrected|lowdelay|nos
@@ -158,7 +158,7 @@ T04 开工时与收尾时读取的上游文件哈希不同（Lead 在 2026-11-16
 
 | 码 | 条件 |
 |---|---|
-| E_FIR_SCHEMA | manifest schema 缺失/不等于 tspi-fir/v1，或未知非 x_ 字段 |
+| E_FIR_SCHEMA | manifest schema 缺失/不等于 khaen-fir/v1，或未知非 x_ 字段 |
 | E_FIR_TAPS | taps 与文件样本数不符，或越界（nos 例外） |
 | E_FIR_DELAY | delay_samples 与家族规则不符或 delay_ms 不一致 |
 | E_FIR_NUMERIC | h 含 NaN/Inf 或 max|h|=0（nos 例外） |
@@ -444,9 +444,9 @@ High shelf：
 - 极点半径：|p| <= 0.999999（越界 E_PEQ_UNSTABLE）；报告 max|p|、max|a1|。
 - 状态变量 denormal 处理由运行器负责（RT 规范），设计报告只要求稳定与有限。
 
-### 5.5 导出 schema（tspi-modal-peq/v1）
+### 5.5 导出 schema（khaen-modal-peq/v1）
 
-    schema: "tspi-modal-peq/v1"
+    schema: "khaen-modal-peq/v1"
     tool: {name, version}
     created_unix: u64
     fs: u32
@@ -484,7 +484,7 @@ High shelf：
 
 CONTRACT v1/v1.1 字段语义不变；v1.1 文件经 T13 adapter 转成内部 IR（保留 type/freq/q/gain/trim/delay/polarity；未知 type 拒绝）。本规范的 modal PEQ 是新栈 P_post 的直接产物，不经 CamillaDSP；不得双写/双应用同一 PEQ。
 
-## 6. 目标导入（tspi-target-draft/v1）
+## 6. 目标导入（khaen-target-draft/v1）
 
 ### 6.1 边界与区分
 
@@ -504,7 +504,7 @@ CSV 规则：逗号分隔、无注释行（# 行拒绝）、允许指数记法�
 
 ### 6.3 sidecar / 单 JSON 字段（规范性）
 
-    schema: "tspi-target-draft/v1"            # 必填
+    schema: "khaen-target-draft/v1"            # 必填
     frequency_unit: "Hz"                     # 必填且只允许 Hz
     magnitude_unit: "dB"                     # 必填且只允许 dB
     phase_unit: "deg"                        # 有 phase 时必填；无 phase 时必须缺省/拒绝
@@ -578,7 +578,7 @@ JSON 形式：`source_hash` 若给出，必须是 points 数组的**规范序列
 
 | # | 码 | 条件 |
 |---|---|---|
-| 1 | E_TGT_SCHEMA | schema 缺失/不等于 tspi-target-draft/v1 |
+| 1 | E_TGT_SCHEMA | schema 缺失/不等于 khaen-target-draft/v1 |
 | 2 | E_TGT_FIELD_UNKNOWN | 顶层未知非 x_ 字段 |
 | 3 | E_TGT_MISSING_FIELD | 必填字段缺失（schema/单位/runtime_rate/normalization/interpolation/edge_policy；有 phase 时 phase_unit/phase_ref/unwrap_policy；delay_removed 时 target_delay_samples；CSV 形式 source_hash） |
 | 4 | E_TGT_UNIT | frequency/magnitude/phase 单位缺失或非 Hz/dB/deg |
@@ -842,7 +842,7 @@ JSON 形式：`source_hash` 若给出，必须是 points 数组的**规范序列
 
 ### 12.1 产物
 
-- 交付文件：projects/tspi-audio-dsp/rt-stack/spec/fir-toolbox.md（本文件，v1.2-draft）。
+- 交付文件：projects/khaen-audio-dsp/rt-stack/spec/fir-toolbox.md（本文件，v1.2-draft）。
 - 证据文件（task-34 授权写域 rt-stack/evidence/T04/）：
   - evidence/T04/recompute-vectors.mjs（19,502 B；V1–V18 全部可复算脚本，含 V16/V17 构造参数）；
   - evidence/T04/vector-results.json（8,539 B；脚本输出，sha256 f9411b3e…2780）；
@@ -856,14 +856,14 @@ JSON 形式：`source_hash` 若给出，必须是 points 数组的**规范序列
 
 | 输入 | sha256 | bytes |
 |---|---|---|
-| scratch/lead/planner/TSPI-RT-STACK-WBS.md | ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9 | 35728 |
+| scratch/lead/planner/KHAEN-RT-STACK-WBS.md | ffe5cde9e27470f0c2db9c4242383478422f553defba9370c8d268d0643204b9 | 35728 |
 | scratch/lead/planner/DSP-HOST-DECISION.md | ab1056477d8e1c01dbe61df6f2d15c4bb0cca6b05f9177ef51559df3e2d25ded | 27951 |
 | scratch/lead/planner/DSP-HOST-CPU-BUDGET.md | 5954bfa2c64210e1dd4c75268aa674976c3f67fa35c2000363cc6dc5e25a2aa1 | 18859 |
 | calibration-spec/CONTRACT.md | 522640c38c98e8d826ede82cfac15cbdb97766d935071f836bfe336c4d5727e9 | 22256 |
 | calibration-spec/ACCEPTANCE.md | 24731cdea518c0996447246e5d3792e39cdc0594f573ad13bd5a633b8ec4d431 | 28692 |
 | web/docs/API.md | ffcd0898f98ba317ab836918d7fc61fcf15f8a540ae639382c0e97b842ac6f08 | 26056 |
-| audio/overlay/etc/tspi-audio/layout-presets.yml | 4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da | 11228 |
-| audio/overlay/usr/local/bin/tspi-channelmap | d7eeeb93c55c5ae26489a7c2f0d56d1a2303b6e3429215a15671ef3d19276365 | 74505 |
+| audio/overlay/etc/khaen-audio/layout-presets.yml | 4856109265371666a6001804330e2a595dad8599b3aecc2f4390be679b2427da | 11228 |
+| audio/overlay/usr/local/bin/khaen-channelmap | d7eeeb93c55c5ae26489a7c2f0d56d1a2303b6e3429215a15671ef3d19276365 | 74505 |
 | web/src/channelmap.rs | ac5bf41e123ce723fc75bcb01910769529e785d8fc17a75aafa31cec7a192d87 | 102498 |
 | upmix/docs/PEQ-TYPE.md | 5f0691f2c14510d6b3685d9a10574db6d086d22fbba454c9e25e873913c2761f | 4909 |
 | docs/MIMO-COEFF-PLAN.md | fc832832487e73182787ad19e4fb3639edb3355584a33a5f9a4d707f539c3f30 | 45259 |

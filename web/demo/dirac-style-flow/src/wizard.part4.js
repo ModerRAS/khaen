@@ -88,7 +88,7 @@ function renderStep7() {
           '<div class="lc-row" style="margin-top:6px"><span class="lbl" id="art-cell-lbl">FL ← SUB1</span><input type="range" id="art-level" data-test="art-level" min="-24" max="0" step="1" value="' + c.level + '"><span class="unit" id="art-level-out">' + (c.level < 0 ? c.level + ' dB' : '0（关闭）') + '</span></div>' +
           '<div class="mimo-row" style="margin:0;font-size:9px;color:var(--muted2);line-height:1.4">0 = 关闭 · −24 dB = 最强（示意）</div>' +
         '</div></div>' +
-        (TSPI_LIVE
+        (KHAEN_LIVE
           ? '<div class="panel"><div class="panel-h">皇帝位侧路 <span class="badge3 model">f_hi / 从喇叭</span></div><div class="panel-b">' +
               '<div class="lc-row"><span class="lbl">上沿</span><input type="number" id="f-hi" data-test="f-hi" min="20" max="150" step="1" value="' + d.fHi + '"><span class="unit">Hz</span></div>' +
               '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">' +
@@ -381,7 +381,7 @@ function openApplyConfirm() {
       '<table class="confirm-table">' + rows +
       '<tr><td>目标曲线 / 低切</td><td>' + (d.target || '未选') + ' · 主箱 ' + d.cut.mains + ' / 环绕 ' + d.cut.surround + ' Hz</td></tr>' +
       '<tr><td>ART 衰减 / MIMO 衰减（示意）</td><td>' + countArt() + ' 条 · ' + d.mimo.mains + '/' + d.mimo.surround + '/' + d.mimo.height + ' dB</td></tr>' +
-      '<tr><td>导出槽位</td><td>Slot 3 · TSPI-DiracFlow-Demo</td></tr>' +
+      '<tr><td>导出槽位</td><td>Slot 3 · KHAEN-DiracFlow-Demo</td></tr>' +
       '<tr><td>回滚快照</td><td>will create · #FLOW-SNAP-' + Date.now().toString().slice(-5) + '</td></tr></table>' +
       '<div class="confirm-note">应用后可通过“回滚”恢复应用前状态；演示环境不会修改任何设备或 CueMix。</div>',
     buttons: [
@@ -392,7 +392,7 @@ function openApplyConfirm() {
 }
 function applyFlow() {
   hideModal();
-  tspiPostJob('remeasure').catch(() => {});
+  khaenPostJob('remeasure').catch(() => {});
   saveSnapshot();
   state.design.applied = true; state.design.rolledBack = false;
   renderStep8();
@@ -414,7 +414,7 @@ function openRollbackConfirm() {
 function rollbackFlow() {
   hideModal();
   if (state.jobId) {
-    tspiApi('POST', CAL_API.jobs + '/' + encodeURIComponent(state.jobId) + '/rollback', {}).catch(() => {});
+    khaenApi('POST', CAL_API.jobs + '/' + encodeURIComponent(state.jobId) + '/rollback', {}).catch(() => {});
   }
   const snap = state.design.snapshotBeforeApply;
   if (snap && snap.design) {
@@ -436,7 +436,7 @@ function buildFlowConfig() {
     if (k.on) artConns.push({ main: r, support: c, attenuation_db: k.level, f_low_hz: k.low, f_high_hz: k.high });
   }
   return {
-    schema: 'tspi-dirac-flow-demo/v2',
+    schema: 'khaen-dirac-flow-demo/v2',
     generated_at: new Date().toISOString(),
     demo: true,
     note: '演示导出，不写设备。实测数据与示意/目标数据分列；ART/MIMO/After 为示意模型。',
@@ -466,16 +466,16 @@ function buildFlowConfig() {
       mimo_attenuation_db: d.mimo,
       target_rt60_s: 0.45,
     },
-    apply: { slot: 3, name: 'TSPI-DiracFlow-Demo', applied: d.applied, rolled_back: !!d.rolledBack, rollback_snapshot: 'FLOW-SNAP' },
+    apply: { slot: 3, name: 'KHAEN-DiracFlow-Demo', applied: d.applied, rolled_back: !!d.rolledBack, rollback_snapshot: 'FLOW-SNAP' },
   };
 }
 function buildFlowYaml() {
   const d = state.design;
-  const lines = ['# tspi dirac-style flow 导出片段（演示，不写设备）', 'device:', '  audio_interface: MOTU UltraLite-mk5', '  mic: UMIK-1 718-7696', '  mic_orientation_deg: 90', '  sample_rate: 48000', 'layout:', '  preset: 4.1.2'];
+  const lines = ['# khaen dirac-style flow 导出片段（演示，不写设备）', 'device:', '  audio_interface: MOTU UltraLite-mk5', '  mic: UMIK-1 718-7696', '  mic_orientation_deg: 90', '  sample_rate: 48000', 'layout:', '  preset: 4.1.2'];
   for (const r of state.layout.roles) lines.push('  - {id: ' + r.id + ', output_channel: ' + r.out + '}');
   lines.push('design:', '  target_curve: ' + d.target, '  target_curve_fullband: ' + (d.target === 'tilt10' ? '{at_20hz_db: 0, at_20khz_db: -10}' : '{at_20hz_db: 0, at_20khz_db: 0}'), '  low_cut:', '    mains: {freq_hz: ' + d.cut.mains + ', slope_db_oct: ' + d.slope.mains + '}', '    surround: {freq_hz: ' + d.cut.surround + ', slope_db_oct: ' + d.slope.surround + '}', '    sub_lowpass: {follows: mains, freq_hz: ' + d.cut.mains + '}', '  art_attenuation:', '    fsiso_hz: ' + d.fsiso);
   for (const r of ART_ROWS) for (const c of ART_COLS) { if (r === c) continue; const k = getConn(r, c); if (k.on) lines.push('    - {main: ' + r + ', support: ' + c + ', attenuation_db: ' + k.level + ', f_low: ' + k.low + ', f_high: ' + k.high + '}'); }
-  lines.push('  mimo_attenuation_db: {mains: ' + d.mimo.mains + ', surround: ' + d.mimo.surround + ', height: ' + d.mimo.height + ', sub: ' + d.mimo.sub + '}', 'apply: {slot: 3, name: TSPI-DiracFlow-Demo, applied: ' + d.applied + ', rolled_back: ' + !!d.rolledBack + '}');
+  lines.push('  mimo_attenuation_db: {mains: ' + d.mimo.mains + ', surround: ' + d.mimo.surround + ', height: ' + d.mimo.height + ', sub: ' + d.mimo.sub + '}', 'apply: {slot: 3, name: KHAEN-DiracFlow-Demo, applied: ' + d.applied + ', rolled_back: ' + !!d.rolledBack + '}');
   return lines.join('\n') + '\n';
 }
 function openFlowExport() {
@@ -540,4 +540,4 @@ window.__flow = {
 
 /* ---------------- boot ---------------- */
 renderStep();
-if (typeof tspiBoot === 'function') tspiBoot();
+if (typeof khaenBoot === 'function') khaenBoot();

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TSPI 校准批量窗口：apply 包装（示例；窗口前冻结 REST/命令细节与 hash）
+# KHAEN 校准批量窗口：apply 包装（示例；窗口前冻结 REST/命令细节与 hash）
 # 用法（由 plan 生成的 argv 调用）：apply.sh <step_dir>
 # 约束：真实 apply 目前依赖 B1/B4（T71 签发 + CalibrationPort）；未解锁时必须
 #       记录 503/NOT_RUN 并回退 last-good，不得启动 CamillaDSP（C 永不回退）。
@@ -9,11 +9,11 @@ STEP_DIR="$1"
 mkdir -p "$STEP_DIR"
 OUT="$STEP_DIR/applied.json"
 LOG="$STEP_DIR/apply.log"
-echo "# tspi-cal-batch apply $(date -Is)" | tee "$LOG"
+echo "# khaen-cal-batch apply $(date -Is)" | tee "$LOG"
 
-TOKEN_FILE="$TSPI_DAEMON_AUTH"
-if [ -z "$TOKEN_FILE" ]; then TOKEN_FILE=/etc/tspi-rt-stack/daemon-auth.json; fi
-BASE_URL="$TSPI_DAEMON_URL"
+TOKEN_FILE="$KHAEN_DAEMON_AUTH"
+if [ -z "$TOKEN_FILE" ]; then TOKEN_FILE=/etc/khaen-rt-stack/daemon-auth.json; fi
+BASE_URL="$KHAEN_DAEMON_URL"
 if [ -z "$BASE_URL" ]; then BASE_URL=http://127.0.0.1:80; fi
 TOKEN=""
 if [ -r "$TOKEN_FILE" ]; then
@@ -35,7 +35,7 @@ else
   RC=3
 fi
 cat > "$OUT" <<EOF
-{"schema":"tspi-cal-batch-apply-cmd/v1","step_dir":"$STEP_DIR","rc":$RC,
+{"schema":"khaen-cal-batch-apply-cmd/v1","step_dir":"$STEP_DIR","rc":$RC,
  "applied_version":null,"not_run":["真实 apply：B1/B4 未解锁；本示例不伪造 applied_version"]}
 EOF
 exit "$RC"

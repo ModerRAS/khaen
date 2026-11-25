@@ -1,0 +1,15 @@
+[Unit]
+Description=khaen-audio: 开机恢复上次音频模式（默认 disabled，opt-in）
+Documentation=file:///etc/default/khaen-audio
+After=network-online.target local-fs.target
+Wants=network-online.target
+ConditionPathExists=/etc/khaen/last-mode
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/khaen-mode --restore
+RemainAfterExit=no
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

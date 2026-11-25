@@ -68,8 +68,8 @@ fn unicast_receiver_config(port: u16, channels: u16) -> ReceiverConfig {
         port,
         multicast: false,
         interfaces: khaen_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
-            group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
-            source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
+        group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
+        source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
         channels,
         rcvbuf_bytes: 4 << 20,
         recv_timeout_ms: 10,
@@ -204,8 +204,8 @@ fn loopback_multicast_receives_when_platform_allows() {
         port,
         multicast: true,
         interfaces: khaen_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
-            group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
-            source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
+        group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
+        source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
         channels: 2,
         rcvbuf_bytes: 4 << 20,
         recv_timeout_ms: 10,
@@ -251,7 +251,7 @@ fn loopback_multicast_receives_when_platform_allows() {
 fn sdp_file_to_receiver_config() {
     let text = "v=0\r\n\
 o=- 0 0 IN IP4 127.0.0.1\r\n\
-s=TSPI-AES67-proto\r\n\
+s=KHAEN-AES67-proto\r\n\
 c=IN IP4 239.69.16.146/32\r\n\
 t=0 0\r\n\
 m=audio 5004 RTP/AVP 103\r\n\

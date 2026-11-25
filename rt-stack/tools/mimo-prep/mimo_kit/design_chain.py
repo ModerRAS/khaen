@@ -88,7 +88,7 @@ def build_h7_from_arm(arm_dir, params=None, freqs=None):
     H_norm = H7 / levels[:, None, None]
     meta, marker = _load_arm_meta(arm_dir)
     info = {
-        "schema": "tspi-mimo-h/v2", "task": "task-252", "synthetic": False,
+        "schema": "khaen-mimo-h/v2", "task": "task-252", "synthetic": False,
         "arm": os.path.abspath(arm_dir),
         "arm_meta": {"session_json": os.path.join(arm_dir, "meta", "session.json"),
                      "session_sha256": sha256_file(os.path.join(arm_dir, "meta", "session.json"))
@@ -240,7 +240,7 @@ def export_t66(design_dir, outdir, l_g=4096, d=2048, block=128, registry=None):
              dacs=np.array([DAC[p] for p in rd.PARTICIPANTS]))
     offdiag = [float(np.max(np.abs(cells[od, id_])))
                for od in range(len(rd.PARTICIPANTS)) for id_ in range(len(rd.PARTICIPANTS)) if od != id_]
-    exp = {"schema": "tspi-mimo-t66-export/v2", "task": "task-252", "synthetic": False,
+    exp = {"schema": "khaen-mimo-t66-export/v2", "task": "task-252", "synthetic": False,
            "pilot_3mic": True, "design_source": design_dir, "guard_ok": True,
            "l_g": int(l_g), "block_size": block, "baseline_d": int(d),
            "participants": rd.PARTICIPANTS,
@@ -340,7 +340,7 @@ def run_live_design(arm_dir=None, h_npz=None, out=None, taps=4096, delay=2048,
     p = pack_plan(os.path.join(out, "export"))
     gv = guard_plan(p["plan"], d["design_dir"], registry=registry)
     manifest = {
-        "schema": "tspi-mimo-real-design-manifest/v1", "task": "task-252",
+        "schema": "khaen-mimo-real-design-manifest/v1", "task": "task-252",
         "claim": "REAL-room G from corrected remeasure identity H, provenance-guarded, "
                  "compiled by the REAL T66 compiler; offline only (no board, no sound, no git)",
         "arm": h["info"].get("arm"), "h_sha256": h["info"].get("h_sha256"),

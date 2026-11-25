@@ -14,8 +14,8 @@
 use crate::peq_fit::{FIT_FREQ_MIN_HZ, REFERENCE_FREQ_HZ, REPORT_GRID_OCTAVE};
 use crate::peq_plan::PeqBiquad;
 use khaen_core::abi::{
-    PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES, PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1,
-    TSPI_PLAN_ABI_V2,
+    PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES, PLAN_IIR_SECTION_COEFFS, KHAEN_PLAN_ABI_V1,
+    KHAEN_PLAN_ABI_V2,
 };
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ fn section_abs_peak_db(section: &PeqBiquad) -> f64 {
         .fold(f64::NEG_INFINITY, f64::max)
 }
 
-/// T64 报告 channel（字段子集 + bands[]；与 tspi-peq-fit/v1 同形）。
+/// T64 报告 channel（字段子集 + bands[]；与 khaen-peq-fit/v1 同形）。
 fn peq_report_channel(
     name: &str,
     p_fir: &[f64],
@@ -249,33 +249,36 @@ fn peq_fixture(sections: Vec<PeqBiquad>) -> Fixture {
 /// 漂移都会让这些常量失败。
 #[test]
 fn t66_peq_v1_bit_exact_baseline_without_peq() {
+    // renamed tspi -> khaen (2026-11-25): GRAPH_HASH_DOMAIN b"tspi-plan/v1\0" ->
+    // b"khaen-plan/v1\0" (+1 B of hash domain), so graph_id and the plan sha256 that
+    // commits to it change. plan byte lengths are unchanged (the domain is not stored).
     let cases = [
         (
             DelayPolarityEncoding::RoleMetadata,
             true,
-            "d82537e5d2629d68397aa981d57f4e4d47a88590c0473cd5e7a8e855fd723444",
-            "9035583aee4a0b64ca0bccd4894eb78f92298255f4880b8f01ecb9554ac15980",
+            "8101e1aab7976c4d5ed0b7b17a9e74872c5d40f30f6df69670fd19a58109b71e",
+            "86333bcc7e20fe4b67c10fb81016059489e6cec48f3842924c08a5b897a74506",
             3596usize,
         ),
         (
             DelayPolarityEncoding::RoleMetadata,
             false,
-            "6c8d2bcc4073fc9157bffe8ce6308f7e519ebf0bd6ce27a479ad6042e124f7b7",
-            "720853d58d8245aad2cdf8e2237cd41b9fad48a4eb885cf80b8e019ff90f60d4",
+            "d230b51d809592019474145243f63255bd5473d2b8bff248932340cf963a6897",
+            "1668d3af9a10fa4927026476cf6d57cd254aca2ac6555068624065e5e06ae145",
             720usize,
         ),
         (
             DelayPolarityEncoding::CoeffEmbedded,
             true,
-            "8b58b0f6a533cf26ca22b5af3afe7f754dfe88bed84c67c1436530fac876f6b8",
-            "8096add0aabd61c2d3f67055f93685ad477f3659cf2e5998049d6bce243afe99",
+            "539b63157cc4db4f12cb63f369110fa961a0990e223aa493ad9d7b03182d4a2f",
+            "9cbd1544de061d522f987a2c6b55cde507325824716b757bb158eb8795f729c4",
             3612usize,
         ),
         (
             DelayPolarityEncoding::CoeffEmbedded,
             false,
-            "6c8d2bcc4073fc9157bffe8ce6308f7e519ebf0bd6ce27a479ad6042e124f7b7",
-            "720853d58d8245aad2cdf8e2237cd41b9fad48a4eb885cf80b8e019ff90f60d4",
+            "d230b51d809592019474145243f63255bd5473d2b8bff248932340cf963a6897",
+            "1668d3af9a10fa4927026476cf6d57cd254aca2ac6555068624065e5e06ae145",
             720usize,
         ),
     ];
@@ -289,7 +292,7 @@ fn t66_peq_v1_bit_exact_baseline_without_peq() {
         assert_eq!(plan.plan_sha256(), plan_sha, "plan sha256 ({encoding:?})");
         assert_eq!(plan.graph_id_hex(), graph_id, "graph_id ({encoding:?})");
         assert_eq!(plan.plan_bytes.len(), bytes, "plan bytes ({encoding:?})");
-        assert_eq!(plan.header.abi_version, TSPI_PLAN_ABI_V1);
+        assert_eq!(plan.header.abi_version, KHAEN_PLAN_ABI_V1);
         assert_eq!(plan.header.reserved3, [0u32; 3]);
         assert!(plan.iir_entries.is_empty());
         assert!(plan.iir_table.is_empty());
@@ -312,7 +315,7 @@ fn t66_peq_t64_sections_written_as_plan_abi_v2_iir_and_host_parsed() {
     let plan = compile_ok(&fixture);
 
     // 头部/表：ABI v2，reserved3 = [IIR 表偏移, 表项数, 0]。
-    assert_eq!(plan.header.abi_version, TSPI_PLAN_ABI_V2);
+    assert_eq!(plan.header.abi_version, KHAEN_PLAN_ABI_V2);
     assert_eq!(plan.header.reserved3[1], 1, "1 个 en-IIR role");
     assert_eq!(plan.header.reserved3[2], 0);
     let iir_offset = plan.header.reserved3[0] as usize;
@@ -364,7 +367,8 @@ fn t66_peq_t64_sections_written_as_plan_abi_v2_iir_and_host_parsed() {
 
     // 无 PEQ 对照：同 P FIR 的 stereo fixture 仍是 v1（plan 只多出 IIR 区）。
     let baseline = compile_ok(&Fixture::stereo(DelayPolarityEncoding::RoleMetadata));
-    assert_eq!(baseline.plan_sha256(), "6c8d2bcc4073fc9157bffe8ce6308f7e519ebf0bd6ce27a479ad6042e124f7b7");
+    // renamed tspi -> khaen (2026-11-25); same property (no-PEQ baseline plan sha256).
+    assert_eq!(baseline.plan_sha256(), "d230b51d809592019474145243f63255bd5473d2b8bff248932340cf963a6897");
     let extra = plan.coeffs.len() - baseline.coeffs.len();
     assert!(
         (40..40 + 64).contains(&extra),
@@ -378,7 +382,7 @@ fn t66_peq_t64_sections_written_as_plan_abi_v2_iir_and_host_parsed() {
         .admit_with(plan.token(), &env_4w(), &mut memory)
         .expect("T20 plan-arena 必须接受 T66 ABI v2 plan");
     let view = registry.plan_view(version).expect("admitted plan view");
-    assert_eq!(view.header.abi_version, TSPI_PLAN_ABI_V2);
+    assert_eq!(view.header.abi_version, KHAEN_PLAN_ABI_V2);
     assert_eq!(view.header.graph_id, plan.graph_id);
     assert_eq!(view.roles[0].peq_count, 2);
     let host_iir = registry
@@ -512,7 +516,7 @@ fn t66_peq_plan_section_count_and_stability_fail_closed() {
     assert_code(&error, E_CA_PEQ_ABI);
 
     let plan = compile_ok(&peq_fixture(vec![peq_section(1000.0, -0.1, 2.0); 32]));
-    assert_eq!(plan.header.abi_version, TSPI_PLAN_ABI_V2);
+    assert_eq!(plan.header.abi_version, KHAEN_PLAN_ABI_V2);
     assert_eq!(plan.iir_entries[0].section_count, 32);
     assert_eq!(plan.roles[0].peq_count, 32);
     plan.verify().expect("32-section plan must verify");
@@ -535,7 +539,7 @@ fn t66_peq_plan_coeff_budget_includes_iir_and_fails_closed() {
 
     fixture.options.coeff_budget_bytes = base_len as u64 + 4096;
     let plan = compile_plan(&fixture.request()).expect("budget with IIR must compile");
-    assert_eq!(plan.header.abi_version, TSPI_PLAN_ABI_V2);
+    assert_eq!(plan.header.abi_version, KHAEN_PLAN_ABI_V2);
     assert!(plan.coeffs.len() > base_len);
 }
 
@@ -606,7 +610,7 @@ fn t66_peq_plan_missing_iir_sections_is_rejected_unless_experiment() {
     // 显式实验旁路：不拒收，但记 W_EXPERIMENT_IIR_EXCLUDED，plan 仍 v1、envelope 如实 false。
     let request = fixture.request().with_experiment(ExperimentMode::SINGLE_POINT);
     let plan = compile_plan(&request).expect("experiment bypass must compile");
-    assert_eq!(plan.header.abi_version, TSPI_PLAN_ABI_V1);
+    assert_eq!(plan.header.abi_version, KHAEN_PLAN_ABI_V1);
     assert!(plan.d7_warnings.contains(&W_EXPERIMENT_IIR_EXCLUDED));
     let envelope = plan.experiment_envelope_json();
     assert!(envelope.contains("\"t64_correction_in_plan\": false"));
@@ -622,7 +626,7 @@ fn t66_peq_plan_experiment_envelope_reports_t64_correction_in_plan() {
     let fixture = peq_fixture(vec![peq_section(100.0, -6.0, 1.0)]);
     let request = fixture.request().with_experiment(ExperimentMode::SINGLE_POINT);
     let plan = compile_plan(&request).expect("experiment plan with PEQ must compile");
-    assert_eq!(plan.header.abi_version, TSPI_PLAN_ABI_V2);
+    assert_eq!(plan.header.abi_version, KHAEN_PLAN_ABI_V2);
     assert!(!plan
         .d7_warnings
         .contains(&W_EXPERIMENT_IIR_EXCLUDED));
@@ -655,7 +659,7 @@ fn t66_peq_plan_compile_report_iir_summary_matches_plan() {
     let sections = vec![peq_section(100.0, -6.0, 1.0), peq_section(200.0, -3.0, 2.0)];
     let plan = compile_ok(&peq_fixture(sections));
     let summary = plan.report.iir.as_ref().expect("report must carry IIR summary");
-    assert_eq!(summary.abi_version, TSPI_PLAN_ABI_V2);
+    assert_eq!(summary.abi_version, KHAEN_PLAN_ABI_V2);
     assert_eq!(summary.role_count, 1);
     assert_eq!(summary.section_count, 2);
     assert_eq!(summary.roles, vec![("FL".to_string(), 2u16)]);

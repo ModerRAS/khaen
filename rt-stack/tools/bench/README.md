@@ -1,4 +1,4 @@
-# rt-stack/tools/bench —— TSPI RT-first DSP 离线性能工装
+# rt-stack/tools/bench —— KHAEN RT-first DSP 离线性能工装
 
 > 任务：team task-156（WBS **T29 / T46 / T30** 的性能门禁准备）。写域：本目录 + evidence/perf-harness/。
 > 状态（2026-11-17）：**离线工装已落地并在本机 x86 真实执行**（executed>0，CSV/JSON 见
@@ -73,7 +73,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/bench/run-bench.ps1 -Q
 
 ## 6. 线程/DAG 复刻与测量口径（重要）
 
-- 线程循环用 T09 的 [RT] phase 函数 + TspiBlockAckV1 phase 位图 + wait_phase_done
+- 线程循环用 T09 的 [RT] phase 函数 + KhaenBlockAckV1 phase 位图 + wait_phase_done
   有界 spin：worker 每块 B1→ack→barrier→B2→ack→barrier→B3→ack→barrier；master 在块边界
   清零 partials、发布 block_start，并测“发布 → 全部 all-ack”的块完成时间（含块内串行准备）。
 - 共享 arena（state/partials/input/output）用 raw pointer 在 worker 间传递，与真实 host 的

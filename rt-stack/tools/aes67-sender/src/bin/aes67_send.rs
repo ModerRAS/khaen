@@ -39,7 +39,7 @@ NETWORK / RTP:
   --no-mcast-loop               disable IP_MULTICAST_LOOP
   --ptime <ms>                  packet time (default 1 ms => 48 frames @48k)
   --pt <n>                      RTP payload type (default 97)
-  --ssrc <u32|0x...>            SSRC (default 0x54535049 "TSPI")
+  --ssrc <u32|0x...>            SSRC (default 0x54535049 "KHAEN")
   --seq <u16>                   initial RTP sequence number (default 0)
   --ts <u32>                    initial RTP timestamp (default 0)
   --ts-refclk <value>           SDP a=ts-refclk (default "local"; non-PTP first stage)
@@ -207,7 +207,7 @@ fn real_main() -> anyhow::Result<()> {
         .or_else(|| guess_local_ip(dest_ip))
         .unwrap_or(Ipv4Addr::UNSPECIFIED);
     let sdp = SdpConfig {
-        session_name: args.string("session-name", "TSPI Windows AES67 sender"),
+        session_name: args.string("session-name", "KHAEN Windows AES67 sender"),
         origin_ip: origin_ip.to_string(),
         dest_ip: dest_ip.to_string(),
         multicast,

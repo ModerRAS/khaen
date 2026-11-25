@@ -41,7 +41,7 @@ const DEFAULT_DESIGN_POINTS: usize = 100;
 const T20_DROP_TARGET: f64 = 0.15;
 const I_TARGET_DB: f64 = 3.0;
 const REPORT_I_CAP_DB: f64 = 60.0;
-const SCHEMA: &str = "tspi-mimo-single-point-t20/v1";
+const SCHEMA: &str = "khaen-mimo-single-point-t20/v1";
 const CLAIM: &str = "PREDICTED_ONLY / SINGLE_POINT_NOT_SPATIAL / NO_MEASUREMENT";
 const DEFAULT_OUT: &str = "evidence/calib-chain-20261121/mimo-fill-solver-20261122/t20";
 const MODES: [MatrixMode; 2] = [MatrixMode::Diagonal, MatrixMode::Full5x5];
@@ -84,9 +84,7 @@ fn parse_args() -> Result<Args, String> {
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
         let mut take = |name: &str| -> Result<String, String> {
-            arguments
-                .next()
-                .ok_or_else(|| format!("{name} 缺少参数值"))
+            arguments.next().ok_or_else(|| format!("{name} 缺少参数值"))
         };
         match argument.as_str() {
             "--h" => h = Some(PathBuf::from(take("--h")?)),
@@ -499,11 +497,7 @@ fn design_g_paths(
     paths
 }
 
-fn cap_stats(
-    m: usize,
-    paths: &[Vec<Vec<Cx>>],
-    caps: &[Vec<f64>],
-) -> (f64, usize) {
+fn cap_stats(m: usize, paths: &[Vec<Vec<Cx>>], caps: &[Vec<f64>]) -> (f64, usize) {
     let mut max_magnitude = 0.0f64;
     let mut hits = 0usize;
     for source in 0..m {
@@ -609,7 +603,10 @@ fn after_from_path_firs(
         for bin in 0..bins {
             let mut value = rot_grid[bin].mul(baseline_spec[input][bin]);
             for source in 0..m {
-                let g = g_hat[source][input].get(bin).copied().unwrap_or_else(Cx::zero);
+                let g = g_hat[source][input]
+                    .get(bin)
+                    .copied()
+                    .unwrap_or_else(Cx::zero);
                 value = value.add(baseline_spec[source][bin].mul(g));
             }
             after[input][bin] = value;
@@ -927,11 +924,7 @@ fn run() -> Result<(), String> {
             .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap())
             .map(|(index, _)| index)
             .unwrap_or(0);
-        let early: f64 = ir
-            .iter()
-            .take(4096)
-            .map(|v| v * v)
-            .sum::<f64>();
+        let early: f64 = ir.iter().take(4096).map(|v| v * v).sum::<f64>();
         let total: f64 = ir.iter().map(|v| v * v).sum::<f64>();
         let before_bands: Vec<String> = target_infos[source]
             .iter()
@@ -982,7 +975,19 @@ fn run() -> Result<(), String> {
     let mut ideal_json: Vec<String> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     // mode,taps,valid_band_rows,pass15_band_rows,min_drop,min_i,max_i,numeric_ok,worst_level,worst_edc,engine_feasible
-    let mut combo_rows: Vec<(String, usize, usize, usize, f64, f64, f64, bool, f64, f64, bool)> = Vec::new();
+    let mut combo_rows: Vec<(
+        String,
+        usize,
+        usize,
+        usize,
+        f64,
+        f64,
+        f64,
+        bool,
+        f64,
+        f64,
+        bool,
+    )> = Vec::new();
 
     let mut ideal_rows_by_mode: Vec<Vec<Vec<BandResult>>> = Vec::new();
     let mut ideal_i_by_mode: Vec<Vec<f64>> = Vec::new();
@@ -1052,7 +1057,8 @@ fn run() -> Result<(), String> {
             let firs = match fit_g_paths(m, *mode, &g_paths, &design_freqs, *taps) {
                 Ok(firs) => firs,
                 Err(error) => {
-                    let message = format!("mode={mode_tag} taps={taps}: fit_path_firs 失败: {error}");
+                    let message =
+                        format!("mode={mode_tag} taps={taps}: fit_path_firs 失败: {error}");
                     println!("DESIGN_FAILED: {message}");
                     failures.push(message);
                     continue;
@@ -1136,7 +1142,11 @@ fn run() -> Result<(), String> {
                     .filter(|row| row.valid)
                     .map(|row| row.t20_drop)
                     .fold(f64::INFINITY, f64::min);
-                let min_drop = if min_drop.is_finite() { min_drop } else { f64::NAN };
+                let min_drop = if min_drop.is_finite() {
+                    min_drop
+                } else {
+                    f64::NAN
+                };
                 let pass = valid_bands > 0
                     && rows
                         .iter()
@@ -1284,11 +1294,7 @@ fn run() -> Result<(), String> {
     println!("status_counts: {verdict_detail}");
 
     // ---- 6) 写 CSV ----
-    write_csv(
-        &out_dir.join("t20_bands.csv"),
-        header_bands,
-        &band_csv,
-    )?;
+    write_csv(&out_dir.join("t20_bands.csv"), header_bands, &band_csv)?;
     write_csv(
         &out_dir.join("t20_summary.csv"),
         header_summary,
@@ -1398,7 +1404,7 @@ fn run() -> Result<(), String> {
     // ---- 8) COMMANDS.md ----
     let commands = format!(
         "# 复现命令（单点 MIMO 候选 B T20 预测；纯离线）\n\n\
-         \x20   cd C:/WorkSpace/Claw/projects/tspi-audio-dsp/rt-stack\n\n\
+         \x20   cd C:/WorkSpace/Claw/projects/khaen-audio-dsp/rt-stack\n\n\
          \x20   # 1) 单测（decay 模块；含 taps>4096 的 fit_path_firs 回退路径与 T20 定义）\n\
          \x20   cargo test --offline -p khaen-mimo-design --lib\n\n\
          \x20   # 2) 构建 CLI\n\
@@ -1430,7 +1436,20 @@ fn run() -> Result<(), String> {
     write_text(&out_dir.join("COMMANDS.md"), &commands)?;
 
     // ---- 9) stdout 关键数字 ----
-    for (mode, taps, valid, pass, min_drop, min_i, max_i, numeric_ok, worst_level, worst_edc, engine) in &combo_rows {
+    for (
+        mode,
+        taps,
+        valid,
+        pass,
+        min_drop,
+        min_i,
+        max_i,
+        numeric_ok,
+        worst_level,
+        worst_edc,
+        engine,
+    ) in &combo_rows
+    {
         println!(
             "combo {mode} taps={taps}: engine_feasible={engine} numeric_ok={numeric_ok} valid_band_rows={valid} pass15_band_rows={pass} min_t20_drop={:.4} min_i_db={:.3} max_i_db={:.3} worst_level_db={:.3} worst_edc_guard_db={:.3}",
             min_drop, min_i, max_i, worst_level, worst_edc

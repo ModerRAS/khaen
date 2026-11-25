@@ -1,6 +1,6 @@
 //! S2（PEQ-only）plan 打包：plan ABI v2 per-role IIR(PEQ) 区（GAP-T66-3）。
 //!
-//! 背景：plan ABI v1.0 只有 `TspiRoleV1.peq_count` 计数、没有 role IIR 系数区，T66
+//! 背景：plan ABI v1.0 只有 `KhaenRoleV1.peq_count` 计数、没有 role IIR 系数区，T66
 //! `compile_plan` 对 `peq_count>0` 一律 `E_CA_PEQ_ABI` 拒收，host `graph_from_plan`
 //! 也显式拒绝 → PEQ 无法进入 plan/host。本模块为 **S2 诊断协议的 known PEQ ladder** 提供
 //! 最小 plan 打包器：factorized identity A/G/P（path=delta_D baseline、diag=1.0）+
@@ -16,10 +16,10 @@
 //! 输出幅频 vs 解析 `|H|` ≤ 0.5 dB（20 Hz–20 kHz）。
 
 use khaen_core::abi::{
-    TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1, TspiPlanIirHeaderV2, TspiRoleIirV2, TspiRoleV1,
-    PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS,
-    TSPI_PLAN_ABI_V1, TSPI_PLAN_ABI_V2, TSPI_PLAN_IIR_MAGIC, TSPI_PLAN_IIR_VERSION,
-    TSPI_PLAN_MAGIC,
+    KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenPlanIirHeaderV2, KhaenRoleIirV2,
+    KhaenRoleV1, KHAEN_PLAN_ABI_V1, KHAEN_PLAN_ABI_V2, KHAEN_PLAN_IIR_MAGIC,
+    KHAEN_PLAN_IIR_VERSION, KHAEN_PLAN_MAGIC, PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES,
+    PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS,
 };
 use khaen_core::rt::{
     MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, RT_WORKERS, SAMPLE_RATES_HZ,
@@ -34,7 +34,7 @@ use crate::compile_apply::{
 };
 
 /// S2 PEQ-only plan 打包器 schema。
-pub const PEQ_PLAN_SCHEMA: &str = "tspi-peq-plan/v1";
+pub const PEQ_PLAN_SCHEMA: &str = "khaen-peq-plan/v1";
 /// 角色级延迟上限（200 ms；core-v1 §11.10 role.delay_samples）。
 pub const PEQ_PLAN_ROLE_DELAY_MAX_MS: f64 = 200.0;
 
@@ -223,15 +223,15 @@ pub struct PeqPlanRequest {
 #[derive(Clone, Debug)]
 pub struct PeqPlanArtifact {
     /// plan header（abi_version=2 当且仅当有 PEQ 段）。
-    pub header: TspiPlanHeaderV1,
+    pub header: KhaenPlanHeaderV1,
     /// graph_id（SHA-256；含 IIR 表与系数）。
     pub graph_id: [u8; 32],
     /// 完整 plan 字节（T66 compile/plan.bin 同布局）。
     pub plan_bytes: Vec<u8>,
     /// role 表。
-    pub roles: Vec<TspiRoleV1>,
+    pub roles: Vec<KhaenRoleV1>,
     /// plan ABI v2 IIR 表项（空 = 无 PEQ）。
-    pub iir_entries: Vec<TspiRoleIirV2>,
+    pub iir_entries: Vec<KhaenRoleIirV2>,
     /// 每 role 的 PEQ 级联（与 `roles` 同序；解析响应参考/证据用）。
     pub role_peq: Vec<Vec<PeqBiquad>>,
 }
@@ -313,10 +313,10 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
     let mut path_blobs: Vec<Vec<u8>> = Vec::new();
     let mut diag_blobs: Vec<Vec<u8>> = Vec::new();
     let mut iir_blobs: Vec<Vec<u8>> = Vec::new();
-    let mut paths: Vec<TspiPathV1> = Vec::new();
-    let mut diags: Vec<TspiDiagFirV1> = Vec::new();
-    let mut roles: Vec<TspiRoleV1> = Vec::with_capacity(req.roles.len());
-    let mut iir_entries: Vec<TspiRoleIirV2> = Vec::new();
+    let mut paths: Vec<KhaenPathV1> = Vec::new();
+    let mut diags: Vec<KhaenDiagFirV1> = Vec::new();
+    let mut roles: Vec<KhaenRoleV1> = Vec::with_capacity(req.roles.len());
+    let mut iir_entries: Vec<KhaenRoleIirV2> = Vec::new();
     let mut role_peq: Vec<Vec<PeqBiquad>> = Vec::with_capacity(req.roles.len());
 
     // 1) role 表 + identity path/diag（path=delta_D baseline coeffs [1,0]、diag=[1]）。
@@ -327,7 +327,7 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
         } else {
             ROLE_FLAG_ENABLED
         };
-        roles.push(TspiRoleV1 {
+        roles.push(KhaenRoleV1 {
             role_id: role.role_index,
             out_index: role.out_channel,
             flags,
@@ -343,7 +343,7 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
             reserved4: 0,
         });
         if let Some(source) = role.source_channel {
-            paths.push(TspiPathV1 {
+            paths.push(KhaenPathV1 {
                 in_index: source,
                 out_index: role.out_channel,
                 taps: 2,
@@ -361,7 +361,7 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
                 bytes.extend_from_slice(&0.0f32.to_le_bytes());
                 bytes
             });
-            diags.push(TspiDiagFirV1 {
+            diags.push(KhaenDiagFirV1 {
                 out_index: role.out_channel,
                 flags: 0,
                 taps: 1,
@@ -414,7 +414,7 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
             continue;
         }
         let section_count = role.peq.len();
-        iir_entries.push(TspiRoleIirV2 {
+        iir_entries.push(KhaenRoleIirV2 {
             role_id: role.role_index,
             order: 2,
             section_count: section_count as u16,
@@ -445,12 +445,12 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
         build_iir_table(&iir_entries, &iir_blobs)?
     };
     let n_out = req.container_channels;
-    let mut header = TspiPlanHeaderV1 {
-        magic: TSPI_PLAN_MAGIC,
+    let mut header = KhaenPlanHeaderV1 {
+        magic: KHAEN_PLAN_MAGIC,
         abi_version: if iir_entries.is_empty() {
-            TSPI_PLAN_ABI_V1
+            KHAEN_PLAN_ABI_V1
         } else {
-            TSPI_PLAN_ABI_V2
+            KHAEN_PLAN_ABI_V2
         },
         header_size: PLAN_HEADER_BYTES as u16,
         plan_version: PLAN_VERSION_UNASSIGNED,
@@ -694,16 +694,16 @@ fn build_ctl_meta_for(roles: &[PeqRolePlanInput]) -> Vec<u8> {
     out
 }
 
-fn build_iir_table(entries: &[TspiRoleIirV2], iir_blobs: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+fn build_iir_table(entries: &[KhaenRoleIirV2], iir_blobs: &[Vec<u8>]) -> Result<Vec<u8>, String> {
     if entries.len() != iir_blobs.len() {
         return Err(peq_err(
             "iir_table",
             "表项数与系数 blob 数不一致（内部错误）",
         ));
     }
-    let header = TspiPlanIirHeaderV2 {
-        magic: TSPI_PLAN_IIR_MAGIC,
-        version: TSPI_PLAN_IIR_VERSION,
+    let header = KhaenPlanIirHeaderV2 {
+        magic: KHAEN_PLAN_IIR_MAGIC,
+        version: KHAEN_PLAN_IIR_VERSION,
         entry_bytes: PLAN_IIR_ENTRY_BYTES as u16,
         entry_count: entries.len() as u16,
         reserved0: 0,
@@ -724,7 +724,7 @@ fn build_iir_table(entries: &[TspiRoleIirV2], iir_blobs: &[Vec<u8>]) -> Result<V
     Ok(table)
 }
 
-fn iir_header_bytes(header: &TspiPlanIirHeaderV2) -> [u8; PLAN_IIR_HEADER_BYTES] {
+fn iir_header_bytes(header: &KhaenPlanIirHeaderV2) -> [u8; PLAN_IIR_HEADER_BYTES] {
     let mut out = [0u8; PLAN_IIR_HEADER_BYTES];
     out[0..4].copy_from_slice(&header.magic.to_le_bytes());
     out[4..6].copy_from_slice(&header.version.to_le_bytes());
@@ -735,7 +735,7 @@ fn iir_header_bytes(header: &TspiPlanIirHeaderV2) -> [u8; PLAN_IIR_HEADER_BYTES]
     out
 }
 
-fn iir_entry_bytes(entry: &TspiRoleIirV2) -> [u8; PLAN_IIR_ENTRY_BYTES] {
+fn iir_entry_bytes(entry: &KhaenRoleIirV2) -> [u8; PLAN_IIR_ENTRY_BYTES] {
     let mut out = [0u8; PLAN_IIR_ENTRY_BYTES];
     out[0..2].copy_from_slice(&entry.role_id.to_le_bytes());
     out[2..4].copy_from_slice(&entry.order.to_le_bytes());
@@ -751,13 +751,13 @@ fn iir_entry_bytes(entry: &TspiRoleIirV2) -> [u8; PLAN_IIR_ENTRY_BYTES] {
 
 fn verify_artifact(artifact: &PeqPlanArtifact) -> Result<(), String> {
     let header = &artifact.header;
-    if header.magic != TSPI_PLAN_MAGIC {
+    if header.magic != KHAEN_PLAN_MAGIC {
         return Err(peq_err("header.magic", "magic 不符"));
     }
     let expect_abi = if artifact.iir_entries.is_empty() {
-        TSPI_PLAN_ABI_V1
+        KHAEN_PLAN_ABI_V1
     } else {
-        TSPI_PLAN_ABI_V2
+        KHAEN_PLAN_ABI_V2
     };
     if header.abi_version != expect_abi {
         return Err(peq_err("header.abi_version", "版本与 IIR 表存在性不一致"));
@@ -803,9 +803,9 @@ fn verify_artifact(artifact: &PeqPlanArtifact) -> Result<(), String> {
         if iir_end > coeff_base {
             return Err(peq_err("iir_table", "IIR 表越界"));
         }
-        let iir_header = TspiPlanIirHeaderV2 {
-            magic: khaen_core::abi::TSPI_PLAN_IIR_MAGIC,
-            version: khaen_core::abi::TSPI_PLAN_IIR_VERSION,
+        let iir_header = KhaenPlanIirHeaderV2 {
+            magic: khaen_core::abi::KHAEN_PLAN_IIR_MAGIC,
+            version: khaen_core::abi::KHAEN_PLAN_IIR_VERSION,
             entry_bytes: PLAN_IIR_ENTRY_BYTES as u16,
             entry_count: iir_count as u16,
             reserved0: 0,
@@ -833,7 +833,7 @@ fn verify_artifact(artifact: &PeqPlanArtifact) -> Result<(), String> {
             ));
         }
         if artifact.plan_bytes[iir_offset..iir_offset + 4]
-            != khaen_core::abi::TSPI_PLAN_IIR_MAGIC.to_le_bytes()
+            != khaen_core::abi::KHAEN_PLAN_IIR_MAGIC.to_le_bytes()
         {
             return Err(peq_err("iir_table.magic", "IIR 表 magic 不符"));
         }
@@ -875,7 +875,7 @@ mod tests {
         // 1 kHz 处 RBJ peaking（Q1）解析值 ≈ −0.065 dB；远端应回到 0 dB 附近。
         assert!(section.response_db(FS as f64, 1000.0).abs() < 0.1);
         let artifact = compile_peq_plan(&stereo_request(section)).expect("compile v2 plan");
-        assert_eq!(artifact.header.abi_version, TSPI_PLAN_ABI_V2);
+        assert_eq!(artifact.header.abi_version, KHAEN_PLAN_ABI_V2);
         assert_eq!(artifact.section_count(), 1);
         assert_eq!(artifact.iir_entries.len(), 1);
         assert_eq!(artifact.iir_entries[0].role_id, 0);
@@ -894,7 +894,7 @@ mod tests {
                 expected[index]
             );
         }
-        assert_eq!(artifact.plan_bytes[0..4], TSPI_PLAN_MAGIC.to_le_bytes());
+        assert_eq!(artifact.plan_bytes[0..4], KHAEN_PLAN_MAGIC.to_le_bytes());
     }
 
     #[test]
@@ -911,7 +911,7 @@ mod tests {
             ],
         })
         .expect("identity v1 plan");
-        assert_eq!(artifact.header.abi_version, TSPI_PLAN_ABI_V1);
+        assert_eq!(artifact.header.abi_version, KHAEN_PLAN_ABI_V1);
         assert!(artifact.iir_entries.is_empty());
         assert_eq!(artifact.header.reserved3, [0u32; 3]);
         assert!(artifact.section_count() == 0);

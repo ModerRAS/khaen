@@ -1,29 +1,29 @@
 //! 校准 UI/REST 的唯一 JSON 契约（settings / lanes / apply-clear / host pending 字段）。
 //!
-//! 本模块是 daemon（tspi-rt-daemon）与页面（/calibration 向导 + 控制台校准卡）之间
+//! 本模块是 daemon（khaen-rt-daemon）与页面（/calibration 向导 + 控制台校准卡）之间
 //! 唯一允许定义校准请求/响应形状的地方。host 侧字段还没最终落地时，这里给出字段名、
 //! 类型和 pending 语义；REST 层对未实现的 host 字段返回 **501 pending_host_field**，
 //! 不伪造 applied / lanes / ack。
 //!
 //! schema 版本：
-//! - GET/POST /api/calibration/settings -> tspi-cal-settings/v1
-//! - GET /api/calibration/status         -> tspi-cal-status/v1
-//! - GET /api/calibration/jobs[/{id}]    -> tspi-cal-job/v1（新增 progress_text / lanes）
-//! - POST /api/calibration/apply|clear   -> tspi-cal-apply/v1
-//! - job.lanes                           -> tspi-cal-lanes/v1
+//! - GET/POST /api/calibration/settings -> khaen-cal-settings/v1
+//! - GET /api/calibration/status         -> khaen-cal-status/v1
+//! - GET /api/calibration/jobs[/{id}]    -> khaen-cal-job/v1（新增 progress_text / lanes）
+//! - POST /api/calibration/apply|clear   -> khaen-cal-apply/v1
+//! - job.lanes                           -> khaen-cal-lanes/v1
 //!
 //! 注意：本文件只做 JSON 形状/校验，不打开声卡、不接触 host、不执行测量。
 
 use super::*;
 
 /// 校准设置 schema。
-pub const CAL_SETTINGS_SCHEMA: &str = "tspi-cal-settings/v1";
+pub const CAL_SETTINGS_SCHEMA: &str = "khaen-cal-settings/v1";
 /// 校准总状态 schema。
-pub const CAL_STATUS_SCHEMA: &str = "tspi-cal-status/v1";
+pub const CAL_STATUS_SCHEMA: &str = "khaen-cal-status/v1";
 /// 每 lane 结果 schema。
-pub const CAL_LANES_SCHEMA: &str = "tspi-cal-lanes/v1";
+pub const CAL_LANES_SCHEMA: &str = "khaen-cal-lanes/v1";
 /// apply/clear 回执 schema。
-pub const CAL_APPLY_SCHEMA: &str = "tspi-cal-apply/v1";
+pub const CAL_APPLY_SCHEMA: &str = "khaen-cal-apply/v1";
 
 /// 麦克风输入类型：USB 数字麦 / 声卡模拟输入。
 pub const MIC_KINDS: [&str; 2] = ["usb", "analog_48v"];
@@ -51,9 +51,16 @@ pub const STAGE_FIR: &str = "fir";
 /// 每 lane modal EQ stage 名。
 pub const STAGE_MODAL: &str = "modal";
 /// 一键运行链序：crossover(bass) → 全频 FIR → modal EQ → level → delay → emperor/A-B(measure)。
-pub const RUN_STAGE_ORDER: [&str; 6] = [STAGE_BASS, STAGE_FIR, STAGE_MODAL, STAGE_LEVEL, STAGE_DELAY, "measure"];
+pub const RUN_STAGE_ORDER: [&str; 6] = [
+    STAGE_BASS,
+    STAGE_FIR,
+    STAGE_MODAL,
+    STAGE_LEVEL,
+    STAGE_DELAY,
+    "measure",
+];
 /// 一键运行 dry-run schema。
-pub const CAL_RUN_SCHEMA: &str = "tspi-cal-run/v1";
+pub const CAL_RUN_SCHEMA: &str = "khaen-cal-run/v1";
 /// 允许的 FIR 相位模式。
 pub const FIR_PHASES: [&str; 2] = ["mixed", "linear"];
 /// 允许的 FIR 目标曲线。
@@ -422,7 +429,12 @@ impl SubConfig {
     fn from_json(value: &JsonValue) -> Result<Self, RestError> {
         let entries = match value {
             JsonValue::Obj(entries) => entries.clone(),
-            _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs entries must be objects")),
+            _ => {
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "bass.subs entries must be objects",
+                ))
+            }
         };
         let mut fields = Fields::new(entries, "calibration settings bass.subs");
         let id = fields.take_str("id")?;
@@ -434,35 +446,72 @@ impl SubConfig {
         let polarity = fields.take_opt_f64("polarity")?.unwrap_or(1.0) as i32;
         let mut modal_notch = Vec::new();
         if let Some(JsonValue::Arr(items)) = fields.take_opt("modal_notch") {
-            for item in items { modal_notch.push(ModalNotch::from_json(&item)?); }
+            for item in items {
+                modal_notch.push(ModalNotch::from_json(&item)?);
+            }
         }
         fields.finish()?;
-        Ok(SubConfig { id, output, hp_hz, lp_hz, gain_db, delay_samples, polarity, modal_notch })
+        Ok(SubConfig {
+            id,
+            output,
+            hp_hz,
+            lp_hz,
+            gain_db,
+            delay_samples,
+            polarity,
+            modal_notch,
+        })
     }
 
     fn validate(&self) -> Result<(), RestError> {
         if self.id.trim().is_empty() || self.id.len() > 24 {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].id must be 1..=24 characters"));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "bass.subs[].id must be 1..=24 characters",
+            ));
         }
         if self.output.trim().is_empty() || self.output.len() > 32 {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].output must be 1..=32 characters"));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "bass.subs[].output must be 1..=32 characters",
+            ));
         }
-        if !(16.0..=60.0).contains(&self.hp_hz) || !(40.0..=150.0).contains(&self.lp_hz) || self.hp_hz >= self.lp_hz {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].hp_hz/lp_hz must satisfy 16<=hp<lp<=150"));
+        if !(16.0..=60.0).contains(&self.hp_hz)
+            || !(40.0..=150.0).contains(&self.lp_hz)
+            || self.hp_hz >= self.lp_hz
+        {
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "bass.subs[].hp_hz/lp_hz must satisfy 16<=hp<lp<=150",
+            ));
         }
         if !(-12.0..=6.0).contains(&self.gain_db) {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].gain_db must be -12..=6 dB"));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "bass.subs[].gain_db must be -12..=6 dB",
+            ));
         }
         if !(0..=96000).contains(&self.delay_samples) {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].delay_samples must be 0..=96000"));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "bass.subs[].delay_samples must be 0..=96000",
+            ));
         }
         if self.polarity != 1 && self.polarity != -1 {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].polarity must be +1 or -1"));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "bass.subs[].polarity must be +1 or -1",
+            ));
         }
         if self.modal_notch.len() > 4 {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].modal_notch supports at most 4 notches"));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "bass.subs[].modal_notch supports at most 4 notches",
+            ));
         }
-        for notch in &self.modal_notch { notch.validate()?; }
+        for notch in &self.modal_notch {
+            notch.validate()?;
+        }
         Ok(())
     }
 
@@ -475,7 +524,10 @@ impl SubConfig {
             ("gain_db", JsonValue::from(self.gain_db)),
             ("delay_samples", JsonValue::from(self.delay_samples)),
             ("polarity", JsonValue::from(i64::from(self.polarity))),
-            ("modal_notch", JsonValue::arr(self.modal_notch.iter().map(ModalNotch::to_json).collect())),
+            (
+                "modal_notch",
+                JsonValue::arr(self.modal_notch.iter().map(ModalNotch::to_json).collect()),
+            ),
         ])
     }
 }
@@ -484,19 +536,36 @@ impl ModalNotch {
     fn from_json(value: &JsonValue) -> Result<Self, RestError> {
         let entries = match value {
             JsonValue::Obj(entries) => entries.clone(),
-            _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs[].modal_notch entries must be objects")),
+            _ => {
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "bass.subs[].modal_notch entries must be objects",
+                ))
+            }
         };
         let mut fields = Fields::new(entries, "calibration settings bass.subs.modal_notch");
-        let freq_hz = fields.take_opt_f64("freq_hz")?.ok_or_else(|| RestError::bad_request(CODE_MISSING_FIELD, "missing modal_notch.freq_hz"))?;
+        let freq_hz = fields.take_opt_f64("freq_hz")?.ok_or_else(|| {
+            RestError::bad_request(CODE_MISSING_FIELD, "missing modal_notch.freq_hz")
+        })?;
         let gain_db = fields.take_opt_f64("gain_db")?.unwrap_or(-6.0);
         let q = fields.take_opt_f64("q")?.unwrap_or(4.0);
         fields.finish()?;
-        Ok(ModalNotch { freq_hz, gain_db, q })
+        Ok(ModalNotch {
+            freq_hz,
+            gain_db,
+            q,
+        })
     }
 
     fn validate(&self) -> Result<(), RestError> {
-        if !(20.0..=150.0).contains(&self.freq_hz) || !(-24.0..=0.0).contains(&self.gain_db) || !(0.1..=20.0).contains(&self.q) {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "modal_notch must satisfy 20<=freq<=150, -24<=gain<=0, 0.1<=q<=20"));
+        if !(20.0..=150.0).contains(&self.freq_hz)
+            || !(-24.0..=0.0).contains(&self.gain_db)
+            || !(0.1..=20.0).contains(&self.q)
+        {
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "modal_notch must satisfy 20<=freq<=150, -24<=gain<=0, 0.1<=q<=20",
+            ));
         }
         Ok(())
     }
@@ -548,9 +617,36 @@ impl Default for BassSettings {
             sub_gain_db: 0.0,
             strategy: "multi_b".to_string(),
             subs: vec![
-                SubConfig { id: "SUB1".to_string(), output: "7".to_string(), hp_hz: 20.0, lp_hz: 120.0, gain_db: 0.0, delay_samples: 0, polarity: 1, modal_notch: Vec::new() },
-                SubConfig { id: "SUB_L".to_string(), output: "8".to_string(), hp_hz: 20.0, lp_hz: 120.0, gain_db: 0.0, delay_samples: 0, polarity: 1, modal_notch: Vec::new() },
-                SubConfig { id: "SUB_R".to_string(), output: "9".to_string(), hp_hz: 20.0, lp_hz: 120.0, gain_db: 0.0, delay_samples: 0, polarity: 1, modal_notch: Vec::new() },
+                SubConfig {
+                    id: "SUB1".to_string(),
+                    output: "7".to_string(),
+                    hp_hz: 20.0,
+                    lp_hz: 120.0,
+                    gain_db: 0.0,
+                    delay_samples: 0,
+                    polarity: 1,
+                    modal_notch: Vec::new(),
+                },
+                SubConfig {
+                    id: "SUB_L".to_string(),
+                    output: "8".to_string(),
+                    hp_hz: 20.0,
+                    lp_hz: 120.0,
+                    gain_db: 0.0,
+                    delay_samples: 0,
+                    polarity: 1,
+                    modal_notch: Vec::new(),
+                },
+                SubConfig {
+                    id: "SUB_R".to_string(),
+                    output: "9".to_string(),
+                    hp_hz: 20.0,
+                    lp_hz: 120.0,
+                    gain_db: 0.0,
+                    delay_samples: 0,
+                    polarity: 1,
+                    modal_notch: Vec::new(),
+                },
             ],
             routing: SubRouting::default(),
             predicted_peak_db: Some(0.0),
@@ -562,7 +658,11 @@ impl Default for BassSettings {
 impl BassSettings {
     /// 重算预测峰值与全局 pre_gain（输入 LFE/L/R 按权重分给每只炮；取最大输入）。
     pub fn recompute_pre_gain(&mut self) {
-        let input_rows = [&self.routing.lfe_weights, &self.routing.left_weights, &self.routing.right_weights];
+        let input_rows = [
+            &self.routing.lfe_weights,
+            &self.routing.left_weights,
+            &self.routing.right_weights,
+        ];
         let mut peak = 0.0f64;
         for row in input_rows {
             let mut sum = 0.0f64;
@@ -575,7 +675,11 @@ impl BassSettings {
             }
         }
         self.predicted_peak_db = Some(peak);
-        self.pre_gain_db = Some(if peak > 0.0 { -peak.clamp(0.0, 20.0) } else { 0.0 });
+        self.pre_gain_db = Some(if peak > 0.0 {
+            -peak.clamp(0.0, 20.0)
+        } else {
+            0.0
+        });
     }
 }
 
@@ -601,26 +705,43 @@ impl BassSettings {
             .unwrap_or_else(|| "LR4".to_string());
         let linear_phase = fields.take_opt_bool("linear_phase")?.unwrap_or(true);
         let sub_gain_db = fields.take_opt_f64("sub_gain_db")?.unwrap_or(0.0);
-        let strategy = fields.take_opt_str("strategy")?.unwrap_or_else(|| "multi_b".to_string());
+        let strategy = fields
+            .take_opt_str("strategy")?
+            .unwrap_or_else(|| "multi_b".to_string());
         let mut subs = Vec::new();
         if let Some(JsonValue::Arr(items)) = fields.take_opt("subs") {
-            for item in items { subs.push(SubConfig::from_json(&item)?); }
+            for item in items {
+                subs.push(SubConfig::from_json(&item)?);
+            }
         }
         let routing = match fields.take_opt("routing") {
             None | Some(JsonValue::Null) => SubRouting::default(),
             Some(value) => {
                 let entries = match value {
                     JsonValue::Obj(entries) => entries,
-                    _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.routing must be an object")),
+                    _ => {
+                        return Err(RestError::bad_request(
+                            CODE_INVALID_FIELD,
+                            "bass.routing must be an object",
+                        ))
+                    }
                 };
                 let mut fields = Fields::new(entries, "calibration settings bass.routing");
-                let mode = fields.take_opt_str("mode")?.unwrap_or_else(|| "all_to_all".to_string());
+                let mode = fields
+                    .take_opt_str("mode")?
+                    .unwrap_or_else(|| "all_to_all".to_string());
                 let lfe_weights = parse_weight_row(fields.take_opt("lfe_weights"))?;
                 let left_weights = parse_weight_row(fields.take_opt("left_weights"))?;
                 let right_weights = parse_weight_row(fields.take_opt("right_weights"))?;
                 let stereo_bias = fields.take_opt_f64("stereo_bias")?.unwrap_or(0.0);
                 fields.finish()?;
-                SubRouting { mode, lfe_weights, left_weights, right_weights, stereo_bias }
+                SubRouting {
+                    mode,
+                    lfe_weights,
+                    left_weights,
+                    right_weights,
+                    stereo_bias,
+                }
             }
         };
         let predicted_peak_db = fields.take_opt_f64("predicted_peak_db")?;
@@ -656,7 +777,10 @@ impl BassSettings {
                 format!("bass.crossover_hz must be {CROSSOVER_HZ_MIN}..={CROSSOVER_HZ_MAX} Hz"),
             ));
         }
-        for (field, slope) in [("main_slope", &self.main_slope), ("sub_slope", &self.sub_slope)] {
+        for (field, slope) in [
+            ("main_slope", &self.main_slope),
+            ("sub_slope", &self.sub_slope),
+        ] {
             if !SLOPES.contains(&slope.as_str()) {
                 return Err(RestError::bad_request(
                     CODE_UNSUPPORTED_VALUE,
@@ -672,34 +796,65 @@ impl BassSettings {
         }
         if self.enabled {
             if !matches!(self.strategy.as_str(), "single" | "multi_b") {
-                return Err(RestError::bad_request(CODE_UNSUPPORTED_VALUE, "bass.strategy must be single or multi_b"));
+                return Err(RestError::bad_request(
+                    CODE_UNSUPPORTED_VALUE,
+                    "bass.strategy must be single or multi_b",
+                ));
             }
             if self.subs.is_empty() || self.subs.len() > 4 {
-                return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.subs must have 1..=4 subwoofers"));
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "bass.subs must have 1..=4 subwoofers",
+                ));
             }
             let mut ids = Vec::new();
             for sub in &self.subs {
                 sub.validate()?;
                 if ids.contains(&sub.id.as_str()) {
-                    return Err(RestError::bad_request(CODE_INVALID_FIELD, format!("duplicate sub id '{}'", sub.id)));
+                    return Err(RestError::bad_request(
+                        CODE_INVALID_FIELD,
+                        format!("duplicate sub id '{}'", sub.id),
+                    ));
                 }
                 ids.push(sub.id.as_str());
             }
             if !matches!(self.routing.mode.as_str(), "all_to_all" | "stereo_bias") {
-                return Err(RestError::bad_request(CODE_UNSUPPORTED_VALUE, "bass.routing.mode must be all_to_all or stereo_bias"));
+                return Err(RestError::bad_request(
+                    CODE_UNSUPPORTED_VALUE,
+                    "bass.routing.mode must be all_to_all or stereo_bias",
+                ));
             }
             if !(-1.0..=1.0).contains(&self.routing.stereo_bias) {
-                return Err(RestError::bad_request(CODE_INVALID_FIELD, "bass.routing.stereo_bias must be -1..=1"));
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "bass.routing.stereo_bias must be -1..=1",
+                ));
             }
-            for (name, row) in [("lfe_weights", &self.routing.lfe_weights), ("left_weights", &self.routing.left_weights), ("right_weights", &self.routing.right_weights)] {
+            for (name, row) in [
+                ("lfe_weights", &self.routing.lfe_weights),
+                ("left_weights", &self.routing.left_weights),
+                ("right_weights", &self.routing.right_weights),
+            ] {
                 if row.len() != self.subs.len() {
-                    return Err(RestError::bad_request(CODE_INVALID_FIELD, format!("bass.routing.{name} length must equal subs count")));
+                    return Err(RestError::bad_request(
+                        CODE_INVALID_FIELD,
+                        format!("bass.routing.{name} length must equal subs count"),
+                    ));
                 }
-                if row.iter().any(|value| !value.is_finite() || !(0.0..=1.5).contains(value)) {
-                    return Err(RestError::bad_request(CODE_INVALID_FIELD, format!("bass.routing.{name} values must be 0..=1.5")));
+                if row
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.5).contains(value))
+                {
+                    return Err(RestError::bad_request(
+                        CODE_INVALID_FIELD,
+                        format!("bass.routing.{name} values must be 0..=1.5"),
+                    ));
                 }
                 if row.iter().sum::<f64>() <= 0.0 {
-                    return Err(RestError::bad_request(CODE_INVALID_FIELD, format!("bass.routing.{name} must have positive sum")));
+                    return Err(RestError::bad_request(
+                        CODE_INVALID_FIELD,
+                        format!("bass.routing.{name} must have positive sum"),
+                    ));
                 }
             }
         }
@@ -715,15 +870,48 @@ impl BassSettings {
             ("linear_phase", JsonValue::Bool(self.linear_phase)),
             ("sub_gain_db", JsonValue::from(self.sub_gain_db)),
             ("strategy", JsonValue::str(self.strategy.as_str())),
-            ("subs", JsonValue::arr(self.subs.iter().map(SubConfig::to_json).collect())),
+            (
+                "subs",
+                JsonValue::arr(self.subs.iter().map(SubConfig::to_json).collect()),
+            ),
             ("subs_count", JsonValue::from(self.subs.len())),
-            ("routing", JsonValue::obj(vec![
-                ("mode", JsonValue::str(self.routing.mode.as_str())),
-                ("lfe_weights", JsonValue::arr(self.routing.lfe_weights.iter().map(|v| JsonValue::from(*v)).collect())),
-                ("left_weights", JsonValue::arr(self.routing.left_weights.iter().map(|v| JsonValue::from(*v)).collect())),
-                ("right_weights", JsonValue::arr(self.routing.right_weights.iter().map(|v| JsonValue::from(*v)).collect())),
-                ("stereo_bias", JsonValue::from(self.routing.stereo_bias)),
-            ])),
+            (
+                "routing",
+                JsonValue::obj(vec![
+                    ("mode", JsonValue::str(self.routing.mode.as_str())),
+                    (
+                        "lfe_weights",
+                        JsonValue::arr(
+                            self.routing
+                                .lfe_weights
+                                .iter()
+                                .map(|v| JsonValue::from(*v))
+                                .collect(),
+                        ),
+                    ),
+                    (
+                        "left_weights",
+                        JsonValue::arr(
+                            self.routing
+                                .left_weights
+                                .iter()
+                                .map(|v| JsonValue::from(*v))
+                                .collect(),
+                        ),
+                    ),
+                    (
+                        "right_weights",
+                        JsonValue::arr(
+                            self.routing
+                                .right_weights
+                                .iter()
+                                .map(|v| JsonValue::from(*v))
+                                .collect(),
+                        ),
+                    ),
+                    ("stereo_bias", JsonValue::from(self.routing.stereo_bias)),
+                ]),
+            ),
             ("predicted_peak_db", opt_f64_json(self.predicted_peak_db)),
             ("pre_gain_db", opt_f64_json(self.pre_gain_db)),
         ])
@@ -761,48 +949,94 @@ impl FirSettings {
     fn from_json(value: &JsonValue) -> Result<Self, RestError> {
         let entries = match value {
             JsonValue::Obj(entries) => entries.clone(),
-            _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "settings.fir must be a JSON object")),
+            _ => {
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "settings.fir must be a JSON object",
+                ))
+            }
         };
         let mut fields = Fields::new(entries, "calibration settings fir");
         let enabled = fields.take_opt_bool("enabled")?.unwrap_or(true);
-        let target_curve = fields.take_opt_str("target_curve")?.unwrap_or_else(|| "flat".to_string());
+        let target_curve = fields
+            .take_opt_str("target_curve")?
+            .unwrap_or_else(|| "flat".to_string());
         let mut custom_curve = Vec::new();
         if let Some(JsonValue::Arr(items)) = fields.take_opt("custom_curve") {
             for item in items {
                 let entries = match item {
                     JsonValue::Obj(entries) => entries,
-                    _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "fir.custom_curve entries must be objects")),
+                    _ => {
+                        return Err(RestError::bad_request(
+                            CODE_INVALID_FIELD,
+                            "fir.custom_curve entries must be objects",
+                        ))
+                    }
                 };
                 let mut point = Fields::new(entries, "calibration settings fir.custom_curve");
-                let hz = point.take_opt_f64("hz")?.ok_or_else(|| RestError::bad_request(CODE_MISSING_FIELD, "missing custom_curve.hz"))?;
-                let db = point.take_opt_f64("db")?.ok_or_else(|| RestError::bad_request(CODE_MISSING_FIELD, "missing custom_curve.db"))?;
+                let hz = point.take_opt_f64("hz")?.ok_or_else(|| {
+                    RestError::bad_request(CODE_MISSING_FIELD, "missing custom_curve.hz")
+                })?;
+                let db = point.take_opt_f64("db")?.ok_or_else(|| {
+                    RestError::bad_request(CODE_MISSING_FIELD, "missing custom_curve.db")
+                })?;
                 point.finish()?;
                 custom_curve.push((hz, db));
             }
         }
         let taps = fields.take_opt_u32("taps")?.unwrap_or(4096);
-        let phase = fields.take_opt_str("phase")?.unwrap_or_else(|| "mixed".to_string());
+        let phase = fields
+            .take_opt_str("phase")?
+            .unwrap_or_else(|| "mixed".to_string());
         fields.finish()?;
-        Ok(FirSettings { enabled, target_curve, custom_curve, taps, phase })
+        Ok(FirSettings {
+            enabled,
+            target_curve,
+            custom_curve,
+            taps,
+            phase,
+        })
     }
 
     fn validate(&self) -> Result<(), RestError> {
         if !FIR_TARGET_CURVES.contains(&self.target_curve.as_str()) {
-            return Err(RestError::bad_request(CODE_UNSUPPORTED_VALUE, format!("fir.target_curve must be one of: {}", FIR_TARGET_CURVES.join(","))));
+            return Err(RestError::bad_request(
+                CODE_UNSUPPORTED_VALUE,
+                format!(
+                    "fir.target_curve must be one of: {}",
+                    FIR_TARGET_CURVES.join(",")
+                ),
+            ));
         }
         if self.target_curve == "custom" {
             if self.custom_curve.len() < 2 || self.custom_curve.len() > 64 {
-                return Err(RestError::bad_request(CODE_INVALID_FIELD, "fir.custom_curve requires 2..=64 points"));
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "fir.custom_curve requires 2..=64 points",
+                ));
             }
-            if self.custom_curve.iter().any(|(hz, db)| !hz.is_finite() || !db.is_finite() || *hz < 20.0 || *hz > 20000.0) {
-                return Err(RestError::bad_request(CODE_INVALID_FIELD, "fir.custom_curve points must be finite 20..=20000 Hz"));
+            if self
+                .custom_curve
+                .iter()
+                .any(|(hz, db)| !hz.is_finite() || !db.is_finite() || *hz < 20.0 || *hz > 20000.0)
+            {
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "fir.custom_curve points must be finite 20..=20000 Hz",
+                ));
             }
         }
         if !(512..=FIR_TAPS_MAX).contains(&self.taps) {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, format!("fir.taps must be 512..={FIR_TAPS_MAX}")));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                format!("fir.taps must be 512..={FIR_TAPS_MAX}"),
+            ));
         }
         if !FIR_PHASES.contains(&self.phase.as_str()) {
-            return Err(RestError::bad_request(CODE_UNSUPPORTED_VALUE, format!("fir.phase must be one of: {}", FIR_PHASES.join(","))));
+            return Err(RestError::bad_request(
+                CODE_UNSUPPORTED_VALUE,
+                format!("fir.phase must be one of: {}", FIR_PHASES.join(",")),
+            ));
         }
         Ok(())
     }
@@ -811,7 +1045,20 @@ impl FirSettings {
         JsonValue::obj(vec![
             ("enabled", JsonValue::Bool(self.enabled)),
             ("target_curve", JsonValue::str(self.target_curve.as_str())),
-            ("custom_curve", JsonValue::arr(self.custom_curve.iter().map(|(hz, db)| JsonValue::obj(vec![("hz", JsonValue::from(*hz)), ("db", JsonValue::from(*db))])).collect())),
+            (
+                "custom_curve",
+                JsonValue::arr(
+                    self.custom_curve
+                        .iter()
+                        .map(|(hz, db)| {
+                            JsonValue::obj(vec![
+                                ("hz", JsonValue::from(*hz)),
+                                ("db", JsonValue::from(*db)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
             ("taps", JsonValue::from(self.taps)),
             ("phase", JsonValue::str(self.phase.as_str())),
         ])
@@ -833,7 +1080,12 @@ pub struct ModalEqSettings {
 
 impl Default for ModalEqSettings {
     fn default() -> Self {
-        ModalEqSettings { enabled: true, auto_detect: true, max_notches: 4, disabled_lanes: Vec::new() }
+        ModalEqSettings {
+            enabled: true,
+            auto_detect: true,
+            max_notches: 4,
+            disabled_lanes: Vec::new(),
+        }
     }
 }
 
@@ -841,7 +1093,12 @@ impl ModalEqSettings {
     fn from_json(value: &JsonValue) -> Result<Self, RestError> {
         let entries = match value {
             JsonValue::Obj(entries) => entries.clone(),
-            _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "settings.modal must be a JSON object")),
+            _ => {
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    "settings.modal must be a JSON object",
+                ))
+            }
         };
         let mut fields = Fields::new(entries, "calibration settings modal");
         let enabled = fields.take_opt_bool("enabled")?.unwrap_or(true);
@@ -852,25 +1109,44 @@ impl ModalEqSettings {
             for item in items {
                 match item {
                     JsonValue::Str(lane) => disabled_lanes.push(lane),
-                    _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "modal.disabled_lanes entries must be strings")),
+                    _ => {
+                        return Err(RestError::bad_request(
+                            CODE_INVALID_FIELD,
+                            "modal.disabled_lanes entries must be strings",
+                        ))
+                    }
                 }
             }
         }
         fields.finish()?;
-        Ok(ModalEqSettings { enabled, auto_detect, max_notches, disabled_lanes })
+        Ok(ModalEqSettings {
+            enabled,
+            auto_detect,
+            max_notches,
+            disabled_lanes,
+        })
     }
 
     fn validate(&self) -> Result<(), RestError> {
         if !(1..=8).contains(&self.max_notches) {
-            return Err(RestError::bad_request(CODE_INVALID_FIELD, "modal.max_notches must be 1..=8"));
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "modal.max_notches must be 1..=8",
+            ));
         }
         let mut seen = Vec::new();
         for lane in &self.disabled_lanes {
             if !CAL_LANES.contains(&lane.as_str()) {
-                return Err(RestError::bad_request(CODE_INVALID_FIELD, format!("unknown modal disabled lane '{lane}'")));
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    format!("unknown modal disabled lane '{lane}'"),
+                ));
             }
             if seen.contains(&lane.as_str()) {
-                return Err(RestError::bad_request(CODE_INVALID_FIELD, format!("duplicate modal disabled lane '{lane}'")));
+                return Err(RestError::bad_request(
+                    CODE_INVALID_FIELD,
+                    format!("duplicate modal disabled lane '{lane}'"),
+                ));
             }
             seen.push(lane.as_str());
         }
@@ -882,7 +1158,15 @@ impl ModalEqSettings {
             ("enabled", JsonValue::Bool(self.enabled)),
             ("auto_detect", JsonValue::Bool(self.auto_detect)),
             ("max_notches", JsonValue::from(self.max_notches)),
-            ("disabled_lanes", JsonValue::arr(self.disabled_lanes.iter().map(|lane| JsonValue::str(lane.as_str())).collect())),
+            (
+                "disabled_lanes",
+                JsonValue::arr(
+                    self.disabled_lanes
+                        .iter()
+                        .map(|lane| JsonValue::str(lane.as_str()))
+                        .collect(),
+                ),
+            ),
         ])
     }
 }
@@ -938,9 +1222,7 @@ impl CalibrationSettings {
             None | Some(JsonValue::Null) => None,
             Some(value) => Some(CalFileRef::from_json(&value)?),
         };
-        let orientation_deg = fields
-            .take_opt_u16("orientation_deg")?
-            .unwrap_or(90);
+        let orientation_deg = fields.take_opt_u16("orientation_deg")?.unwrap_or(90);
         let target_mode = fields
             .take_opt_str("target_mode")?
             .unwrap_or_else(|| "flat".to_string());
@@ -1050,13 +1332,15 @@ impl CalibrationSettings {
         if self.fir.enabled && self.fir.phase == "linear" {
             warnings.push(CalValidationMessage {
                 code: "FIR_LINEAR_PHASE_PRERINGING",
-                message: "全频线性相位 FIR 会增加群延迟与 pre-ringing；taps 越大越明显（当前 {}）".to_string(),
+                message: "全频线性相位 FIR 会增加群延迟与 pre-ringing；taps 越大越明显（当前 {}）"
+                    .to_string(),
             });
         }
         if self.fir.enabled && self.fir.taps > 16384 {
             warnings.push(CalValidationMessage {
                 code: "FIR_TAPS_CPU",
-                message: "全频 FIR taps > 16384；注意分区卷积 CPU 与 RT 预算（host 字段未落地）".to_string(),
+                message: "全频 FIR taps > 16384；注意分区卷积 CPU 与 RT 预算（host 字段未落地）"
+                    .to_string(),
             });
         }
         CalSettingsValidation {
@@ -1347,12 +1631,24 @@ impl CalLaneResult {
             ("confidence", opt_f64_json(self.confidence)),
             ("failure", opt_string_json(&self.failure)),
             ("target_curve", opt_string_json(&self.target_curve)),
-            ("taps", match self.taps { Some(taps) => JsonValue::from(taps), None => JsonValue::Null }),
+            (
+                "taps",
+                match self.taps {
+                    Some(taps) => JsonValue::from(taps),
+                    None => JsonValue::Null,
+                },
+            ),
             ("phase", opt_string_json(&self.phase)),
-            ("expected_mag_error_db", opt_f64_json(self.expected_mag_error_db)),
+            (
+                "expected_mag_error_db",
+                opt_f64_json(self.expected_mag_error_db),
+            ),
             ("group_delay_ms", opt_f64_json(self.group_delay_ms)),
             ("peak_dbfs", opt_f64_json(self.peak_dbfs)),
-            ("notches", JsonValue::arr(self.notches.iter().map(ModalNotch::to_json).collect())),
+            (
+                "notches",
+                JsonValue::arr(self.notches.iter().map(ModalNotch::to_json).collect()),
+            ),
         ])
     }
 }
@@ -1467,12 +1763,7 @@ impl CalBassResults {
             ],
             group_delay_ms: Some(4.2),
             pre_ringing_ms: settings.linear_phase.then_some(2.1),
-            freq_response: vec![
-                (40.0, 0.2),
-                (80.0, 0.0),
-                (120.0, -0.3),
-                (150.0, -0.6),
-            ],
+            freq_response: vec![(40.0, 0.2), (80.0, 0.0), (120.0, -0.3), (150.0, -0.6)],
             subs: settings
                 .subs
                 .iter()
@@ -1530,7 +1821,10 @@ impl CalBassResults {
                         .collect(),
                 ),
             ),
-            ("subs", JsonValue::arr(self.subs.iter().map(SubResult::to_json).collect())),
+            (
+                "subs",
+                JsonValue::arr(self.subs.iter().map(SubResult::to_json).collect()),
+            ),
             ("pre_gain_db", opt_f64_json(self.pre_gain_db)),
         ])
     }
@@ -1562,8 +1856,7 @@ impl CalLaneResults {
 
     /// 是否全部锁定。
     pub fn all_locked(&self) -> bool {
-        !self.lanes.is_empty()
-            && self.lanes.iter().all(|lane| lane.state == "locked")
+        !self.lanes.is_empty() && self.lanes.iter().all(|lane| lane.state == "locked")
     }
 
     /// 失败 lane 数。
@@ -1843,12 +2136,20 @@ fn parse_weight_row(value: Option<JsonValue>) -> Result<Vec<f64>, RestError> {
             for item in items {
                 match item {
                     JsonValue::Num(number) if number.is_finite() => weights.push(number),
-                    _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "routing weights must be finite numbers")),
+                    _ => {
+                        return Err(RestError::bad_request(
+                            CODE_INVALID_FIELD,
+                            "routing weights must be finite numbers",
+                        ))
+                    }
                 }
             }
             Ok(weights)
         }
-        Some(_) => Err(RestError::bad_request(CODE_INVALID_FIELD, "routing weights must be arrays")),
+        Some(_) => Err(RestError::bad_request(
+            CODE_INVALID_FIELD,
+            "routing weights must be arrays",
+        )),
     }
 }
 
@@ -2119,7 +2420,12 @@ pub fn host_stage_request(
     if !lanes.is_empty() {
         fields.push((
             "lanes",
-            JsonValue::arr(lanes.iter().map(|lane| JsonValue::str(lane.as_str())).collect()),
+            JsonValue::arr(
+                lanes
+                    .iter()
+                    .map(|lane| JsonValue::str(lane.as_str()))
+                    .collect(),
+            ),
         ));
     }
     if let Some(reference_lane) = reference_lane {

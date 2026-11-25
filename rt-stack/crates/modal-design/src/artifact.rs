@@ -4,7 +4,7 @@
 //! （g[out][in][tap]，**不含** delta_D baseline；完整 G = delta_D*I + g，与
 //! khaen_core::compile::CompileInput.g 布局一致）冻结成一套**逐路径系数 artifact**：
 //! 每路径一个单声道 WAVE_FORMAT_IEEE_FLOAT（f32，fs = 设计 fs，长度 = taps，
-//! **不做任何归一化**）+ 一个确定性 JSON manifest（schema tspi-modal-artifact/v1）。
+//! **不做任何归一化**）+ 一个确定性 JSON manifest（schema khaen-modal-artifact/v1）。
 //!
 //! # 输入（只读 consumer；本模块不改上游语义）
 //!
@@ -23,7 +23,7 @@
 //! # 产物（deterministic；同输入同输出逐字节一致）
 //!
 //!   artifact/
-//!     manifest.json                      # schema tspi-modal-artifact/v1
+//!     manifest.json                      # schema khaen-modal-artifact/v1
 //!     coeff/p_<in_role>__<out_role>.wav  # M*M 条（4.1.2 = 25；stereo strict = 4）
 //!
 //! - 文件内容：p_<in>__<out>.wav = G 的 cell [out][in] 的修正系数 g（f64 设计 -> f32 落盘）。
@@ -59,7 +59,7 @@
 //!
 //! # 与 T13 IR 草案的关系
 //!
-//! 语义对齐 T13 的 tspi-cal-ir-draft/v1（version/hash/role/fs/taps/P/phase/D/stale）与
+//! 语义对齐 T13 的 khaen-cal-ir-draft/v1（version/hash/role/fs/taps/P/phase/D/stale）与
 //! compat-matrix Y16/Y24：artifact 带 hash/version/role/stale；G 只 modal residual（curve 只在
 //! target/P 侧绑一次，本模块不二次乘）；P 侧 detail 由 P 基线 hash 绑定而不复制/改写。
 
@@ -84,13 +84,13 @@ use crate::validate::HoldoutReport;
 // ===========================================================================
 
 /// artifact manifest schema（T54 冻结；T59/T66 消费）。
-pub const ARTIFACT_SCHEMA: &str = "tspi-modal-artifact/v1";
+pub const ARTIFACT_SCHEMA: &str = "khaen-modal-artifact/v1";
 /// artifact 整数版本（语义变更必须升版）。
 pub const ARTIFACT_VERSION: u32 = 1;
 /// artifact 内容 hash 规范化算法标识（确定性；created_unix/warnings 不参与）。
-pub const ARTIFACT_HASH_ALGO: &str = "tspi-modal-artifact-canonical-v1";
+pub const ARTIFACT_HASH_ALGO: &str = "khaen-modal-artifact-canonical-v1";
 /// artifact 内容 hash domain（canonical 文本首行）。
-pub const ARTIFACT_HASH_DOMAIN: &str = "tspi-modal-artifact/v1";
+pub const ARTIFACT_HASH_DOMAIN: &str = "khaen-modal-artifact/v1";
 /// manifest 文件名（相对 artifact 根）。
 pub const ARTIFACT_MANIFEST_FILE: &str = "manifest.json";
 /// 系数 WAV 子目录（相对 artifact 根）。

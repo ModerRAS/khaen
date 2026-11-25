@@ -6,7 +6,7 @@
 
 - [x] 1. host 增加校准 socket 和虚拟输入
 - 新增 `rt-stack/crates/rt-host/src/cal_control.rs`，并在 `lib.rs` 登记
-- 缺省监听 `/run/tspi-rt-stack/host.sock`，可用 `TSPI_HOST_SOCK` 改路径
+- 缺省监听 `/run/khaen-rt-stack/host.sock`，可用 `KHAEN_HOST_SOCK` 改路径
 - 一行 JSON 请求：`status`、`enter`、`measure`、`solve`、`remeasure`、`leave`
 - `run_command` 启动时绑定 socket。绑定失败只记警告，播放继续
 - 在 plan-arena 块循环和旧 2 声道块循环里，`capture_input_phase` 之后覆盖输入。播放模式不改缓冲
@@ -49,22 +49,22 @@
 - 两次复测结束前不自动 `leave`。切换发生在进程内
 - _需求: 1.5, 5.2_
 
-- [x] 6. 把 tspi-cal 改成短客户端
-- 在 `rt-stack/crates/calibration/src/bin/tspi-cal.rs` 增加 `status`、`enter`、`measure`、`solve`、`remeasure`、`leave`
+- [x] 6. 把 khaen-cal 改成短客户端
+- 在 `rt-stack/crates/calibration/src/bin/khaen-cal.rs` 增加 `status`、`enter`、`measure`、`solve`、`remeasure`、`leave`
 - 每条命令连接 socket，打印 host 的一行结果，然后退出
 - 这些命令不打开 PCM，不调用 `aplay`，不调用 `tools/analysis/emperor_focus_field.py`
 - 现有 `run` 和 `rt60` 保持原样
 - _需求: 1.1, 5.4_
 
 - [x] 7. daemon 转发同一组请求
-- `TSPI_CAL_JOB_BACKEND=real` 改为连接 `TSPI_HOST_SOCK`，缺省路径与 host 相同
+- `KHAEN_CAL_JOB_BACKEND=real` 改为连接 `KHAEN_HOST_SOCK`，缺省路径与 host 相同
 - `CAL_JOB_KINDS` 增加 `emperor`
 - real 模式下 `kind=full` 和 `kind=retest` 返回 400
 - socket 连不上时返回 503，不造一条测量记录
 - `POST /api/calibration/jobs` 增加 `stage`，取 `measure`、`solve`、`remeasure`，并接受 `f_hi`、`supports`、`target`。这些字段原样送进 socket
 - real 模式下 `measure` 和 `remeasure` 缺少 `audible_sweep_authorized=true` 时返回 400，host 不切换输入
 - `synthetic` 模式的回执保持 `synthetic=true`，verdict 不写成 `FIELD_SHORTER`
-- daemon 不打开声卡，不执行 `systemctl restart`，不再按 `TSPI_CAL_BIN` 拉起会自己播声的校准程序
+- daemon 不打开声卡，不执行 `systemctl restart`，不再按 `KHAEN_CAL_BIN` 拉起会自己播声的校准程序
 - 进度读 `status.json`，结束读 `summary.json` 的 `verdict`
 - _需求: 2.1, 2.2, 2.3, 2.4, 2.5, 5.3_
 
@@ -79,7 +79,7 @@
 - _需求: 2.1, 2.4, 5.2_
 
 - [x] 9. 只读对照 nsp16
-- 读取板上 `/etc/systemd/system/khaen-rt-host-nsp16.service` 和 `/etc/tspi-rt-stack/rt-host-nsp16.toml`
+- 读取板上 `/etc/systemd/system/khaen-rt-host-nsp16.service` 和 `/etc/khaen-rt-stack/rt-host-nsp16.toml`
 - 对照 `rt-stack/service/khaen-rt-host.service` 和现有 host 配置模板
 - 当前 16 声道播放仍依赖、通用模板里没有的项，写进 `khaen-rt-host` 的部署文件
 - 对照结果写入 `rt-stack/deploy/NSP16-FOLD.md`，列出收进来的项和故意不收的项。只改了服务名的行不收。`khaen-rt-host-nsp7.service` 保持原样
@@ -89,7 +89,7 @@
 
 - [x] 10. 单测
 - `TEMP` 和 `TMP` 指向 `C:/WorkSpace/Claw/scratch/lead/testtmp`
-- 假 socket 上跑 `tspi-cal solve`：写出 `g_pp` 和 `target_fir_taps`，不写 IIR 段，`verdict=PREDICTED_ONLY`，`synthetic=true`，进程随后退出
+- 假 socket 上跑 `khaen-cal solve`：写出 `g_pp` 和 `target_fir_taps`，不写 IIR 段，`verdict=PREDICTED_ONLY`，`synthetic=true`，进程随后退出
 - 真实设备请求缺出声确认时，capture 源不变，UMIK 不打开
 - daemon 的 real 模式对着假 socket：`kind=full` 返回 400；socket 可用时 `kind=emperor` 不再是 503；`stage=measure` 和 `stage=remeasure` 不调用 `systemctl`。已授权的回执带 host 写出的 verdict，真实录音完成后 `synthetic=false`
 - daemon 的 synthetic 模式里，`kind=emperor` 保持 `synthetic=true`，verdict 不是 `FIELD_SHORTER`

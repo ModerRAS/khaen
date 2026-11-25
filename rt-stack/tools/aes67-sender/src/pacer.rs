@@ -47,7 +47,7 @@ impl Default for SenderConfig {
             ptime_ms: crate::DEFAULT_PTIME_MS,
             duration_s: None,
             payload_type: crate::DEFAULT_PAYLOAD_TYPE,
-            ssrc: 0x5453_5049, // "TSPI"
+            ssrc: 0x5453_5049, // "KHAEN"
             initial_seq: 0,
             initial_ts: 0,
             warmup_ms: 50.0,

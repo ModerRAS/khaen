@@ -59,9 +59,9 @@
 use core::fmt;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use khaen_core::abi::TspiEpochInfoV1;
+use khaen_core::abi::KhaenEpochInfoV1;
 use khaen_core::rt::{RtStatus, SAMPLE_RATES_HZ};
-use khaen_core::workers::TspiRtControlV1;
+use khaen_core::workers::KhaenRtControlV1;
 
 // ---------------------------------------------------------------------------
 // 常量（core-v1 §3.4/§6.4/§12.3；T19 运行期阈值在此冻结）
@@ -335,13 +335,13 @@ pub fn rt_tick() -> u64 {
 /// 几次"的计数状态属于 master 热路径（不放进共享 ctl，避免给 ctl 增加未冻结字段），
 /// 由 TickBudget 维护。预算非法（0）时按 SPEC_TICK_READS_PER_BLOCK_MAX=3 解释。
 #[inline]
-pub fn rt_tick_budgeted(ctl: &TspiRtControlV1) -> u64 {
+pub fn rt_tick_budgeted(ctl: &KhaenRtControlV1) -> u64 {
     let _ = tick_read_budget(ctl);
     raw_tick()
 }
 
 /// 解析每 block tick 预算：ctl.tick_read_budget 合法时用它，0/超界时用规范上限 3。
-pub const fn tick_read_budget(ctl: &TspiRtControlV1) -> u32 {
+pub const fn tick_read_budget(ctl: &KhaenRtControlV1) -> u32 {
     let configured = ctl.tick_read_budget;
     if configured == 0 || configured > SPEC_TICK_READS_PER_BLOCK_MAX {
         SPEC_TICK_READS_PER_BLOCK_MAX
@@ -372,7 +372,7 @@ impl TickBudget {
     }
 
     /// 按 ctl.tick_read_budget 构造。
-    pub const fn from_control(ctl: &TspiRtControlV1) -> Self {
+    pub const fn from_control(ctl: &KhaenRtControlV1) -> Self {
         Self::new(tick_read_budget(ctl))
     }
 
@@ -392,7 +392,7 @@ impl TickBudget {
     }
 
     /// 读一次 tick；超出预算返回 TickBudgetExhausted（405，fail closed）。
-    pub fn read(&mut self, ctl: &TspiRtControlV1) -> Result<u64, ClockError> {
+    pub fn read(&mut self, ctl: &KhaenRtControlV1) -> Result<u64, ClockError> {
         if self.reads >= self.max_reads {
             return Err(ClockError::TickBudgetExhausted);
         }
@@ -1008,7 +1008,7 @@ impl ClockMap {
             .ok_or(ClockError::TimestampOverflow)
     }
 
-    /// 生成 core-v1 §11.4 TspiEpochInfoV1（flags bit0 = first_after_discontinuity）。
+    /// 生成 core-v1 §11.4 KhaenEpochInfoV1（flags bit0 = first_after_discontinuity）。
     pub fn epoch_info(
         &self,
         plan_version: u32,
@@ -1017,8 +1017,8 @@ impl ClockMap {
         n_out: u16,
         mode: u16,
         first_after_discontinuity: bool,
-    ) -> TspiEpochInfoV1 {
-        TspiEpochInfoV1 {
+    ) -> KhaenEpochInfoV1 {
+        KhaenEpochInfoV1 {
             epoch_id: self.epoch_id,
             plan_version,
             sample_rate: self.sample_rate_hz,
@@ -1841,7 +1841,7 @@ pub struct ClockUpdate {
 /// 调用顺序（T26）：start_stream（epoch 1，mapping）→ claim_servo →
 /// observe/poll（锁定时只把 owner 域的 ppm 写回 mapping）→ 失锁时自动新 epoch
 /// 并清空 mapping → reanchor_after_discontinuity 建新 epoch mapping
-/// （TspiEpochInfoV1.flags bit0=1）。
+/// （KhaenEpochInfoV1.flags bit0=1）。
 #[derive(Clone, Debug)]
 pub struct ClockRuntime {
     sample_rate_hz: u32,
@@ -2074,7 +2074,7 @@ impl ClockRuntime {
         self.apply_discontinuity(reason, at_mono_ns)
     }
 
-    /// 生成 core-v1 §11.4 TspiEpochInfoV1（reanchor 后 flags bit0=1）。
+    /// 生成 core-v1 §11.4 KhaenEpochInfoV1（reanchor 后 flags bit0=1）。
     pub fn epoch_info(
         &self,
         plan_version: u32,
@@ -2082,14 +2082,14 @@ impl ClockRuntime {
         n_in: u16,
         n_out: u16,
         mode: u16,
-    ) -> Option<TspiEpochInfoV1> {
+    ) -> Option<KhaenEpochInfoV1> {
         let stamp = self.epoch.current()?;
         let start_mono_ns = self
             .map
             .as_ref()
             .map(|map| map.mono_start_ns())
             .unwrap_or(stamp.start_mono_ns);
-        Some(TspiEpochInfoV1 {
+        Some(KhaenEpochInfoV1 {
             epoch_id: stamp.epoch_id,
             plan_version,
             sample_rate: self.sample_rate_hz,
@@ -2125,8 +2125,8 @@ const _: () = {
     assert!(!core::mem::needs_drop::<ClockCounters>());
     assert!(!core::mem::needs_drop::<TickBudget>());
     // §11.4 epoch 元数据 64 B/align 64。
-    assert!(core::mem::size_of::<TspiEpochInfoV1>() == 64);
-    assert!(core::mem::align_of::<TspiEpochInfoV1>() == 64);
+    assert!(core::mem::size_of::<KhaenEpochInfoV1>() == 64);
+    assert!(core::mem::align_of::<KhaenEpochInfoV1>() == 64);
     assert!(core::mem::size_of::<TickBudget>() <= 16);
 };
 

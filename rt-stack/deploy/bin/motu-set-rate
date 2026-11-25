@@ -16,10 +16,10 @@ for i in $(seq 1 20); do
 done
 [ -z "$card" ] && { echo "MOTU not present in /proc/asound/cards (USB 掉线？先插回)" >&2; exit 3; }
 pb=$(cat /proc/asound/card$card/pcm0p/sub0/hw_params 2>/dev/null || echo closed)
-[ "$pb" != "closed" ] && { echo "MOTU playback busy (host 在跑？先 systemctl stop tspi-rt-host)" >&2; exit 4; }
+[ "$pb" != "closed" ] && { echo "MOTU playback busy (host 在跑？先 systemctl stop khaen-rt-host)" >&2; exit 4; }
 out=$(timeout 8 aplay -D hw:$card,0 -f S24_3LE -c 22 -r "$RATE" -d 1 -t raw /dev/zero 2>&1); rc=$?
 alsarate=$(awk '/rate:/{print $2}' /proc/asound/card$card/pcm0p/sub0/hw_params 2>/dev/null | cut -d" " -f1)
-CLIENT=""; for c in /usr/local/lib/tspi/cuemix_client.py /var/tmp/tspi-bw/cuemix_client.py; do [ -f "$c" ] && { CLIENT="$c"; break; }; done
+CLIENT=""; for c in /usr/local/lib/khaen/cuemix_client.py /var/tmp/khaen-bw/cuemix_client.py; do [ -f "$c" ] && { CLIENT="$c"; break; }; done
 devrate=""
 if [ -n "$CLIENT" ]; then
   timeout 12 python3 "$CLIENT" --transport ws --host 169.254.111.126 --port 1280 --read 4 --idle-stop 2 --json /tmp/motu-set-rate.json >/dev/null 2>&1 || true

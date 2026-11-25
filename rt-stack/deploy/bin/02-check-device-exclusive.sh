@@ -3,10 +3,10 @@
 #
 # 判据：
 #   1 旧音频 unit（retire+replace+retain）全部 inactive（切换窗口 audio-off）
-#   2 旧 C 进程不存在（camilladsp/tspi-upmix）
+#   2 旧 C 进程不存在（camilladsp/khaen-upmix）
 #   3 /dev/snd 无其它进程持有（fuser/lsof/proc fd 三选一有输出即 FAIL）
 #   4 /proc/asound/card*/pcm*/sub*/status 全部 closed（有 RUNNING/OPEN 即 FAIL）
-#   5 /run/tspi/mode 非 dante/aes67
+#   5 /run/khaen/mode 非 dante/aes67
 #   6 旧控制面端口（1234 Camilla WS / 80 旧 Web）无监听
 #   7 MOTU card 已枚举（--no-require-motu 可关；仅用于“先证明无 owner，再查设备”的场景）
 #
@@ -45,8 +45,8 @@ for u in "${ALL_OLD_AUDIO_UNITS[@]}"; do sunit_active "$u" && BUSY+=("$u"); done
 [ "${#BUSY[@]}" -eq 0 ] && pass "旧音频 unit 全部 inactive" || fail "仍 active: ${BUSY[*]}"
 
 # 2) C 进程
-PROCS="$(pgrep -a -f 'camilladsp|tspi-upmix' 2>/dev/null || true)"
-[ -z "$PROCS" ] && pass "无 camilladsp/tspi-upmix 进程" || fail "旧 C 进程仍在: $(printf '%s' "$PROCS" | head -n 3 | tr '\n' ' ')"
+PROCS="$(pgrep -a -f 'camilladsp|khaen-upmix' 2>/dev/null || true)"
+[ -z "$PROCS" ] && pass "无 camilladsp/khaen-upmix 进程" || fail "旧 C 进程仍在: $(printf '%s' "$PROCS" | head -n 3 | tr '\n' ' ')"
 
 # 3) /dev/snd holders
 SND_DIR="$(p /dev/snd)"
@@ -74,12 +74,12 @@ done
 [ -z "$OPEN" ] && pass "所有 PCM substream status=closed" || fail "PCM 非 closed:$OPEN"
 
 # 5) mode
-MODE_FILE="$(p /run/tspi/mode)"
+MODE_FILE="$(p /run/khaen/mode)"
 if [ -f "$MODE_FILE" ]; then
   MODE="$(tr -d '[:space:]' < "$MODE_FILE" 2>/dev/null || true)"
-  case "$MODE" in dante|aes67) fail "/run/tspi/mode=$MODE";; *) pass "/run/tspi/mode=${MODE:-unknown}";; esac
+  case "$MODE" in dante|aes67) fail "/run/khaen/mode=$MODE";; *) pass "/run/khaen/mode=${MODE:-unknown}";; esac
 else
-  pass "/run/tspi/mode 不存在（audio-off）"
+  pass "/run/khaen/mode 不存在（audio-off）"
 fi
 
 # 6) old control ports

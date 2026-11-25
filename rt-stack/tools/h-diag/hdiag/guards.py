@@ -62,11 +62,11 @@ ACTUATORS = ["FL", "FR", "SL", "SR", "SUB1"]
 EXCLUDED_ROLES = ["HFL", "HFR"]
 POSITION_ROLES = {"design": "design", "holdout": "holdout", "validation": "holdout"}
 
-SCHEMA_MANIFEST = "tspi-hdiag-positions/v1"
-SCHEMA_H_DIAG = "tspi-h-diag/v1"
-SCHEMA_SESSION = "tspi-mimo-measurement/v1"
-SCHEMA_POSITION = "tspi-mimo-position/v1"
-SCHEMA_ANALYSIS = "tspi-channel-measurement/v1"
+SCHEMA_MANIFEST = "khaen-hdiag-positions/v1"
+SCHEMA_H_DIAG = "khaen-h-diag/v1"
+SCHEMA_SESSION = "khaen-mimo-measurement/v1"
+SCHEMA_POSITION = "khaen-mimo-position/v1"
+SCHEMA_ANALYSIS = "khaen-channel-measurement/v1"
 SCHEMA_ANALYSIS_META = "khaen-calibration-meta/v1"
 
 

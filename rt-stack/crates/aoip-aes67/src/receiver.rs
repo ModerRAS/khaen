@@ -34,9 +34,9 @@ use std::time::Duration;
 
 use crate::clock::{MediaClock, UsrvClock};
 use crate::jitter::{self, JitterConfig, JitterError, JitterReader, JitterStats};
+use crate::listen::{GroupAllow, ReceiverInterfaces, SourceAllow};
 use crate::rtp;
 use crate::sdp::{self, SdpError, Session};
-use crate::listen::{GroupAllow, ReceiverInterfaces, SourceAllow};
 use crate::sockopt;
 
 /// 单个 UDP 数据报最大接收长度（48 帧×8ch×3B + 12B 头 ≈ 1164 B；留 2 ms ptime 余量）。
@@ -588,7 +588,8 @@ impl Aes67Receiver {
 
     /// 请求内部重锚（下一个包作为新流首包）。用于 stay 模式流间隙恢复，避免重启进程。
     pub fn request_reanchor(&self) {
-        self.reanchor_req.store(true, std::sync::atomic::Ordering::Release);
+        self.reanchor_req
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     /// 重锚请求标志（可跨线程 clone，用于播放线程在流间隙时请求重锚）。
@@ -962,7 +963,10 @@ mod tests {
         assert_eq!(receiver.local_addr().port(), 15_432);
         let report = receiver.report_json();
         // task-320：显式接口列表 + join 绑定证据（单接口 = 只有它，不得出现 0.0.0.0 之外的兜底）。
-        assert!(report.contains("\"interfaces\":[\"127.0.0.1\"]"), "{report}");
+        assert!(
+            report.contains("\"interfaces\":[\"127.0.0.1\"]"),
+            "{report}"
+        );
         assert!(report.contains("\"group_allow\":[]"), "{report}");
         assert!(report.contains("\"source_allow\":[]"), "{report}");
         // Linux = restricted（IP_MULTICAST_ALL=0）；Windows = platform_default（内核按成员交付）。
@@ -1001,8 +1005,8 @@ mod tests {
             Aes67Receiver::bind(config).unwrap_err().name(),
             "ERR_RX_GROUP_NOT_ALLOWED"
         );
-        config.group_allow = GroupAllow::try_from_groups(&[Ipv4Addr::new(239, 255, 42, 98)])
-            .expect("group allow");
+        config.group_allow =
+            GroupAllow::try_from_groups(&[Ipv4Addr::new(239, 255, 42, 98)]).expect("group allow");
         config.validate().expect("组命中白名单必须通过");
         // 单播 + 组白名单 = 配置错误（组白名单只对组播有语义）。
         let mut unicast = unicast_config(0, 2);
@@ -1033,9 +1037,10 @@ mod tests {
                 .expect("source allow");
         let mut receiver = Aes67Receiver::bind(config).expect("bind");
         let port = receiver.local_addr().port();
-        let mut sender = crate::sender::Aes67RtpSender::bind(
-            crate::sender::SenderConfig::unicast(SocketAddr::from((Ipv4Addr::LOCALHOST, port)), 2),
-        )
+        let mut sender = crate::sender::Aes67RtpSender::bind(crate::sender::SenderConfig::unicast(
+            SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            2,
+        ))
         .expect("sender");
         for _ in 0..4 {
             sender.send_silence().expect("send");
@@ -1071,9 +1076,10 @@ mod tests {
                 .expect("source allow");
         let mut receiver = Aes67Receiver::bind(config).expect("bind");
         let port = receiver.local_addr().port();
-        let mut sender = crate::sender::Aes67RtpSender::bind(
-            crate::sender::SenderConfig::unicast(SocketAddr::from((Ipv4Addr::LOCALHOST, port)), 2),
-        )
+        let mut sender = crate::sender::Aes67RtpSender::bind(crate::sender::SenderConfig::unicast(
+            SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            2,
+        ))
         .expect("sender");
         for _ in 0..4 {
             sender.send_silence().expect("send");

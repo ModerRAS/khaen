@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Independent verifier for the TSPI f64 reference package (WBS T03, P0).
+"""Independent verifier for the KHAEN f64 reference package (WBS T03, P0).
 
 It checks, without needing T06 / rt-check / any Rust crate:
 
@@ -41,8 +41,8 @@ FIXTURES_DIR = REF_ROOT / "fixtures"
 CASES_DIR = FIXTURES_DIR / "cases"
 INDEX_PATH = FIXTURES_DIR / "index.json"
 HANDCALC_PATH = REF_ROOT / "HAND-CALC.md"
-SCHEMA = "tspi-reference-fixture/v1"
-INDEX_SCHEMA = "tspi-reference-fixtures-index/v1"
+SCHEMA = "khaen-reference-fixture/v1"
+INDEX_SCHEMA = "khaen-reference-fixtures-index/v1"
 FENCE = chr(96) * 3  # three backticks, kept out of source text for tooling reasons
 
 sys.path.insert(0, str(TOOLS_DIR))
@@ -911,7 +911,7 @@ def verify(report_path: Path | None, negative_validation_flag: bool = False) -> 
         run_negative_validation(fixtures, report, hand_blocks)
     passed = report.failures == 0
     doc = dict(
-        schema="tspi-reference-verify-report/v1",
+        schema="khaen-reference-verify-report/v1",
         generator="tools/verify_reference.py",
         reference_root=str(REF_ROOT),
         fixtures=case_results,
@@ -937,7 +937,7 @@ def verify(report_path: Path | None, negative_validation_flag: bool = False) -> 
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="verify TSPI reference fixtures and hand-calc vectors")
+    ap = argparse.ArgumentParser(description="verify KHAEN reference fixtures and hand-calc vectors")
     ap.add_argument("--report", default=None, help="write JSON verification report to this path")
     ap.add_argument("--negative-validation", action="store_true",
                     help="also run 12 negative/trap-formula/handcheck checks (task-52 P2-2/P3-5/P3-6)")

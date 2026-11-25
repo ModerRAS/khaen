@@ -1,7 +1,7 @@
-//! [NONRT] `tspi-cal-ir-draft/v1` 校准 IR 草案：解析/绑定/stale/PostEncoding（对齐 T13 adapter）。
+//! [NONRT] `khaen-cal-ir-draft/v1` 校准 IR 草案：解析/绑定/stale/PostEncoding（对齐 T13 adapter）。
 //!
 //! WBS T14 的“IR”输入：runner 不重新解析 YAML 校准文件（那是 T13 的职责），而是消费 T13 calibration
-//! adapter 产出的内部 IR 草案（`tspi-cal-ir-draft/v1`），把它的 version/hash/role/fs/taps/placement/
+//! adapter 产出的内部 IR 草案（`khaen-cal-ir-draft/v1`），把它的 version/hash/role/fs/taps/placement/
 //! P/phase/D 绑定到本次 file 图：
 //!
 //! - **版本/绑定**：`ir_version` 必须 =1；`ir_hash` 必须 64 hex（进入图版本 hash）；
@@ -25,11 +25,11 @@ use crate::sha256::is_hex64;
 use crate::{RunnerError, RunnerResult, E_FILE_DELAY, E_FILE_IR, E_FILE_TAPS};
 
 /// IR 草案 schema（T13）。
-pub const IR_SCHEMA: &str = "tspi-cal-ir-draft/v1";
+pub const IR_SCHEMA: &str = "khaen-cal-ir-draft/v1";
 /// IR 草案版本（T13）。
 pub const IR_VERSION: u32 = 1;
 /// IR 规范化 hash 算法标识（T13）。
-pub const IR_HASH_ALGO: &str = "tspi-cal-ir-canonical-v1";
+pub const IR_HASH_ALGO: &str = "khaen-cal-ir-canonical-v1";
 /// P/phase/D 编码：已折入 P FIR 系数（role 字段 delay=0/polarity=+1）。
 pub const POST_ENCODING_COEFF_EMBEDDED: &str = "coeff_embedded";
 /// P/phase/D 编码：放 role 元数据（P FIR = [1]；runner 应用整数 delay/polarity）。
@@ -148,7 +148,7 @@ pub struct IrPostRole {
     pub p_taps: u32,
 }
 
-/// 解析后的 `tspi-cal-ir-draft/v1` 草案（绑定用）。
+/// 解析后的 `khaen-cal-ir-draft/v1` 草案（绑定用）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrDraft {
     /// schema。
@@ -252,7 +252,7 @@ const IR_KNOWN_FIELDS: [&str; 14] = [
     "extensions",
 ];
 
-/// 解析 `tspi-cal-ir-draft/v1` IR JSON（结构/语义校验；不写文件）。
+/// 解析 `khaen-cal-ir-draft/v1` IR JSON（结构/语义校验；不写文件）。
 pub fn parse_ir(value: &Json) -> RunnerResult<IrDraft> {
     let object = value
         .as_object()

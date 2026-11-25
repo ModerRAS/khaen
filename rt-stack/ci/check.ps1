@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# TSPI RT stack offline check (WBS T06)
+# KHAEN RT stack offline check (WBS T06)
 #
 # Usage (from rt-stack/ or anywhere):
 #   powershell -NoProfile -File ci/check.ps1

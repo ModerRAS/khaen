@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provenance guard for TSPI MIMO G design / plan issuance (task-252).
+"""Provenance guard for KHAEN MIMO G design / plan issuance (task-252).
 
 Motivation (2026-11-19 incident): the G-4096 plan issued to release-v10 fixtures and
 the 2026-11-20 board-window runbook (plan sha256 ceb04215...) was not a real-room
@@ -150,7 +150,7 @@ def synthetic_registry(project=None):
     ev = os.path.join(project, "rt-stack", "evidence")
     dryrun = os.path.join(ev, "mimo-pilot-3mic", "prep", "dryrun", "out")
     planrt = os.path.join(ev, "mimo-pilot-3mic", "planrt-20261119")
-    reg = {"schema": "tspi-mimo-synthetic-registry/v1", "project": project,
+    reg = {"schema": "khaen-mimo-synthetic-registry/v1", "project": project,
            "synthetic_design_sha256": {}, "synthetic_plan_sha256": {},
            "synthetic_h_sha256": {}, "synthetic_G_ideal_sha256": None,
            "dryrun_design_dir": None, "notes": []}
@@ -536,7 +536,7 @@ def g_guard_plan(plan_path, compile_report_path=None, design=None, registry=None
 #                   retargeted to the 12k chain input H (48 kHz IRs, 8 container slots or
 #                   the 7-output guard format).
 #
-# Provenance schemas: tspi-mimo-12k-artifact-provenance/v1, tspi-mimo-12k-plan-provenance/v1.
+# Provenance schemas: khaen-mimo-12k-artifact-provenance/v1, khaen-mimo-12k-plan-provenance/v1.
 
 A12_PARTICIPANTS = ["FL", "FR", "SL", "SR", "SUB1"]
 A12_FS_48 = 48000
@@ -550,10 +550,10 @@ A12_DSYS = 2 * A12_RESAMP_DELAY + A12_GROUP * A12_D12  # 574
 A12_G_MATCH_ATOL = 1e-12
 A12_ROW_DEATH_DB = -60.0
 A12_SILENT_IR_ABS = 1e-8
-A12_ARTIFACT_SCHEMA = "tspi-mimo-12k-v2/artifact/v1"
-A12_ART_PROV_SCHEMA = "tspi-mimo-12k-artifact-provenance/v1"
-A12_PLAN_PROV_SCHEMA = "tspi-mimo-12k-plan-provenance/v1"
-A12_H_GUARD_SCHEMA = "tspi-mimo-12k-h-guard/v1"
+A12_ARTIFACT_SCHEMA = "khaen-mimo-12k-v2/artifact/v1"
+A12_ART_PROV_SCHEMA = "khaen-mimo-12k-artifact-provenance/v1"
+A12_PLAN_PROV_SCHEMA = "khaen-mimo-12k-plan-provenance/v1"
+A12_H_GUARD_SCHEMA = "khaen-mimo-12k-h-guard/v1"
 A12_PARAMS_REQUIRED = ("schema", "fs_hz", "lowrate_hz", "group", "participants", "taps",
                        "d12", "resamp_taps", "resamp_delay", "dsys_samples", "g_file",
                        "resamp_file", "g_sha256")
@@ -624,7 +624,7 @@ def synthetic_registry_12k(project=None):
     dryrun = os.path.join(ev, "mimo-pilot-3mic", "prep", "dryrun")
     planrt = os.path.join(ev, "mimo-pilot-3mic", "planrt-20261119", "plans")
     prov_root = os.path.join(ev, "mimo-12k-provenance")
-    reg = {"schema": "tspi-mimo-12k-synthetic-registry/v1", "project": project,
+    reg = {"schema": "khaen-mimo-12k-synthetic-registry/v1", "project": project,
            "synthetic_h_sha256": {}, "synthetic_g12_file_sha256": {},
            "synthetic_g12_content_sha256": {}, "synthetic_params_sha256": {},
            "synthetic_roots": [os.path.join(dryrun, "out"), planrt,
@@ -856,9 +856,9 @@ def g12_artifact_guard(artifact_dir, provenance_path=None, registry=None, live=T
                    "params.json missing required provenance fields: %s" % (missing,))
         metrics["params_missing_fields"] = missing
     schema = str(params.get("schema") or "")
-    if schema and not schema.startswith("tspi-mimo-12k"):
+    if schema and not schema.startswith("khaen-mimo-12k"):
         _code_fail(codes, reasons, "a12_params_schema",
-                   "params.schema %r is not a tspi-mimo-12k artifact schema" % schema)
+                   "params.schema %r is not a khaen-mimo-12k artifact schema" % schema)
     taps = _as_int(params.get("taps"))
     d12 = _as_int(params.get("d12"))
     group = _as_int(params.get("group"))
@@ -1113,7 +1113,7 @@ def _verdict_12k(codes, reasons, metrics):
     for c in codes:
         reasons.setdefault(c, _A12_REASON_TEXT.get(c, c))
     return {"ok": not codes, "codes": codes, "reasons": reasons, "metrics": metrics,
-            "schema": "tspi-mimo-12k-guard-verdict/v1"}
+            "schema": "khaen-mimo-12k-guard-verdict/v1"}
 
 
 # ---------------------------------------------------------------- 12k plan guard
@@ -1228,7 +1228,7 @@ _A12_REASON_TEXT = {
     "a12_missing_params": "12k artifact has no params.json",
     "a12_bad_params": "12k artifact params.json is not a JSON object",
     "a12_params_missing_fields": "params.json is missing required provenance fields",
-    "a12_params_schema": "params.json schema is not a tspi-mimo-12k artifact schema",
+    "a12_params_schema": "params.json schema is not a khaen-mimo-12k artifact schema",
     "a12_params_inconsistent": "params.json rate/taps/D12/group/delay are inconsistent with the 12k domain",
     "a12_params_participants": "params.participants is not the 5 participant design set",
     "a12_params_delay": "params.dsys_samples != 2*resamp_delay + group*d12",
@@ -1239,7 +1239,7 @@ _A12_REASON_TEXT = {
     "a12_g_nonfinite": "12k G contains NaN/Inf",
     "a12_identity_only": "12k G has no off-diagonal correction (identity plan must not be issued)",
     "a12_missing_provenance": "12k artifact has no provenance record (cannot prove a real measured-H design)",
-    "a12_provenance_schema": "12k artifact provenance schema is not tspi-mimo-12k-artifact-provenance/v1",
+    "a12_provenance_schema": "12k artifact provenance schema is not khaen-mimo-12k-artifact-provenance/v1",
     "a12_synthetic_marker": "12k artifact is tagged synthetic/dry-run",
     "a12_params_sha_mismatch": "params.json bytes do not match the provenance record",
     "a12_g_file_sha_mismatch": "g f32 bytes do not match the provenance record",
@@ -1283,7 +1283,7 @@ _A12_REASON_TEXT = {
     "a12_plan_bytes_mismatch": "compile-report plan_bytes does not match plan.bin size",
     "a12_plan_report_synthetic": "compile-report tags the plan synthetic/dry-run",
     "a12_plan_missing_provenance": "12k plan has no plan-provenance record",
-    "a12_plan_provenance_schema": "plan provenance schema is not tspi-mimo-12k-plan-provenance/v1",
+    "a12_plan_provenance_schema": "plan provenance schema is not khaen-mimo-12k-plan-provenance/v1",
     "a12_plan_synthetic": "12k plan provenance is tagged synthetic",
     "a12_plan_provenance_sha_mismatch": "plan provenance plan_sha256 does not match plan.bin bytes",
     "a12_plan_compile_report_mismatch": "plan provenance compile_report_sha256 does not match compile-report.json",
@@ -1329,7 +1329,7 @@ def _emit(obj, json_out):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="TSPI MIMO provenance guard (task-252)")
+    ap = argparse.ArgumentParser(description="KHAEN MIMO provenance guard (task-252)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("registry")
     p.add_argument("--out", default=None)

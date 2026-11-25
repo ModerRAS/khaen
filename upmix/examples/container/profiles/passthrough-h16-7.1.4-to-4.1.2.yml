@@ -1,8 +1,8 @@
-# tspi-upmix 生成：passthrough-h16-7.1.4-to-4.1.2
+# khaen-upmix 生成：passthrough-h16-7.1.4-to-4.1.2
 # 跨布局下混（C 折入 FL/FR -3.01 dB；BL/BR/TRL/TRR 折入对应声道 -6.02 dB）；不是同布局直通，也不含低音管理（与上混路径低频行为不同）
-# 输入 h16-7.1.4（12ch）-> 输出 4.1.2（8ch）；schema tspi-channelmap/v2；tspi-upmix 1.2.0
+# 输入 h16-7.1.4（12ch）-> 输出 4.1.2（8ch）；schema khaen-channelmap/v2；khaen-upmix 1.2.0
 # 参数：跨布局下混路径：输入容器（h16-7.1.4，12ch）按角色映射到 4.1.2；C 折入 FL/FR（-3.01 dB），BL/BR/TRL/TRR 折入对应声道（-6.02 dB）；无低音管理（FL/FR 全频、SUB 只收 LFE），与上混路径低频行为不同
-schema: tspi-channelmap/v2
+schema: khaen-channelmap/v2
 version: 2
 profile:
   name: passthrough-h16-7.1.4-to-4.1.2

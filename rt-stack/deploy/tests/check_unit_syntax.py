@@ -6,19 +6,19 @@
   * .service 需要 [Service] Type/ExecStart 与 [Install] WantedBy；.target 需要 [Unit] 与 [Install]；
   * ExecStart 首 token 必须是绝对路径（允许前缀 -/@/+/!）；Type/Restart 枚举合法；
   * khaen-rt-host.service 必须是 RT 门槛（LimitRTPRIO=99 + LimitMEMLOCK=infinity）；
-  * tspi-rt-stack.target 必须 Wants/After 自研 host+daemon（F-18/T28-P0-1：否则只 start target 拉不起 host）；
-  * 新栈 unit 不得依赖/启动旧 C（camilladsp、tspi-upmix-autodetect、tspi-audio.target、tspi-mode、
-    khaen-audio-web、tspi-boot-mode）；缺省同时检查 service/ 与 deploy/config/（task-223 T72-N9：
+  * khaen-rt-stack.target 必须 Wants/After 自研 host+daemon（F-18/T28-P0-1：否则只 start target 拉不起 host）；
+  * 新栈 unit 不得依赖/启动旧 C（camilladsp、khaen-upmix-autodetect、khaen-audio.target、khaen-mode、
+    khaen-audio-web、khaen-boot-mode）；缺省同时检查 service/ 与 deploy/config/（task-223 T72-N9：
     keeper 的 Before= 曾残留旧 unit 名，deploy/config 不能漏检）；
   * 90-safe-mute.conf.example（drop-in）只允许 [Service] 的 Environment/EnvironmentFile/ExecStart 类 key；
     F-17：必须用 EnvironmentFile 覆盖 rt-host.env 的 normal（Environment= 会被 EnvironmentFile 覆盖），
-    且 env 文件（90-safe-mute.env.example）只写 TSPI_HOST_SAFE_MODE=mute（host 实际读取的变量名）；
-  * F3（2026-11-18）：host/daemon 必须有 RuntimeDirectory/LogsDirectory=tspi-rt-stack，覆盖
-    ReadWritePaths 里的 /run/tspi-rt-stack、/var/log/tspi-rt-stack（否则 ProtectSystem=strict 下
+    且 env 文件（90-safe-mute.env.example）只写 KHAEN_HOST_SAFE_MODE=mute（host 实际读取的变量名）；
+  * F3（2026-11-18）：host/daemon 必须有 RuntimeDirectory/LogsDirectory=khaen-rt-stack，覆盖
+    ReadWritePaths 里的 /run/khaen-rt-stack、/var/log/khaen-rt-stack（否则 ProtectSystem=strict 下
     mount namespace 因目录不存在而失败）；
   * F4（2026-11-18）：host 的 DeviceAllow 必须是 char-alsa rw（ALSA 设备组），禁止 /dev/snd/* 通配
     （systemd 252 + cgroup v2 下不生效，板端实测所有 ALSA 节点 EPERM）；
-  * B1（2026-11-20 板窗）：tspi-irq-affinity.service 必须带开机竞态等待——ExecStartPre 调用
+  * B1（2026-11-20 板窗）：khaen-irq-affinity.service 必须带开机竞态等待——ExecStartPre 调用
     irq-affinity-pin wait（IRQ56/57 节点可能在 oneshot 启动后才注册），且 TimeoutStartSec>=90
     （覆盖 wait 默认 60s + 钉核回读余量）。
 
@@ -55,8 +55,8 @@ UNIT_KEYS = {
 }
 TYPE_OK = {'simple', 'exec', 'forking', 'oneshot', 'dbus', 'notify', 'notify-reload', 'idle'}
 RESTART_OK = {'no', 'on-success', 'on-failure', 'on-abnormal', 'on-abort', 'on-watchdog', 'always'}
-OLD_C = ('camilladsp', 'tspi-upmix-autodetect', 'tspi-audio.target', 'tspi-mode',
-         'khaen-audio-web', 'tspi-boot-mode')
+OLD_C = ('camilladsp', 'khaen-upmix-autodetect', 'khaen-audio.target', 'khaen-mode',
+         'khaen-audio-web', 'khaen-boot-mode')
 
 
 def parse(path):
@@ -129,19 +129,19 @@ def check(path):
     for s, k, v, _i in entries:
         values.setdefault((s, k), []).append(v.strip())
     if is_env_dropin:
-        # F-17：safe-mute env 只允许 host 实际读取的 TSPI_HOST_SAFE_MODE（不得写 TSPI_RT_HOST_SAFE_MODE）。
+        # F-17：safe-mute env 只允许 host 实际读取的 KHAEN_HOST_SAFE_MODE（不得写 KHAEN_RT_HOST_SAFE_MODE）。
         env_vars = {}
         for (s, k), vs in values.items():
             if s != 'env':
                 problems.append(f'env 文件不允许 section: [{s}]')
                 continue
             for v in vs:
-                if k == 'TSPI_HOST_SAFE_MODE':
+                if k == 'KHAEN_HOST_SAFE_MODE':
                     env_vars[k] = v
                 else:
-                    problems.append(f'env 文件出现未许可变量 {k}（只允许 TSPI_HOST_SAFE_MODE）')
-        if env_vars.get('TSPI_HOST_SAFE_MODE') != 'mute':
-            problems.append('env 文件必须写 TSPI_HOST_SAFE_MODE=mute')
+                    problems.append(f'env 文件出现未许可变量 {k}（只允许 KHAEN_HOST_SAFE_MODE）')
+        if env_vars.get('KHAEN_HOST_SAFE_MODE') != 'mute':
+            problems.append('env 文件必须写 KHAEN_HOST_SAFE_MODE=mute')
         return {'file': name, 'kind': 'envdropin', 'ok': not problems, 'problems': problems}
     if is_dropin:
         if any(s != 'Service' for s in sections):
@@ -153,16 +153,16 @@ def check(path):
                 problems.append(f'drop-in 不允许 key: {k}')
         if name == '90-safe-mute.conf.example':
             for v in values.get(('Service', 'Environment'), []):
-                if v.startswith('TSPI_'):
+                if v.startswith('KHAEN_'):
                     problems.append(f'F-17：drop-in 不能用 Environment= 覆盖 env 文件（{v}）；'
                                     'systemd 语义下 EnvironmentFile= 优先，请用 EnvironmentFile=')
             ef = values.get(('Service', 'EnvironmentFile'), [])
             if not any('90-safe-mute.env' in v for v in ef):
-                problems.append('F-17：drop-in 必须 EnvironmentFile=/etc/tspi-rt-stack/90-safe-mute.env')
+                problems.append('F-17：drop-in 必须 EnvironmentFile=/etc/khaen-rt-stack/90-safe-mute.env')
             blob = '\n'.join(line for line in open(path, encoding='utf-8', errors='replace')
                               if not line.strip().startswith('#') and not line.strip().startswith(';'))
-            if 'TSPI_RT_HOST_SAFE_MODE' in blob:
-                problems.append('F-17：仍出现 host 不读的 TSPI_RT_HOST_SAFE_MODE')
+            if 'KHAEN_RT_HOST_SAFE_MODE' in blob:
+                problems.append('F-17：仍出现 host 不读的 KHAEN_RT_HOST_SAFE_MODE')
         return {'file': name, 'kind': 'dropin', 'ok': not problems, 'problems': problems}
     if is_service or is_target:
         if 'Unit' not in sections:
@@ -201,12 +201,12 @@ def check(path):
         aft = []
         for v in values.get(('Unit', 'After'), []):
             aft += v.split()
-        if 'tspi-irq-affinity.service' not in req:
-            problems.append('khaen-rt-host 必须 Requires=tspi-irq-affinity.service（pin 失败不启动 host）')
-        if 'tspi-irq-affinity.service' not in aft:
-            problems.append('khaen-rt-host 必须 After=tspi-irq-affinity.service（先钉核后启动）')
+        if 'khaen-irq-affinity.service' not in req:
+            problems.append('khaen-rt-host 必须 Requires=khaen-irq-affinity.service（pin 失败不启动 host）')
+        if 'khaen-irq-affinity.service' not in aft:
+            problems.append('khaen-rt-host 必须 After=khaen-irq-affinity.service（先钉核后启动）')
     # F3/F4（2026-11-18 板端缺陷回归）：host/daemon 的 RuntimeDirectory/LogsDirectory 与 ALSA 设备白名单。
-    if name in ('khaen-rt-host.service', 'tspi-rt-daemon.service'):
+    if name in ('khaen-rt-host.service', 'khaen-rt-daemon.service'):
         rd = []
         for v in values.get(('Service', 'RuntimeDirectory'), []):
             rd += v.split()
@@ -216,17 +216,17 @@ def check(path):
         rw = []
         for v in values.get(('Service', 'ReadWritePaths'), []):
             rw += v.split()
-        if 'tspi-rt-stack' not in rd:
-            problems.append(f'F3：{name} 必须 RuntimeDirectory=tspi-rt-stack'
-                            '（ReadWritePaths=/run/tspi-rt-stack 要求目录在 namespace 建立前存在）')
-        if 'tspi-rt-stack' not in ld:
-            problems.append(f'F3：{name} 必须 LogsDirectory=tspi-rt-stack')
-        if '/run/tspi-rt-stack' in rw and 'tspi-rt-stack' in rd:
-            pass  # RuntimeDirectory 提供 /run/tspi-rt-stack
-        elif '/run/tspi-rt-stack' in rw:
-            problems.append(f'F3：{name} ReadWritePaths 含 /run/tspi-rt-stack 但 RuntimeDirectory 未提供')
-        if '/var/log/tspi-rt-stack' in rw and 'tspi-rt-stack' not in ld:
-            problems.append(f'F3：{name} ReadWritePaths 含 /var/log/tspi-rt-stack 但 LogsDirectory 未提供')
+        if 'khaen-rt-stack' not in rd:
+            problems.append(f'F3：{name} 必须 RuntimeDirectory=khaen-rt-stack'
+                            '（ReadWritePaths=/run/khaen-rt-stack 要求目录在 namespace 建立前存在）')
+        if 'khaen-rt-stack' not in ld:
+            problems.append(f'F3：{name} 必须 LogsDirectory=khaen-rt-stack')
+        if '/run/khaen-rt-stack' in rw and 'khaen-rt-stack' in rd:
+            pass  # RuntimeDirectory 提供 /run/khaen-rt-stack
+        elif '/run/khaen-rt-stack' in rw:
+            problems.append(f'F3：{name} ReadWritePaths 含 /run/khaen-rt-stack 但 RuntimeDirectory 未提供')
+        if '/var/log/khaen-rt-stack' in rw and 'khaen-rt-stack' not in ld:
+            problems.append(f'F3：{name} ReadWritePaths 含 /var/log/khaen-rt-stack 但 LogsDirectory 未提供')
         if rd:
             modes = values.get(('Service', 'RuntimeDirectoryMode'), [])
             if modes and modes[0] != '0755':
@@ -247,36 +247,36 @@ def check(path):
         if len([v for v in da if v]) > 1:
             problems.append(f'F4：khaen-rt-host 只应有一条 DeviceAllow（实际 {len(da)} 条）')
     # F-18/T28-P0-1：target 必须显式 Wants/After host+daemon
-    if name == 'tspi-rt-stack.target':
+    if name == 'khaen-rt-stack.target':
         for key in ('Wants', 'After'):
             items = []
             for v in values.get(('Unit', key), []):
                 items += v.split()
-            for need in ('khaen-rt-host.service', 'tspi-rt-daemon.service'):
+            for need in ('khaen-rt-host.service', 'khaen-rt-daemon.service'):
                 if need not in items:
                     problems.append(f'target {key}= 缺 {need}（F-18：只 start target 拉不起 host/daemon）')
             # task-192：只 start target 时也必须拉起 IRQ 持久化 oneshot（不能只依赖 host 的 Requires）
-            if 'tspi-irq-affinity.service' not in items:
-                problems.append(f'target {key}= 缺 tspi-irq-affinity.service（task-192 IRQ 持久化）')
+            if 'khaen-irq-affinity.service' not in items:
+                problems.append(f'target {key}= 缺 khaen-irq-affinity.service（task-192 IRQ 持久化）')
     # task-192：IRQ 亲和持久化 oneshot 契约（Before host + oneshot/RemainAfterExit + pin 脚本路径）
-    if name == 'tspi-irq-affinity.service':
+    if name == 'khaen-irq-affinity.service':
         if values.get(('Service', 'Type'), [''])[0] != 'oneshot':
-            problems.append('tspi-irq-affinity.service 必须 Type=oneshot')
+            problems.append('khaen-irq-affinity.service 必须 Type=oneshot')
         if values.get(('Service', 'RemainAfterExit'), [''])[0] != 'yes':
-            problems.append('tspi-irq-affinity.service 必须 RemainAfterExit=yes（启动后保持 active 供 verify 查）')
+            problems.append('khaen-irq-affinity.service 必须 RemainAfterExit=yes（启动后保持 active 供 verify 查）')
         ex = values.get(('Service', 'ExecStart'), [''])
-        if not ex or '/usr/local/lib/tspi/irq-affinity-pin' not in ex[0]:
-            problems.append('tspi-irq-affinity.service ExecStart 必须是 /usr/local/lib/tspi/irq-affinity-pin apply')
+        if not ex or '/usr/local/lib/khaen/irq-affinity-pin' not in ex[0]:
+            problems.append('khaen-irq-affinity.service ExecStart 必须是 /usr/local/lib/khaen/irq-affinity-pin apply')
         before = []
         for v in values.get(('Unit', 'Before'), []):
             before += v.split()
         if 'khaen-rt-host.service' not in before:
-            problems.append('tspi-irq-affinity.service 必须 Before=khaen-rt-host.service（host 启动前钉核）')
+            problems.append('khaen-irq-affinity.service 必须 Before=khaen-rt-host.service（host 启动前钉核）')
         # B1（2026-11-20 板窗）：开机竞态防护——ExecStartPre 先等依赖 IRQ 节点就绪，再由 ExecStart 钉核。
         # （v11 重启实测：oneshot ~4s 先跑，end0 IRQ56/57 节点未注册 → apply fail-closed → host 因 Requires= 不启动）
         pre = [v.strip() for v in values.get(('Service', 'ExecStartPre'), [])]
         if not any('irq-affinity-pin' in v and 'wait' in v for v in pre):
-            problems.append('tspi-irq-affinity.service 必须 ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait'
+            problems.append('khaen-irq-affinity.service 必须 ExecStartPre=/usr/local/lib/khaen/irq-affinity-pin wait'
                             '（B1 开机 IRQ 竞态：IRQ56/57 节点可能晚于 oneshot 就绪）')
         tos = values.get(('Service', 'TimeoutStartSec'), [''])
         try:
@@ -284,7 +284,7 @@ def check(path):
         except (ValueError, IndexError):
             tos_v = 0
         if tos_v < 90:
-            problems.append('tspi-irq-affinity.service 必须显式 TimeoutStartSec>=90'
+            problems.append('khaen-irq-affinity.service 必须显式 TimeoutStartSec>=90'
                             '（wait 默认 60s + 钉核回读余量；B1）')
     # 旧 C 依赖/启动禁止（注释已被 parse 跳过）
     blob = '\n'.join(line for line in open(path, encoding='utf-8', errors='replace'))

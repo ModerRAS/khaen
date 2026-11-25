@@ -22,7 +22,7 @@ fn dod_root_contract_constants() {
     assert_eq!(REPORT_SCHEMA, "khaen-file-runner-report/v1");
     assert_eq!(PRECISION_LOCK, "f32-strict");
     assert_eq!(GRAPH_HASH_ALGO, "sha256-canonical-v1");
-    assert!(GRAPH_HASH_DOMAIN.starts_with("TSPI-FILE-RUNNER-GRAPH"));
+    assert!(GRAPH_HASH_DOMAIN.starts_with("KHAEN-FILE-RUNNER-GRAPH"));
     assert_eq!(RUNNER_NAME, "khaen-file-runner");
     assert!(!RUNNER_VERSION.is_empty());
     assert_eq!(ROUTE_TAPS_REGULAR_MAX, 4_096);

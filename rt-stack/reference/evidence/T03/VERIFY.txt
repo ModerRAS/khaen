@@ -1,5 +1,5 @@
 $ python.exe tools/verify_reference.py --report evidence/T03/verify-report.json
-[cwd] C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack\reference
+[cwd] C:\WorkSpace\Claw\projects\khaen-audio-dsp\rt-stack\reference
 [exit_code] 0
 --- stdout ---
 report: evidence\T03\verify-report.json

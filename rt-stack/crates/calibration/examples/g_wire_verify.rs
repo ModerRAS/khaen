@@ -43,8 +43,8 @@ fn value(args: &[String], key: &str) -> Option<String> {
 }
 
 fn run(args: &[String]) -> Result<u8, String> {
-    let g_paths_path = value(args, "--g-paths")
-        .ok_or_else(|| "--g-paths FILE is required".to_string())?;
+    let g_paths_path =
+        value(args, "--g-paths").ok_or_else(|| "--g-paths FILE is required".to_string())?;
     let report_path = value(args, "--compile-report")
         .ok_or_else(|| "--compile-report FILE is required".to_string())?;
     let plan_path = value(args, "--plan").map(PathBuf::from);
@@ -94,7 +94,10 @@ fn run(args: &[String]) -> Result<u8, String> {
             .and_then(|value| value.as_str())
             .ok_or_else(|| "paths[].in_role 缺失".to_string())?;
         plan_keys.push((out_role.to_string(), in_role.to_string()));
-        let taps = path.get("taps").and_then(|value| value.as_u64()).unwrap_or(0) as usize;
+        let taps = path
+            .get("taps")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0) as usize;
         let actual_sha = path
             .get("coeff_sha256")
             .and_then(|value| value.as_str())
@@ -116,7 +119,9 @@ fn run(args: &[String]) -> Result<u8, String> {
             .find(|(out, in_, _, _)| *out == out_dense && *in_ == in_dense)
             .ok_or_else(|| format!("plan path {out_role}/{in_role} 在注入 G 中不存在"))?;
         if !nonzero {
-            failures.push(format!("plan 出现注入 G 里全零的 cell {out_role}/{in_role}"));
+            failures.push(format!(
+                "plan 出现注入 G 里全零的 cell {out_role}/{in_role}"
+            ));
             continue;
         }
         if taps != l_g {
@@ -207,7 +212,7 @@ fn run(args: &[String]) -> Result<u8, String> {
     }
 
     let document = json_object(vec![
-        ("schema", text("tspi-cal-g-wire-verify/v1")),
+        ("schema", text("khaen-cal-g-wire-verify/v1")),
         ("verdict", text(if failures.is_empty() { "EXPERIMENT" } else { "MISMATCH" })),
         ("acceptability", text("NON_ACCEPTABLE")),
         ("scope", text("SINGLE_POINT_NOT_SPATIAL")),

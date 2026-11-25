@@ -1,4 +1,4 @@
-# TSPI 模态 MIMO 设计：ingest / timebase / target / solve / validate / artifact（T06 scaffold；leaf T48-T54）
+# KHAEN 模态 MIMO 设计：ingest / timebase / target / solve / validate / artifact（T06 scaffold；leaf T48-T54）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-modal-design"

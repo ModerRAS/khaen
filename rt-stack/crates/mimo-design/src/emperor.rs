@@ -216,7 +216,11 @@ pub fn bass_arrival_sample(x: &[f64], fs: f64) -> Option<usize> {
     Some(
         band.iter()
             .enumerate()
-            .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.1.abs()
+                    .partial_cmp(&b.1.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(index, _)| index)
             .unwrap_or(0),
     )
@@ -335,7 +339,12 @@ pub fn design_channel(
     let primary_band = limit_to_control_band(primary, params.fs, params.f_lo, params.f_hi)?;
     let mut support_band = Vec::with_capacity(supports.len());
     for support in supports {
-        support_band.push(limit_to_control_band(support, params.fs, params.f_lo, params.f_hi)?);
+        support_band.push(limit_to_control_band(
+            support,
+            params.fs,
+            params.f_lo,
+            params.f_hi,
+        )?);
     }
     let class = classify_decay(&primary_band, params.fs)?;
     let taps = params.d12 + ((class.tail_s * params.fs).ceil() as usize).max(8);
@@ -382,9 +391,16 @@ fn classify_decay(x: &[f64], fs: f64) -> Result<DecayClass, String> {
     if x.len() < 8 {
         return Err("脉冲响应太短，衰减曲线无法判断".to_string());
     }
-    let peak = x.iter().enumerate().max_by(|a, b| {
-        a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal)
-    }).map(|(i, _)| i).unwrap_or(0);
+    let peak = x
+        .iter()
+        .enumerate()
+        .max_by(|a, b| {
+            a.1.abs()
+                .partial_cmp(&b.1.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(0);
     let mut rev = vec![0.0; x.len() - peak];
     let mut acc = 0.0;
     for (i, v) in x[peak..].iter().enumerate().rev() {
@@ -409,9 +425,17 @@ fn classify_decay(x: &[f64], fs: f64) -> Result<DecayClass, String> {
             descent_db.max(0.0)
         ));
     }
-    let metric = if descent_db >= 35.0 { DecayMetric::T30 } else { DecayMetric::T20 };
+    let metric = if descent_db >= 35.0 {
+        DecayMetric::T30
+    } else {
+        DecayMetric::T20
+    };
     let tail_s = knee as f64 / fs;
-    Ok(DecayClass { metric, tail_s: tail_s.max(params_min_tail(fs)), descent_db })
+    Ok(DecayClass {
+        metric,
+        tail_s: tail_s.max(params_min_tail(fs)),
+        descent_db,
+    })
 }
 
 fn params_min_tail(fs: f64) -> f64 {
@@ -504,11 +528,20 @@ fn solve_correction(
     } else {
         return Err("预延迟长于滤波器".to_string());
     }
-    let peak = dry.iter().enumerate().max_by(|a, b| {
-        a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal)
-    }).map(|(i, _)| i).unwrap_or(0);
+    let peak = dry
+        .iter()
+        .enumerate()
+        .max_by(|a, b| {
+            a.1.abs()
+                .partial_cmp(&b.1.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(0);
     let keep_end = peak + ((params.t_keep_s * params.fs).round() as usize);
-    let tail_end = (peak + ((classify_decay(primary, params.fs)?.tail_s * params.fs).round() as usize) + params.d12)
+    let tail_end = (peak
+        + ((classify_decay(primary, params.fs)?.tail_s * params.fs).round() as usize)
+        + params.d12)
         .min(conv_len.saturating_sub(1));
     let mut target = dry.clone();
     for v in target.iter_mut().skip(keep_end) {
@@ -537,16 +570,29 @@ fn solve_correction(
     if tail_to > tail_from {
         let spectra: Vec<(Vec<f64>, Vec<f64>)> = cols
             .iter()
-            .map(|column| tail_control_spectrum(&column[tail_from..tail_to], params.fs, params.f_lo, params.f_hi))
+            .map(|column| {
+                tail_control_spectrum(
+                    &column[tail_from..tail_to],
+                    params.fs,
+                    params.f_lo,
+                    params.f_hi,
+                )
+            })
             .collect();
-        let (dry_re, dry_im) = tail_control_spectrum(&dry[tail_from..tail_to], params.fs, params.f_lo, params.f_hi);
+        let (dry_re, dry_im) = tail_control_spectrum(
+            &dry[tail_from..tail_to],
+            params.fs,
+            params.f_lo,
+            params.f_hi,
+        );
         if !dry_re.is_empty() && spectra.iter().all(|(re, _)| re.len() == dry_re.len()) {
             let ww = params.w_tail * params.w_tail;
             for i in 0..n_unk {
                 for j in i..n_unk {
                     let mut acc = 0.0;
                     for k in 0..dry_re.len() {
-                        acc += spectra[i].0[k] * spectra[j].0[k] + spectra[i].1[k] * spectra[j].1[k];
+                        acc +=
+                            spectra[i].0[k] * spectra[j].0[k] + spectra[i].1[k] * spectra[j].1[k];
                     }
                     ata[i * n_unk + j] += ww * acc;
                     if i != j {
@@ -596,13 +642,31 @@ fn solve_correction(
         add_conv(&mut predicted, h, g);
     }
     let tail_ratio = if tail_to > tail_from {
-        let before = tail_control_energy(&dry[tail_from..tail_to], params.fs, params.f_lo, params.f_hi);
-        let after = tail_control_energy(&predicted[tail_from..tail_to], params.fs, params.f_lo, params.f_hi);
-        if before <= 1e-20 { 1.0 } else { after / before }
+        let before = tail_control_energy(
+            &dry[tail_from..tail_to],
+            params.fs,
+            params.f_lo,
+            params.f_hi,
+        );
+        let after = tail_control_energy(
+            &predicted[tail_from..tail_to],
+            params.fs,
+            params.f_lo,
+            params.f_hi,
+        );
+        if before <= 1e-20 {
+            1.0
+        } else {
+            after / before
+        }
     } else {
         1.0
     };
-    Ok(Solved { g_primary, g_support: filters, tail_ratio })
+    Ok(Solved {
+        g_primary,
+        g_support: filters,
+        tail_ratio,
+    })
 }
 
 fn basis_hz(index: usize, taps: usize, fs: f64) -> f64 {
@@ -684,7 +748,10 @@ fn max_dft_gain(g: &[f64]) -> f64 {
     let mut im = vec![0.0; n];
     re[..g.len()].copy_from_slice(g);
     fft_in_place(&mut re, &mut im);
-    re.iter().zip(im.iter()).map(|(a, b)| (a * a + b * b).sqrt()).fold(0.0, f64::max)
+    re.iter()
+        .zip(im.iter())
+        .map(|(a, b)| (a * a + b * b).sqrt())
+        .fold(0.0, f64::max)
 }
 
 fn cholesky_solve(a: &mut [f64], b: &mut [f64], n: usize) -> Result<(), String> {
@@ -769,9 +836,16 @@ fn upsample4(low: &[f64], interp: &[f64]) -> Vec<f64> {
 /// 从脉冲响应估计 T20 或 T30 的外推秒数。曲线不够就拒绝。
 pub fn score_decay(x: &[f64], fs: f64) -> Result<(DecayMetric, f64), String> {
     let class = classify_decay(x, fs)?;
-    let peak = x.iter().enumerate().max_by(|a, b| {
-        a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal)
-    }).map(|(i, _)| i).unwrap_or(0);
+    let peak = x
+        .iter()
+        .enumerate()
+        .max_by(|a, b| {
+            a.1.abs()
+                .partial_cmp(&b.1.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(0);
     let mut energy = vec![0.0; x.len() - peak];
     let mut acc = 0.0;
     for (i, v) in x[peak..].iter().enumerate().rev() {
@@ -779,8 +853,15 @@ pub fn score_decay(x: &[f64], fs: f64) -> Result<(DecayMetric, f64), String> {
         energy[i] = acc;
     }
     let e0 = energy[0].max(1e-30);
-    let db: Vec<f64> = energy.iter().map(|e| 10.0 * (e.max(1e-30) / e0).log10()).collect();
-    let (lo, hi) = if class.metric == DecayMetric::T30 { (-5.0, -35.0) } else { (-5.0, -25.0) };
+    let db: Vec<f64> = energy
+        .iter()
+        .map(|e| 10.0 * (e.max(1e-30) / e0).log10())
+        .collect();
+    let (lo, hi) = if class.metric == DecayMetric::T30 {
+        (-5.0, -35.0)
+    } else {
+        (-5.0, -25.0)
+    };
     let mut t_lo = None;
     let mut t_hi = None;
     for (i, v) in db.iter().enumerate() {
@@ -895,16 +976,32 @@ mod tests {
         let p = params_fast();
         let h = mode(12_000.0, 63.0, 0.08, 0.8, 1e-5);
         let d = design_channel(&h, &[], &p).unwrap();
-        assert!(d.predicted_tail_ratio < 0.5, "尾巴能量比 {}", d.predicted_tail_ratio);
+        assert!(
+            d.predicted_tail_ratio < 0.5,
+            "尾巴能量比 {}",
+            d.predicted_tail_ratio
+        );
         assert!(d.g_primary.iter().all(|v| v.is_finite()));
         let mut ident = vec![0.0; d.taps];
         ident[0] = 1.0;
-        let diff: f64 = d.g_primary.iter().zip(ident.iter()).map(|(a, b)| (a - b).abs()).sum();
+        let diff: f64 = d
+            .g_primary
+            .iter()
+            .zip(ident.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
         assert!(diff > 0.5, "导出的主修正不应再是一个单位脉冲");
-        assert!((d.g_primary[0] - 1.0).abs() > 0.2, "首点 {}", d.g_primary[0]);
+        assert!(
+            (d.g_primary[0] - 1.0).abs() > 0.2,
+            "首点 {}",
+            d.g_primary[0]
+        );
         let gain = max_dft_gain(&d.g_primary);
         let above = bin_mag(&d.g_primary, 400.0, p.fs);
-        assert!(above < gain * 0.05 + 1e-3, "400 Hz 处修正应远小于通带，实际 {above}");
+        assert!(
+            above < gain * 0.05 + 1e-3,
+            "400 Hz 处修正应远小于通带，实际 {above}"
+        );
         assert_eq!(d.taps, p.d12 + ((d.tail_s * p.fs).ceil() as usize).max(8));
         assert!(!d.tail_truncated);
     }
@@ -955,7 +1052,11 @@ mod tests {
         let d = design_channel(&h, &[], &p).unwrap();
         let db = peak_gain_db(&d.g_primary);
         let expect = if db > 0.0 { -db } else { 0.0 };
-        assert!((d.pre_gain_db - expect).abs() < 1e-6, "增益 {db} 预衰减 {}", d.pre_gain_db);
+        assert!(
+            (d.pre_gain_db - expect).abs() < 1e-6,
+            "增益 {db} 预衰减 {}",
+            d.pre_gain_db
+        );
         assert!(d.pre_gain_db >= p.pre_gain_floor_db - 1e-6);
         let untouched = peak_gain_db(&d.g_primary);
         assert!((untouched - db).abs() < 1e-9, "预衰减不得改系数");
@@ -983,7 +1084,11 @@ mod tests {
         let h = mode(12_000.0, 63.0, 0.12, 1.0, 1e-5);
         let d = design_channel(&h, &[], &p).unwrap();
         assert!(!d.engine_playable);
-        assert!(d.taps > 64, "抽头 {} 不应被 64 点上限截成可播放设计", d.taps);
+        assert!(
+            d.taps > 64,
+            "抽头 {} 不应被 64 点上限截成可播放设计",
+            d.taps
+        );
     }
 
     fn stopped_envelope(drop_db: f64) -> Vec<f64> {
@@ -1009,12 +1114,22 @@ mod tests {
     fn decay_metric_follows_how_far_the_curve_falls() {
         let mid = stopped_envelope(30.0);
         let mid_class = classify_decay(&mid, 12_000.0).unwrap();
-        assert_eq!(mid_class.metric, DecayMetric::T20, "落下 {:.1} dB", mid_class.descent_db);
+        assert_eq!(
+            mid_class.metric,
+            DecayMetric::T20,
+            "落下 {:.1} dB",
+            mid_class.descent_db
+        );
         assert!((25.0..35.0).contains(&mid_class.descent_db));
 
         let deep = stopped_envelope(50.0);
         let deep_class = classify_decay(&deep, 12_000.0).unwrap();
-        assert_eq!(deep_class.metric, DecayMetric::T30, "落下 {:.1} dB", deep_class.descent_db);
+        assert_eq!(
+            deep_class.metric,
+            DecayMetric::T30,
+            "落下 {:.1} dB",
+            deep_class.descent_db
+        );
         let (scored, seconds) = score_decay(&deep, 12_000.0).unwrap();
         assert_eq!(scored, DecayMetric::T30);
         assert!(seconds.is_finite() && seconds > 0.0);
@@ -1049,7 +1164,10 @@ mod tests {
         let p = params_fast();
         let h = mode(12_000.0, 63.0, 0.02, 0.5, 0.5);
         let err = design_channel(&h, &[], &p).unwrap_err();
-        assert!(err.contains("−25") || err.contains("-25") || err.contains("25"), "{err}");
+        assert!(
+            err.contains("−25") || err.contains("-25") || err.contains("25"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1085,7 +1203,11 @@ mod tests {
         let peak = ir
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.1.abs()
+                    .partial_cmp(&b.1.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)
             .unwrap_or(0);
         let end = (peak + keep).min(ir.len());
@@ -1116,7 +1238,9 @@ mod tests {
             };
             println!(
                 "{name} extension_hz={} peak={:.6}",
-                extension.map(|hz| format!("{hz:.0}")).unwrap_or_else(|| "噪声".to_string()),
+                extension
+                    .map(|hz| format!("{hz:.0}"))
+                    .unwrap_or_else(|| "噪声".to_string()),
                 peak
             );
             let decimated = decimate_48_to_12(&ir48, params.resamp_taps).unwrap();
@@ -1136,7 +1260,12 @@ mod tests {
                         let spots: Vec<String> = [20.0, 40.0, 50.0, 74.0, 100.0, 125.0, 150.0]
                             .into_iter()
                             .map(|f| {
-                                format!("{f:.0}:{:.1}", 20.0 * bin_mag(&solved.g_primary, f, params.fs).max(1e-20).log10())
+                                format!(
+                                    "{f:.0}:{:.1}",
+                                    20.0 * bin_mag(&solved.g_primary, f, params.fs)
+                                        .max(1e-20)
+                                        .log10()
+                                )
                             })
                             .collect();
                         println!(
@@ -1180,7 +1309,8 @@ mod tests {
                         "{name} CONTROL f_lo={:.0} descent={:.1} tail={tail_db:.2}dB peak={db:.1} pre={:.1}",
                         used.f_lo, d.descent_db, d.pre_gain_db
                     );
-                    if (d.pre_gain_db - expect).abs() > 0.05 || d.pre_gain_db < used.pre_gain_floor_db - 0.05
+                    if (d.pre_gain_db - expect).abs() > 0.05
+                        || d.pre_gain_db < used.pre_gain_floor_db - 0.05
                     {
                         failures.push(format!("{name} 增益 {db:.2} dB 预衰减 {}", d.pre_gain_db));
                     }
@@ -1216,7 +1346,9 @@ mod tests {
             "HFR-b-24",
             "LFE-b",
         ] {
-            let ir48 = read_f32(&format!(r"C:\WorkSpace\Claw\scratch\lead\rew-room-20261123\{name}.f32"));
+            let ir48 = read_f32(&format!(
+                r"C:\WorkSpace\Claw\scratch\lead\rew-room-20261123\{name}.f32"
+            ));
             if ir48.len() < 8 {
                 continue;
             }
@@ -1242,12 +1374,54 @@ mod tests {
             let raw_band = limit_to_control_band(&on_raw.1, used.fs, used.f_lo, used.f_hi).unwrap();
             let raw_dry = limit_to_control_band(&on_raw.2, used.fs, used.f_lo, used.f_hi).unwrap();
             let bass_peak = peak_index(&raw_dry);
-            let rect = dft_tail_energy(&on_raw.1, used.fs, used.f_lo, used.f_hi, Some(bass_peak), false)
-                / dft_tail_energy(&on_raw.2, used.fs, used.f_lo, used.f_hi, Some(bass_peak), false).max(1e-30);
-            let hann = dft_tail_energy(&on_raw.1, used.fs, used.f_lo, used.f_hi, Some(bass_peak), true)
-                / dft_tail_energy(&on_raw.2, used.fs, used.f_lo, used.f_hi, Some(bass_peak), true).max(1e-30);
-            let filtered = dft_tail_energy(&raw_band, used.fs, used.f_lo, used.f_hi, Some(bass_peak), true)
-                / dft_tail_energy(&raw_dry, used.fs, used.f_lo, used.f_hi, Some(bass_peak), true).max(1e-30);
+            let rect = dft_tail_energy(
+                &on_raw.1,
+                used.fs,
+                used.f_lo,
+                used.f_hi,
+                Some(bass_peak),
+                false,
+            ) / dft_tail_energy(
+                &on_raw.2,
+                used.fs,
+                used.f_lo,
+                used.f_hi,
+                Some(bass_peak),
+                false,
+            )
+            .max(1e-30);
+            let hann = dft_tail_energy(
+                &on_raw.1,
+                used.fs,
+                used.f_lo,
+                used.f_hi,
+                Some(bass_peak),
+                true,
+            ) / dft_tail_energy(
+                &on_raw.2,
+                used.fs,
+                used.f_lo,
+                used.f_hi,
+                Some(bass_peak),
+                true,
+            )
+            .max(1e-30);
+            let filtered = dft_tail_energy(
+                &raw_band,
+                used.fs,
+                used.f_lo,
+                used.f_hi,
+                Some(bass_peak),
+                true,
+            ) / dft_tail_energy(
+                &raw_dry,
+                used.fs,
+                used.f_lo,
+                used.f_hi,
+                Some(bass_peak),
+                true,
+            )
+            .max(1e-30);
             println!(
                 "{name} rect {:.2} dB hann {:.2} dB filtered-hann {:.2} dB band-window {:.2} dB predicted {:.2} dB tail {:.3} s",
                 10.0 * rect.max(1e-20).log10(),
@@ -1276,7 +1450,11 @@ mod tests {
         let peak = dry
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.1.abs()
+                    .partial_cmp(&b.1.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(index, _)| index)
             .unwrap_or(0);
         let start = (peak + 240).min(conv_len);
@@ -1289,7 +1467,11 @@ mod tests {
     fn peak_index(x: &[f64]) -> usize {
         x.iter()
             .enumerate()
-            .max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.1.abs()
+                    .partial_cmp(&b.1.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(index, _)| index)
             .unwrap_or(0)
     }
@@ -1338,10 +1520,20 @@ mod tests {
         assert_eq!(bass_align_delays(&[10, 40, 25]), vec![30, 0, 15]);
         assert_eq!(bass_align_delays(&[7]), vec![0]);
         assert!(bass_align_delays(&[]).is_empty());
-        let names = ["L-full", "R-full", "SL-full", "SR-full", "HFL-full-24", "HFR-full-24", "LFE-full"];
+        let names = [
+            "L-full",
+            "R-full",
+            "SL-full",
+            "SR-full",
+            "HFL-full-24",
+            "HFR-full-24",
+            "LFE-full",
+        ];
         let mut arrivals = Vec::new();
         for name in names {
-            let ir48 = read_f32(&format!(r"C:\WorkSpace\Claw\scratch\lead\rew-room-20261123\{name}.f32"));
+            let ir48 = read_f32(&format!(
+                r"C:\WorkSpace\Claw\scratch\lead\rew-room-20261123\{name}.f32"
+            ));
             if ir48.len() < 32 {
                 continue;
             }
@@ -1357,13 +1549,16 @@ mod tests {
             let buildup = bass_align_delays(&arrivals);
             let buildup_ms = buildup.iter().copied().max().unwrap_or(0) as f64 / 12.0;
             println!("低频建立差 {buildup_ms:.1} ms");
-            assert!(buildup_ms > 10.0, "低频建立差短到几毫秒时，才和座位尺寸同一量级");
+            assert!(
+                buildup_ms > 10.0,
+                "低频建立差短到几毫秒时，才和座位尺寸同一量级"
+            );
         }
     }
 
     /// 全场 REW 冲击响应。文件不在时跳过。控制频段尾巴要比直通短，带外增益被下潜截掉。
     #[ignore = "known failure under investigation, tracked in HANDOFF 2026-11-25"]
-#[test]
+    #[test]
     fn rew_room_control_band_tail_is_shorter_than_dry() {
         let root = r"C:\WorkSpace\Claw\scratch\lead\rew-room-20261123";
         let names = [
@@ -1442,7 +1637,10 @@ mod tests {
         }
         for (group, group_peaks) in peaks.iter().enumerate() {
             if group_over[group] {
-                failures.push(format!("第 {} 组有音箱超过 +20 dB，整组一起拒绝", group + 1));
+                failures.push(format!(
+                    "第 {} 组有音箱超过 +20 dB，整组一起拒绝",
+                    group + 1
+                ));
                 continue;
             }
             if group_peaks.is_empty() {
@@ -1450,11 +1648,21 @@ mod tests {
             }
             match shared_pre_gain_db(group_peaks, params.pre_gain_floor_db) {
                 Ok(shared) => {
-                    let hottest = group_peaks.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                    println!("GROUP {} shared={shared:.2}dB hottest={hottest:.1}dB n={}", group + 1, group_peaks.len());
+                    let hottest = group_peaks
+                        .iter()
+                        .copied()
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    println!(
+                        "GROUP {} shared={shared:.2}dB hottest={hottest:.1}dB n={}",
+                        group + 1,
+                        group_peaks.len()
+                    );
                     let expect = if hottest > 0.0 { -hottest } else { 0.0 };
                     if (shared - expect).abs() > 1e-6 {
-                        failures.push(format!("第 {} 组预衰减 {shared:.2} 没有跟着最高增益 {hottest:.1}", group + 1));
+                        failures.push(format!(
+                            "第 {} 组预衰减 {shared:.2} 没有跟着最高增益 {hottest:.1}",
+                            group + 1
+                        ));
                     }
                 }
                 Err(err) => failures.push(format!("第 {} 组: {err}", group + 1)),

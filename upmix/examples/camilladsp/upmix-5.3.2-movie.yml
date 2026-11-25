@@ -1,8 +1,8 @@
-# tspi-upmix 生成：upmix-5.3.2-movie
+# khaen-upmix 生成：upmix-5.3.2-movie
 # 输入 2.0（2ch）-> 输出 5.3.2（10ch）；采样率 48000 Hz
 # 中置 -3dB 提取对白；环绕 -3dB、高度 -6dB；低频 80Hz 分频
 # 用途：独立 CamillaDSP（ALSA）
-title: tspi-upmix upmix-5.3.2-movie（2.0 -> 5.3.2）
+title: khaen-upmix upmix-5.3.2-movie（2.0 -> 5.3.2）
 description: 中置 -3dB 提取对白；环绕 -3dB、高度 -6dB；低频 80Hz 分频
 devices:
   samplerate: 48000

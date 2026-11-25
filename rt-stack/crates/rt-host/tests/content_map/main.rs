@@ -18,7 +18,7 @@
 //!
 //! 本文件是集成测试 target（cargo 自动发现 tests/content_map/main.rs，与 compat 的
 //! tests/center_downmix/main.rs 同模式；不改 public_registration.rs）。布局输入为真实 overlay
-//! `audio/overlay/etc/tspi-audio/layout-presets.yml`（include_str! 绑定），不写临时文件。
+//! `audio/overlay/etc/khaen-audio/layout-presets.yml`（include_str! 绑定），不写临时文件。
 
 use khaen_rt_host::content_map::{
     center_downmix_gain_linear_f64, center_downmix_worst_case_added_db, CenterDownmixConfig,
@@ -30,7 +30,7 @@ use khaen_rt_host::content_map::{
 };
 
 const OVERLAY: &str =
-    include_str!("../../../../../audio/overlay/etc/tspi-audio/layout-presets.yml");
+    include_str!("../../../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
 
 fn presets() -> LayoutPresets {
     LayoutPresets::parse_overlay(OVERLAY.as_bytes()).expect("overlay layout-presets 解析失败")
@@ -356,7 +356,11 @@ fn center_downmix_nsp_512_single_stream_folds_center_keeps_lfe() {
     assert_eq!(plan.source.role_channel("LFE"), Some(3));
     assert_eq!(plan.source.role_channel("TFL"), Some(6));
     assert_eq!(plan.headroom.program_peak_dbfs, -18.0);
-    assert_eq!(plan.headroom.trim_linear(), 1.0, "−18 dBFS 基准不得触发 D7 trim");
+    assert_eq!(
+        plan.headroom.trim_linear(),
+        1.0,
+        "−18 dBFS 基准不得触发 D7 trim"
+    );
     let frames = 4usize;
     let mut buffer = vec![0.0f32; 8 * frames];
     for frame in 0..frames {
@@ -652,7 +656,7 @@ fn center_downmix_buffer_size_is_validated_without_panic() {
 #[test]
 fn layout_presets_reader_parses_t57_overlay_input_output_sections() {
     let presets = presets();
-    assert_eq!(presets.schema(), "tspi-layout-presets/v2");
+    assert_eq!(presets.schema(), "khaen-layout-presets/v2");
     // 输入布局：9 个（h16-5.1/7.1/5.1.2/5.1.4/7.1.2/7.1.4 + nsp-5.1.2 + pc-2ch/pc-8ch）
     assert_eq!(presets.input_layouts().len(), 9);
     let nsp512 = presets.input_layout("nsp-5.1.2").expect("nsp-5.1.2");
@@ -711,8 +715,8 @@ fn layout_presets_reader_parses_t57_overlay_input_output_sections() {
 fn layout_presets_reader_rejects_schema_unknown_fields_and_duplicate_slots() {
     // schema 不匹配
     let wrong_schema = OVERLAY.replace(
-        "schema: tspi-layout-presets/v2",
-        "schema: tspi-layout-presets/v1",
+        "schema: khaen-layout-presets/v2",
+        "schema: khaen-layout-presets/v1",
     );
     let error =
         LayoutPresets::parse_overlay(wrong_schema.as_bytes()).expect_err("schema 不匹配必须拒收");
@@ -728,7 +732,7 @@ fn layout_presets_reader_rejects_schema_unknown_fields_and_duplicate_slots() {
 
     // 输出容器槽位重复（scatter 必须单射）
     let duplicate_slot = concat!(
-        "schema: tspi-layout-presets/v2\n",
+        "schema: khaen-layout-presets/v2\n",
         "output_layouts:\n",
         "  dup:\n",
         "    roles:\n",
@@ -741,7 +745,7 @@ fn layout_presets_reader_rejects_schema_unknown_fields_and_duplicate_slots() {
     assert!(error.to_string().contains("被多个角色占用"), "{error}");
 
     // 缺少 output_layouts 段
-    let missing_outputs = "schema: tspi-layout-presets/v2\ninput_layouts: {}\n";
+    let missing_outputs = "schema: khaen-layout-presets/v2\ninput_layouts: {}\n";
     let error = LayoutPresets::parse_overlay(missing_outputs.as_bytes())
         .expect_err("缺少 output_layouts 必须拒收");
     assert_eq!(error.code, ContentMapErrorCode::LayoutParse);
@@ -759,7 +763,7 @@ fn layout_presets_reader_reports_io_errors_and_supports_block_style_roles() {
 
     // 块状多行角色条目（WebUI profile 可能使用）也能解析（最小读取器支持块映射序列条目）
     let block_style = concat!(
-        "schema: tspi-layout-presets/v2\n",
+        "schema: khaen-layout-presets/v2\n",
         "input_layouts:\n",
         "  blk-5.1:\n",
         "    channels: 6\n",

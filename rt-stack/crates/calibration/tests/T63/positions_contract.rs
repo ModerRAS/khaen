@@ -1242,12 +1242,12 @@ fn t63_positions_job_stage_writes_artifacts_and_restart_resume() {
 }
 
 // ---------------------------------------------------------------------------
-// 契约样例（设置 TSPI_T63_EVIDENCE_DIR 时才写盘；CI 默认无副作用）
+// 契约样例（设置 KHAEN_T63_EVIDENCE_DIR 时才写盘；CI 默认无副作用）
 // ---------------------------------------------------------------------------
 
 #[test]
 fn t63_positions_writes_evidence_examples_when_requested() {
-    let Some(directory) = std::env::var_os("TSPI_T63_EVIDENCE_DIR").map(PathBuf::from) else {
+    let Some(directory) = std::env::var_os("KHAEN_T63_EVIDENCE_DIR").map(PathBuf::from) else {
         return;
     };
     fs::create_dir_all(&directory).unwrap();

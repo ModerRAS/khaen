@@ -50,7 +50,7 @@ fn opts() -> ImportOptions {
 /// sidecar 基础字段（§6.3 必填）；fields 覆盖同名字段（值为原始 JSON 片段）。
 fn sidecar(fields: &[(&str, &str)]) -> String {
     let base: [(&str, &str); 7] = [
-        ("schema", "\"tspi-target-draft/v1\""),
+        ("schema", "\"khaen-target-draft/v1\""),
         ("frequency_unit", "\"Hz\""),
         ("magnitude_unit", "\"dB\""),
         ("runtime_rate", "48000"),
@@ -147,7 +147,7 @@ fn json_points_phase(points: &[(f64, f64, f64)]) -> String {
 /// 基础 JSON 文档（§6.3 必填 + points）。
 fn json_doc(points: &str, extra: &[(&str, &str)]) -> String {
     let mut text = String::from(
-        r#"{"schema":"tspi-target-draft/v1","frequency_unit":"Hz","magnitude_unit":"dB","runtime_rate":48000,"normalization":"none","interpolation":"log_frequency_linear","edge_policy":"hold","points":"#,
+        r#"{"schema":"khaen-target-draft/v1","frequency_unit":"Hz","magnitude_unit":"dB","runtime_rate":48000,"normalization":"none","interpolation":"log_frequency_linear","edge_policy":"hold","points":"#,
     );
     text.push_str(points);
     for (key, value) in extra {
@@ -511,7 +511,7 @@ fn t11_targets_json_schema_missing_or_wrong() {
     );
     expect_code(import_json_obj(&doc), TargetErrorCode::Schema);
     // 错 schema。
-    let doc = json_doc(&points, &[]).replace("tspi-target-draft/v1", "tspi-target-draft/v2");
+    let doc = json_doc(&points, &[]).replace("khaen-target-draft/v1", "khaen-target-draft/v2");
     expect_code(import_json_obj(&doc), TargetErrorCode::Schema);
     // JSON 语法错误 / 非对象根。
     expect_code(import_json_obj("{\"schema\":"), TargetErrorCode::Schema);
@@ -522,18 +522,18 @@ fn t11_targets_json_schema_missing_or_wrong() {
 fn t11_targets_json_missing_required_field() {
     // 缺 runtime_rate → E_TGT_RATE（§6.9.1 矩阵：runtime_rate 缺失/不等于 fs → RATE）。
     let doc = format!(
-        "{{\"schema\":\"tspi-target-draft/v1\",\"frequency_unit\":\"Hz\",\"magnitude_unit\":\"dB\",\"normalization\":\"none\",\"interpolation\":\"log_frequency_linear\",\"edge_policy\":\"hold\",\"points\":{}}}",
+        "{{\"schema\":\"khaen-target-draft/v1\",\"frequency_unit\":\"Hz\",\"magnitude_unit\":\"dB\",\"normalization\":\"none\",\"interpolation\":\"log_frequency_linear\",\"edge_policy\":\"hold\",\"points\":{}}}",
         json_points_mag(&[(20.0, 0.0), (20_000.0, 0.0)])
     );
     expect_code(import_json_obj(&doc), TargetErrorCode::Rate);
     // 缺 normalization → E_TGT_MISSING_FIELD。
     let doc = format!(
-        "{{\"schema\":\"tspi-target-draft/v1\",\"frequency_unit\":\"Hz\",\"magnitude_unit\":\"dB\",\"runtime_rate\":48000,\"interpolation\":\"log_frequency_linear\",\"edge_policy\":\"hold\",\"points\":{}}}",
+        "{{\"schema\":\"khaen-target-draft/v1\",\"frequency_unit\":\"Hz\",\"magnitude_unit\":\"dB\",\"runtime_rate\":48000,\"interpolation\":\"log_frequency_linear\",\"edge_policy\":\"hold\",\"points\":{}}}",
         json_points_mag(&[(20.0, 0.0), (20_000.0, 0.0)])
     );
     expect_code(import_json_obj(&doc), TargetErrorCode::MissingField);
     // 缺 points（JSON 形式必填）。
-    let doc = r#"{"schema":"tspi-target-draft/v1","frequency_unit":"Hz","magnitude_unit":"dB","runtime_rate":48000,"normalization":"none","interpolation":"log_frequency_linear","edge_policy":"hold"}"#;
+    let doc = r#"{"schema":"khaen-target-draft/v1","frequency_unit":"Hz","magnitude_unit":"dB","runtime_rate":48000,"normalization":"none","interpolation":"log_frequency_linear","edge_policy":"hold"}"#;
     expect_code(import_json_obj(doc), TargetErrorCode::MissingField);
 }
 
@@ -1620,7 +1620,7 @@ fn t11_targets_report_json_deterministic() {
     assert_eq!(first, second, "报告必须确定性");
     assert!(first.starts_with('{') && first.ends_with('}'));
     for key in [
-        "\"schema\":\"tspi-target-report-draft/v1\"",
+        "\"schema\":\"khaen-target-report-draft/v1\"",
         "\"form\":\"csv\"",
         "\"point_count\":3",
         "\"phase_target\":\"absolute\"",

@@ -95,7 +95,9 @@ fn cmd_solve(args: &[String]) -> Result<(), String> {
         for h in &supports {
             s.push(decimate_48_to_12(h, params.resamp_taps)?);
         }
-        let n = p.len().min(s.iter().map(|v| v.len()).min().unwrap_or(p.len()));
+        let n = p
+            .len()
+            .min(s.iter().map(|v| v.len()).min().unwrap_or(p.len()));
         let p = p[..n].to_vec();
         let s = s.into_iter().map(|v| v[..n].to_vec()).collect();
         (p, s)
@@ -184,7 +186,11 @@ fn cmd_render(args: &[String]) -> Result<(), String> {
         cat.extend_from_slice(c);
     }
     write_f32(&req(args, "--out")?, &cat)?;
-    println!("RENDER_OK channels={} frames={}", ch.len(), ch.first().map(|c| c.len()).unwrap_or(0));
+    println!(
+        "RENDER_OK channels={} frames={}",
+        ch.len(),
+        ch.first().map(|c| c.len()).unwrap_or(0)
+    );
     Ok(())
 }
 
@@ -229,7 +235,11 @@ fn deconvolve(rec: &[f64], sweep: &[f64]) -> Result<Vec<f64>, String> {
     sr[..sweep.len()].copy_from_slice(sweep);
     khaen_mimo_design::fir::fft_in_place(&mut rr, &mut ri);
     khaen_mimo_design::fir::fft_in_place(&mut sr, &mut si);
-    let max_s = sr.iter().zip(si.iter()).map(|(a, b)| a * a + b * b).fold(0.0, f64::max);
+    let max_s = sr
+        .iter()
+        .zip(si.iter())
+        .map(|(a, b)| a * a + b * b)
+        .fold(0.0, f64::max);
     let reg = 1e-3 * max_s.max(1e-12);
     for i in 0..n {
         let den = sr[i] * sr[i] + si[i] * si[i] + reg;
@@ -254,7 +264,8 @@ fn exp_sweep(fs: f64, f0: f64, f1: f64, seconds: f64) -> Vec<f64> {
     for i in 0..n {
         let t = i as f64 / fs;
         let phase = std::f64::consts::TAU * f0 * seconds / ln * ((t / seconds * ln).exp() - 1.0);
-        let fade = ((i as f64 / 256.0).min(1.0) * ((n - i) as f64 / 256.0).min(1.0)).clamp(0.0, 1.0);
+        let fade =
+            ((i as f64 / 256.0).min(1.0) * ((n - i) as f64 / 256.0).min(1.0)).clamp(0.0, 1.0);
         y[i] = phase.sin() * fade;
     }
     y
@@ -277,20 +288,32 @@ fn synth_mode(fs: f64, hz: f64, tau: f64, seconds: f64, noise: f64) -> Vec<f64> 
 }
 
 fn req(args: &[String], key: &str) -> Result<String, String> {
-    args.iter().position(|a| a == key).and_then(|i| args.get(i + 1).cloned()).ok_or_else(|| format!("缺少 {key}"))
+    args.iter()
+        .position(|a| a == key)
+        .and_then(|i| args.get(i + 1).cloned())
+        .ok_or_else(|| format!("缺少 {key}"))
 }
 
 fn arg_str(args: &[String], key: &str) -> Option<String> {
-    args.iter().position(|a| a == key).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == key)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn json_arr(items: &[String]) -> String {
-    let body = items.iter().map(|s| json_str(s)).collect::<Vec<_>>().join(",");
+    let body = items
+        .iter()
+        .map(|s| json_str(s))
+        .collect::<Vec<_>>()
+        .join(",");
     format!("[{body}]")
 }
 
 fn arg_f64(args: &[String], key: &str) -> Option<f64> {
-    args.iter().position(|a| a == key).and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok())
+    args.iter()
+        .position(|a| a == key)
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse().ok())
 }
 
 fn read_f32(path: &str) -> Result<Vec<f64>, String> {
@@ -298,7 +321,10 @@ fn read_f32(path: &str) -> Result<Vec<f64>, String> {
     if bytes.len() % 4 != 0 {
         return Err(format!("{path} 长度不是 4 的倍数"));
     }
-    Ok(bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64).collect())
+    Ok(bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64)
+        .collect())
 }
 
 fn write_f32(path: impl AsRef<std::path::Path>, x: &[f64]) -> Result<(), String> {

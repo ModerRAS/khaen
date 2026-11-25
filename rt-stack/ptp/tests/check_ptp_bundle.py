@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""TSPI PTP bundle static checker (no root, no ptp4l execution required).
+"""KHAEN PTP bundle static checker (no root, no ptp4l execution required).
 
 Validates the PTP grandmaster bundle/source layout:
   * units: ExecStart wrappers, target Wants/After, conflicts against slave-only PTP owners,
-    master Requires=tspi-ptp-phc2sys.service;
-  * env template: allowed TSPI_PTP_* keys only, valid values;
+    master Requires=khaen-ptp-phc2sys.service;
+  * env template: allowed KHAEN_PTP_* keys only, valid values;
   * ptp4l configs: [global] present, required GM keys/values, no inline comments (linuxptp parser
     rejects them), no deprecated slaveOnly/masterOnly keys, transport matches the file variant,
-    uds_address under /run/tspi-ptp;
+    uds_address under /run/khaen-ptp;
   * lib wrappers: POSIX sh shebang, reference the bundled bin path, no CRLF.
 
 Usage: check_ptp_bundle.py <dir> [--json OUT]
@@ -20,10 +20,10 @@ import re
 import sys
 
 ENV_KEYS = {
-    'TSPI_PTP_IFACE', 'TSPI_PTP_CONF', 'TSPI_PTP_HW_TS', 'TSPI_PTP_UTC_OFFSET',
-    'TSPI_PHC2SYS_SRC', 'TSPI_PTP_PHC', 'TSPI_PTP_EXTRA_ARGS',
+    'KHAEN_PTP_IFACE', 'KHAEN_PTP_CONF', 'KHAEN_PTP_HW_TS', 'KHAEN_PTP_UTC_OFFSET',
+    'KHAEN_PHC2SYS_SRC', 'KHAEN_PTP_PHC', 'KHAEN_PTP_EXTRA_ARGS',
 }
-REQUIRED_UNITS = ('tspi-ptp-master.service', 'tspi-ptp-phc2sys.service', 'tspi-ptp.target')
+REQUIRED_UNITS = ('khaen-ptp-master.service', 'khaen-ptp-phc2sys.service', 'khaen-ptp.target')
 REQUIRED_LIB = ('ptp-lib.sh', 'ptp-master-start', 'ptp-phc2sys-start')
 REQUIRED_ETC = ('ptp-master.env.example', 'ptp4l-master-udp.conf.example', 'ptp4l-master-l2.conf.example')
 CONF_EXPECT = {
@@ -80,31 +80,31 @@ def check_units(root, problems):
             problems.append(f'missing unit: units/{name}')
     if problems:
         return
-    m = parse_unit(os.path.join(udir, 'tspi-ptp-master.service'))
-    p = parse_unit(os.path.join(udir, 'tspi-ptp-phc2sys.service'))
-    t = parse_unit(os.path.join(udir, 'tspi-ptp.target'))
+    m = parse_unit(os.path.join(udir, 'khaen-ptp-master.service'))
+    p = parse_unit(os.path.join(udir, 'khaen-ptp-phc2sys.service'))
+    t = parse_unit(os.path.join(udir, 'khaen-ptp.target'))
     ex = words(m, 'Service', 'ExecStart')
-    if ex != ['/usr/local/lib/tspi/ptp-master-start']:
-        problems.append(f'master ExecStart must be /usr/local/lib/tspi/ptp-master-start (got {ex})')
+    if ex != ['/usr/local/lib/khaen/ptp-master-start']:
+        problems.append(f'master ExecStart must be /usr/local/lib/khaen/ptp-master-start (got {ex})')
     ex = words(p, 'Service', 'ExecStart')
-    if ex != ['/usr/local/lib/tspi/ptp-phc2sys-start']:
-        problems.append(f'phc2sys ExecStart must be /usr/local/lib/tspi/ptp-phc2sys-start (got {ex})')
+    if ex != ['/usr/local/lib/khaen/ptp-phc2sys-start']:
+        problems.append(f'phc2sys ExecStart must be /usr/local/lib/khaen/ptp-phc2sys-start (got {ex})')
     for label, u in (('master', m), ('phc2sys', p)):
-        if '/etc/tspi-ptp/ptp-master.env' not in ' '.join(get(u, 'Service', 'EnvironmentFile')):
-            problems.append(f'{label}: EnvironmentFile must load /etc/tspi-ptp/ptp-master.env')
+        if '/etc/khaen-ptp/ptp-master.env' not in ' '.join(get(u, 'Service', 'EnvironmentFile')):
+            problems.append(f'{label}: EnvironmentFile must load /etc/khaen-ptp/ptp-master.env')
         if not get(u, 'Service', 'RuntimeDirectory'):
-            problems.append(f'{label}: RuntimeDirectory missing (/run/tspi-ptp for the UDS)')
-    if 'tspi-ptp-phc2sys.service' not in words(m, 'Unit', 'Requires'):
-        problems.append('master must Requires=tspi-ptp-phc2sys.service (PHC discipline before serving)')
-    if 'tspi-ptp-phc2sys.service' not in words(m, 'Unit', 'After'):
-        problems.append('master must be After=tspi-ptp-phc2sys.service')
+            problems.append(f'{label}: RuntimeDirectory missing (/run/khaen-ptp for the UDS)')
+    if 'khaen-ptp-phc2sys.service' not in words(m, 'Unit', 'Requires'):
+        problems.append('master must Requires=khaen-ptp-phc2sys.service (PHC discipline before serving)')
+    if 'khaen-ptp-phc2sys.service' not in words(m, 'Unit', 'After'):
+        problems.append('master must be After=khaen-ptp-phc2sys.service')
     conflicts = set(words(m, 'Unit', 'Conflicts'))
-    for legacy in ('tspi-ptp4l-master.service', 'tspi-phc2sys.service',
-                   'tspi-statime-inferno.service', 'tspi-aes67-daemon.service'):
+    for legacy in ('khaen-ptp4l-master.service', 'khaen-phc2sys.service',
+                   'khaen-statime-inferno.service', 'khaen-aes67-daemon.service'):
         if legacy not in conflicts:
             problems.append(f'master Conflicts must include legacy/slave-only PTP owner {legacy}')
     wants = set(words(t, 'Unit', 'Wants'))
-    for need in ('tspi-ptp-master.service', 'tspi-ptp-phc2sys.service'):
+    for need in ('khaen-ptp-master.service', 'khaen-ptp-phc2sys.service'):
         if need not in wants:
             problems.append(f'target Wants must include {need}')
     # capabilities: HW timestamping needs NET_ADMIN/RAW; UDP PTP ports 319/320 need NET_BIND_SERVICE.
@@ -139,14 +139,14 @@ def check_env(root, problems):
         if k not in ENV_KEYS:
             problems.append(f'env line {i}: unsupported key {k}')
         env[k] = v
-    if env.get('TSPI_PTP_HW_TS') not in ('auto', 'on', 'off'):
-        problems.append(f'TSPI_PTP_HW_TS must be auto|on|off (got {env.get("TSPI_PTP_HW_TS")!r})')
+    if env.get('KHAEN_PTP_HW_TS') not in ('auto', 'on', 'off'):
+        problems.append(f'KHAEN_PTP_HW_TS must be auto|on|off (got {env.get("KHAEN_PTP_HW_TS")!r})')
     try:
-        off = int(env.get('TSPI_PTP_UTC_OFFSET', ''))
+        off = int(env.get('KHAEN_PTP_UTC_OFFSET', ''))
     except ValueError:
         off = None
     if off is None or not (0 <= off <= 255):
-        problems.append(f'TSPI_PTP_UTC_OFFSET must be an integer 0..255 (got {env.get("TSPI_PTP_UTC_OFFSET")!r})')
+        problems.append(f'KHAEN_PTP_UTC_OFFSET must be an integer 0..255 (got {env.get("KHAEN_PTP_UTC_OFFSET")!r})')
 
 
 def check_conf(path, expect_transport, problems):
@@ -191,8 +191,8 @@ def check_conf(path, expect_transport, problems):
         if old in values:
             problems.append(f'{name}: deprecated key {old} (linuxptp 4.2: use clientOnly/serverOnly)')
     uds = values.get('uds_address', '')
-    if not uds.startswith('/run/tspi-ptp/'):
-        problems.append(f'{name}: uds_address should live under /run/tspi-ptp, got {uds!r}')
+    if not uds.startswith('/run/khaen-ptp/'):
+        problems.append(f'{name}: uds_address should live under /run/khaen-ptp, got {uds!r}')
 
 
 def check_lib(root, problems):
@@ -211,12 +211,12 @@ def check_lib(root, problems):
         path = os.path.join(ldir, name)
         if os.path.isfile(path):
             text = open(path, encoding='utf-8', errors='replace').read()
-            if '/opt/tspi-rt-stack/ptp/current/bin/' not in text:
-                problems.append(f'lib/{name}: does not reference /opt/tspi-rt-stack/ptp/current/bin/')
+            if '/opt/khaen-rt-stack/ptp/current/bin/' not in text:
+                problems.append(f'lib/{name}: does not reference /opt/khaen-rt-stack/ptp/current/bin/')
     ml = os.path.join(ldir, 'ptp-master-start')
     if os.path.isfile(ml):
         text = open(ml, encoding='utf-8', errors='replace').read()
-        for token in ('detect_ptp_phc', 'TSPI_PTP_HW_TS', '-H', '-S'):
+        for token in ('detect_ptp_phc', 'KHAEN_PTP_HW_TS', '-H', '-S'):
             if token not in text:
                 problems.append(f'lib/ptp-master-start: missing fallback logic token {token!r}')
 

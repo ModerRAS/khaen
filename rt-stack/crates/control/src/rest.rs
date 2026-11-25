@@ -7,7 +7,7 @@
 //! RestRequest -> RestResponse 处理核心，可被任意 HTTP/WS 传输层直接调用。
 //!
 //! ## 权威输入（只读）
-//! - WBS T42 行与 §1/§7（scratch/lead/planner/TSPI-RT-STACK-WBS.md）
+//! - WBS T42 行与 §1/§7（scratch/lead/planner/KHAEN-RT-STACK-WBS.md）
 //! - DSP-HOST-DECISION §2/§5/§6（新 daemon job/状态/prepare/commit/actual-version）
 //! - rt-stack/spec/compat-matrix.md R01-R51、§2.4、X01-X22、K02/K05/K14/K15/K53/K57
 //! - rt-stack/spec/core-v1.md §5.3（PlanCommitted 前不得改输出；REST 的 applied 只能在
@@ -34,9 +34,9 @@
 //!   mode,target,coeff}，POST /api/runtime/{prepare,commit,abort}；响应带 actual
 //!   config/graph/coeff/target version+hash；prepare 与 commit 分离；冲突 409；幂等
 //!   （重复 commit 同一 prepare_id 返回同一 actual；重复 volume/mute 返回 actual）。
-//! - R50 错误 envelope {"error":{"code","message"}}；可选请求头 X-TSPI-API-Version
+//! - R50 错误 envelope {"error":{"code","message"}}；可选请求头 X-KHAEN-API-Version
 //!   缺省 v1，仅显式不兼容版本 400 unsupported_api_version；响应头回
-//!   X-TSPI-API-Version: 1；不引入 422。
+//!   X-KHAEN-API-Version: 1；不引入 422。
 //! - R51/X01：/api/* 未知路径 JSON 404 not_found；已知路径错误方法 JSON 405；
 //!   非 /api 未知路径同样 JSON 404（静态资源由 T70 web 层在 REST fallback 前处理）。
 //! - X02/X03：请求体严格字段白名单；未知字段 400 unknown_field（报字段名）；缺失
@@ -106,25 +106,25 @@ use khaen_core::rt::{RtStatus, BLOCK_SIZES, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ
 /// REST API 版本（X14/R50；缺省 v1，仅显式不兼容版本拒绝）。
 pub const API_VERSION: u32 = 1;
 /// 请求/响应 API 版本头（X14）。
-pub const API_VERSION_HEADER: &str = "X-TSPI-API-Version";
+pub const API_VERSION_HEADER: &str = "X-KHAEN-API-Version";
 /// 直接 API token 头（R04/token fallback；免 CSRF）。
-pub const TOKEN_HEADER: &str = "X-TSPI-Token";
+pub const TOKEN_HEADER: &str = "X-KHAEN-Token";
 /// header token 的 Bearer 形式（Authorization: Bearer <token>）。
 pub const AUTHORIZATION_HEADER: &str = "Authorization";
 /// 会话 Cookie 名（R03-R06）。
 pub const SESSION_COOKIE: &str = "khaen_session";
 /// 写方法 CSRF 头（K03；Cookie session 必填，header token 免）。
-pub const CSRF_HEADER: &str = "X-TSPI-CSRF";
+pub const CSRF_HEADER: &str = "X-KHAEN-CSRF";
 /// CSRF 头的兼容别名（旧客户端）。
 pub const CSRF_HEADER_ALIAS: &str = "X-CSRF-Token";
 /// runtime 状态 schema（X17：状态必须带版本身份）。
-pub const RUNTIME_STATUS_SCHEMA: &str = "tspi-runtime-status/v1";
+pub const RUNTIME_STATUS_SCHEMA: &str = "khaen-runtime-status/v1";
 /// runtime 配置 schema。
-pub const CONFIG_SCHEMA: &str = "tspi-runtime-config/v1";
-/// 模式状态 schema（R10/A04 tspi-audio/v1 的新栈替代 schema）。
-pub const MODE_STATUS_SCHEMA: &str = "tspi-mode-status/v1";
+pub const CONFIG_SCHEMA: &str = "khaen-runtime-config/v1";
+/// 模式状态 schema（R10/A04 khaen-audio/v1 的新栈替代 schema）。
+pub const MODE_STATUS_SCHEMA: &str = "khaen-mode-status/v1";
 /// 音频格式 schema（R13）。
-pub const AUDIO_FORMAT_SCHEMA: &str = "tspi-audio-format/v1";
+pub const AUDIO_FORMAT_SCHEMA: &str = "khaen-audio-format/v1";
 /// 新栈构建版本（R01 version = 新栈构建版本）。
 pub const REST_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -2942,7 +2942,7 @@ impl AuthState {
 /// 鉴权方式（header token 免 CSRF；Cookie session 必须 CSRF）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthKind {
-    /// 直接 header token（X-TSPI-Token / Authorization: Bearer）。
+    /// 直接 header token（X-KHAEN-Token / Authorization: Bearer）。
     HeaderToken,
     /// Cookie 会话。
     Session,
@@ -3489,9 +3489,9 @@ impl RestService {
 // 退役语义；所有 handler 只消费 RuntimeEngine/CalibrationPort 契约，不伪造 actual。
 
 /// 校准 job 列表 schema（R48）。
-pub const CAL_JOBS_SCHEMA: &str = "tspi-cal-jobs/v1";
+pub const CAL_JOBS_SCHEMA: &str = "khaen-cal-jobs/v1";
 /// 校准 job 单项 schema（R48）。
-pub const CAL_JOB_SCHEMA: &str = "tspi-cal-job/v1";
+pub const CAL_JOB_SCHEMA: &str = "khaen-cal-job/v1";
 /// 旧客户端 token 头（KEEP R04：S1 使用 x-auth-token；查找大小写不敏感）。
 pub const LEGACY_TOKEN_HEADER: &str = "X-Auth-Token";
 /// token 头兼容集合（先查新栈头，再查 S1 遗留头）。
@@ -3827,7 +3827,7 @@ fn create_session(inner: &mut Inner, now: u64) -> (String, String, u64) {
     (session_id, csrf, ttl)
 }
 
-/// 从请求提取直接 API token（X-TSPI-Token / S1 遗留 X-Auth-Token / Bearer）。
+/// 从请求提取直接 API token（X-KHAEN-Token / S1 遗留 X-Auth-Token / Bearer）。
 fn request_token(request: &RestRequest) -> Option<&str> {
     for name in TOKEN_HEADERS {
         if let Some(value) = request.header_value(name) {
@@ -5206,7 +5206,7 @@ fn legacy_mode_body(
                 (
                     "message",
                     JsonValue::str(
-                        "external tspi-mode script retired in P1; mode switching is internal (T44)",
+                        "external khaen-mode script retired in P1; mode switching is internal (T44)",
                     ),
                 ),
             ]),
@@ -5376,7 +5376,7 @@ fn handle_legacy_mode_script_status(inner: &Inner) -> Result<RestResponse, RestE
             (
                 "message",
                 JsonValue::str(
-                    "external tspi-mode script retired in P1; mode switching is internal (T44)",
+                    "external khaen-mode script retired in P1; mode switching is internal (T44)",
                 ),
             ),
         ]),
@@ -5780,10 +5780,7 @@ fn cal_job_item(job: &CalJobView, lanes: Option<&CalLaneResults>) -> JsonValue {
             lanes,
         )),
     ));
-    entries.push((
-        "lanes_schema".to_string(),
-        JsonValue::str(CAL_LANES_SCHEMA),
-    ));
+    entries.push(("lanes_schema".to_string(), JsonValue::str(CAL_LANES_SCHEMA)));
     entries.push((
         "lanes".to_string(),
         match lanes {
@@ -5884,7 +5881,8 @@ fn validate_cal_job(job: &CalJobView) -> Result<(), RestError> {
         ));
     }
     if let Some(stage) = &job.stage {
-        if !CAL_JOB_STATES.contains(&stage.as_str()) && !CAL_EXTRA_STAGES.contains(&stage.as_str()) {
+        if !CAL_JOB_STATES.contains(&stage.as_str()) && !CAL_EXTRA_STAGES.contains(&stage.as_str())
+        {
             return Err(RestError::internal(
                 "calibration port returned an invalid job stage",
             ));
@@ -5910,7 +5908,7 @@ fn cal_port_error(error: CalPortError) -> RestError {
 fn calibration_port(inner: &mut Inner) -> Result<&mut Box<dyn CalibrationPort + Send>, RestError> {
     inner.calibration.as_mut().ok_or_else(|| {
         RestError::service_unavailable(
-            "calibration daemon is not wired (daemon: TSPI_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
+            "calibration daemon is not wired (daemon: KHAEN_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
         )
     })
 }
@@ -5919,7 +5917,7 @@ fn handle_cal_jobs_list(inner: &mut Inner) -> Result<RestResponse, RestError> {
     let (jobs, lanes) = {
         let port = inner.calibration.as_mut().ok_or_else(|| {
             RestError::service_unavailable(
-                "calibration daemon is not wired (daemon: TSPI_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
+                "calibration daemon is not wired (daemon: KHAEN_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
             )
         })?;
         let jobs = port.list();
@@ -6066,7 +6064,10 @@ fn handle_cal_jobs_start(
         }
     }
     const SUPPORT_NAMES: [&str; 7] = ["FL", "FR", "SL", "SR", "HFL", "HFR", "SUB1"];
-    if let Some(name) = supports.iter().find(|name| !SUPPORT_NAMES.contains(&name.as_str())) {
+    if let Some(name) = supports
+        .iter()
+        .find(|name| !SUPPORT_NAMES.contains(&name.as_str()))
+    {
         return Err(RestError::bad_request(
             CODE_INVALID_FIELD,
             format!("unknown support {name}"),
@@ -6076,7 +6077,10 @@ fn handle_cal_jobs_start(
     if extra_stage && kind != "emperor" {
         return Err(RestError::bad_request(
             CODE_INVALID_FIELD,
-            format!("stage {} requires kind=emperor", stage.as_deref().unwrap_or("-")),
+            format!(
+                "stage {} requires kind=emperor",
+                stage.as_deref().unwrap_or("-")
+            ),
         ));
     }
     if extra_stage && !audible_sweep_authorized {
@@ -6150,7 +6154,10 @@ fn handle_cal_jobs_start(
                 ("failure", JsonValue::Null),
                 ("synthetic", JsonValue::Bool(true)),
                 ("verdict", JsonValue::str("PREDICTED_ONLY")),
-                ("progress_text", JsonValue::str("合成状态机完成（synthetic；未接真实 host）")),
+                (
+                    "progress_text",
+                    JsonValue::str("合成状态机完成（synthetic；未接真实 host）"),
+                ),
                 ("lanes", JsonValue::Null),
                 ("lanes_schema", JsonValue::str(CAL_LANES_SCHEMA)),
                 ("pending_host_fields", JsonValue::arr(Vec::new())),
@@ -6206,7 +6213,7 @@ fn handle_cal_job_get(inner: &mut Inner, job_id: &str) -> Result<RestResponse, R
     let (job, lanes) = {
         let port = inner.calibration.as_mut().ok_or_else(|| {
             RestError::service_unavailable(
-                "calibration daemon is not wired (daemon: TSPI_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
+                "calibration daemon is not wired (daemon: KHAEN_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
             )
         })?;
         let Some(job) = port.get(job_id) else {
@@ -6335,14 +6342,11 @@ fn handle_cal_settings_post(
 /// 服务端校准文件上传（host 需要可读路径；尚未落地 -> 501，不伪造上传成功）。
 fn handle_cal_settings_cal_file() -> Result<RestResponse, RestError> {
     Err(pending_host_field_error(
-        "server-side calibration file upload is pending host fields; send cal_file.path + cal_file.sha256 in POST /api/calibration/settings instead (schema tspi-cal-settings/v1)",
+        "server-side calibration file upload is pending host fields; send cal_file.path + cal_file.sha256 in POST /api/calibration/settings instead (schema khaen-cal-settings/v1)",
     ))
 }
 
-fn handle_cal_run(
-    inner: &mut Inner,
-    request: &RestRequest,
-) -> Result<RestResponse, RestError> {
+fn handle_cal_run(inner: &mut Inner, request: &RestRequest) -> Result<RestResponse, RestError> {
     let entries = parse_json_object_body(request, "/api/calibration/run", true)?;
     let mut fields = Fields::new(entries, "/api/calibration/run");
     let dry_run = fields.take_opt_bool("dry_run")?.unwrap_or(true);
@@ -6359,17 +6363,30 @@ fn handle_cal_run(
                         if !RUN_STAGE_ORDER.contains(&stage.as_str()) {
                             return Err(RestError::bad_request(
                                 CODE_INVALID_FIELD,
-                                format!("unknown run stage '{stage}'; allowed: {}", RUN_STAGE_ORDER.join(",")),
+                                format!(
+                                    "unknown run stage '{stage}'; allowed: {}",
+                                    RUN_STAGE_ORDER.join(",")
+                                ),
                             ));
                         }
                         stages.push(stage);
                     }
-                    _ => return Err(RestError::bad_request(CODE_INVALID_FIELD, "run stages entries must be strings")),
+                    _ => {
+                        return Err(RestError::bad_request(
+                            CODE_INVALID_FIELD,
+                            "run stages entries must be strings",
+                        ))
+                    }
                 }
             }
             stages
         }
-        Some(_) => return Err(RestError::bad_request(CODE_INVALID_FIELD, "run stages must be an array")),
+        Some(_) => {
+            return Err(RestError::bad_request(
+                CODE_INVALID_FIELD,
+                "run stages must be an array",
+            ))
+        }
     };
     fields.finish()?;
     if !dry_run {
@@ -6400,7 +6417,11 @@ fn handle_cal_run(
                 ("available", JsonValue::Bool(!extra)),
                 (
                     "pending_host_fields",
-                    if extra { pending_host_fields_json() } else { JsonValue::arr(Vec::new()) },
+                    if extra {
+                        pending_host_fields_json()
+                    } else {
+                        JsonValue::arr(Vec::new())
+                    },
                 ),
             ])
         })
@@ -6426,7 +6447,7 @@ fn handle_cal_status_get(inner: &mut Inner) -> Result<RestResponse, RestError> {
     let (jobs, lanes) = {
         let port = inner.calibration.as_mut().ok_or_else(|| {
             RestError::service_unavailable(
-                "calibration daemon is not wired (daemon: TSPI_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
+                "calibration daemon is not wired (daemon: KHAEN_CAL_JOB_BACKEND=synthetic|off; real backend NOT_WIRED); refusing to fake a job",
             )
         })?;
         let jobs = port.list();
@@ -6483,7 +6504,10 @@ fn handle_cal_status_get(inner: &mut Inner) -> Result<RestResponse, RestError> {
                 ]),
                 JsonValue::obj(vec![
                     ("stage", JsonValue::str(STAGE_DELAY)),
-                    ("label", JsonValue::str("Delay 对齐（逐箱 onset；LFE 40–150 Hz 互相关）")),
+                    (
+                        "label",
+                        JsonValue::str("Delay 对齐（逐箱 onset；LFE 40–150 Hz 互相关）"),
+                    ),
                     ("available", JsonValue::Bool(false)),
                     (
                         "reason",
@@ -6513,10 +6537,7 @@ fn handle_cal_status_get(inner: &mut Inner) -> Result<RestResponse, RestError> {
     Ok(RestResponse::json(200, &JsonValue::obj(fields)))
 }
 
-fn handle_cal_apply(
-    inner: &mut Inner,
-    request: &RestRequest,
-) -> Result<RestResponse, RestError> {
+fn handle_cal_apply(inner: &mut Inner, request: &RestRequest) -> Result<RestResponse, RestError> {
     let entries = parse_json_object_body(request, "/api/calibration/apply", false)?;
     let mut apply = CalApplyRequest::parse(&JsonValue::Obj(entries))?;
     if apply.includes("level") && apply.level_trims.is_empty() {
@@ -6562,14 +6583,14 @@ fn handle_cal_apply(
     Ok(RestResponse::json(200, &JsonValue::obj(fields)))
 }
 
-fn handle_cal_clear(
-    inner: &mut Inner,
-    request: &RestRequest,
-) -> Result<RestResponse, RestError> {
+fn handle_cal_clear(inner: &mut Inner, request: &RestRequest) -> Result<RestResponse, RestError> {
     let entries = parse_json_object_body(request, "/api/calibration/clear", true)?;
     let mut request_fields = Fields::new(entries, "/api/calibration/clear");
     let targets = match request_fields.take_opt("targets") {
-        None | Some(JsonValue::Null) => APPLY_TARGETS.iter().map(|target| target.to_string()).collect(),
+        None | Some(JsonValue::Null) => APPLY_TARGETS
+            .iter()
+            .map(|target| target.to_string())
+            .collect(),
         Some(JsonValue::Arr(items)) => {
             let mut targets = Vec::with_capacity(items.len());
             for item in items {
@@ -6610,7 +6631,15 @@ fn handle_cal_clear(
     let mut fields = vec![
         ("schema", JsonValue::str(CAL_APPLY_SCHEMA)),
         ("ok", JsonValue::Bool(true)),
-        ("cleared", JsonValue::arr(targets.iter().map(|target| JsonValue::str(target.as_str())).collect())),
+        (
+            "cleared",
+            JsonValue::arr(
+                targets
+                    .iter()
+                    .map(|target| JsonValue::str(target.as_str()))
+                    .collect(),
+            ),
+        ),
         ("applied", cleared.to_json()),
         ("applied_to_audio", JsonValue::Bool(false)),
         ("not_applied_to_audio", JsonValue::Bool(true)),
@@ -6634,7 +6663,7 @@ fn handle_cal_clear(
 #[path = "calibration_job_port.rs"]
 pub mod calibration_job_port;
 
-/// CLI stage 后端（真实 MOTU/UMIK 音频；TSPI_CAL_STAGE=cli）。见 calibration_cli_stage.rs。
+/// CLI stage 后端（真实 MOTU/UMIK 音频；KHAEN_CAL_STAGE=cli）。见 calibration_cli_stage.rs。
 #[path = "calibration_cli_stage.rs"]
 pub mod calibration_cli_stage;
 

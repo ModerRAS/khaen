@@ -12,4 +12,4 @@
 | MergingRavennaALSA.ko | build-aes67-daemon.sh | /lib/modules/$(uname -r)/extra/ | AES67 LKM |
 | ptp4l/phc2sys/pmc | build-linuxptp.sh（或 .deb） | /usr/sbin/ | linuxptp 3.1.1 |
 
-`tspi-mode`、`tspi-ptp-status`、`ptp-status-hook`、UCM 回移脚本是本目录自带的 shell 脚本（已随 overlay 提供）。
+`khaen-mode`、`khaen-ptp-status`、`ptp-status-hook`、UCM 回移脚本是本目录自带的 shell 脚本（已随 overlay 提供）。

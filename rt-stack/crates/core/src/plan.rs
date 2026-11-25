@@ -4,18 +4,18 @@
 //! stale 校验）与 T26（集成）。**本模块不是 RT 路径**：可分配、可校验、可返回
 //! owned PlanBuf；不得被 [RT] 调用图引用。
 
-use crate::abi::{TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1, TspiRoleV1};
+use crate::abi::{KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1};
 use crate::rt::{PlanVersion, RtStatus};
 
 /// plan 的可变构建素材（NONRT 拥有）。
 #[derive(Clone, Debug, Default)]
 pub struct PlanTables {
     /// 路径表（按 (out_index, in_index) 升序）。
-    pub paths: Vec<TspiPathV1>,
+    pub paths: Vec<KhaenPathV1>,
     /// 对角 FIR 表（按 out_index 升序）。
-    pub diags: Vec<TspiDiagFirV1>,
+    pub diags: Vec<KhaenDiagFirV1>,
     /// role 表（按 role_id 升序）。
-    pub roles: Vec<TspiRoleV1>,
+    pub roles: Vec<KhaenRoleV1>,
 }
 
 /// 拥有 plan 字节的 NONRT 句柄（Drop 只发生在 CTL）。
@@ -102,7 +102,7 @@ pub fn recompute_graph_id(bytes: &[u8]) -> Result<[u8; 32], RtStatus> {
 ///
 /// T06 scaffold：返回 ERR_UNSUPPORTED；T12 实现。
 pub fn pack_plan(
-    header: &TspiPlanHeaderV1,
+    header: &KhaenPlanHeaderV1,
     tables: &PlanTables,
     coeffs: &[f32],
 ) -> Result<Vec<u8>, RtStatus> {

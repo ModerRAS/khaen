@@ -1032,10 +1032,10 @@ fn t43_endpoint_spec_rejects_alsa_device_mismatch() {
 fn t43_aes67_pipe_endpoint_and_frame_math() {
     let plan = plan_16ch();
     let spec = plan
-        .pipe_endpoint("/run/tspi/aes67.raw")
+        .pipe_endpoint("/run/khaen/aes67.raw")
         .expect("pipe spec");
     assert_eq!(spec.transport, AoipTransport::Pipe);
-    assert_eq!(spec.pipe_path, Some("/run/tspi/aes67.raw"));
+    assert_eq!(spec.pipe_path, Some("/run/khaen/aes67.raw"));
     assert!(spec.alsa_device.is_none());
     assert_eq!(spec.frame_bytes().expect("frame bytes"), 16 * 4);
     assert_eq!(spec.validate_pipe_chunk(64 * 128).expect("chunk"), 128);
@@ -1133,7 +1133,7 @@ fn t43_inferno_alas_and_pipe_endpoints() {
     assert_eq!(spec.ptp_source, PtpSource::StatimePtpV1VirtualClock);
     spec.validate().expect("inferno spec valid");
 
-    let pipe = inferno_pipe_endpoint(&inferno_env_16(), container, "/run/tspi/inferno.raw")
+    let pipe = inferno_pipe_endpoint(&inferno_env_16(), container, "/run/khaen/inferno.raw")
         .expect("inferno pipe");
     assert_eq!(pipe.transport, AoipTransport::Pipe);
     assert_eq!(pipe.frame_bytes().expect("frame"), 64);

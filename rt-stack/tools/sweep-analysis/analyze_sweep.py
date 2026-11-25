@@ -558,15 +558,15 @@ def main():
     root, out = a.root, a.out
     os.makedirs(out, exist_ok=True)
     data = os.path.join(root, "data")
-    cal_umik = load_cal(r"C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibration-spec\mics\umik1_718-7696_90deg.txt")
-    cal_ma1 = load_cal(r"C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibration-spec\mics\ma1_frequency_response_6086517654_6D7C8E.txt")
+    cal_umik = load_cal(r"C:\WorkSpace\Claw\projects\khaen-audio-dsp\calibration-spec\mics\umik1_718-7696_90deg.txt")
+    cal_ma1 = load_cal(r"C:\WorkSpace\Claw\projects\khaen-audio-dsp\calibration-spec\mics\ma1_frequency_response_6086517654_6D7C8E.txt")
     # source for board take: extracted played channel (exact composite ch0)
     comp_path = os.path.join(data, "board", "take-comp-ch00-sweep-10s.raw")
     comp = read_s24(comp_path, 1)[:, 0]
     pre = 1.5
     sweep = comp[int(pre * FS): int(pre * FS) + int(10.0 * FS)]
     summary = {
-        "schema": "tspi-sweep-analysis/v2",
+        "schema": "khaen-sweep-analysis/v2",
         "timebase_policy": {
             "distance_requires_common_timebase": True,
             "default_timebase_source": "none",

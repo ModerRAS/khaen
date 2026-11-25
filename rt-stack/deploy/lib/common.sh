@@ -21,22 +21,22 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 # 路径（全部可被环境变量覆盖；--root 只影响文件系统访问，不影响 systemctl）
 # ---------------------------------------------------------------------------
-TSPI_DEPLOY_ROOT="${TSPI_DEPLOY_ROOT:-/}"
-TSPI_STACK_PREFIX="${TSPI_STACK_PREFIX:-/opt/tspi-rt-stack}"
-TSPI_ETC="${TSPI_ETC:-/etc/tspi-rt-stack}"
-TSPI_STATE_DIR="${TSPI_STATE_DIR:-/var/lib/tspi-rt-stack}"
-TSPI_RUN_DIR="${TSPI_RUN_DIR:-/run/tspi-rt-stack}"
-TSPI_LOG_DIR="${TSPI_LOG_DIR:-/var/log/tspi-rt-stack}"
-TSPI_EVIDENCE_BASE="${TSPI_EVIDENCE_BASE:-/var/lib/tspi-rt-stack/evidence}"
-TSPI_SYSTEMD_DIR="${TSPI_SYSTEMD_DIR:-/etc/systemd/system}"
-TSPI_SYSTEMCTL="${TSPI_SYSTEMCTL:-systemctl}"
-TSPI_PYTHON="${TSPI_PYTHON:-}"
-TSPI_TIMEOUT_SECS="${TSPI_TIMEOUT_SECS:-120}"
+KHAEN_DEPLOY_ROOT="${KHAEN_DEPLOY_ROOT:-/}"
+KHAEN_STACK_PREFIX="${KHAEN_STACK_PREFIX:-/opt/khaen-rt-stack}"
+KHAEN_ETC="${KHAEN_ETC:-/etc/khaen-rt-stack}"
+KHAEN_STATE_DIR="${KHAEN_STATE_DIR:-/var/lib/khaen-rt-stack}"
+KHAEN_RUN_DIR="${KHAEN_RUN_DIR:-/run/khaen-rt-stack}"
+KHAEN_LOG_DIR="${KHAEN_LOG_DIR:-/var/log/khaen-rt-stack}"
+KHAEN_EVIDENCE_BASE="${KHAEN_EVIDENCE_BASE:-/var/lib/khaen-rt-stack/evidence}"
+KHAEN_SYSTEMD_DIR="${KHAEN_SYSTEMD_DIR:-/etc/systemd/system}"
+KHAEN_SYSTEMCTL="${KHAEN_SYSTEMCTL:-systemctl}"
+KHAEN_PYTHON="${KHAEN_PYTHON:-}"
+KHAEN_TIMEOUT_SECS="${KHAEN_TIMEOUT_SECS:-120}"
 
-DRY_RUN="${TSPI_DEPLOY_DRY_RUN:-1}"
-ROOT="${TSPI_DEPLOY_ROOT:-/}"
-AUTHORIZE_FILE="${TSPI_AUTHORIZE_FILE:-}"
-EVIDENCE_DIR="${TSPI_EVIDENCE_RUN:-}"
+DRY_RUN="${KHAEN_DEPLOY_DRY_RUN:-1}"
+ROOT="${KHAEN_DEPLOY_ROOT:-/}"
+AUTHORIZE_FILE="${KHAEN_AUTHORIZE_FILE:-}"
+EVIDENCE_DIR="${KHAEN_EVIDENCE_RUN:-}"
 RUN_TS="$(date +%Y%m%dT%H%M%S)"
 # 注意：不要占用调用方的 HERE（各脚本自己设置）；本库只用 COMMON_DIR。
 COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,11 +77,11 @@ need_cmd() {
   return 1
 }
 py() {
-  if [ -n "$TSPI_PYTHON" ]; then "$TSPI_PYTHON" "$@"; return $?; fi
+  if [ -n "$KHAEN_PYTHON" ]; then "$KHAEN_PYTHON" "$@"; return $?; fi
   # 注意：Windows 上 python3 可能是 Microsoft Store 占位 stub（command -v 成功但不可用），必须实测。
   if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" >/dev/null 2>&1; then python3 "$@"; return $?; fi
   if command -v python >/dev/null 2>&1 && python -c "import sys" >/dev/null 2>&1; then python "$@"; return $?; fi
-  die "需要可用的 python3/python（可用 TSPI_PYTHON 指定）" 7
+  die "需要可用的 python3/python（可用 KHAEN_PYTHON 指定）" 7
 }
 sha256_of() { sha256sum -- "$1" 2>/dev/null | awk '{print $1}'; }
 file_size_of() { stat -c '%s' -- "$1" 2>/dev/null || printf '0'; }
@@ -110,7 +110,7 @@ require_authorization() {
 # 是否已进入过渡态（旧 C 激活入口仍在 => 未退役）
 c_entry_present() {
   local f
-  for f in /run/tspi/camilladsp.yml /run/tspi/camilladsp.env /etc/tspi/last-mode; do
+  for f in /run/khaen/camilladsp.yml /run/khaen/camilladsp.env /etc/khaen/last-mode; do
     [ -e "$(p "$f")" ] && { printf '%s\n' "$f"; return 0; }
   done
   return 1
@@ -119,31 +119,31 @@ c_entry_present() {
 # ---------------------------------------------------------------------------
 # systemd 查询（只读；夹具下由 mocks/systemctl 提供）
 # ---------------------------------------------------------------------------
-sunit_active() { "$TSPI_SYSTEMCTL" is-active --quiet "$1" >/dev/null 2>&1; }
-sunit_enabled_state() { "$TSPI_SYSTEMCTL" is-enabled "$1" 2>/dev/null || true; }
-sunit_exists() { "$TSPI_SYSTEMCTL" cat "$1" >/dev/null 2>&1; }
+sunit_active() { "$KHAEN_SYSTEMCTL" is-active --quiet "$1" >/dev/null 2>&1; }
+sunit_enabled_state() { "$KHAEN_SYSTEMCTL" is-enabled "$1" 2>/dev/null || true; }
+sunit_exists() { "$KHAEN_SYSTEMCTL" cat "$1" >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------------------
-# IRQ 亲和持久化配置（task-192；/etc/tspi-rt-stack/irq-affinity.env）
+# IRQ 亲和持久化配置（task-192；/etc/khaen-rt-stack/irq-affinity.env）
 # ---------------------------------------------------------------------------
 # 默认值来自 task-189 板端实测（evidence/board-irq-affinity/）：IRQ58(xhci/MOTU)→CPU1、
 # IRQ56(end0/PTP)→CPU2、IRQ57(end0 第二队列)→CPU3；DSP_CPUS={4,5,6,7}。
 # 调用后设置 IRQ_PINS / IRQ_T45_MAP / IRQ_DSP_CPUS；配置文件存在时覆盖默认（env 变量优先）。
 irq_config_load() {
-  IRQ_PINS="${TSPI_IRQ_PINS:-58:1 56:2 57:3}"
-  IRQ_T45_MAP="${TSPI_IRQ_T45_MAP:-usb=58,ptp=56,eth=56}"
-  IRQ_DSP_CPUS="${TSPI_IRQ_DSP_CPUS:-4,5,6,7}"
+  IRQ_PINS="${KHAEN_IRQ_PINS:-58:1 56:2 57:3}"
+  IRQ_T45_MAP="${KHAEN_IRQ_T45_MAP:-usb=58,ptp=56,eth=56}"
+  IRQ_DSP_CPUS="${KHAEN_IRQ_DSP_CPUS:-4,5,6,7}"
   local ef line key val
-  ef="$(p "$TSPI_ETC/irq-affinity.env")"
+  ef="$(p "$KHAEN_ETC/irq-affinity.env")"
   [ -f "$ef" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ""|\#*|\;*) continue ;; esac
     key="${line%%=*}"; val="${line#*=}"
     val="${val%\"}"; val="${val#\"}"
     case "$key" in
-      TSPI_IRQ_PINS) [ -n "${TSPI_IRQ_PINS:-}" ] || IRQ_PINS="$val" ;;
-      TSPI_IRQ_T45_MAP) [ -n "${TSPI_IRQ_T45_MAP:-}" ] || IRQ_T45_MAP="$val" ;;
-      TSPI_IRQ_DSP_CPUS) [ -n "${TSPI_IRQ_DSP_CPUS:-}" ] || IRQ_DSP_CPUS="$val" ;;
+      KHAEN_IRQ_PINS) [ -n "${KHAEN_IRQ_PINS:-}" ] || IRQ_PINS="$val" ;;
+      KHAEN_IRQ_T45_MAP) [ -n "${KHAEN_IRQ_T45_MAP:-}" ] || IRQ_T45_MAP="$val" ;;
+      KHAEN_IRQ_DSP_CPUS) [ -n "${KHAEN_IRQ_DSP_CPUS:-}" ] || IRQ_DSP_CPUS="$val" ;;
     esac
   done < "$ef"
 }
@@ -154,7 +154,7 @@ irq_config_load() {
 # evidence_prepare：设置 evidence 目录（若调用方未给）并在 live 时创建。
 evidence_prepare() {
   local name="$1"
-  [ -n "$EVIDENCE_DIR" ] || EVIDENCE_DIR="${TSPI_EVIDENCE_RUN:-$(p "$TSPI_EVIDENCE_BASE")/${RUN_TS}-${name}}"
+  [ -n "$EVIDENCE_DIR" ] || EVIDENCE_DIR="${KHAEN_EVIDENCE_RUN:-$(p "$KHAEN_EVIDENCE_BASE")/${RUN_TS}-${name}}"
   if [ "$DRY_RUN" = "1" ]; then
     log "[dry-run] evidence 目录（不会创建）: $EVIDENCE_DIR"
   else
@@ -165,7 +165,7 @@ evidence_prepare() {
 
 evidence_begin() {  # $1 = 名称（如 03-retire-c）
   local name="$1"
-  EVIDENCE_DIR="${TSPI_EVIDENCE_RUN:-$(p "$TSPI_EVIDENCE_BASE")/${RUN_TS}-${name}}"
+  EVIDENCE_DIR="${KHAEN_EVIDENCE_RUN:-$(p "$KHAEN_EVIDENCE_BASE")/${RUN_TS}-${name}}"
   if [ "$DRY_RUN" = "1" ]; then
     log "[dry-run] evidence 目录（不会创建）: $EVIDENCE_DIR"
   else
@@ -199,8 +199,8 @@ ev_cmd() {  # 执行并记录到 commands.log（时间/exit/命令）；返回�
 # current release 解析：优先 Linux 符号链接；Windows/无符号链接权限的夹具用 current.release 指针文件。
 current_release_dir() {
   local cur ptr
-  cur="$(p "$TSPI_STACK_PREFIX/current")"
-  ptr="$(p "$TSPI_STACK_PREFIX/current.release")"
+  cur="$(p "$KHAEN_STACK_PREFIX/current")"
+  ptr="$(p "$KHAEN_STACK_PREFIX/current.release")"
   if [ -L "$cur" ]; then readlink -f "$cur" 2>/dev/null && return 0; fi
   if [ -f "$ptr" ]; then tr -d "\r\n" < "$ptr"; return 0; fi
   if [ -d "$cur" ]; then printf "%s" "$cur"; return 0; fi
@@ -209,8 +209,8 @@ current_release_dir() {
 # set_current：原子切换 current（Linux 用 symlink；不可用时降级为指针文件，并打印实际模式）
 set_current() {
   local rel="$1" cur ptr tmp mode
-  cur="$(p "$TSPI_STACK_PREFIX/current")"
-  ptr="$(p "$TSPI_STACK_PREFIX/current.release")"
+  cur="$(p "$KHAEN_STACK_PREFIX/current")"
+  ptr="$(p "$KHAEN_STACK_PREFIX/current.release")"
   if ln -sfn "$rel" "$cur.tmp" 2>/dev/null && [ -L "$cur.tmp" ]; then
     mv -Tf "$cur.tmp" "$cur" || return 1
     rm -f "$ptr" 2>/dev/null || true
@@ -237,24 +237,24 @@ now_iso() { date '+%Y-%m-%dT%H:%M:%S%z'; }
 # ---------------------------------------------------------------------------
 # wait_unit_active unit [timeout_secs]：反复 is-active 直到成功/超时。
 wait_unit_active() {
-  local u="$1" timeout="${2:-$TSPI_TIMEOUT_SECS}" i=0
+  local u="$1" timeout="${2:-$KHAEN_TIMEOUT_SECS}" i=0
   if [ "$DRY_RUN" = "1" ]; then log "[dry-run] 等待 $u active（<= ${timeout}s）"; return 0; fi
   while [ "$i" -lt "$timeout" ]; do
     sunit_active "$u" && return 0
-    sleep "${TSPI_POLL_SECS:-1}"
+    sleep "${KHAEN_POLL_SECS:-1}"
     i=$((i+1))
   done
   return 1
 }
 # assert_c_retired：输出违规项（旧 C unit 未 masked/active、C 进程），返回 0=干净。
 # F-42 修复（2026-11-17）：启用态只查 enabled 不够——disabled 且未 mask 仍可能被依赖/入口拉起。
-#   必须 masked：C 进程链 + 旧 web/WS shim + boot-mode；tspi-audio.target 不能 mask，只要求非 enabled。
+#   必须 masked：C 进程链 + 旧 web/WS shim + boot-mode；khaen-audio.target 不能 mask，只要求非 enabled。
 # 依赖调用方已 source config/old-c-units.conf（RETIRE_*_UNITS / C_PROCESS_PATTERNS）。
 assert_c_retired() {
   local u st bad=0
   local mask_required=("${RETIRE_C_UNITS[@]}" "${REPLACE_SHIM_UNITS[@]}")
   for u in "${RETIRE_ENTRY_UNITS[@]}"; do
-    [ "$u" = "tspi-audio.target" ] || mask_required+=("$u")
+    [ "$u" = "khaen-audio.target" ] || mask_required+=("$u")
   done
   for u in "${RETIRE_C_UNITS[@]}" "${RETIRE_ENTRY_UNITS[@]}" "${REPLACE_SHIM_UNITS[@]}"; do
     st="$(sunit_enabled_state "$u")"
@@ -282,14 +282,14 @@ assert_c_retired() {
 #     1) /proc/<MainPID>/environ（进程真实环境；需 unit active）
 #     2) systemctl show -p EnvironmentFiles --value，逐文件解析（覆盖 drop-in 追加项）
 #     3) 兜底 systemctl show -p Environment（只含 Environment=，老 systemd/夹具）
-#   TSPI_PROC_ROOT 只用于 mock/夹具（默认 /proc；夹具下由 ROOT 前缀拼接）。
+#   KHAEN_PROC_ROOT 只用于 mock/夹具（默认 /proc；夹具下由 ROOT 前缀拼接）。
 # ---------------------------------------------------------------------------
-TSPI_PROC_ROOT="${TSPI_PROC_ROOT:-/proc}"
+KHAEN_PROC_ROOT="${KHAEN_PROC_ROOT:-/proc}"
 
 # unit_main_pid unit -> MainPID（非数字/0/空 => 空串）
 unit_main_pid() {
   local pid
-  pid="$("$TSPI_SYSTEMCTL" show --property=MainPID --value "$1" 2>/dev/null | tr -d '[:space:]')" || true
+  pid="$("$KHAEN_SYSTEMCTL" show --property=MainPID --value "$1" 2>/dev/null | tr -d '[:space:]')" || true
   case "$pid" in ''|0|*[!0-9]*) printf '' ;; *) printf '%s' "$pid" ;; esac
 }
 
@@ -297,7 +297,7 @@ unit_main_pid() {
 _proc_environ_contains() {
   local pid="$1" needle="$2" f
   [ -n "$pid" ] || return 1
-  f="$(p "$TSPI_PROC_ROOT/$pid/environ")"
+  f="$(p "$KHAEN_PROC_ROOT/$pid/environ")"
   [ -r "$f" ] || return 1
   tr '\0' '\n' < "$f" 2>/dev/null | grep -qxF -- "$needle"
 }
@@ -305,7 +305,7 @@ _proc_environ_contains() {
 # unit_environment_files unit -> 换行分隔的 EnvironmentFile 路径（去掉 systemd 的 '-' 前缀）
 unit_environment_files() {
   local u="$1" files f
-  files="$("$TSPI_SYSTEMCTL" show --property=EnvironmentFiles --value "$u" 2>/dev/null || true)"
+  files="$("$KHAEN_SYSTEMCTL" show --property=EnvironmentFiles --value "$u" 2>/dev/null || true)"
   for f in $files; do
     f="${f#-}"
     [ -n "$f" ] || continue
@@ -332,7 +332,7 @@ unit_env_contains() {
     if _env_file_contains "$(p "$f")" "$needle"; then return 0; fi
   done < <(unit_environment_files "$u")
   # 3) 兜底：Environment=（不含 EnvironmentFile；仅老 systemd/夹具）
-  envs="$("$TSPI_SYSTEMCTL" show --property=Environment "$u" 2>/dev/null || true)"
+  envs="$("$KHAEN_SYSTEMCTL" show --property=Environment "$u" 2>/dev/null || true)"
   case "$envs" in *"$needle"*) return 0 ;; esac
   return 1
 }
@@ -341,7 +341,7 @@ unit_env_contains() {
 unit_env_verify_source() {
   local u="$1" pid f
   pid="$(unit_main_pid "$u")"
-  if [ -n "$pid" ] && [ -r "$(p "$TSPI_PROC_ROOT/$pid/environ")" ]; then printf '/proc/%s/environ' "$pid"; return 0; fi
+  if [ -n "$pid" ] && [ -r "$(p "$KHAEN_PROC_ROOT/$pid/environ")" ]; then printf '/proc/%s/environ' "$pid"; return 0; fi
   f="$(unit_environment_files "$u" | head -n 1)"
   if [ -n "$f" ]; then printf 'EnvironmentFiles(%s)' "$f"; return 0; fi
   printf 'systemctl-show-Environment(fallback)'

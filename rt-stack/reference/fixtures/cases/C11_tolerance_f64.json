@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C11_tolerance_f64",
   "title": "non-dyadic f64 coefficients: tolerance comparison (rtol=1e-12)",
   "tags": [

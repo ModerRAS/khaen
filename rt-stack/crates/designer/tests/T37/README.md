@@ -55,7 +55,7 @@ khaen-designer lib 的单元测试（模块路径 corrected::corrected_tests::*�
 
 ## oracle 说明
 
-- 目标用 T11 import_json_bytes 真实导入（tspi-target-draft/v1），不是 mock 目标结构。
+- 目标用 T11 import_json_bytes 真实导入（khaen-target-draft/v1），不是 mock 目标结构。
 - 响应验证用 corrected::verify（直接 DTFT + 解析 GD，O(L)/点），不复用 LS 中间量。
 - 最小相位替代用 min_phase_from_magnitude_table（同态法，诊断/oracle；不是本家族输出）。
 - 数值期望来自 evidence/T37/MANIFEST.md 的 Python 原型 + Rust 实测交叉记录。

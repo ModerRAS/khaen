@@ -95,28 +95,28 @@ const CMDLINE_8: &str =
 
 #[test]
 fn scheduler_fake_layout_affinity_entry_offsets() {
-    // core-v1 §11.13 TspiWorkerAffinityV1：32 B / align 8（align 例外）。
-    assert_eq!(size_of::<TspiWorkerAffinityV1>(), 32);
-    assert_eq!(align_of::<TspiWorkerAffinityV1>(), 8);
-    assert_eq!(core::mem::offset_of!(TspiWorkerAffinityV1, worker_id), 0);
+    // core-v1 §11.13 KhaenWorkerAffinityV1：32 B / align 8（align 例外）。
+    assert_eq!(size_of::<KhaenWorkerAffinityV1>(), 32);
+    assert_eq!(align_of::<KhaenWorkerAffinityV1>(), 8);
+    assert_eq!(core::mem::offset_of!(KhaenWorkerAffinityV1, worker_id), 0);
     assert_eq!(
-        core::mem::offset_of!(TspiWorkerAffinityV1, sched_priority),
+        core::mem::offset_of!(KhaenWorkerAffinityV1, sched_priority),
         1
     );
-    assert_eq!(core::mem::offset_of!(TspiWorkerAffinityV1, flags), 2);
-    assert_eq!(core::mem::offset_of!(TspiWorkerAffinityV1, cpu_index), 4);
-    assert_eq!(core::mem::offset_of!(TspiWorkerAffinityV1, reserved0), 6);
+    assert_eq!(core::mem::offset_of!(KhaenWorkerAffinityV1, flags), 2);
+    assert_eq!(core::mem::offset_of!(KhaenWorkerAffinityV1, cpu_index), 4);
+    assert_eq!(core::mem::offset_of!(KhaenWorkerAffinityV1, reserved0), 6);
     assert_eq!(
-        core::mem::offset_of!(TspiWorkerAffinityV1, irq_dependency_mask),
+        core::mem::offset_of!(KhaenWorkerAffinityV1, irq_dependency_mask),
         8
     );
-    assert_eq!(core::mem::offset_of!(TspiWorkerAffinityV1, reserved1), 16);
-    assert_eq!(core::mem::offset_of!(TspiWorkerAffinityV1, reserved2), 24);
+    assert_eq!(core::mem::offset_of!(KhaenWorkerAffinityV1, reserved1), 16);
+    assert_eq!(core::mem::offset_of!(KhaenWorkerAffinityV1, reserved2), 24);
 }
 
 #[test]
 fn scheduler_fake_layout_no_drop_and_capacity() {
-    assert!(!needs_drop::<TspiWorkerAffinityV1>());
+    assert!(!needs_drop::<KhaenWorkerAffinityV1>());
     assert!(!needs_drop::<TopologySnapshot>());
     assert!(!needs_drop::<LscpuSnapshot>());
     assert!(!needs_drop::<SchedRequest>());
@@ -149,7 +149,7 @@ fn scheduler_fake_constants_initial_values() {
 
 #[test]
 fn scheduler_fake_affinity_entry_new_and_predicates() {
-    let entry = TspiWorkerAffinityV1::new(2, 70, 0xFFFF, 5, IRQ_BIT_USB_CAPTURE);
+    let entry = KhaenWorkerAffinityV1::new(2, 70, 0xFFFF, 5, IRQ_BIT_USB_CAPTURE);
     assert_eq!(entry.worker_id, 2);
     assert_eq!(entry.sched_priority, 70);
     assert_eq!(entry.flags, AFFINITY_FLAG_KNOWN_MASK); // 未知位被掩掉
@@ -162,7 +162,7 @@ fn scheduler_fake_affinity_entry_new_and_predicates() {
     assert!(entry.is_isolated());
     assert!(entry.validate().is_ok());
 
-    let plain = TspiWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, 0, 0);
+    let plain = KhaenWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, 0, 0);
     assert!(plain.is_rt());
     assert!(!plain.is_isolated());
     assert!(plain.validate().is_ok());
@@ -171,35 +171,35 @@ fn scheduler_fake_affinity_entry_new_and_predicates() {
 #[test]
 fn scheduler_fake_affinity_entry_validate_negative_matrix() {
     assert_eq!(
-        TspiWorkerAffinityV1::new(0, 0, AFFINITY_FLAG_RT, 0, 0).validate(),
+        KhaenWorkerAffinityV1::new(0, 0, AFFINITY_FLAG_RT, 0, 0).validate(),
         Err(RtStatus::ERR_ADMISSION_SCHED)
     );
     assert_eq!(
-        TspiWorkerAffinityV1::new(0, 100, AFFINITY_FLAG_RT, 0, 0).validate(),
+        KhaenWorkerAffinityV1::new(0, 100, AFFINITY_FLAG_RT, 0, 0).validate(),
         Err(RtStatus::ERR_ADMISSION_SCHED)
     );
     assert_eq!(
-        TspiWorkerAffinityV1::new(0, 70, 0x8000, 0, 0).validate(),
+        KhaenWorkerAffinityV1::new(0, 70, 0x8000, 0, 0).validate(),
         Err(RtStatus::ERR_ADMISSION_SCHED)
     );
     assert_eq!(
-        TspiWorkerAffinityV1::new(0, 70, 0, 0, 0).validate(),
+        KhaenWorkerAffinityV1::new(0, 70, 0, 0, 0).validate(),
         Err(RtStatus::ERR_ADMISSION_SCHED) // flags bit0=rt 必须置位
     );
     assert_eq!(
-        TspiWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, CPU_UNUSED, 0).validate(),
+        KhaenWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, CPU_UNUSED, 0).validate(),
         Err(RtStatus::ERR_ADMISSION_SCHED)
     );
-    let mut reserved = TspiWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, 0, 0);
+    let mut reserved = KhaenWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, 0, 0);
     reserved.reserved1 = 1;
     assert_eq!(reserved.validate(), Err(RtStatus::ERR_BAD_LAYOUT));
-    let unknown_irq = TspiWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, 0, 1 << 40);
+    let unknown_irq = KhaenWorkerAffinityV1::new(0, 70, AFFINITY_FLAG_RT, 0, 1 << 40);
     assert_eq!(unknown_irq.validate(), Err(RtStatus::ERR_ADMISSION_SCHED));
 }
 
 #[test]
 fn scheduler_fake_affinity_entry_to_bytes_layout() {
-    let entry = TspiWorkerAffinityV1::new(3, 70, AFFINITY_FLAG_RT, 0x0102, IRQ_BIT_PTP_TIMER);
+    let entry = KhaenWorkerAffinityV1::new(3, 70, AFFINITY_FLAG_RT, 0x0102, IRQ_BIT_PTP_TIMER);
     let bytes = entry.to_bytes();
     assert_eq!(bytes.len(), 32);
     assert_eq!(bytes[0], 3);
@@ -215,10 +215,10 @@ fn scheduler_fake_affinity_entry_to_bytes_layout() {
 
 #[test]
 fn scheduler_fake_affinity_entry_zero_encodes_all_zero() {
-    assert_eq!(TspiWorkerAffinityV1::ZERO.to_bytes(), [0u8; 32]);
+    assert_eq!(KhaenWorkerAffinityV1::ZERO.to_bytes(), [0u8; 32]);
     assert_eq!(
-        TspiWorkerAffinityV1::ZERO,
-        TspiWorkerAffinityV1::new(0, 0, 0, 0, 0)
+        KhaenWorkerAffinityV1::ZERO,
+        KhaenWorkerAffinityV1::new(0, 0, 0, 0, 0)
     );
 }
 
@@ -703,8 +703,8 @@ fn scheduler_fake_plan_2worker_independent_profile() {
     assert_eq!(two.worker_cpu(0), Some(0));
     assert_eq!(two.worker_cpu(1), Some(1));
     assert_eq!(two.worker_cpu(2), None);
-    assert_eq!(two.affinity[2], TspiWorkerAffinityV1::ZERO);
-    assert_eq!(two.affinity[3], TspiWorkerAffinityV1::ZERO);
+    assert_eq!(two.affinity[2], KhaenWorkerAffinityV1::ZERO);
+    assert_eq!(two.affinity[3], KhaenWorkerAffinityV1::ZERO);
     assert_eq!(two.validate(), Ok(()));
     assert_eq!(two.validate_against(&topo), Ok(()));
     // 2/4 是独立 profile：hash 必须不同（graph_id 会把 affinity 表算进去）。
@@ -796,8 +796,8 @@ fn scheduler_fake_plan_affinity_helper_matches_plan() {
     let built = plan_4worker();
     assert_eq!(table, built.affinity);
     let table_two = plan_affinity(&request_2worker(), &topo).unwrap();
-    assert_eq!(table_two[2], TspiWorkerAffinityV1::ZERO);
-    assert_eq!(table_two[3], TspiWorkerAffinityV1::ZERO);
+    assert_eq!(table_two[2], KhaenWorkerAffinityV1::ZERO);
+    assert_eq!(table_two[3], KhaenWorkerAffinityV1::ZERO);
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,7 +1071,7 @@ fn scheduler_fake_two_worker_re_admission_after_one_core_lost() {
     assert!(two.is_two_worker_profile());
     assert_eq!(two.worker_cpu(0), Some(0));
     assert_eq!(two.worker_cpu(1), Some(1));
-    assert_eq!(two.affinity[2], TspiWorkerAffinityV1::ZERO);
+    assert_eq!(two.affinity[2], KhaenWorkerAffinityV1::ZERO);
     assert_ne!(two.affinity_hash, four.affinity_hash);
     assert_eq!(two.validate_against(&topo), Ok(()));
     assert_eq!(two.gate_block(&topo), SchedGate::Admit);
@@ -1218,13 +1218,13 @@ fn scheduler_fake_t09_ack_mask_and_profile_alignment() {
 #[test]
 fn scheduler_fake_t18_cpu_set_gate_wiring() {
     use crate::admission::{validate as admission_validate, AdmissionEnv};
-    use khaen_core::abi::{TspiPlanHeaderV1, ABI_VERSION, TSPI_PLAN_MAGIC};
+    use khaen_core::abi::{KhaenPlanHeaderV1, ABI_VERSION, KHAEN_PLAN_MAGIC};
     use khaen_core::rt::PlanView;
 
     let topo = topology_8();
     let planned = plan_4worker();
-    let header = TspiPlanHeaderV1 {
-        magic: TSPI_PLAN_MAGIC,
+    let header = KhaenPlanHeaderV1 {
+        magic: KHAEN_PLAN_MAGIC,
         abi_version: ABI_VERSION,
         header_size: 128,
         plan_version: 1,
@@ -1344,7 +1344,7 @@ fn scheduler_fake_validate_detects_tampered_plan() {
     assert_eq!(tampered_hash.validate(), Err(RtStatus::ERR_HASH));
 
     let mut unused_nonzero = plan_2worker();
-    unused_nonzero.affinity[3] = TspiWorkerAffinityV1::new(3, 70, AFFINITY_FLAG_RT, 3, 0);
+    unused_nonzero.affinity[3] = KhaenWorkerAffinityV1::new(3, 70, AFFINITY_FLAG_RT, 3, 0);
     assert_eq!(
         unused_nonzero.validate(),
         Err(RtStatus::ERR_ADMISSION_SCHED)
@@ -1426,7 +1426,8 @@ fn scheduler_fake_affinity_hash_golden_4worker() {
     // 冻结确定性证据（D-04 算法回归；改动算法/表项布局必须显式更新并说明）。
     let hash = plan_4worker().affinity_hash;
     // 2026-11-17 首次运行冻结：算法/夹具不变则必须逐位一致。
-    let expected: [u8; 8] = [21, 38, 236, 30, 57, 140, 174, 19];
+    // renamed tspi -> khaen (2026-11-25): AFFINITY_HASH_DOMAIN b"tspi-affinity-v1" grows 1 B.
+    let expected: [u8; 8] = [138, 66, 16, 62, 21, 212, 18, 48];
     assert_eq!(hash, expected, "golden affinity_hash = {:?}", hash);
 }
 
@@ -1434,7 +1435,8 @@ fn scheduler_fake_affinity_hash_golden_4worker() {
 fn scheduler_fake_affinity_hash_golden_2worker() {
     let hash = plan_2worker().affinity_hash;
     // 2026-11-17 首次运行冻结：2 worker 独立 profile 的 hash 必须与 4 worker 不同。
-    let expected: [u8; 8] = [255, 223, 222, 86, 154, 222, 208, 57];
+    // renamed tspi -> khaen (2026-11-25): AFFINITY_HASH_DOMAIN b"tspi-affinity-v1" grows 1 B.
+    let expected: [u8; 8] = [68, 180, 152, 225, 113, 225, 95, 192];
     assert_eq!(hash, expected, "golden affinity_hash(2w) = {:?}", hash);
 }
 

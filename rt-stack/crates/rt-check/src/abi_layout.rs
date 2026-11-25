@@ -11,9 +11,9 @@ pub const RT_CHECK_ABI_LAYOUT_SCANNED: usize = 120;
 use core::mem::{align_of, offset_of, size_of};
 
 use khaen_core::abi::{
-    TspiBlockAckV1, TspiBlockDescV1, TspiDiagFirV1, TspiEpochInfoV1, TspiEventV1, TspiHwParamsV1,
-    TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, TspiSpscHeaderV1, TspiWorkerAffinityV1,
-    TspiWorkerStatsV1,
+    KhaenBlockAckV1, KhaenBlockDescV1, KhaenDiagFirV1, KhaenEpochInfoV1, KhaenEventV1,
+    KhaenHwParamsV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1, KhaenSpscHeaderV1,
+    KhaenWorkerAffinityV1, KhaenWorkerStatsV1,
 };
 use khaen_core::rt;
 
@@ -57,292 +57,406 @@ macro_rules! check_offset {
 pub fn run() -> Report {
     let mut report = Report::default();
 
-    check_size_align!(report, "TspiBlockDescV1", TspiBlockDescV1, 64, 64);
-    check_offset!(report, "TspiBlockDescV1", TspiBlockDescV1, epoch_id, 8);
-    check_offset!(report, "TspiBlockDescV1", TspiBlockDescV1, block_seq, 16);
-    check_offset!(report, "TspiBlockDescV1", TspiBlockDescV1, frame_index, 24);
-    check_offset!(report, "TspiBlockDescV1", TspiBlockDescV1, plan_version, 32);
-    check_offset!(report, "TspiBlockDescV1", TspiBlockDescV1, flags, 36);
-    check_offset!(report, "TspiBlockDescV1", TspiBlockDescV1, valid_frames, 40);
-    check_offset!(report, "TspiBlockDescV1", TspiBlockDescV1, slot_index, 44);
+    check_size_align!(report, "KhaenBlockDescV1", KhaenBlockDescV1, 64, 64);
+    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, epoch_id, 8);
+    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, block_seq, 16);
     check_offset!(
         report,
-        "TspiBlockDescV1",
-        TspiBlockDescV1,
+        "KhaenBlockDescV1",
+        KhaenBlockDescV1,
+        frame_index,
+        24
+    );
+    check_offset!(
+        report,
+        "KhaenBlockDescV1",
+        KhaenBlockDescV1,
+        plan_version,
+        32
+    );
+    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, flags, 36);
+    check_offset!(
+        report,
+        "KhaenBlockDescV1",
+        KhaenBlockDescV1,
+        valid_frames,
+        40
+    );
+    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, slot_index, 44);
+    check_offset!(
+        report,
+        "KhaenBlockDescV1",
+        KhaenBlockDescV1,
         mono_publish_ns,
         48
     );
     check_offset!(
         report,
-        "TspiBlockDescV1",
-        TspiBlockDescV1,
+        "KhaenBlockDescV1",
+        KhaenBlockDescV1,
         play_deadline_ns,
         56
     );
 
-    check_size_align!(report, "TspiEpochInfoV1", TspiEpochInfoV1, 64, 64);
-    check_offset!(report, "TspiEpochInfoV1", TspiEpochInfoV1, plan_version, 8);
-    check_offset!(report, "TspiEpochInfoV1", TspiEpochInfoV1, sample_rate, 12);
-    check_offset!(report, "TspiEpochInfoV1", TspiEpochInfoV1, block_size, 16);
-    check_offset!(report, "TspiEpochInfoV1", TspiEpochInfoV1, n_in, 18);
-    check_offset!(report, "TspiEpochInfoV1", TspiEpochInfoV1, n_out, 20);
-    check_offset!(report, "TspiEpochInfoV1", TspiEpochInfoV1, mode, 22);
-    check_offset!(report, "TspiEpochInfoV1", TspiEpochInfoV1, flags, 24);
+    check_size_align!(report, "KhaenEpochInfoV1", KhaenEpochInfoV1, 64, 64);
     check_offset!(
         report,
-        "TspiEpochInfoV1",
-        TspiEpochInfoV1,
-        start_mono_ns,
-        32
-    );
-
-    check_size_align!(report, "TspiHwParamsV1", TspiHwParamsV1, 64, 64);
-    check_offset!(report, "TspiHwParamsV1", TspiHwParamsV1, sample_format, 2);
-    check_offset!(report, "TspiHwParamsV1", TspiHwParamsV1, n_in, 4);
-    check_offset!(report, "TspiHwParamsV1", TspiHwParamsV1, n_out, 6);
-    check_offset!(report, "TspiHwParamsV1", TspiHwParamsV1, sample_rate, 8);
-    check_offset!(report, "TspiHwParamsV1", TspiHwParamsV1, period_frames, 12);
-    check_offset!(report, "TspiHwParamsV1", TspiHwParamsV1, buffer_frames, 16);
-    check_offset!(
-        report,
-        "TspiHwParamsV1",
-        TspiHwParamsV1,
-        in_stride_bytes,
-        20
-    );
-    check_offset!(
-        report,
-        "TspiHwParamsV1",
-        TspiHwParamsV1,
-        out_stride_bytes,
-        24
-    );
-    check_offset!(report, "TspiHwParamsV1", TspiHwParamsV1, flags, 28);
-
-    check_size_align!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, 128, 64);
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, magic, 0);
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, header_size, 6);
-    check_offset!(
-        report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenEpochInfoV1",
+        KhaenEpochInfoV1,
         plan_version,
         8
     );
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenEpochInfoV1",
+        KhaenEpochInfoV1,
         sample_rate,
         12
     );
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, block_size, 16);
+    check_offset!(report, "KhaenEpochInfoV1", KhaenEpochInfoV1, block_size, 16);
+    check_offset!(report, "KhaenEpochInfoV1", KhaenEpochInfoV1, n_in, 18);
+    check_offset!(report, "KhaenEpochInfoV1", KhaenEpochInfoV1, n_out, 20);
+    check_offset!(report, "KhaenEpochInfoV1", KhaenEpochInfoV1, mode, 22);
+    check_offset!(report, "KhaenEpochInfoV1", KhaenEpochInfoV1, flags, 24);
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenEpochInfoV1",
+        KhaenEpochInfoV1,
+        start_mono_ns,
+        32
+    );
+
+    check_size_align!(report, "KhaenHwParamsV1", KhaenHwParamsV1, 64, 64);
+    check_offset!(report, "KhaenHwParamsV1", KhaenHwParamsV1, sample_format, 2);
+    check_offset!(report, "KhaenHwParamsV1", KhaenHwParamsV1, n_in, 4);
+    check_offset!(report, "KhaenHwParamsV1", KhaenHwParamsV1, n_out, 6);
+    check_offset!(report, "KhaenHwParamsV1", KhaenHwParamsV1, sample_rate, 8);
+    check_offset!(
+        report,
+        "KhaenHwParamsV1",
+        KhaenHwParamsV1,
+        period_frames,
+        12
+    );
+    check_offset!(
+        report,
+        "KhaenHwParamsV1",
+        KhaenHwParamsV1,
+        buffer_frames,
+        16
+    );
+    check_offset!(
+        report,
+        "KhaenHwParamsV1",
+        KhaenHwParamsV1,
+        in_stride_bytes,
+        20
+    );
+    check_offset!(
+        report,
+        "KhaenHwParamsV1",
+        KhaenHwParamsV1,
+        out_stride_bytes,
+        24
+    );
+    check_offset!(report, "KhaenHwParamsV1", KhaenHwParamsV1, flags, 28);
+
+    check_size_align!(report, "KhaenPlanHeaderV1", KhaenPlanHeaderV1, 128, 64);
+    check_offset!(report, "KhaenPlanHeaderV1", KhaenPlanHeaderV1, magic, 0);
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        header_size,
+        6
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        plan_version,
+        8
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        sample_rate,
+        12
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        block_size,
+        16
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         low_band_count,
         22
     );
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, path_count, 24);
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, max_taps, 28);
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, workers, 32);
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, graph_id, 36);
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        path_count,
+        24
+    );
+    check_offset!(report, "KhaenPlanHeaderV1", KhaenPlanHeaderV1, max_taps, 28);
+    check_offset!(report, "KhaenPlanHeaderV1", KhaenPlanHeaderV1, workers, 32);
+    check_offset!(report, "KhaenPlanHeaderV1", KhaenPlanHeaderV1, graph_id, 36);
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         total_coeff_bytes,
         68
     );
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         path_table_offset,
         72
     );
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         diag_table_offset,
         76
     );
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, in_stride, 80);
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, out_stride, 84);
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        in_stride,
+        80
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        out_stride,
+        84
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         role_table_offset,
         88
     );
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         role_table_count,
         92
     );
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, reserved1, 94);
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        reserved1,
+        94
+    );
     // T105 errata E1（repr(C) 合法对齐版）：spec 字面 94/98/102/106 的 u32 不可表达。
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         affinity_table_offset,
         96
     );
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         affinity_count,
         100
     );
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, reserved2, 102);
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        reserved2,
+        102
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         ctl_meta_offset,
         104
     );
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         ctl_meta_len,
         108
     );
-    check_offset!(report, "TspiPlanHeaderV1", TspiPlanHeaderV1, reserved3, 112);
     check_offset!(
         report,
-        "TspiPlanHeaderV1",
-        TspiPlanHeaderV1,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
+        reserved3,
+        112
+    );
+    check_offset!(
+        report,
+        "KhaenPlanHeaderV1",
+        KhaenPlanHeaderV1,
         header_crc32c,
         124
     );
 
-    check_size_align!(report, "TspiWorkerAffinityV1", TspiWorkerAffinityV1, 32, 8);
+    check_size_align!(
+        report,
+        "KhaenWorkerAffinityV1",
+        KhaenWorkerAffinityV1,
+        32,
+        8
+    );
     check_offset!(
         report,
-        "TspiWorkerAffinityV1",
-        TspiWorkerAffinityV1,
+        "KhaenWorkerAffinityV1",
+        KhaenWorkerAffinityV1,
         worker_id,
         0
     );
     check_offset!(
         report,
-        "TspiWorkerAffinityV1",
-        TspiWorkerAffinityV1,
+        "KhaenWorkerAffinityV1",
+        KhaenWorkerAffinityV1,
         sched_priority,
         1
     );
     check_offset!(
         report,
-        "TspiWorkerAffinityV1",
-        TspiWorkerAffinityV1,
+        "KhaenWorkerAffinityV1",
+        KhaenWorkerAffinityV1,
         flags,
         2
     );
     check_offset!(
         report,
-        "TspiWorkerAffinityV1",
-        TspiWorkerAffinityV1,
+        "KhaenWorkerAffinityV1",
+        KhaenWorkerAffinityV1,
         cpu_index,
         4
     );
     check_offset!(
         report,
-        "TspiWorkerAffinityV1",
-        TspiWorkerAffinityV1,
+        "KhaenWorkerAffinityV1",
+        KhaenWorkerAffinityV1,
         irq_dependency_mask,
         8
     );
 
-    check_size_align!(report, "TspiEventV1", TspiEventV1, 64, 64);
-    check_offset!(report, "TspiEventV1", TspiEventV1, mono_ns, 8);
-    check_offset!(report, "TspiEventV1", TspiEventV1, epoch_id, 16);
-    check_offset!(report, "TspiEventV1", TspiEventV1, block_seq, 24);
-    check_offset!(report, "TspiEventV1", TspiEventV1, kind, 32);
-    check_offset!(report, "TspiEventV1", TspiEventV1, lane, 34);
-    check_offset!(report, "TspiEventV1", TspiEventV1, severity, 35);
-    check_offset!(report, "TspiEventV1", TspiEventV1, value_a, 36);
-    check_offset!(report, "TspiEventV1", TspiEventV1, value_b, 40);
-    check_offset!(report, "TspiEventV1", TspiEventV1, payload, 48);
+    check_size_align!(report, "KhaenEventV1", KhaenEventV1, 64, 64);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, mono_ns, 8);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, epoch_id, 16);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, block_seq, 24);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, kind, 32);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, lane, 34);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, severity, 35);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, value_a, 36);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, value_b, 40);
+    check_offset!(report, "KhaenEventV1", KhaenEventV1, payload, 48);
 
-    check_size_align!(report, "TspiBlockAckV1", TspiBlockAckV1, 64, 64);
-    check_offset!(report, "TspiBlockAckV1", TspiBlockAckV1, phase_done, 16);
-    check_offset!(report, "TspiBlockAckV1", TspiBlockAckV1, cutoff, 28);
-    check_offset!(report, "TspiBlockAckV1", TspiBlockAckV1, plan_version, 32);
+    check_size_align!(report, "KhaenBlockAckV1", KhaenBlockAckV1, 64, 64);
+    check_offset!(report, "KhaenBlockAckV1", KhaenBlockAckV1, phase_done, 16);
+    check_offset!(report, "KhaenBlockAckV1", KhaenBlockAckV1, cutoff, 28);
+    check_offset!(report, "KhaenBlockAckV1", KhaenBlockAckV1, plan_version, 32);
     check_offset!(
         report,
-        "TspiBlockAckV1",
-        TspiBlockAckV1,
+        "KhaenBlockAckV1",
+        KhaenBlockAckV1,
         expected_workers,
         36
     );
-    check_offset!(report, "TspiBlockAckV1", TspiBlockAckV1, flags, 37);
+    check_offset!(report, "KhaenBlockAckV1", KhaenBlockAckV1, flags, 37);
     check_offset!(
         report,
-        "TspiBlockAckV1",
-        TspiBlockAckV1,
+        "KhaenBlockAckV1",
+        KhaenBlockAckV1,
         deadline_mono_ns,
         40
     );
-    check_offset!(report, "TspiBlockAckV1", TspiBlockAckV1, compute_ticks, 48);
-
-    check_size_align!(report, "TspiSpscHeaderV1", TspiSpscHeaderV1, 64, 64);
-    check_offset!(report, "TspiSpscHeaderV1", TspiSpscHeaderV1, capacity, 8);
     check_offset!(
         report,
-        "TspiSpscHeaderV1",
-        TspiSpscHeaderV1,
+        "KhaenBlockAckV1",
+        KhaenBlockAckV1,
+        compute_ticks,
+        48
+    );
+
+    check_size_align!(report, "KhaenSpscHeaderV1", KhaenSpscHeaderV1, 64, 64);
+    check_offset!(report, "KhaenSpscHeaderV1", KhaenSpscHeaderV1, capacity, 8);
+    check_offset!(
+        report,
+        "KhaenSpscHeaderV1",
+        KhaenSpscHeaderV1,
         entry_stride,
         12
     );
-    check_offset!(report, "TspiSpscHeaderV1", TspiSpscHeaderV1, write_pos, 16);
-    check_offset!(report, "TspiSpscHeaderV1", TspiSpscHeaderV1, read_pos, 24);
-    check_offset!(report, "TspiSpscHeaderV1", TspiSpscHeaderV1, dropped, 32);
-    check_offset!(report, "TspiSpscHeaderV1", TspiSpscHeaderV1, epoch_id, 40);
-
-    check_size_align!(report, "TspiWorkerStatsV1", TspiWorkerStatsV1, 64, 64);
-
-    check_size_align!(report, "TspiPathV1", TspiPathV1, 32, 8);
-    check_offset!(report, "TspiPathV1", TspiPathV1, in_index, 0);
-    check_offset!(report, "TspiPathV1", TspiPathV1, out_index, 2);
-    check_offset!(report, "TspiPathV1", TspiPathV1, taps, 4);
-    check_offset!(report, "TspiPathV1", TspiPathV1, delay_samples, 8);
-    check_offset!(report, "TspiPathV1", TspiPathV1, polarity, 12);
-    check_offset!(report, "TspiPathV1", TspiPathV1, flags, 13);
-    check_offset!(report, "TspiPathV1", TspiPathV1, coeff_offset_bytes, 16);
-    check_offset!(report, "TspiPathV1", TspiPathV1, coeff_len_bytes, 24);
-
-    check_size_align!(report, "TspiDiagFirV1", TspiDiagFirV1, 32, 8);
-    check_offset!(report, "TspiDiagFirV1", TspiDiagFirV1, out_index, 0);
-    check_offset!(report, "TspiDiagFirV1", TspiDiagFirV1, flags, 2);
-    check_offset!(report, "TspiDiagFirV1", TspiDiagFirV1, taps, 4);
-    check_offset!(report, "TspiDiagFirV1", TspiDiagFirV1, delay_samples, 8);
     check_offset!(
         report,
-        "TspiDiagFirV1",
-        TspiDiagFirV1,
+        "KhaenSpscHeaderV1",
+        KhaenSpscHeaderV1,
+        write_pos,
+        16
+    );
+    check_offset!(report, "KhaenSpscHeaderV1", KhaenSpscHeaderV1, read_pos, 24);
+    check_offset!(report, "KhaenSpscHeaderV1", KhaenSpscHeaderV1, dropped, 32);
+    check_offset!(report, "KhaenSpscHeaderV1", KhaenSpscHeaderV1, epoch_id, 40);
+
+    check_size_align!(report, "KhaenWorkerStatsV1", KhaenWorkerStatsV1, 64, 64);
+
+    check_size_align!(report, "KhaenPathV1", KhaenPathV1, 32, 8);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, in_index, 0);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, out_index, 2);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, taps, 4);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, delay_samples, 8);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, polarity, 12);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, flags, 13);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, coeff_offset_bytes, 16);
+    check_offset!(report, "KhaenPathV1", KhaenPathV1, coeff_len_bytes, 24);
+
+    check_size_align!(report, "KhaenDiagFirV1", KhaenDiagFirV1, 32, 8);
+    check_offset!(report, "KhaenDiagFirV1", KhaenDiagFirV1, out_index, 0);
+    check_offset!(report, "KhaenDiagFirV1", KhaenDiagFirV1, flags, 2);
+    check_offset!(report, "KhaenDiagFirV1", KhaenDiagFirV1, taps, 4);
+    check_offset!(report, "KhaenDiagFirV1", KhaenDiagFirV1, delay_samples, 8);
+    check_offset!(
+        report,
+        "KhaenDiagFirV1",
+        KhaenDiagFirV1,
         coeff_offset_bytes,
         16
     );
-    check_offset!(report, "TspiDiagFirV1", TspiDiagFirV1, coeff_len_bytes, 24);
+    check_offset!(
+        report,
+        "KhaenDiagFirV1",
+        KhaenDiagFirV1,
+        coeff_len_bytes,
+        24
+    );
 
-    check_size_align!(report, "TspiRoleV1", TspiRoleV1, 32, 8);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, role_id, 0);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, out_index, 2);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, flags, 4);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, delay_samples, 8);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, gain_q15, 12);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, polarity, 14);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, peq_count, 16);
-    check_offset!(report, "TspiRoleV1", TspiRoleV1, name_hash, 20);
+    check_size_align!(report, "KhaenRoleV1", KhaenRoleV1, 32, 8);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, role_id, 0);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, out_index, 2);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, flags, 4);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, delay_samples, 8);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, gain_q15, 12);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, polarity, 14);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, peq_count, 16);
+    check_offset!(report, "KhaenRoleV1", KhaenRoleV1, name_hash, 20);
 
     // 附录 B.1：时限公式（floor gate / ceil T_block）。
     let timing: [(u32, u16, u64, u64); 4] = [

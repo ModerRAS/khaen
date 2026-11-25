@@ -19,7 +19,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use khaen_core::abi::{TspiBlockAckV1, ABI_VERSION};
+use khaen_core::abi::{KhaenBlockAckV1, ABI_VERSION};
 use khaen_core::workers::{
     execute_block_scheduled, WorkerPartials, WorkerScheduleStats, WORKER_ACK_FLAG_VALID,
 };
@@ -250,9 +250,9 @@ fn execute_graph(
             None => break,
         };
         let valid_frames = chunk.frames_valid;
-        let ack = TspiBlockAckV1 {
+        let ack = KhaenBlockAckV1 {
             flags: WORKER_ACK_FLAG_VALID,
-            ..TspiBlockAckV1::new(
+            ..KhaenBlockAckV1::new(
                 seq,
                 OFFLINE_EPOCH_ID,
                 graph.plan_version,

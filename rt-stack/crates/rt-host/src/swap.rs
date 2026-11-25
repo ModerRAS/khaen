@@ -3,17 +3,17 @@
 //!
 //! 【分区纪律】本文件是**混合模块**（同文件同时含 [RT] 与 [NONRT]），按 README §6 不写纯 RT
 //! 模块标记，由代码评审 + drop-audit 类型清单覆盖：
-//! - [RT] 区（commit_swap_at_block_boundary 与 TspiSwapAckV1/GraphQuarantine 方法）：只读写
+//! - [RT] 区（commit_swap_at_block_boundary 与 KhaenSwapAckV1/GraphQuarantine 方法）：只读写
 //!   固定大小原子字段和"发布后只读"的 plain 字段；禁止分配/锁/syscall/日志/格式化/panic/析构
 //!   （core-v1 §9.3/§10、§13.3 R-DROP-01..14）。
 //! - [NONRT] 区（PlanRegistry/PlanArena）：唯一持有 plan arena 与 Arc 强引用；unmap/释放只在
 //!   retire gate RG-1..RG-4（§7.5）全过后发生。RT 不可见任何 owned 句柄（§13.2）。
 //!
 //! 【本任务实现的契约行】
-//! 1. **block-version + 4 worker ack（§7.3/§11.13 TspiSwapAckV1）**：master 在 block 边界把
+//! 1. **block-version + 4 worker ack（§7.3/§11.13 KhaenSwapAckV1）**：master 在 block 边界把
 //!    current_plan_ptr/version 原子替换为 pending（commit_swap_at_block_boundary）；随后只有
 //!    "新 plan_version 上的 all-ack block" 才把该 block 的 worker 位图 OR 进 swap ack
-//!    （TspiSwapAckV1::note_block_all_ack），4 位到齐才 retire_ready=1（RG-2）。
+//!    （KhaenSwapAckV1::note_block_all_ack），4 位到齐才 retire_ready=1（RG-2）。
 //! 2. **迟到 partial/graph quarantine 直到 all-ack（§7.6/INV-L5/R-DROP-06）**：旧 plan arena 在
 //!    切换完成时进入 GraphQuarantine（固定 QUARANTINE_SLOTS=8 槽），剩余 worker 位图由迟到
 //!    worker 显式 ack 清零；未 all-ack 前 try_release 恒失败、arena 永不回收；worker 失联则
@@ -22,11 +22,11 @@
 //!    RG-1（switch_state 回 IDLE）+ RG-2（swap all-ack）+ RG-3（旧版本 block 全部终态且
 //!    quarantine all-ack；由 T09/T16 owner 快照确认）+ 显式 RG-4 确认后，由 control 线程把
 //!    Arc 强引用降到 0 并释放（unmap 计数器 +1）。
-//! 4. **无 RT 最后 Arc drop（§13.4 Lemma 2/R-DROP-05）**：[RT] 入口只接收 &TspiSwapAckV1 /
-//!    &GraphQuarantine / &TspiRtControlV1 并返回 RtStatus/Option<PlanVersion> 等 Copy 值；swap
+//! 4. **无 RT 最后 Arc drop（§13.4 Lemma 2/R-DROP-05）**：[RT] 入口只接收 &KhaenSwapAckV1 /
+//!    &GraphQuarantine / &KhaenRtControlV1 并返回 RtStatus/Option<PlanVersion> 等 Copy 值；swap
 //!    ack 只携带旧 arena 裸地址 old_plan_ptr，从不 clone/drop Arc（测试以
 //!    PlanRegistry::arena_strong_count 断言 RT 全程不改变强引用计数）。
-//! 5. **crossfade 双 CPU/RAM 预算拒绝（§5.3 I06/§7.4/§11.13 TspiCrossfadeBudgetV1）**：仅当
+//! 5. **crossfade 双 CPU/RAM 预算拒绝（§5.3 I06/§7.4/§11.13 KhaenCrossfadeBudgetV1）**：仅当
 //!    plan flags bit2=1、新旧 rate/N/O/B 相同、逐输出 total_delay_q16 严格相等、crossfade 帧数
 //!    == B 且 <=128、双图 RAM 下界与峰值 CPU 均 <= 可用量且声明值不低于下界时才接受；预算不足
 //!    -> ERR_CROSSFADE_BUDGET(123)，D 不可对齐 -> RT_E_CROSSFADE_ALIGN(309)（§9.2）。
@@ -36,13 +36,13 @@
 //!    ERR_BAD_LAYOUT 拒收（PLAN_FLAG_MASK=0x1F；旧 0x3F 放过 bit5 的尾巴已按 E4 收窄）。
 //!
 //! 【契约缺口登记（不改他人写域，报 integrator/Lead）】
-//! - TspiSwapAckV1 / TspiCrossfadeBudgetV1（§11.13）尚未进入 core::abi；本 leaf 先在
+//! - KhaenSwapAckV1 / KhaenCrossfadeBudgetV1（§11.13）尚未进入 core::abi；本 leaf 先在
 //!   rt-host::swap 定义（布局与 §11.13 逐字节一致），待 integrator 提升后本模块改为 re-export。
 //! - ERR_CROSSFADE_BUDGET(123) / RT_E_CROSSFADE_ALIGN(309)（§9.2）尚未进入 core::rt；
 //!   本 leaf 以本地常量提供，码值按 §9.2 冻结。
 //! - core::rt 未导出 SWITCH_SWITCHED(2)/SWITCH_ABORT(3)；本 leaf 补 2/3 常量（与 §11.13
 //!   switch_state 编码一致，3 与 workers::WORKER_SWITCH_ABORT 同值）。
-//! - TspiPathV1/TspiDiagFirV1/TspiRoleV1 当前 ABI v1.0 尚无 delay_q16（§11.10 v1.1）；本 leaf
+//! - KhaenPathV1/KhaenDiagFirV1/KhaenRoleV1 当前 ABI v1.0 尚无 delay_q16（§11.10 v1.1）；本 leaf
 //!   的 total_delay_q16 按 delay_samples*65536 + delay_q16 口径实现，delay_q16 暂取 0；一旦
 //!   integrator 补齐 ABI 字段，仅需改 plan_total_delay_q16 一处。
 //! - coeff blob 无 header 偏移字段：本 leaf 约定 coeff blob 位于 plan 字节尾部
@@ -56,18 +56,17 @@ use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use khaen_core::abi::{
-    plan_abi_supported, TspiBlockAckV1, TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1,
-    TspiPlanIirHeaderV2, TspiRoleIirV2, TspiRoleV1, ABI_VERSION, PLAN_IIR_ENTRY_BYTES,
-    PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1,
-    TSPI_PLAN_IIR_MAGIC, TSPI_PLAN_IIR_VERSION, TSPI_PLAN_MAGIC,
-    TSPI_RING_MAGIC,
+    plan_abi_supported, KhaenBlockAckV1, KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1,
+    KhaenPlanIirHeaderV2, KhaenRoleIirV2, KhaenRoleV1, ABI_VERSION, KHAEN_PLAN_ABI_V1,
+    KHAEN_PLAN_IIR_MAGIC, KHAEN_PLAN_IIR_VERSION, KHAEN_PLAN_MAGIC, KHAEN_RING_MAGIC,
+    PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS,
 };
 use khaen_core::rt::{
     t_block_ns_ceil, PlanView, BLOCK_SIZES, MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_MATRIX_PATHS,
     MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, QUARANTINE_SLOTS, RT_WORKERS, RT_WORKERS_FALLBACK,
     SAMPLE_RATES_HZ, SWITCH_ARMED, SWITCH_IDLE, TAPS_EXTENDED_MAX, TAPS_NORMAL_MAX,
 };
-use khaen_core::workers::{ack_mask, TspiRtControlV1};
+use khaen_core::workers::{ack_mask, KhaenRtControlV1};
 
 use crate::admission::{self, AdmissionEnv, AdmissionReport, MemoryBackend, PlatformMemory};
 
@@ -80,9 +79,9 @@ pub const SWITCH_SWITCHED: u32 = 2;
 /// plan 切换状态：ABORT（切换被中止；§11.13 switch_state=3，与 WORKER_SWITCH_ABORT 同值）。
 pub const SWITCH_ABORT: u32 = 3;
 
-/// TspiSwapAckV1 字节数（core-v1 §11.13）。
+/// KhaenSwapAckV1 字节数（core-v1 §11.13）。
 pub const SWAP_ACK_BYTES: usize = 64;
-/// TspiCrossfadeBudgetV1 字节数（core-v1 §11.13）。
+/// KhaenCrossfadeBudgetV1 字节数（core-v1 §11.13）。
 pub const CROSSFADE_BUDGET_BYTES: usize = 64;
 /// 旧图 quarantine 槽数（core-v1 §3.3/§7.6）。
 pub const GRAPH_QUARANTINE_SLOTS: usize = QUARANTINE_SLOTS;
@@ -94,15 +93,15 @@ pub const PLAN_FLAG_CROSSFADE: u8 = 1 << 2;
 pub const PLAN_FLAG_EXTENDED_TAPS_ADMITTED: u8 = 1 << 3;
 /// plan header flags 已知位掩码（bit0..bit4；bit5..7=0，core-v1 v1.1.3 errata E4/§11.10）。
 pub const PLAN_FLAG_MASK: u8 = 0x1F;
-/// TspiCrossfadeBudgetV1.flags bit0=admission_passed（core-v1 §11.13）。
+/// KhaenCrossfadeBudgetV1.flags bit0=admission_passed（core-v1 §11.13）。
 pub const CROSSFADE_FLAG_ADMISSION_PASSED: u32 = 1 << 0;
-/// TspiCrossfadeBudgetV1.flags bit1=d_aligned（core-v1 §11.13）。
+/// KhaenCrossfadeBudgetV1.flags bit1=d_aligned（core-v1 §11.13）。
 pub const CROSSFADE_FLAG_D_ALIGNED: u32 = 1 << 1;
-/// TspiCrossfadeBudgetV1.flags 已知位掩码。
+/// KhaenCrossfadeBudgetV1.flags 已知位掩码。
 pub const CROSSFADE_FLAG_MASK: u32 = CROSSFADE_FLAG_ADMISSION_PASSED | CROSSFADE_FLAG_D_ALIGNED;
-/// TspiSwapAckV1.flags bit0=retire_ready（§11.13；权威值是 retire_ready 原子）。
+/// KhaenSwapAckV1.flags bit0=retire_ready（§11.13；权威值是 retire_ready 原子）。
 pub const SWAP_ACK_FLAG_RETIRE_READY: u8 = 1 << 0;
-/// TspiSwapAckV1.flags 已知位掩码。
+/// KhaenSwapAckV1.flags 已知位掩码。
 pub const SWAP_ACK_FLAG_MASK: u8 = SWAP_ACK_FLAG_RETIRE_READY;
 /// crossfade 预算不足拒绝码（core-v1 §9.2 code 123；待 integrator 提升到 core::rt）。
 pub const ERR_CROSSFADE_BUDGET: RtStatus = RtStatus::from_code(123);
@@ -133,7 +132,7 @@ pub const fn total_delay_q16(delay_samples: u32, delay_q16: u32) -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// TspiSwapAckV1（64 B / align 64；core-v1 §11.13）
+// KhaenSwapAckV1（64 B / align 64；core-v1 §11.13）
 // ---------------------------------------------------------------------------
 
 /// RT 可见的 swap all-worker ack（§11.13；不是 Copy，needs_drop==false）。
@@ -144,7 +143,7 @@ pub const fn total_delay_q16(delay_samples: u32, delay_q16: u32) -> u64 {
 /// plain 字段只允许在 RD-2 发布（ARMED）之前由 NONRT 写；RT 只写 ack_mask/retire_ready 原子。
 #[repr(C, align(64))]
 #[derive(Debug)]
-pub struct TspiSwapAckV1 {
+pub struct KhaenSwapAckV1 {
     /// 待 ack 的 plan（= 新版本）。
     pub plan_version: u32,
     /// expected workers（2/4；all-ack 用 ACK_MASK(expected)）。
@@ -173,7 +172,7 @@ pub struct TspiSwapAckV1 {
     pub reserved4: u64,
 }
 
-impl TspiSwapAckV1 {
+impl KhaenSwapAckV1 {
     /// 全零构造（admission 一次分配/测试；未 init 前 validate 拒绝）。
     pub const fn new() -> Self {
         Self {
@@ -298,7 +297,7 @@ impl TspiSwapAckV1 {
     ///
     /// 校验 block 的 expected/version/cutoff/三 phase 位图全部到齐；通过后把这些 worker 记入
     /// swap ack 并置 retire_ready（一个 4 worker all-ack 块即满足"每个 worker 都用过新版本"）。
-    pub fn note_block_all_ack(&self, block: &TspiBlockAckV1) -> RtStatus {
+    pub fn note_block_all_ack(&self, block: &KhaenBlockAckV1) -> RtStatus {
         let expected = self.expected_workers;
         if !expected_valid(expected) {
             return RtStatus::ERR_ADMISSION_SCHED;
@@ -389,14 +388,14 @@ impl TspiSwapAckV1 {
     }
 }
 
-impl Default for TspiSwapAckV1 {
+impl Default for KhaenSwapAckV1 {
     fn default() -> Self {
         Self::new()
     }
 }
 
 // ---------------------------------------------------------------------------
-// TspiCrossfadeBudgetV1（64 B / align 64；core-v1 §11.13 I06）
+// KhaenCrossfadeBudgetV1（64 B / align 64；core-v1 §11.13 I06）
 // ---------------------------------------------------------------------------
 
 /// crossfade 双图/双历史峰值预算（§11.13 I06；不是 Copy，needs_drop==false）。
@@ -405,7 +404,7 @@ impl Default for TspiSwapAckV1 {
 /// 字段在 RD-2 发布（ARMED/commit）后只读，RT 不写。
 #[repr(C, align(64))]
 #[derive(Debug)]
-pub struct TspiCrossfadeBudgetV1 {
+pub struct KhaenCrossfadeBudgetV1 {
     /// 旧 plan 版本。
     pub old_plan_version: u32,
     /// 新 plan 版本。
@@ -430,7 +429,7 @@ pub struct TspiCrossfadeBudgetV1 {
     pub reserved: u64,
 }
 
-impl TspiCrossfadeBudgetV1 {
+impl KhaenCrossfadeBudgetV1 {
     /// 构造未校验预算（flags=0、reserved=0；版本 0 表示调用者暂未知，由 registry 回填）。
     #[allow(clippy::too_many_arguments)]
     pub const fn new(
@@ -511,7 +510,7 @@ impl TspiCrossfadeBudgetV1 {
     }
 }
 
-impl Default for TspiCrossfadeBudgetV1 {
+impl Default for KhaenCrossfadeBudgetV1 {
     fn default() -> Self {
         Self::new(0, 0, 0, 0, 0, 0, 0, 0, 0)
     }
@@ -639,7 +638,7 @@ fn max_output_delay(profile: &[u64; MAX_OUTPUT_CHANNELS], out_count: usize) -> u
 pub fn validate_crossfade(
     old: &PlanArena,
     new: &PlanArena,
-    budget: &TspiCrossfadeBudgetV1,
+    budget: &KhaenCrossfadeBudgetV1,
 ) -> Result<CrossfadeCheck, RtStatus> {
     let status = budget.validate();
     if !status.is_ok() {
@@ -1094,19 +1093,19 @@ pub struct PlanArenaMemory {
 
 /// [NONRT] 一个已准入 plan arena。
 ///
-/// 唯一所有者是 PlanRegistry 里的 Arc 强引用；[RT] 只通过 ptr_u64 拿到与 TspiPlanHeaderV1
+/// 唯一所有者是 PlanRegistry 里的 Arc 强引用；[RT] 只通过 ptr_u64 拿到与 KhaenPlanHeaderV1
 /// 同址的裸地址（core-v1 §13.4 Lemma 1/2），绝不持有 Arc/引用所有权。本类型有隐式字段析构，
 /// 只允许在 CTL（NONRT）发生（R-DROP-04/05）。
 #[derive(Debug)]
 pub struct PlanArena {
     version: PlanVersion,
     graph_id: [u8; 32],
-    header: TspiPlanHeaderV1,
-    paths: Vec<TspiPathV1>,
-    diags: Vec<TspiDiagFirV1>,
-    roles: Vec<TspiRoleV1>,
+    header: KhaenPlanHeaderV1,
+    paths: Vec<KhaenPathV1>,
+    diags: Vec<KhaenDiagFirV1>,
+    roles: Vec<KhaenRoleV1>,
     /// plan ABI v2 per-role IIR 表项（空 = 无 PEQ；v1 plan 恒空）。
-    iir: Vec<TspiRoleIirV2>,
+    iir: Vec<KhaenRoleIirV2>,
     coeffs: Vec<u8>,
     raw_bytes: usize,
     admission: Option<AdmissionReport>,
@@ -1125,27 +1124,27 @@ impl PlanArena {
     }
 
     /// plan 头（含 registry 分配的 plan_version）。
-    pub fn header(&self) -> &TspiPlanHeaderV1 {
+    pub fn header(&self) -> &KhaenPlanHeaderV1 {
         &self.header
     }
 
     /// path 表。
-    pub fn paths(&self) -> &[TspiPathV1] {
+    pub fn paths(&self) -> &[KhaenPathV1] {
         &self.paths
     }
 
     /// diag FIR 表。
-    pub fn diags(&self) -> &[TspiDiagFirV1] {
+    pub fn diags(&self) -> &[KhaenDiagFirV1] {
         &self.diags
     }
 
     /// role 表。
-    pub fn roles(&self) -> &[TspiRoleV1] {
+    pub fn roles(&self) -> &[KhaenRoleV1] {
         &self.roles
     }
 
     /// plan ABI v2 per-role IIR 表项（空 = 无 PEQ；GAP-T66-3）。
-    pub fn iir(&self) -> &[TspiRoleIirV2] {
+    pub fn iir(&self) -> &[KhaenRoleIirV2] {
         &self.iir
     }
 
@@ -1182,7 +1181,7 @@ impl PlanArena {
 
     /// plan arena 基址（= header 地址；RT 只把它当数值，不解引用 owned 类型）。
     pub fn ptr_u64(&self) -> u64 {
-        &self.header as *const TspiPlanHeaderV1 as u64
+        &self.header as *const KhaenPlanHeaderV1 as u64
     }
 
     /// plan 是否声明 crossfade（flags bit2）。
@@ -1262,11 +1261,11 @@ fn check_coeff_range(offset: u64, len: u32, taps: u32, total_coeff: usize) -> Re
 /// |a1|<1+a2）、全部系数有限。
 fn parse_plan_iir(
     bytes: &[u8],
-    header: &TspiPlanHeaderV1,
+    header: &KhaenPlanHeaderV1,
     coeff_base: usize,
     total_coeff: usize,
-    roles: &[TspiRoleV1],
-) -> Result<Vec<TspiRoleIirV2>, RtStatus> {
+    roles: &[KhaenRoleV1],
+) -> Result<Vec<KhaenRoleIirV2>, RtStatus> {
     let offset = header.reserved3[0] as usize;
     let count = header.reserved3[1] as usize;
     if offset == 0 || count == 0 {
@@ -1278,7 +1277,7 @@ fn parse_plan_iir(
     if count > MAX_OUTPUT_ROLES {
         return Err(RtStatus::ERR_CAPACITY);
     }
-    let header_bytes = size_of::<TspiPlanIirHeaderV2>();
+    let header_bytes = size_of::<KhaenPlanIirHeaderV2>();
     if header_bytes != PLAN_IIR_HEADER_BYTES {
         return Err(RtStatus::ERR_BAD_LAYOUT);
     }
@@ -1292,21 +1291,21 @@ fn parse_plan_iir(
     if offset < 128 || offset % 8 != 0 || table_end > coeff_base {
         return Err(RtStatus::ERR_BAD_LAYOUT);
     }
-    let iir_header: TspiPlanIirHeaderV2 = read_pod(bytes, offset)?;
-    if iir_header.magic != TSPI_PLAN_IIR_MAGIC
-        || iir_header.version != TSPI_PLAN_IIR_VERSION
+    let iir_header: KhaenPlanIirHeaderV2 = read_pod(bytes, offset)?;
+    if iir_header.magic != KHAEN_PLAN_IIR_MAGIC
+        || iir_header.version != KHAEN_PLAN_IIR_VERSION
         || iir_header.entry_bytes as usize != PLAN_IIR_ENTRY_BYTES
         || iir_header.entry_count as usize != count
         || iir_header.reserved0 != 0
     {
         return Err(RtStatus::ERR_BAD_LAYOUT);
     }
-    let mut entries: Vec<TspiRoleIirV2> = Vec::with_capacity(count);
+    let mut entries: Vec<KhaenRoleIirV2> = Vec::with_capacity(count);
     let mut previous_role: Option<u16> = None;
     let mut index = 0usize;
     while index < count {
         let entry_offset = offset + header_bytes + index * PLAN_IIR_ENTRY_BYTES;
-        let entry: TspiRoleIirV2 = read_pod(bytes, entry_offset)?;
+        let entry: KhaenRoleIirV2 = read_pod(bytes, entry_offset)?;
         if entry.order != 2
             || entry.flags != 0
             || entry.reserved0 != 0
@@ -1349,9 +1348,7 @@ fn parse_plan_iir(
     }
     // 每个 peq_count>0 的 role 必须有且只有一条 IIR 表项（parse 阶段按 role_id 唯一保证后者）。
     for role in roles {
-        if role.peq_count != 0
-            && !entries.iter().any(|entry| entry.role_id == role.role_id)
-        {
+        if role.peq_count != 0 && !entries.iter().any(|entry| entry.role_id == role.role_id) {
             return Err(RtStatus::ERR_ROLES);
         }
     }
@@ -1409,8 +1406,8 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
     if bytes.len() < 128 {
         return Err(RtStatus::ERR_BAD_LAYOUT);
     }
-    let mut header: TspiPlanHeaderV1 = read_pod(bytes, 0)?;
-    if header.magic != TSPI_PLAN_MAGIC {
+    let mut header: KhaenPlanHeaderV1 = read_pod(bytes, 0)?;
+    if header.magic != KHAEN_PLAN_MAGIC {
         return Err(RtStatus::ERR_MAGIC);
     }
     // plan ABI 版本（GAP-T66-3）：v1 旧 plan 与 v2 per-role IIR plan 都接受；
@@ -1424,7 +1421,7 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
     if header.reserved0 != 0 || header.reserved1 != 0 || header.reserved2 != 0 {
         return Err(RtStatus::ERR_BAD_LAYOUT);
     }
-    if header.abi_version == TSPI_PLAN_ABI_V1 {
+    if header.abi_version == KHAEN_PLAN_ABI_V1 {
         if header.reserved3 != [0u32; 3] {
             return Err(RtStatus::ERR_BAD_LAYOUT);
         }
@@ -1439,9 +1436,7 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
         if header.reserved3[1] as usize > MAX_OUTPUT_ROLES {
             return Err(RtStatus::ERR_CAPACITY);
         }
-        if header.reserved3[0] != 0
-            && (header.reserved3[0] < 128 || header.reserved3[0] % 8 != 0)
-        {
+        if header.reserved3[0] != 0 && (header.reserved3[0] < 128 || header.reserved3[0] % 8 != 0) {
             return Err(RtStatus::ERR_BAD_LAYOUT);
         }
     }
@@ -1508,19 +1503,19 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
     let path_region = table_region(
         header.path_table_offset,
         header.path_count as usize,
-        size_of::<TspiPathV1>(),
+        size_of::<KhaenPathV1>(),
         coeff_base,
     )?;
     let diag_region = table_region(
         header.diag_table_offset,
         header.diag_fir_count as usize,
-        size_of::<TspiDiagFirV1>(),
+        size_of::<KhaenDiagFirV1>(),
         coeff_base,
     )?;
     let role_region = table_region(
         header.role_table_offset,
         header.role_table_count as usize,
-        size_of::<TspiRoleV1>(),
+        size_of::<KhaenRoleV1>(),
         coeff_base,
     )?;
     if header.affinity_count > RT_WORKERS as u16 {
@@ -1543,14 +1538,14 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
     }
 
     // path 表：按 (out_index,in_index) 严格升序、无重复（§11.10 表顺序）。
-    let mut paths: Vec<TspiPathV1> = Vec::with_capacity(header.path_count as usize);
+    let mut paths: Vec<KhaenPathV1> = Vec::with_capacity(header.path_count as usize);
     if let Some((start, _len)) = path_region {
         let count = header.path_count as usize;
         let mut index = 0usize;
         let mut previous: Option<(u16, u16)> = None;
         while index < count {
-            let offset = start + index * size_of::<TspiPathV1>();
-            let path: TspiPathV1 = read_pod(bytes, offset)?;
+            let offset = start + index * size_of::<KhaenPathV1>();
+            let path: KhaenPathV1 = read_pod(bytes, offset)?;
             if path.in_index >= header.n_in || path.out_index >= header.n_out {
                 return Err(RtStatus::ERR_PATH_TABLE);
             }
@@ -1582,14 +1577,14 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
     }
 
     // diag FIR 表：按 out_index 严格升序、无重复。
-    let mut diags: Vec<TspiDiagFirV1> = Vec::with_capacity(header.diag_fir_count as usize);
+    let mut diags: Vec<KhaenDiagFirV1> = Vec::with_capacity(header.diag_fir_count as usize);
     if let Some((start, _len)) = diag_region {
         let count = header.diag_fir_count as usize;
         let mut index = 0usize;
         let mut previous: Option<u16> = None;
         while index < count {
-            let offset = start + index * size_of::<TspiDiagFirV1>();
-            let diag: TspiDiagFirV1 = read_pod(bytes, offset)?;
+            let offset = start + index * size_of::<KhaenDiagFirV1>();
+            let diag: KhaenDiagFirV1 = read_pod(bytes, offset)?;
             if diag.out_index >= header.n_out {
                 return Err(RtStatus::ERR_PATH_TABLE);
             }
@@ -1617,14 +1612,14 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
     }
 
     // role 表：按 role_id 严格升序、无重复。
-    let mut roles: Vec<TspiRoleV1> = Vec::with_capacity(header.role_table_count as usize);
+    let mut roles: Vec<KhaenRoleV1> = Vec::with_capacity(header.role_table_count as usize);
     if let Some((start, _len)) = role_region {
         let count = header.role_table_count as usize;
         let mut index = 0usize;
         let mut previous: Option<u16> = None;
         while index < count {
-            let offset = start + index * size_of::<TspiRoleV1>();
-            let role: TspiRoleV1 = read_pod(bytes, offset)?;
+            let offset = start + index * size_of::<KhaenRoleV1>();
+            let role: KhaenRoleV1 = read_pod(bytes, offset)?;
             if role.role_id as usize >= MAX_OUTPUT_ROLES {
                 return Err(RtStatus::ERR_ROLES);
             }
@@ -1663,7 +1658,7 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
 
     // GAP-T66-3：v1 plan 没有 IIR 系数区，role.peq_count>0 必须拒收（禁止静默丢弃 PEQ）；
     // v2 plan 的 IIR 表在 role 表之后解析（role 绑定/系数区间/CRC）。
-    if header.abi_version == TSPI_PLAN_ABI_V1 && roles.iter().any(|role| role.peq_count != 0) {
+    if header.abi_version == KHAEN_PLAN_ABI_V1 && roles.iter().any(|role| role.peq_count != 0) {
         return Err(RtStatus::ERR_ROLES);
     }
     let iir = parse_plan_iir(bytes, &header, coeff_base, total_coeff, &roles)?;
@@ -1695,8 +1690,8 @@ fn parse_plan_arena(token: &PlanToken, version: PlanVersion) -> Result<PlanArena
 /// current_plan_ptr/version 原子替换为 pending 并置 switch_state=SWITCHED（Release）。
 /// 成功返回新 plan_version；IDLE/SWITCHED/ABORT、pending 标签非法或版本倒退 ->
 /// ERR_SWITCH_BUSY / RT_E_PLAN_MISMATCH，绝不部分切换。
-pub fn commit_swap_at_block_boundary(ctl: &TspiRtControlV1) -> Result<PlanVersion, RtStatus> {
-    if ctl.magic != TSPI_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
+pub fn commit_swap_at_block_boundary(ctl: &KhaenRtControlV1) -> Result<PlanVersion, RtStatus> {
+    if ctl.magic != KHAEN_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
         return Err(RtStatus::ERR_BAD_LAYOUT);
     }
     if ctl.safety_request.load(Ordering::Acquire) != 0 {
@@ -1737,7 +1732,7 @@ pub fn commit_swap_at_block_boundary(ctl: &TspiRtControlV1) -> Result<PlanVersio
 /// 同时推进两处原子状态：swap ack（RG-2 位）与旧图 quarantine 的剩余位（R-DROP-06）。
 /// 任一标签不符即返回对应错误，且不部分推进（先 swap ack 后 quarantine 位）。
 pub fn note_worker_switched(
-    swap_ack: &TspiSwapAckV1,
+    swap_ack: &KhaenSwapAckV1,
     quarantine: &GraphQuarantine,
     quarantine_slot: usize,
     worker: u8,
@@ -1757,10 +1752,10 @@ pub fn note_worker_switched(
 /// 语义：block 在新 plan_version 上三 phase 全部 all-ack 且 cutoff=0 => 每个 worker 都已离开
 /// 旧图；因此逐 worker 清 quarantine 剩余位（工人失联则位永不清，槽永不释放）。
 pub fn note_block_switched(
-    swap_ack: &TspiSwapAckV1,
+    swap_ack: &KhaenSwapAckV1,
     quarantine: &GraphQuarantine,
     quarantine_slot: usize,
-    block: &TspiBlockAckV1,
+    block: &KhaenBlockAckV1,
     old_plan_version: PlanVersion,
     old_epoch: u64,
     new_plan_version: PlanVersion,
@@ -1972,7 +1967,7 @@ impl PlanRegistry {
     }
 
     /// 指定版本 plan 的 ABI v2 per-role IIR 表项（v1/无 PEQ 为空切片；GAP-T66-3）。
-    pub fn iir_entries(&self, version: PlanVersion) -> Option<&[TspiRoleIirV2]> {
+    pub fn iir_entries(&self, version: PlanVersion) -> Option<&[KhaenRoleIirV2]> {
         self.arc(version).map(|arena| arena.iir())
     }
 
@@ -2041,7 +2036,7 @@ impl PlanRegistry {
         &mut self,
         old: PlanVersion,
         new: PlanToken,
-        budget: &TspiCrossfadeBudgetV1,
+        budget: &KhaenCrossfadeBudgetV1,
     ) -> Result<PlanVersion, RtStatus> {
         let status = budget.validate();
         if !status.is_ok() {
@@ -2070,7 +2065,7 @@ impl PlanRegistry {
         &mut self,
         old: PlanVersion,
         new: PlanToken,
-        budget: &mut TspiCrossfadeBudgetV1,
+        budget: &mut KhaenCrossfadeBudgetV1,
         backend: &mut B,
     ) -> Result<PlanVersion, RtStatus> {
         let status = budget.validate();
@@ -2182,8 +2177,8 @@ impl PlanRegistry {
     pub fn arm(
         &mut self,
         token: StageToken,
-        ctl: &TspiRtControlV1,
-        swap_ack: &mut TspiSwapAckV1,
+        ctl: &KhaenRtControlV1,
+        swap_ack: &mut KhaenSwapAckV1,
         epoch_id: u64,
     ) -> RtStatus {
         if self.staged != Some(token.version) {
@@ -2192,7 +2187,7 @@ impl PlanRegistry {
         if self.armed {
             return RtStatus::ERR_SWITCH_BUSY;
         }
-        if ctl.magic != TSPI_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
+        if ctl.magic != KHAEN_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
             return RtStatus::ERR_BAD_LAYOUT;
         }
         if ctl.switch_state.load(Ordering::Acquire) != SWITCH_IDLE {
@@ -2242,8 +2237,8 @@ impl PlanRegistry {
     /// 之后只有 retire gate 全过才能释放。
     pub fn complete_swap(
         &mut self,
-        ctl: &TspiRtControlV1,
-        swap_ack: &TspiSwapAckV1,
+        ctl: &KhaenRtControlV1,
+        swap_ack: &KhaenSwapAckV1,
     ) -> Result<PlanVersion, RtStatus> {
         let version = match self.staged {
             Some(value) => value,
@@ -2252,7 +2247,7 @@ impl PlanRegistry {
         if !self.armed {
             return Err(RtStatus::ERR_SWITCH_BUSY);
         }
-        if ctl.magic != TSPI_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
+        if ctl.magic != KHAEN_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
             return Err(RtStatus::ERR_BAD_LAYOUT);
         }
         if ctl.switch_state.load(Ordering::Acquire) != SWITCH_SWITCHED {
@@ -2362,11 +2357,11 @@ impl PlanRegistry {
     }
 
     /// [NONRT] 中止已 arm 的切换并把 switch_state 回 IDLE（旧 plan 保持生效）。
-    pub fn abort_and_disarm(&mut self, token: StageToken, ctl: &TspiRtControlV1) -> RtStatus {
+    pub fn abort_and_disarm(&mut self, token: StageToken, ctl: &KhaenRtControlV1) -> RtStatus {
         if self.staged != Some(token.version) {
             return RtStatus::ERR_PLAN_STALE;
         }
-        if ctl.magic != TSPI_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
+        if ctl.magic != KHAEN_RING_MAGIC || ctl.abi_version != ABI_VERSION || ctl.size != 128 {
             return RtStatus::ERR_BAD_LAYOUT;
         }
         let state = ctl.switch_state.load(Ordering::Acquire);
@@ -2441,10 +2436,10 @@ impl PlanRegistry {
     /// 只有返回 Some 才表示 control 可/已 drop+unmap 旧 arena（本函数已执行 Arc drop）。
     pub fn poll_retire(
         &mut self,
-        ctl: &TspiRtControlV1,
-        swap_ack: &TspiSwapAckV1,
+        ctl: &KhaenRtControlV1,
+        swap_ack: &KhaenSwapAckV1,
     ) -> Option<PlanVersion> {
-        if ctl.magic == TSPI_RING_MAGIC && ctl.abi_version == ABI_VERSION && ctl.size == 128 {
+        if ctl.magic == KHAEN_RING_MAGIC && ctl.abi_version == ABI_VERSION && ctl.size == 128 {
             self.mirror_switch_idle = ctl.switch_state.load(Ordering::Acquire) == SWITCH_IDLE;
         } else {
             self.mirror_switch_idle = false;
@@ -2601,12 +2596,12 @@ impl Default for PlanRegistry {
 const _: () = {
     assert!(SWAP_ACK_BYTES == 64);
     assert!(CROSSFADE_BUDGET_BYTES == 64);
-    assert!(size_of::<TspiSwapAckV1>() == SWAP_ACK_BYTES);
-    assert!(align_of::<TspiSwapAckV1>() == 64);
-    assert!(!needs_drop::<TspiSwapAckV1>());
-    assert!(size_of::<TspiCrossfadeBudgetV1>() == CROSSFADE_BUDGET_BYTES);
-    assert!(align_of::<TspiCrossfadeBudgetV1>() == 64);
-    assert!(!needs_drop::<TspiCrossfadeBudgetV1>());
+    assert!(size_of::<KhaenSwapAckV1>() == SWAP_ACK_BYTES);
+    assert!(align_of::<KhaenSwapAckV1>() == 64);
+    assert!(!needs_drop::<KhaenSwapAckV1>());
+    assert!(size_of::<KhaenCrossfadeBudgetV1>() == CROSSFADE_BUDGET_BYTES);
+    assert!(align_of::<KhaenCrossfadeBudgetV1>() == 64);
+    assert!(!needs_drop::<KhaenCrossfadeBudgetV1>());
     assert!(!needs_drop::<GraphQuarantine>());
     assert!(!needs_drop::<PlanVersion>());
     assert!(!needs_drop::<RtStatus>());

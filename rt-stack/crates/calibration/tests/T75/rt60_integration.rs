@@ -1,4 +1,4 @@
-// T75：goal-6 RT60/CSD 接入 tspi-cal job 测量流水线（离线 fake；无板端/无声卡）。
+// T75：goal-6 RT60/CSD 接入 khaen-cal job 测量流水线（离线 fake；无板端/无声卡）。
 //
 // 注册方式：crates/calibration/src/stage_backend.rs 末尾
 //   #[cfg(test)] mod t75_rt60_tests { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/T75/rt60_integration.rs")); }
@@ -21,7 +21,7 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn temp_path(tag: &str) -> std::path::PathBuf {
     let base = std::env::temp_dir();
     let id = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
-    base.join(format!("tspi-t75-{tag}-{}-{id}", std::process::id()))
+    base.join(format!("khaen-t75-{tag}-{}-{id}", std::process::id()))
 }
 
 fn hex64() -> String {
@@ -234,7 +234,7 @@ fn t75_rt60_artifacts_are_written_by_default_and_do_not_block_pipeline() {
     assert!(kind_list.contains(&"rt60_csd"), "kinds: {kind_list:?}");
     assert!(kind_list.contains(&"rt60_ir"), "kinds: {kind_list:?}");
     let summary = artifact(&snapshot, &root, "rt60/summary.json").expect("rt60 summary");
-    assert!(summary.contains("\"schema\":\"tspi-rt60/v1\""));
+    assert!(summary.contains("\"schema\":\"khaen-rt60/v1\""));
     assert!(summary.contains("\"kind\":\"deconvolved_capture\""));
     assert!(summary.contains("\"simulated\":true"));
     assert!(summary.contains("\"real_measurement\":\"NOT_RUN\""));
@@ -245,7 +245,7 @@ fn t75_rt60_artifacts_are_written_by_default_and_do_not_block_pipeline() {
         "fake-engine IR must not claim valid RT60"
     );
     let csd = artifact(&snapshot, &root, "csd/FL.json").expect("csd artifact");
-    assert!(csd.contains("\"schema\":\"tspi-rt60-csd/v1\""));
+    assert!(csd.contains("\"schema\":\"khaen-rt60-csd/v1\""));
     assert!(csd.contains("\"nperseg\":1024"));
     let csv = artifact(&snapshot, &root, "rt60/rt60.csv").expect("rt60 csv");
     assert!(csv.starts_with("label,ir,center_hz,method,rt60_s"));

@@ -2,7 +2,7 @@
 """Multipoint measurement ingestion for h-diag: manifest, analysis parsing,
 measurement-consistency gate, complex H assembly.
 
-Input contract (manifest: tspi-hdiag-positions/v1)
+Input contract (manifest: khaen-hdiag-positions/v1)
 --------------------------------------------------
 The design/holdout split and the file -> (position, actuator) mapping come ONLY from
 the pre-registered manifest.  h-diag never guesses a role from a file name.  File

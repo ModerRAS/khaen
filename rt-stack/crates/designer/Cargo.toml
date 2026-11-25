@@ -1,4 +1,4 @@
-# TSPI FIR 工具箱设计器（T06 scaffold；leaf T10/T11/T33-T41/T55）
+# KHAEN FIR 工具箱设计器（T06 scaffold；leaf T10/T11/T33-T41/T55）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-designer"

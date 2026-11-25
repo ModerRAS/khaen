@@ -1,4 +1,4 @@
-//! [NONRT] TSPI 自研离线 file runner（crate `khaen-file-runner`）—— WBS **T14** 写域。
+//! [NONRT] KHAEN 自研离线 file runner（crate `khaen-file-runner`）—— WBS **T14** 写域。
 //!
 //! 本 crate 是 P1 自研 RT-first DSP 栈的**文件输入执行器**（file runner）：解析/解包自有文件
 //! 格式，把 core plan 在同一语义下执行，并产出 identity 保护与完整图版本/元数据。它**不直接
@@ -12,8 +12,8 @@
 //! | 模块 | 文件 | 合同 |
 //! | --- | --- | --- |
 //! | `wav` | RIFF/WAVE 输入 + f32 系数/输出 WAV | 自有解析/解包/写回；采样格式与 T22 `rt-host::format` 逐位同语义（S16/S24/S32/F32）；固定 f32 精度 |
-//! | `fir` | `tspi-fir/v1` manifest | 对齐 T55 reporter 的字段面与 `spec/fir-toolbox.md` §2.2 校验规则 1–7（taps/sha256/finite/reference/端点/预算） |
-//! | `ir` | `tspi-cal-ir-draft/v1` 校准 IR 草案 | 对齐 T13 calibration adapter 的 version/hash/role/fs/taps/placement/P/phase/D、stale 六原因与 `PostEncoding` 二选一（禁止双叠） |
+//! | `fir` | `khaen-fir/v1` manifest | 对齐 T55 reporter 的字段面与 `spec/fir-toolbox.md` §2.2 校验规则 1–7（taps/sha256/finite/reference/端点/预算） |
+//! | `ir` | `khaen-cal-ir-draft/v1` 校准 IR 草案 | 对齐 T13 calibration adapter 的 version/hash/role/fs/taps/placement/P/phase/D、stale 六原因与 `PostEncoding` 二选一（禁止双叠） |
 //! | `graph` / `session` | `khaen-file-runner/v1` session manifest | 对齐 T12 `core::compile` 的 `CompileInput`/`CompileOptions`/`CompiledPlans` 与 T09 `WorkerDagPlan`；完整图版本 = 规范化 SHA-256（含 coefficients/roles/fs/B/D/IR binding，不含 plan_version） |
 //! | `runner` | 执行 + `khaen-file-runner-report/v1` 元数据 | core factorized 图经 T09 四 worker 静态 DAG 执行；flush = L_F−1（T03 SPEC §3.3）；identity 保护 = G=I 但保留 P_post（core-v1 §5.5 fallback） |
 //! | `source` | 固定 buffer block source（host 接口） | `B x N` planar 块 + flush 零 + block 对齐；runner 与 T26 host 共用同一输入切分，不占 ALSA |
@@ -29,7 +29,7 @@
 //! 权威输入（只读）：`rt-stack/spec/core-v1.md`（T02 v1.1.1 §6.3/§11/§12.3/§15.1）、
 //! `rt-stack/reference/SPEC.md`（T03 §3 长度/尾/flush/identity 保护）、`rt-stack/spec/fir-toolbox.md`
 //! （T04 §2/§7.2/§9）、`rt-stack/spec/compat-matrix.md`（T05 Y12–Y24）、
-//! `scratch/lead/planner/{TSPI-RT-STACK-WBS.md,DSP-HOST-DECISION.md}`。
+//! `scratch/lead/planner/{KHAEN-RT-STACK-WBS.md,DSP-HOST-DECISION.md}`。
 //!
 //! # 精度与版本锁
 //!
@@ -61,7 +61,7 @@ pub const REPORT_SCHEMA: &str = "khaen-file-runner-report/v1";
 /// 图版本 hash 算法标识（规范化序列化 + SHA-256）。
 pub const GRAPH_HASH_ALGO: &str = "sha256-canonical-v1";
 /// 图版本 hash 域前缀（避免与 plan graph_id / IR hash 混用）。
-pub const GRAPH_HASH_DOMAIN: &str = "TSPI-FILE-RUNNER-GRAPH-v1";
+pub const GRAPH_HASH_DOMAIN: &str = "KHAEN-FILE-RUNNER-GRAPH-v1";
 /// 精度锁唯一合法值（f32 执行路径；f64 只作离线参考）。
 pub const PRECISION_LOCK: &str = "f32-strict";
 /// runner 名称（写进报告）。

@@ -7,7 +7,7 @@
 //! **不写盘**、**不做 timebase 数学**（coarse/frac/ppm 反演归 T49）、**不做解卷积**。
 //!
 //! 权威输入（只读）：
-//! - WBS T48 行与 §1/§6/§7（scratch/lead/planner/TSPI-RT-STACK-WBS.md）；
+//! - WBS T48 行与 §1/§6/§7（scratch/lead/planner/KHAEN-RT-STACK-WBS.md）；
 //! - DSP-HOST-DECISION §2.1–§2.3（新 daemon 保存 raw/source/slot/repeat/公共时轴；UMIK 独立 USB ADC 1ch；
 //!   MOTU 可选电学 reference 是另一独立通道；缺有效时轴不能产可应用矩阵）；
 //! - docs/MIMO-COEFF-PLAN.md §2.3（session/positions 目录与 position label/role/weight）与 §2.4a（相位语义）；
@@ -16,15 +16,15 @@
 //! - rt-stack/spec/compat-matrix.md Y23/Y24（数值/单位校验、artifact 版本/hash/stale 精神）；
 //! - calibration-spec/CONTRACT.md §2/§3（source 分析产物复用 measure-multi 的 schema/字段语义）。
 //!
-//! # 输入目录契约（tspi-modal-ingest/v1，本模块冻结）
+//! # 输入目录契约（khaen-modal-ingest/v1，本模块冻结）
 //!
 //! ~~~text
 //! <session_dir>/
-//!   session.json                 schema tspi-mimo-measurement/v1（必需）
+//!   session.json                 schema khaen-mimo-measurement/v1（必需）
 //!   SHA256SUMS                   "<64 lowercase hex>  <relative path>"，逐行（必需；覆盖本模块读取的全部文件）
 //!   positions/
 //!     <position_dir>/
-//!       position.json            schema tspi-mimo-position/v1（label/role/weight 必填）
+//!       position.json            schema khaen-mimo-position/v1（label/role/weight 必填）
 //!       capture.raw              UMIK 独立 USB ADC 1ch 采集（原样，不重采样；必需）
 //!       reference.raw            MOTU 可选电学 reference，另一独立通道（session.reference 声明时必需）
 //!       <SPK>-ch<NN>.analysis.json   source：measure-multi 兼容分析产物（每 participant 必需）
@@ -47,7 +47,7 @@
 //!   且 slot 覆盖 0..participants.len()、render_frame_index 与 capture_sample_index 随 slot 严格递增。
 //!   全部 position 必须共享同一 session_id/epoch_id/graph_id（公共 render frame 基准；跨 position
 //!   不复用 capture 属正常，时间轴重建由 T49 完成）。
-//! - analysis.json：schema tspi-channel-measurement/v1 + meta schema khaen-calibration-meta/v1；
+//! - analysis.json：schema khaen-channel-measurement/v1 + meta schema khaen-calibration-meta/v1；
 //!   必须与 session 的 fs/设备/通道/sweep 参数一致，channel == speaker.out_index，FR 频点有限且严格递增，
 //!   freq_hz ∈ (0, fs/2]。onset_invalid=true / clock_ppm_ok=false / clock_ppm_significant=true 且
 //!   drift_corrected!=true → 拒交付。
@@ -91,13 +91,13 @@ use khaen_core::rt::{
 };
 
 /// session 清单 schema（本模块冻结）。
-pub const SESSION_SCHEMA: &str = "tspi-mimo-measurement/v1";
+pub const SESSION_SCHEMA: &str = "khaen-mimo-measurement/v1";
 /// position 清单 schema（本模块冻结）。
-pub const POSITION_SCHEMA: &str = "tspi-mimo-position/v1";
+pub const POSITION_SCHEMA: &str = "khaen-mimo-position/v1";
 /// 公共时轴 diag schema（本模块冻结）。
-pub const DIAG_SCHEMA: &str = "tspi-mimo-diag/v1";
+pub const DIAG_SCHEMA: &str = "khaen-mimo-diag/v1";
 /// source 分析产物 schema（复用 khaen-calibrate measure-multi；只读兼容）。
-pub const ANALYSIS_SCHEMA: &str = "tspi-channel-measurement/v1";
+pub const ANALYSIS_SCHEMA: &str = "khaen-channel-measurement/v1";
 /// source 分析产物 meta schema（复用 khaen-calibrate measure-multi；只读兼容）。
 pub const ANALYSIS_META_SCHEMA: &str = "khaen-calibration-meta/v1";
 /// 输入文件 hash 清单文件名。
@@ -498,13 +498,13 @@ pub struct StimulusInfo {
 /// 工具/版本声明（状态/证据链追溯）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolInfo {
-    /// 工具名（如 tspi-audio-daemon）。
+    /// 工具名（如 khaen-audio-daemon）。
     pub name: String,
     /// 工具版本。
     pub version: String,
 }
 
-/// session.json 解析结果（schema tspi-mimo-measurement/v1）。
+/// session.json 解析结果（schema khaen-mimo-measurement/v1）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct IngestSession {
     /// session 唯一 id（进入所有 diag/报告的公共时轴）。
@@ -565,7 +565,7 @@ impl IngestSession {
     }
 }
 
-/// position.json 解析结果（schema tspi-mimo-position/v1）。
+/// position.json 解析结果（schema khaen-mimo-position/v1）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PositionMeta {
     /// 测点标签（唯一；进入冻结清单/holdout 记录）。
@@ -623,7 +623,7 @@ pub struct MicClock {
     pub correction: DriftCorrection,
 }
 
-/// 一个参与者的公共时轴 diag（schema tspi-mimo-diag/v1）。
+/// 一个参与者的公共时轴 diag（schema khaen-mimo-diag/v1）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimebaseDiag {
     /// session id（必须等于 session.json）。
@@ -698,7 +698,7 @@ pub struct AnalysisPosition {
     pub weight: Option<f64>,
 }
 
-/// 单个 participant 的 source 分析结果（schema tspi-channel-measurement/v1）。
+/// 单个 participant 的 source 分析结果（schema khaen-channel-measurement/v1）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceAnalysis {
     /// 播放设备通道号（= speaker.out_index）。
@@ -2115,8 +2115,7 @@ fn parse_session(
     let block_frames = match opt_u64(entries, "block_frames", context)? {
         None => None,
         Some(value) => {
-            if value > u16::MAX as u64 || !khaen_core::rt::BLOCK_SIZES.contains(&(value as u16))
-            {
+            if value > u16::MAX as u64 || !khaen_core::rt::BLOCK_SIZES.contains(&(value as u16)) {
                 return Err(IngestError::unsupported(
                     format!("{context}.block_frames"),
                     format!("{value} is not a supported block size (64/128)"),

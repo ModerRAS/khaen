@@ -29,7 +29,7 @@ fs.mkdirSync(servedDir, { recursive: true });
 let served = template
   .replace('<style>\n/*__CSS__*/\n</style>', '<link rel="stylesheet" href="/calibration/style.css">')
   .replace('<script>\n/*__JS__*/\n</script>', '<script src="/calibration/app.js" defer></script>')
-  .replace('<title>TSPI Audio · Dirac 式校准流程向导（演示）</title>', '<title>TSPI 校准向导 · Calibration</title>');
+  .replace('<title>KHAEN Audio · Dirac 式校准流程向导（演示）</title>', '<title>KHAEN 校准向导 · Calibration</title>');
 if (served.includes('__CSS__') || served.includes('__JS__') || served.includes('__PILOT__')) throw new Error('served placeholder not replaced');
 if (/<style[\s>]/i.test(served) || !served.includes('src="/calibration/app.js"') || !served.includes('href="/calibration/style.css"')) {
   throw new Error('served page must use external calibration assets only');

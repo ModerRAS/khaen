@@ -360,7 +360,7 @@ fn save_auth_hash(path: &std::path::Path, hash: &str) -> Result<(), AppError> {
             .map_err(|e| AppError::internal(format!("创建目录失败: {e}")))?;
     }
     let file = AuthFile {
-        schema: "tspi-auth/v1".into(),
+        schema: "khaen-auth/v1".into(),
         algorithm: "argon2id".into(),
         password_hash: hash.to_string(),
         updated_unix: std::time::SystemTime::now()
@@ -602,7 +602,7 @@ mod tests {
         save_auth_hash(&p, &hash).unwrap();
         assert_eq!(load_auth_hash(&p).as_deref(), Some(hash.as_str()));
         let text = std::fs::read_to_string(&p).unwrap();
-        assert!(text.contains("tspi-auth/v1"));
+        assert!(text.contains("khaen-auth/v1"));
         assert!(text.contains("argon2id"));
         let _ = std::fs::remove_dir_all(&dir);
     }

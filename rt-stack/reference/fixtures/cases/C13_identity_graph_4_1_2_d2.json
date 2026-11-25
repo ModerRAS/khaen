@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C13_identity_graph_4_1_2_d2",
   "title": "identity graph G=I (D=2) over 4.1.2 7 roles/8ch container with scatter",
   "tags": [

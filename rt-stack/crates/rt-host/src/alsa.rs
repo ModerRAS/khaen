@@ -8,9 +8,9 @@
 //! - **duplex 协商**：`StreamCaps`（两方向独立能力）+ `DuplexRequest` → `negotiate`
 //!   一次定出 `HwParamsPlan`（format 优先级、48k/96k、period ∈ {64,128}、buffer 为
 //!   period 整数倍、方向间 period/buffer/rate/format 必须一致，见 core-v1 §11.9 单
-//!   `TspiHwParamsV1` 语义）。
+//!   `KhaenHwParamsV1` 语义）。
 //! - **actual 参数**：`RawActual`（backend 协商后的真实 hwparams）→ `validate_actual`
-//!   → `DuplexActual{ hw: TspiHwParamsV1, ... }`；**actual period ∉ {64,128} 直接
+//!   → `DuplexActual{ hw: KhaenHwParamsV1, ... }`；**actual period ∉ {64,128} 直接
 //!   ERR_DEVICE_PARAMS，禁止静默夹取/内部拆分**（§6.1 I11；负向对照见 tests/T17）。
 //!   `hwparams_hash` 给出 owner 交接/重开证据用的确定性哈希。
 //! - **启动/恢复状态机**：`DuplexSession` 驱动
@@ -71,7 +71,7 @@
 //! DSP-HOST-DECISION.md` §5/§6；`evidence/baseline/board-evidence/E1-DIGITAL-INPUT.md`
 //! 与 `e1-duplex-probe-20261116-220517.txt`（MOTU 实测 actual 参数）。
 
-use khaen_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
+use khaen_core::abi::{sample_format, KhaenHwParamsV1, ABI_VERSION};
 use khaen_core::events::EV_DEVICE_OWNER_CHANGE;
 use khaen_core::rt::{
     RtStatus, BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ,
@@ -662,11 +662,11 @@ pub struct RawActual {
     pub playback: StreamActual,
 }
 
-/// 校验通过的 duplex actual（冻结 `TspiHwParamsV1` + 计划 + 变更标记 + 哈希）。
+/// 校验通过的 duplex actual（冻结 `KhaenHwParamsV1` + 计划 + 变更标记 + 哈希）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DuplexActual {
     /// 冻结 ABI 硬件参数（§11.9；B 来源链 = `hw.period_frames`）。
-    pub hw: TspiHwParamsV1,
+    pub hw: KhaenHwParamsV1,
     /// 下发给 backend 的计划（对比 actual 判断是否需要重建 plan/新 epoch）。
     pub planned: HwParamsPlan,
     /// actual period 与计划不同（仍 ∈ {64,128}；调用方需 plan 重建 + 新 epoch）。
@@ -899,13 +899,13 @@ fn round_up_to_period(value: u32, period_frames: u32) -> Result<u32, AlsaError> 
 }
 
 // ---------------------------------------------------------------------------
-// actual 校验（actual period 硬规则 / 单 TspiHwParamsV1 语义 / stride / hash）
+// actual 校验（actual period 硬规则 / 单 KhaenHwParamsV1 语义 / stride / hash）
 // ---------------------------------------------------------------------------
 
-/// 校验 backend 的 actual 参数并构造冻结 `TspiHwParamsV1`。
+/// 校验 backend 的 actual 参数并构造冻结 `KhaenHwParamsV1`。
 ///
 /// **硬规则**：两方向 actual period 必须 ∈ {64,128}（否则 ERR_DEVICE_PARAMS，不得
-/// 静默夹取）；两方向 rate/format/period/buffer 必须一致（`TspiHwParamsV1` 只有一组）；
+/// 静默夹取）；两方向 rate/format/period/buffer 必须一致（`KhaenHwParamsV1` 只有一组）；
 /// actual 通道 ≥ 计划且 ≤ §3.1 上界；buffer ≥ period 且为 period 整数倍。
 pub fn validate_actual(
     plan: &HwParamsPlan,
@@ -976,7 +976,7 @@ fn validate_stream_actual(
     Ok(())
 }
 
-fn build_hw_params(raw: &RawActual, request: &DuplexRequest) -> Result<TspiHwParamsV1, AlsaError> {
+fn build_hw_params(raw: &RawActual, request: &DuplexRequest) -> Result<KhaenHwParamsV1, AlsaError> {
     let bytes = sample_bytes(raw.capture.sample_format).ok_or(AlsaError::Unsupported)?;
     let in_stride = raw
         .capture
@@ -1003,7 +1003,7 @@ fn build_hw_params(raw: &RawActual, request: &DuplexRequest) -> Result<TspiHwPar
     if request.capture_sanitize {
         flags |= 1 << 2;
     }
-    Ok(TspiHwParamsV1 {
+    Ok(KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: raw.capture.sample_format,
         n_in: raw.capture.channels,
@@ -1019,7 +1019,7 @@ fn build_hw_params(raw: &RawActual, request: &DuplexRequest) -> Result<TspiHwPar
 }
 
 /// actual hwparams 确定性哈希（FNV-1a 64，覆盖 §11.9 语义字段，不含 reserved）。
-pub fn hwparams_hash(hw: &TspiHwParamsV1) -> u64 {
+pub fn hwparams_hash(hw: &KhaenHwParamsV1) -> u64 {
     let mut canonical = [0u8; 32];
     let mut offset = 0usize;
     put_u16(&mut canonical, &mut offset, hw.abi_version);
@@ -1082,7 +1082,7 @@ pub struct HwOpenGate {
 }
 
 /// 闸门环境变量名（只有显式 `1/true/yes/allow` 放行）。
-pub const HW_ALLOW_ENV: &str = "TSPI_ALSA_ALLOW_HW";
+pub const HW_ALLOW_ENV: &str = "KHAEN_ALSA_ALLOW_HW";
 
 impl HwOpenGate {
     /// 默认拒绝。
@@ -3031,7 +3031,7 @@ impl<B: PcmDuplexBackend> DuplexSession<B> {
     pub fn calibration_opened(
         &mut self,
         now_ns: u64,
-        calibration_hw: &TspiHwParamsV1,
+        calibration_hw: &KhaenHwParamsV1,
     ) -> Result<OwnerChange, AlsaError> {
         if self.owner.state() != OwnerState::Transition {
             return Err(AlsaError::SwitchBusy);

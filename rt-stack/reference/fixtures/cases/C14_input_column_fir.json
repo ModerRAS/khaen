@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C14_input_column_fir",
   "title": "input-side FIR A_i acts on G columns before P (A=diag([0,-1],[2]))",
   "tags": [

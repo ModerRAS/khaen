@@ -1,4 +1,4 @@
-# TSPI 离线契约检查 CLI（WBS T06；命令入口 abi-layout/forbid/drop-audit）
+# KHAEN 离线契约检查 CLI（WBS T06；命令入口 abi-layout/forbid/drop-audit）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-rt-check"

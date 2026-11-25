@@ -361,7 +361,7 @@ fn session(layout: &str, participants: Vec<&str>, speakers: Vec<SpeakerInfo>) ->
         },
         room_temperature_c: 22.0,
         tool: ToolInfo {
-            name: "tspi-audio-daemon".to_string(),
+            name: "khaen-audio-daemon".to_string(),
             version: "0.1.0".to_string(),
         },
         created_unix: None,
@@ -1980,7 +1980,7 @@ fn t50_target_stereo_strict_separate_profile() {
     // 独立 hash domain（与 5x5 分开）。
     assert!(target
         .canonical()
-        .starts_with("tspi-modal-stereo-strict-target/v1"));
+        .starts_with("khaen-modal-stereo-strict-target/v1"));
 
     // 5x5 规格不能复用 stereo builder（独立 profile/独立求解）。
     let multi_baseline = default_baseline(&grid);
@@ -2011,7 +2011,7 @@ fn t50_target_stereo_strict_separate_profile() {
     let multi_target = build_target_matrix(&multi_baseline, &multi_plant, &multi_spec).unwrap();
     assert!(multi_target
         .canonical()
-        .starts_with("tspi-modal-target-matrix/v1"));
+        .starts_with("khaen-modal-target-matrix/v1"));
     assert_ne!(
         multi_target.target_sha256(),
         build_stereo_strict_target(&baseline, &plant, &spec)
@@ -2361,7 +2361,7 @@ fn t50_target_evidence_json_shape() {
     assert!(evidence.ends_with('}'));
     assert_json_balanced(&evidence);
     for expected in [
-        "\"schema\":\"tspi-modal-target/v1\"",
+        "\"schema\":\"khaen-modal-target/v1\"",
         "\"profile\":\"multichannel_4_1_2_5\"",
         "\"applied\":false",
         "\"post_apply_measurement\":\"not_requested\"",

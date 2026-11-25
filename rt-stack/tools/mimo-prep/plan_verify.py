@@ -328,7 +328,7 @@ def verify_plan(plan_path: str, manifest_path: str = None, host_report_path: str
 
 def report(ck, plan_path, header, paths, extra) -> dict:
     out = {
-        "schema": "tspi-mimo-plan-verify/v1",
+        "schema": "khaen-mimo-plan-verify/v1",
         "plan": plan_path,
         "plan_sha256": sha256_file(plan_path) if plan_path else None,
         "header": header,

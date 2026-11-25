@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# TSPI PTPv2 grandmaster add-on installer (board-side, default dry-run).
+# KHAEN PTPv2 grandmaster add-on installer (board-side, default dry-run).
 #
-# Verifies the aarch64 PTP add-on bundle, installs it under /opt/tspi-rt-stack/ptp/releases/<id>
+# Verifies the aarch64 PTP add-on bundle, installs it under /opt/khaen-rt-stack/ptp/releases/<id>
 # with an atomic "current" switching symlink, installs the launcher wrappers + unit files, seeds
-# /etc/tspi-ptp/ templates only when missing, daemon-reloads and ENABLES (never starts) tspi-ptp.target.
-# Records the previous release id in /var/lib/tspi-rt-stack/ptp-install.json for rollback.
+# /etc/khaen-ptp/ templates only when missing, daemon-reloads and ENABLES (never starts) khaen-ptp.target.
+# Records the previous release id in /var/lib/khaen-rt-stack/ptp-install.json for rollback.
 #
 # Usage:
 #   ./09-install-ptp-gm.sh --bundle DIR [--live --authorize WINDOW.json] [--root STAGING] [--force]
@@ -15,14 +15,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/../lib/common.sh"
 
 BUNDLE=""; FORCE=0
-PTP_PREFIX="${TSPI_PTP_PREFIX:-$TSPI_STACK_PREFIX/ptp}"
-PTP_ETC="${TSPI_PTP_ETC:-/etc/tspi-ptp}"
-PTP_LIBDIR="${TSPI_PTP_LIBDIR:-/usr/local/lib/tspi}"
-RECORD_FILE="$TSPI_STATE_DIR/ptp-install.json"
+PTP_PREFIX="${KHAEN_PTP_PREFIX:-$KHAEN_STACK_PREFIX/ptp}"
+PTP_ETC="${KHAEN_PTP_ETC:-/etc/khaen-ptp}"
+PTP_LIBDIR="${KHAEN_PTP_LIBDIR:-/usr/local/lib/khaen}"
+RECORD_FILE="$KHAEN_STATE_DIR/ptp-install.json"
 REQUIRED_BINS=(ptp4l phc2sys pmc phc_ctl)
 REQUIRED_LIB=(ptp-lib.sh ptp-master-start ptp-phc2sys-start)
-REQUIRED_UNITS=(tspi-ptp-master.service tspi-ptp-phc2sys.service tspi-ptp.target)
-LEGACY_UNITS=(tspi-ptp4l-master.service tspi-phc2sys.service tspi-statime-inferno.service tspi-aes67-daemon.service tspi-ravenna-lkm.service)
+REQUIRED_UNITS=(khaen-ptp-master.service khaen-ptp-phc2sys.service khaen-ptp.target)
+LEGACY_UNITS=(khaen-ptp4l-master.service khaen-phc2sys.service khaen-statime-inferno.service khaen-aes67-daemon.service khaen-ravenna-lkm.service)
 
 usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 while [ $# -gt 0 ]; do
@@ -61,7 +61,7 @@ if [ "$DRY_RUN" = "1" ]; then
 else
   for u in "${LEGACY_UNITS[@]}"; do
     if sunit_active "$u"; then
-      warn "$u 当前 active：tspi-ptp.target 启动时因 Conflicts= 会停掉它；请确认时钟 owner 切换是本次窗口的意图"
+      warn "$u 当前 active：khaen-ptp.target 启动时因 Conflicts= 会停掉它；请确认时钟 owner 切换是本次窗口的意图"
     fi
   done
 fi
@@ -84,7 +84,7 @@ log "配置模板目录: $(p "$PTP_ETC")；wrapper 目录: $(p "$PTP_LIBDIR")；
 
 # ---- 2) install release payload ----
 run install -d -m 0755 "$RELDIR/bin" "$RELDIR/lib" "$RELDIR/units" "$RELDIR/etc" \
-  "$(p "$PTP_LIBDIR")" "$(p "$PTP_ETC")" "$(p "$TSPI_SYSTEMD_DIR")" "$(p "$TSPI_STATE_DIR")"
+  "$(p "$PTP_LIBDIR")" "$(p "$PTP_ETC")" "$(p "$KHAEN_SYSTEMD_DIR")" "$(p "$KHAEN_STATE_DIR")"
 for b in "${REQUIRED_BINS[@]}"; do run install -m 0755 "$BUNDLE/bin/$b" "$RELDIR/bin/$b"; done
 for f in "${REQUIRED_LIB[@]}"; do
   case "$f" in
@@ -98,7 +98,7 @@ run install -m 0644 "$BUNDLE/manifest.json" "$RELDIR/manifest.json"
 [ -f "$BUNDLE/README.deploy.md" ] && run install -m 0644 "$BUNDLE/README.deploy.md" "$RELDIR/README.deploy.md"
 [ -f "$BUNDLE/INSTALL-ROLLBACK.md" ] && run install -m 0644 "$BUNDLE/INSTALL-ROLLBACK.md" "$RELDIR/INSTALL-ROLLBACK.md"
 
-# ---- 3) launcher wrappers into /usr/local/lib/tspi ----
+# ---- 3) launcher wrappers into /usr/local/lib/khaen ----
 run install -m 0644 "$BUNDLE/lib/ptp-lib.sh" "$(p "$PTP_LIBDIR/ptp-lib.sh")"
 run install -m 0755 "$BUNDLE/lib/ptp-master-start" "$(p "$PTP_LIBDIR/ptp-master-start")"
 run install -m 0755 "$BUNDLE/lib/ptp-phc2sys-start" "$(p "$PTP_LIBDIR/ptp-phc2sys-start")"
@@ -117,9 +117,9 @@ seed_cfg "$BUNDLE/etc/ptp4l-master-udp.conf.example" "$PTP_ETC/ptp4l-master.conf
 seed_cfg "$BUNDLE/etc/ptp4l-master-l2.conf.example"  "$PTP_ETC/ptp4l-master-l2.conf" 0644
 
 # ---- 5) units + enable (do not start) ----
-for u in "${REQUIRED_UNITS[@]}"; do run install -m 0644 "$BUNDLE/units/$u" "$(p "$TSPI_SYSTEMD_DIR/$u")"; done
-run "$TSPI_SYSTEMCTL" daemon-reload
-run "$TSPI_SYSTEMCTL" enable tspi-ptp.target
+for u in "${REQUIRED_UNITS[@]}"; do run install -m 0644 "$BUNDLE/units/$u" "$(p "$KHAEN_SYSTEMD_DIR/$u")"; done
+run "$KHAEN_SYSTEMCTL" daemon-reload
+run "$KHAEN_SYSTEMCTL" enable khaen-ptp.target
 
 # ---- 6) atomic current switch ----
 run ln -sfn "releases/$RID" "$CURRENT"
@@ -128,18 +128,18 @@ run ln -sfn "releases/$RID" "$CURRENT"
 if [ "$DRY_RUN" = "1" ]; then
   log "[dry-run] 将写安装记录: $(p "$RECORD_FILE")（release_id=$RID previous=${PREV:-none}）"
 else
-  install -d -m 0755 "$(p "$TSPI_STATE_DIR")" || die "无法创建 $(p "$TSPI_STATE_DIR")" 7
+  install -d -m 0755 "$(p "$KHAEN_STATE_DIR")" || die "无法创建 $(p "$KHAEN_STATE_DIR")" 7
   py - "$(p "$RECORD_FILE")" "$RID" "${PREV:-}" "$BUNDLE" <<'PY' || die "写安装记录失败" 7
 import json, sys, datetime
 path, rid, prev, bundle = sys.argv[1:5]
 rec = {
-    'schema': 'tspi-rt-stack/ptp-install/v1',
+    'schema': 'khaen-rt-stack/ptp-install/v1',
     'release_id': rid,
     'previous_release': prev or None,
     'bundle': bundle,
     'state': 'installed',
     'installed_at': datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec='seconds'),
-    'notes': 'tspi-ptp.target enabled but NOT started by the installer; start inside the authorized window',
+    'notes': 'khaen-ptp.target enabled but NOT started by the installer; start inside the authorized window',
 }
 open(path, 'w', encoding='utf-8').write(json.dumps(rec, ensure_ascii=False, indent=1) + '\n')
 print(json.dumps(rec, ensure_ascii=False))
@@ -150,5 +150,5 @@ PY
   done
   log "安装后自检 PASS: current/bin/ptp4l + wrappers 可执行"
 fi
-log "完成：release $RID 已安装；tspi-ptp.target 已 enable（未 start）。启动/验证/回滚见 INSTALL-ROLLBACK.md。"
+log "完成：release $RID 已安装；khaen-ptp.target 已 enable（未 start）。启动/验证/回滚见 INSTALL-ROLLBACK.md。"
 exit 0

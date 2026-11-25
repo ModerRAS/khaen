@@ -46,7 +46,7 @@ impl AoipKind {
                 "若切换为方案 B2（本机 ptp4l 做 GM），请改 [mode.aes67] 的 ptp_services/ptp_source".into(),
             ],
             Self::Inferno => vec![
-                "Inferno 是 ALSA 插件（libasound_module_pcm_inferno），没有独立 systemd 服务；状态页的 service 指向 tspi-statime-inferno.service（PTPv1 从时钟）".into(),
+                "Inferno 是 ALSA 插件（libasound_module_pcm_inferno），没有独立 systemd 服务；状态页的 service 指向 khaen-statime-inferno.service（PTPv1 从时钟）".into(),
                 "Inferno 上游没有统一配置文件：通过 INFERNO_* 环境变量或 ALSA 插件参数配置，此处仅只读展示".into(),
                 "Dante 模式使用 PTPv1，需要 Statime（见 [ptp] statime_service）".into(),
                 "Inferno 需要实时权限（rtprio/ulimit -r）与 Dante 时钟同步，详见官方 README".into(),
@@ -228,7 +228,7 @@ impl AoipKind {
                 size: 256,
                 content: Some(
                     "INFERNO_BIND_IP=eth0
-INFERNO_NAME=TSPI-Dante
+INFERNO_NAME=KHAEN-Dante
 INFERNO_RX_CHANNELS=2
 INFERNO_TX_CHANNELS=2
 INFERNO_RX_LATENCY_NS=10000000

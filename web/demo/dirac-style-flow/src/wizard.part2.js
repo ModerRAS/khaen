@@ -62,7 +62,7 @@ const CHECK_ITEMS = [
   { key: 'motu', icon: '▤', title: 'MOTU UltraLite-mk5', desc: 'USB 音频接口 · 22 输出 · 48 kHz', log: 'USB 设备枚举：UltraLite-mk5 · 22 输出 · 48 kHz · 时钟 internal', ok: '已连接 · 22ch / 48k' },
   { key: 'umik', icon: '◉', title: 'UMIK-1 测量麦克风', desc: '序列号 718-7696 · 90° 校准文件', log: 'UMIK-1 718-7696 · 校准文件 90deg 已加载 · 输入增益 +18 dB', ok: '已识别 · 90° 校准' },
   { key: 'wiring', icon: '⌁', title: '输出线序核对（4.1.2）', desc: 'Line Out 1–6 + Line Out 8（ch6 保留空）', log: '输出线序：FL/FR=1-2 · SL/SR=3-4 · HFL/HFR=5-6 · SUB1=8 · ch7 空', ok: '8 路已核对' },
-  { key: 'service', icon: '◫', title: '服务与静音状态', desc: 'tspi-audio-web 运行中 · DSP 待机 · 已静音', log: '服务状态：tspi-audio-web active · camilladsp inactive · master mute on', ok: 'Web 运行 · 已静音' },
+  { key: 'service', icon: '◫', title: '服务与静音状态', desc: 'khaen-audio-web 运行中 · DSP 待机 · 已静音', log: '服务状态：khaen-audio-web active · camilladsp inactive · master mute on', ok: 'Web 运行 · 已静音' },
 ];
 function renderStep1() {
   const body = $('#step-body');
@@ -149,7 +149,7 @@ function renderStep2() {
           '<div class="kv"><span>高度 2</span><b>HFL / HFR</b></div>' +
           '<div class="kv"><span>低音 1</span><b>SUB1 = Line Out 8</b></div>' +
           '<div class="kv"><span>ch6</span><b>保留空（不分配）</b></div>' +
-          '<div class="tik" style="font-size:9.5px;color:var(--muted2);line-height:1.6;margin-top:8px">映射来自 audio/overlay/etc/tspi-audio/layout-presets.yml 的 4.1.2；MOTU 22ch 仅使用 1-6、8 路。</div>' +
+          '<div class="tik" style="font-size:9.5px;color:var(--muted2);line-height:1.6;margin-top:8px">映射来自 audio/overlay/etc/khaen-audio/layout-presets.yml 的 4.1.2；MOTU 22ch 仅使用 1-6、8 路。</div>' +
         '</div></div>' +
       '</div>' +
     '</div>';
@@ -378,7 +378,7 @@ function refreshPointsUI() {
   const msg = $('#points-msg');
   if (msg) {
     const sweet = state.points.some(p => p.on && p.sweet);
-    if (typeof TSPI_LIVE !== 'undefined' && TSPI_LIVE && sweet) msg.innerHTML = '<b>✓</b><span style="color:var(--teal)">皇帝位已点亮。多点和 ART 的 3 点要求留在页面上，这次不测</span>';
+    if (typeof KHAEN_LIVE !== 'undefined' && KHAEN_LIVE && sweet) msg.innerHTML = '<b>✓</b><span style="color:var(--teal)">皇帝位已点亮。多点和 ART 的 3 点要求留在页面上，这次不测</span>';
     else if (n >= 3 && sweet) msg.innerHTML = '<b>✓</b><span style="color:var(--teal)">' + n + ' 点（含听音位）· 满足多点校正与 ART ≥3 要求</span>';
     else if (n < 3) msg.innerHTML = '<span style="color:var(--red)">✗ 仅 ' + n + ' 点：ART 至少需要 3 个有效测点</span>';
     else msg.innerHTML = '<span style="color:var(--red)">✗ 必须包含听音位（P1 甜点）</span>';

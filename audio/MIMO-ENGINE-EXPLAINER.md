@@ -1,7 +1,7 @@
 # MIMO 引擎性能与方案说明（报告补丁：单位/图例 + 为什么 CamillaDSP 不可行、Rust 引擎可行）
 
 > 2026-11-15 初版；**2026-11-17 task-42（B1b）修正过期依据**：① 全部 rtf 数字来自缺 b−p 环形历史/多速率不读 manifest 的原型，只作“错误实现吞吐上限”，**不是可交付/验收证据**；② 删除“因果 FIR 频率分辨率 ≈ fs/taps / ART 需 1–5 Hz”论证，多速率动机改为“≤300 Hz 带宽 + 时域支撑/尾长 + 省 CPU”；③ 相位改为**因果任意相位**（M1），非默认最小相位；④ CamillaDSP 仅开发期 oracle/回退，P1 生产链为自研 host 单图；⑤ 12×16 全部标 ARCHIVE/PAUSED。
-> 权威顺序：`DSP-HOST-DECISION.md` > `TSPI-RT-STACK-WBS.md` > `M1-FINAL-SPEC.md` / `rt-stack/spec/mimo-t6.md` > 本文。
+> 权威顺序：`DSP-HOST-DECISION.md` > `KHAEN-RT-STACK-WBS.md` > `M1-FINAL-SPEC.md` / `rt-stack/spec/mimo-t6.md` > 本文。
 
 ## 1. 单位与图例（读表前先看）
 
@@ -73,8 +73,8 @@
 | 7.1.4 | FL, FR, C, LFE, SL, SR, BL, BR, TFL, TFR, TRL, TRR | 12 |
 | 5.2 / 7.2 | 5/7 地面 + 2 sub（SUB1/SUB2） | 7 / 9 |
 
-- 预设文件：`overlay/etc/tspi-audio/layout-presets.yml`；示例 profile：`overlay/etc/tspi-audio/profiles/examples/4.1.2-h16-714.yml`（H16 7.1.4 → 4.1.2，含 C→L/R、TRL/TRR→HFL/HFR 折叠，C 与后环绕按降混处理）。
-- 校验/渲染：`tspi-channelmap validate/render` 已通过（4.1.2 profile validate rc=0、render rc=0）。
+- 预设文件：`overlay/etc/khaen-audio/layout-presets.yml`；示例 profile：`overlay/etc/khaen-audio/profiles/examples/4.1.2-h16-714.yml`（H16 7.1.4 → 4.1.2，含 C→L/R、TRL/TRR→HFL/HFR 折叠，C 与后环绕按降混处理）。
+- 校验/渲染：`khaen-channelmap validate/render` 已通过（4.1.2 profile validate rc=0、render rc=0）。
 - **域提醒**：上表是**角色顺序（O）**；4.1.2 的 role→槽位/DAC 是 FL0 FR1 SL2 SR3 HFL4 HFR5 **SUB1=7**（ch6 空，S=8），设备仍 22ch；不得把角色数当槽位数/设备宽度（B-mimo P0-2/P0-9；唯一表见 `docs/MIMO-ROADMAP.md` §1）。
 
 ## 6. 多速率动机：时域支撑 + 算力（不是“频率分辨率门”）

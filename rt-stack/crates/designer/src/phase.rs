@@ -7,12 +7,12 @@
 //! 权威契约：
 //! - rt-stack/spec/fir-toolbox.md v1.2-draft §4.2（整数 delay / 分数 delay / 极性 / 作用方向 / 因果）、
 //!   §1.2（响应测量程序）、§1.3（支撑/有效支撑/延迟 D 与 onset）、§1.4（振铃排除窗口径）、
-//!   §1.5（参考归一化 ±0.01 dB）、§2.2（tspi-fir/v1 manifest 字段与规则 2/3/4）、§2.4（20 Hz/20 kHz
+//!   §1.5（参考归一化 ±0.01 dB）、§2.2（khaen-fir/v1 manifest 字段与规则 2/3/4）、§2.4（20 Hz/20 kHz
 //!   Endpoint 联合类型）、§2.5（E_FIR_* 失败码）、§7.1（P/G 行列方向与零填充线性卷积）、
 //!   §9 V10（零填充必要性）/V11（63-tap Kaiser beta 8.96、d=0.5 分数延迟参考值）；
 //! - scratch/lead/planner/DSP-HOST-DECISION.md §3（P=diag(p_j)、输入 delay/polarity 作用列、
 //!   输出作用行、phase 乘谱要 zero padding 实现线性卷积、不循环混叠）；
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T40 行（phase/delay/polarity FIR 工具，输入/输出方向、
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T40 行（phase/delay/polarity FIR 工具，输入/输出方向、
 //!   整数/分数 delay/taps 支撑与因果，独立解析向量）；
 //! - calibration-spec/CONTRACT.md §3.2（校准 invert 与设计极性 XOR，不得双乘）。
 //!
@@ -47,7 +47,7 @@
 //!
 //! 登记（契约边界，不私自扩张 manifest schema）：
 //! - spec §1.7 的 family 只有七类，phase/delay/polarity 是 §4.2 相邻工具而非 family；本模块提供
-//!   FAMILY_NOTE / PhaseManifestDeclaration.family_note，T55 落 tspi-fir/v1 时必须把它写进
+//!   FAMILY_NOTE / PhaseManifestDeclaration.family_note，T55 落 khaen-fir/v1 时必须把它写进
 //!   design/report 段（或先由 T04/Lead 裁决新增字段），本模块不把 phase 冒充成七家族之一。
 //! - §4.2 的分数延迟判据文字覆盖 Kaiser/Hann 与 Lagrange；实测 Hann 63-tap 在 0.9·fs/2 的 GD 偏差
 //!   0.045 samples 超 0.02（Hann 127-tap 才 0.013），故本模块：
@@ -74,7 +74,7 @@ pub const TOOL_KIND: &str = "phase-delay-polarity";
 pub const TOOL_VERSION: &str = "0.1.0";
 
 /// §1.7 七家族之外的登记说明（T55 落 manifest 时不得冒充 family）。
-pub const FAMILY_NOTE: &str = "phase/delay/polarity 是 spec §4.2 相邻工具，不是七家族之一；tspi-fir/v1 manifest 的 family 字段未列此工具，T55 必须放入 design/report 段或先经 T04/Lead 裁决新增字段";
+pub const FAMILY_NOTE: &str = "phase/delay/polarity 是 spec §4.2 相邻工具，不是七家族之一；khaen-fir/v1 manifest 的 family 字段未列此工具，T55 必须放入 design/report 段或先经 T04/Lead 裁决新增字段";
 
 /// 分数延迟窗函数最小窗长（§4.2：taps >= 63）。
 pub const MIN_WINDOW_TAPS: usize = 63;
@@ -207,7 +207,7 @@ pub const E_FIR_BUDGET: &str = "E_FIR_BUDGET";
 pub const E_FIR_NONCAUSAL: &str = "E_FIR_NONCAUSAL";
 /// 错误码（§2.5）：参考归一化。
 pub const E_FIR_REF: &str = "E_FIR_REF";
-/// 本模块 tool API 参数误用（不是 tspi-fir/v1 manifest 失败码）。
+/// 本模块 tool API 参数误用（不是 khaen-fir/v1 manifest 失败码）。
 pub const E_PHASE_ARG: &str = "E_PHASE_ARG";
 
 /// §2.5 失败码集中表（本模块使用子集 + E_PHASE_ARG）。
@@ -1907,7 +1907,7 @@ impl PhaseDesign {
     }
 }
 
-/// manifest/报告声明（不扩 tspi-fir/v1 顶层 schema；T55 放入 design/report 段）。
+/// manifest/报告声明（不扩 khaen-fir/v1 顶层 schema；T55 放入 design/report 段）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhaseManifestDeclaration {
     /// 工具标识。

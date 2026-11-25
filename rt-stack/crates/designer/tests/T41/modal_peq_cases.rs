@@ -1298,7 +1298,7 @@ fn config_max_bands(cfg: &mut ModalDetectConfig, max_bands: usize) {
 
 #[test]
 fn t41_design_from_curve_json_evidence() {
-    // 证据用样例：curve → 检测 → tspi-modal-peq/v1 JSON（--nocapture 日志写入 evidence/T41）
+    // 证据用样例：curve → 检测 → khaen-modal-peq/v1 JSON（--nocapture 日志写入 evidence/T41）
     let fs = 48000.0;
     let curve = synth_modal_curve(
         fs,

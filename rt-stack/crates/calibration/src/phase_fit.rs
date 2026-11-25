@@ -26,13 +26,13 @@
 //!    - 公共 D0：`DePhasedResponse` 只有两个构造入口（aligned_segment 去 D0 一次 / absolute 不再扣），
 //!      类型层面没有二次去相位入口；fit 再校验 plan.phase_ref 与每个响应的 basis、delay_removed 与
 //!      plan.common_d0 完全一致——同一 D0 只扣一次，未知 basis 直接拒绝。
-//! 5. **产物**：确定性 `tspi-phase-fit/v1` report + `tspi-phase-ops/v1` ops（角色→整数 delay/极性，
+//! 5. **产物**：确定性 `khaen-phase-fit/v1` report + `khaen-phase-ops/v1` ops（角色→整数 delay/极性，
 //!    供 T66 编译）+ 每通道 T40 `PhaseDesign`（含系数、D、onset、taps、验证结果、系数 sha256）与
 //!    `PhaseFitArtifacts`（job StageCtx / 目录写盘，路径 `phase/design-report.json`、`phase/ops.json`）。
 //!
 //! # 权威输入（只读）
 //!
-//! - WBS T65 行与 §1/§5/§6/§7（scratch/lead/planner/TSPI-RT-STACK-WBS.md）；
+//! - WBS T65 行与 §1/§5/§6/§7（scratch/lead/planner/KHAEN-RT-STACK-WBS.md）；
 //! - DSP-HOST-DECISION §2.3（公共时间轴/clock_ppm、按实际 crop/coarse/frac/slot 恢复、
 //!   不盲套 CSV 标签、不双扣 fractional delay、避免物理极性重复乘）与 §2.4（相对 delay/polarity、
 //!   未知不猜）；
@@ -101,15 +101,15 @@ use crate::positions::{MultipointPlan, PositionQualityReport, QualityScope};
 // ---------------------------------------------------------------------------
 
 /// 报告 artifact schema（确定性 JSON；`phase/design-report.json`）。
-pub const PHASE_FIT_SCHEMA: &str = "tspi-phase-fit/v1";
+pub const PHASE_FIT_SCHEMA: &str = "khaen-phase-fit/v1";
 /// 执行 ops artifact schema（角色→integer delay/polarity；供 T66 编译）。
-pub const PHASE_OPS_SCHEMA: &str = "tspi-phase-ops/v1";
+pub const PHASE_OPS_SCHEMA: &str = "khaen-phase-ops/v1";
 /// report artifact 相对路径（job artifacts_dir 语义）。
 pub const PHASE_FIT_ARTIFACT_PATH: &str = "phase/design-report.json";
 /// ops artifact 相对路径。
 pub const PHASE_OPS_ARTIFACT_PATH: &str = "phase/ops.json";
 /// 工具名（report provenance）。
-pub const PHASE_FIT_TOOL_NAME: &str = "tspi-phase-fit";
+pub const PHASE_FIT_TOOL_NAME: &str = "khaen-phase-fit";
 /// 工具版本（report provenance；实现版本冻结）。
 pub const PHASE_FIT_TOOL_VERSION: &str = "t65-1";
 
@@ -652,7 +652,7 @@ impl<'a> PhaseFitRequest<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// 公开报告结构（tspi-phase-fit/v1 / tspi-phase-ops/v1）
+// 公开报告结构（khaen-phase-fit/v1 / khaen-phase-ops/v1）
 // ---------------------------------------------------------------------------
 
 /// quality 门摘要。
@@ -828,7 +828,7 @@ pub struct PhaseFitOptionsReport {
     pub require_design_quality: bool,
 }
 
-/// 一次完整 delay/polarity 拟合报告（tspi-phase-fit/v1）。
+/// 一次完整 delay/polarity 拟合报告（khaen-phase-fit/v1）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhaseFitReport {
     /// schema 常量。
@@ -1330,7 +1330,7 @@ fn collect_response_slots<'p, 'r>(
 
 fn measurement_sha256(plan: &MultipointPlan, slots: &[ResponseSlot<'_, '_>]) -> String {
     let mut text = String::new();
-    let _ = writeln!(text, "tspi-phase-fit-measurement/v1");
+    let _ = writeln!(text, "khaen-phase-fit-measurement/v1");
     let _ = writeln!(text, "fs={}", plan.sample_rate_hz);
     let _ = writeln!(text, "plan_sha256={}", plan.plan_sha256());
     let _ = writeln!(text, "common_d0_samples={}", plan.common_d0.samples());
@@ -1350,7 +1350,7 @@ fn measurement_sha256(plan: &MultipointPlan, slots: &[ResponseSlot<'_, '_>]) -> 
 
 fn coefficient_sha256(design: &PhaseDesign) -> String {
     let mut text = String::new();
-    let _ = writeln!(text, "tspi-phase-fir-coeffs/v1");
+    let _ = writeln!(text, "khaen-phase-fir-coeffs/v1");
     let _ = writeln!(
         text,
         "fs={:.17e} delay={:.17e} polarity={} taps={}",
@@ -1395,7 +1395,7 @@ pub fn apply_measured_domain_fir(
 /// 一次 delay/polarity 拟合的完整产出（report + 执行 ops + T40 FIR + artifact）。
 #[derive(Clone, Debug)]
 pub struct PhaseFitOutput {
-    /// 确定性报告（tspi-phase-fit/v1）。
+    /// 确定性报告（khaen-phase-fit/v1）。
     pub report: PhaseFitReport,
     /// 执行 ops（角色→整数 delay/极性；按 plan.participants 顺序）。
     pub ops: Vec<PhaseChannelOp>,
@@ -2393,7 +2393,7 @@ fn checks_json(report: &PhaseFitChecks) -> J {
 }
 
 impl PhaseFitReport {
-    /// 确定性 report JSON（tspi-phase-fit/v1；同输入同字节）。
+    /// 确定性 report JSON（khaen-phase-fit/v1；同输入同字节）。
     pub fn to_json(&self) -> String {
         let tool = J::Obj(vec![
             ("name", J::string(self.tool_name)),

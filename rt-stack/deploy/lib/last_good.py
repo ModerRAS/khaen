@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """T28 自研 last-good 记录校验（07-mark-last-good.sh 写 / 08-rollback.sh 读）。
 
-schema tspi-rt-stack/last-good/v1：
+schema khaen-rt-stack/last-good/v1：
   release_id, release_dir, manifest_sha256, binary_sha256{name->hash}, units_sha256{unit->hash},
   verified_at, verify_report, c_policy, previous{release_id,release_dir} | null
 用法:
@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-SCHEMA = "tspi-rt-stack/last-good/v1"
+SCHEMA = "khaen-rt-stack/last-good/v1"
 C_POLICY_MUST = "never-camilladsp"
 
 

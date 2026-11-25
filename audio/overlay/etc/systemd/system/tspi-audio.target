@@ -1,9 +1,0 @@
-[Unit]
-Description=tspi-audio: 音频栈总目标（模式由 /usr/local/bin/tspi-mode 控制）
-Documentation=file:///etc/tspi-audio/README.md
-# 开机时 /run/tspi/mode 不存在 => target 不启动（服务也不会被拉起）；模式脚本负责写 marker 并显式 start。
-ConditionPathExists=/run/tspi/mode
-After=network-online.target
-
-[Install]
-WantedBy=multi-user.target

@@ -6,9 +6,9 @@
 use core::mem::{align_of, needs_drop, offset_of, size_of};
 
 use khaen_core::abi::{
-    TspiBlockAckV1, TspiBlockDescV1, TspiDiagFirV1, TspiEpochInfoV1, TspiEventV1, TspiHwParamsV1,
-    TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, TspiSpscHeaderV1, TspiWorkerAffinityV1,
-    TspiWorkerStatsV1,
+    KhaenBlockAckV1, KhaenBlockDescV1, KhaenDiagFirV1, KhaenEpochInfoV1, KhaenEventV1,
+    KhaenHwParamsV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1, KhaenSpscHeaderV1,
+    KhaenWorkerAffinityV1, KhaenWorkerStatsV1,
 };
 use khaen_core::rt::{
     gate_ns_floor, t_block_ns_ceil, BlockIo, PlanRef, PlanView, RtControl as CoreRtControl,
@@ -22,96 +22,96 @@ use khaen_rt_host::swap::RtControl;
 #[test]
 fn abi_layout_matches_core_v1_appendix_b() {
     // 64 B，align 64 结构
-    assert_eq!(size_of::<TspiBlockDescV1>(), 64);
-    assert_eq!(align_of::<TspiBlockDescV1>(), 64);
-    assert_eq!(offset_of!(TspiBlockDescV1, epoch_id), 8);
-    assert_eq!(offset_of!(TspiBlockDescV1, block_seq), 16);
-    assert_eq!(offset_of!(TspiBlockDescV1, frame_index), 24);
-    assert_eq!(offset_of!(TspiBlockDescV1, plan_version), 32);
-    assert_eq!(offset_of!(TspiBlockDescV1, flags), 36);
-    assert_eq!(offset_of!(TspiBlockDescV1, valid_frames), 40);
-    assert_eq!(offset_of!(TspiBlockDescV1, slot_index), 44);
-    assert_eq!(offset_of!(TspiBlockDescV1, mono_publish_ns), 48);
-    assert_eq!(offset_of!(TspiBlockDescV1, play_deadline_ns), 56);
+    assert_eq!(size_of::<KhaenBlockDescV1>(), 64);
+    assert_eq!(align_of::<KhaenBlockDescV1>(), 64);
+    assert_eq!(offset_of!(KhaenBlockDescV1, epoch_id), 8);
+    assert_eq!(offset_of!(KhaenBlockDescV1, block_seq), 16);
+    assert_eq!(offset_of!(KhaenBlockDescV1, frame_index), 24);
+    assert_eq!(offset_of!(KhaenBlockDescV1, plan_version), 32);
+    assert_eq!(offset_of!(KhaenBlockDescV1, flags), 36);
+    assert_eq!(offset_of!(KhaenBlockDescV1, valid_frames), 40);
+    assert_eq!(offset_of!(KhaenBlockDescV1, slot_index), 44);
+    assert_eq!(offset_of!(KhaenBlockDescV1, mono_publish_ns), 48);
+    assert_eq!(offset_of!(KhaenBlockDescV1, play_deadline_ns), 56);
 
-    assert_eq!(size_of::<TspiEpochInfoV1>(), 64);
-    assert_eq!(align_of::<TspiEpochInfoV1>(), 64);
-    assert_eq!(offset_of!(TspiEpochInfoV1, plan_version), 8);
-    assert_eq!(offset_of!(TspiEpochInfoV1, flags), 24);
-    assert_eq!(offset_of!(TspiEpochInfoV1, start_mono_ns), 32);
+    assert_eq!(size_of::<KhaenEpochInfoV1>(), 64);
+    assert_eq!(align_of::<KhaenEpochInfoV1>(), 64);
+    assert_eq!(offset_of!(KhaenEpochInfoV1, plan_version), 8);
+    assert_eq!(offset_of!(KhaenEpochInfoV1, flags), 24);
+    assert_eq!(offset_of!(KhaenEpochInfoV1, start_mono_ns), 32);
 
-    assert_eq!(size_of::<TspiEventV1>(), 64);
-    assert_eq!(align_of::<TspiEventV1>(), 64);
-    assert_eq!(offset_of!(TspiEventV1, kind), 32);
-    assert_eq!(offset_of!(TspiEventV1, value_a), 36);
-    assert_eq!(offset_of!(TspiEventV1, payload), 48);
+    assert_eq!(size_of::<KhaenEventV1>(), 64);
+    assert_eq!(align_of::<KhaenEventV1>(), 64);
+    assert_eq!(offset_of!(KhaenEventV1, kind), 32);
+    assert_eq!(offset_of!(KhaenEventV1, value_a), 36);
+    assert_eq!(offset_of!(KhaenEventV1, payload), 48);
 
-    assert_eq!(size_of::<TspiBlockAckV1>(), 64);
-    assert_eq!(align_of::<TspiBlockAckV1>(), 64);
-    assert_eq!(offset_of!(TspiBlockAckV1, phase_done), 16);
-    assert_eq!(offset_of!(TspiBlockAckV1, cutoff), 28);
-    assert_eq!(offset_of!(TspiBlockAckV1, plan_version), 32);
-    assert_eq!(offset_of!(TspiBlockAckV1, deadline_mono_ns), 40);
+    assert_eq!(size_of::<KhaenBlockAckV1>(), 64);
+    assert_eq!(align_of::<KhaenBlockAckV1>(), 64);
+    assert_eq!(offset_of!(KhaenBlockAckV1, phase_done), 16);
+    assert_eq!(offset_of!(KhaenBlockAckV1, cutoff), 28);
+    assert_eq!(offset_of!(KhaenBlockAckV1, plan_version), 32);
+    assert_eq!(offset_of!(KhaenBlockAckV1, deadline_mono_ns), 40);
 
-    assert_eq!(size_of::<TspiSpscHeaderV1>(), 64);
-    assert_eq!(align_of::<TspiSpscHeaderV1>(), 64);
-    assert_eq!(offset_of!(TspiSpscHeaderV1, write_pos), 16);
-    assert_eq!(offset_of!(TspiSpscHeaderV1, dropped), 32);
+    assert_eq!(size_of::<KhaenSpscHeaderV1>(), 64);
+    assert_eq!(align_of::<KhaenSpscHeaderV1>(), 64);
+    assert_eq!(offset_of!(KhaenSpscHeaderV1, write_pos), 16);
+    assert_eq!(offset_of!(KhaenSpscHeaderV1, dropped), 32);
 
-    assert_eq!(size_of::<TspiWorkerStatsV1>(), 64);
-    assert_eq!(align_of::<TspiWorkerStatsV1>(), 64);
+    assert_eq!(size_of::<KhaenWorkerStatsV1>(), 64);
+    assert_eq!(align_of::<KhaenWorkerStatsV1>(), 64);
 
-    assert_eq!(size_of::<TspiHwParamsV1>(), 64);
-    assert_eq!(align_of::<TspiHwParamsV1>(), 64);
-    assert_eq!(offset_of!(TspiHwParamsV1, sample_rate), 8);
-    assert_eq!(offset_of!(TspiHwParamsV1, flags), 28);
+    assert_eq!(size_of::<KhaenHwParamsV1>(), 64);
+    assert_eq!(align_of::<KhaenHwParamsV1>(), 64);
+    assert_eq!(offset_of!(KhaenHwParamsV1, sample_rate), 8);
+    assert_eq!(offset_of!(KhaenHwParamsV1, flags), 28);
 
     // 128 B，align 64
-    assert_eq!(size_of::<TspiPlanHeaderV1>(), 128);
-    assert_eq!(align_of::<TspiPlanHeaderV1>(), 64);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, magic), 0);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, header_size), 6);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, graph_id), 36);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, total_coeff_bytes), 68);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, role_table_offset), 88);
+    assert_eq!(size_of::<KhaenPlanHeaderV1>(), 128);
+    assert_eq!(align_of::<KhaenPlanHeaderV1>(), 64);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, magic), 0);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, header_size), 6);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, graph_id), 36);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, total_coeff_bytes), 68);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, role_table_offset), 88);
     // T105/v1.1 I15 + errata E1：repr(C) 合法对齐版（spec 字面 94/98/102/106 的 u32 不可表达）。
-    assert_eq!(offset_of!(TspiPlanHeaderV1, role_table_count), 92);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, reserved1), 94);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, affinity_table_offset), 96);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, affinity_count), 100);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, reserved2), 102);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, ctl_meta_offset), 104);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, ctl_meta_len), 108);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, reserved3), 112);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, header_crc32c), 124);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, role_table_count), 92);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, reserved1), 94);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, affinity_table_offset), 96);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, affinity_count), 100);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, reserved2), 102);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, ctl_meta_offset), 104);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, ctl_meta_len), 108);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, reserved3), 112);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, header_crc32c), 124);
 
-    // TspiWorkerAffinityV1：§11.13 I15 / B-18，32 B / align 8（plan POD 表项，align 例外）。
-    assert_eq!(size_of::<TspiWorkerAffinityV1>(), 32);
-    assert_eq!(align_of::<TspiWorkerAffinityV1>(), 8);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, worker_id), 0);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, sched_priority), 1);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, flags), 2);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, cpu_index), 4);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, reserved0), 6);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, irq_dependency_mask), 8);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, reserved1), 16);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, reserved2), 24);
+    // KhaenWorkerAffinityV1：§11.13 I15 / B-18，32 B / align 8（plan POD 表项，align 例外）。
+    assert_eq!(size_of::<KhaenWorkerAffinityV1>(), 32);
+    assert_eq!(align_of::<KhaenWorkerAffinityV1>(), 8);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, worker_id), 0);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, sched_priority), 1);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, flags), 2);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, cpu_index), 4);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, reserved0), 6);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, irq_dependency_mask), 8);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, reserved1), 16);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, reserved2), 24);
 
     // 32 B，align 8
-    assert_eq!(size_of::<TspiPathV1>(), 32);
-    assert_eq!(align_of::<TspiPathV1>(), 8);
-    assert_eq!(offset_of!(TspiPathV1, coeff_offset_bytes), 16);
-    assert_eq!(offset_of!(TspiPathV1, coeff_len_bytes), 24);
+    assert_eq!(size_of::<KhaenPathV1>(), 32);
+    assert_eq!(align_of::<KhaenPathV1>(), 8);
+    assert_eq!(offset_of!(KhaenPathV1, coeff_offset_bytes), 16);
+    assert_eq!(offset_of!(KhaenPathV1, coeff_len_bytes), 24);
 
-    assert_eq!(size_of::<TspiDiagFirV1>(), 32);
-    assert_eq!(align_of::<TspiDiagFirV1>(), 8);
-    assert_eq!(offset_of!(TspiDiagFirV1, coeff_offset_bytes), 16);
+    assert_eq!(size_of::<KhaenDiagFirV1>(), 32);
+    assert_eq!(align_of::<KhaenDiagFirV1>(), 8);
+    assert_eq!(offset_of!(KhaenDiagFirV1, coeff_offset_bytes), 16);
 
-    assert_eq!(size_of::<TspiRoleV1>(), 32);
-    assert_eq!(align_of::<TspiRoleV1>(), 8);
-    assert_eq!(offset_of!(TspiRoleV1, delay_samples), 8);
-    assert_eq!(offset_of!(TspiRoleV1, gain_q15), 12);
-    assert_eq!(offset_of!(TspiRoleV1, name_hash), 20);
+    assert_eq!(size_of::<KhaenRoleV1>(), 32);
+    assert_eq!(align_of::<KhaenRoleV1>(), 8);
+    assert_eq!(offset_of!(KhaenRoleV1, delay_samples), 8);
+    assert_eq!(offset_of!(KhaenRoleV1, gain_q15), 12);
+    assert_eq!(offset_of!(KhaenRoleV1, name_hash), 20);
 }
 
 #[test]
@@ -122,18 +122,18 @@ fn rt_visible_types_have_no_drop() {
     assert!(!needs_drop::<PlanView<'static>>());
     assert!(!needs_drop::<BlockIo<'static>>());
     assert!(!needs_drop::<WorkerRtCtx<'static>>());
-    assert!(!needs_drop::<TspiBlockDescV1>());
-    assert!(!needs_drop::<TspiEpochInfoV1>());
-    assert!(!needs_drop::<TspiEventV1>());
-    assert!(!needs_drop::<TspiHwParamsV1>());
-    assert!(!needs_drop::<TspiPlanHeaderV1>());
-    assert!(!needs_drop::<TspiWorkerAffinityV1>());
-    assert!(!needs_drop::<TspiBlockAckV1>());
-    assert!(!needs_drop::<TspiSpscHeaderV1>());
-    assert!(!needs_drop::<TspiWorkerStatsV1>());
-    assert!(!needs_drop::<TspiPathV1>());
-    assert!(!needs_drop::<TspiDiagFirV1>());
-    assert!(!needs_drop::<TspiRoleV1>());
+    assert!(!needs_drop::<KhaenBlockDescV1>());
+    assert!(!needs_drop::<KhaenEpochInfoV1>());
+    assert!(!needs_drop::<KhaenEventV1>());
+    assert!(!needs_drop::<KhaenHwParamsV1>());
+    assert!(!needs_drop::<KhaenPlanHeaderV1>());
+    assert!(!needs_drop::<KhaenWorkerAffinityV1>());
+    assert!(!needs_drop::<KhaenBlockAckV1>());
+    assert!(!needs_drop::<KhaenSpscHeaderV1>());
+    assert!(!needs_drop::<KhaenWorkerStatsV1>());
+    assert!(!needs_drop::<KhaenPathV1>());
+    assert!(!needs_drop::<KhaenDiagFirV1>());
+    assert!(!needs_drop::<KhaenRoleV1>());
     assert!(!needs_drop::<RtControl>());
     assert!(!needs_drop::<CoreRtControl>());
     assert!(!needs_drop::<EventRingLane>());

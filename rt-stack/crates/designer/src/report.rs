@@ -32,7 +32,7 @@
 //! 判据不通过不返回 Err，而是记录 Criterion{passed:false, code}（保留完整实测报告），由
 //! require_pass() 统一拒绝 —— 对应 WBS §6"失败 BLOCKED/FAIL 保原始证据，不静默清零"。
 //!
-//! 未做（NOT_RUN，见 evidence/T55/MANIFEST.md）：写 WAV/f32 系数文件与 tspi-fir/v1 JSON 落盘
+//! 未做（NOT_RUN，见 evidence/T55/MANIFEST.md）：写 WAV/f32 系数文件与 khaen-fir/v1 JSON 落盘
 //! （本任务 DoD 只要求报告数据模型；文件 I/O 归 T14/T26 集成）、板端/ALSA/RT/soak、真实测量、
 //! 跨架构数值差异、f32 运行期量化误差实测（只提供 f32 系数转换的接口建议）。
 
@@ -265,7 +265,7 @@ pub fn parse_family(text: &str) -> Result<Family, ReportError> {
     Err(ReportError::new(
         E_FIR_SCHEMA,
         format!(
-            "unsupported family {text:?}: tspi-fir/v1 只允许 linear|min_fast|min_slow|apodizing|brickwall|corrected|lowdelay|nos（§2.2）；相邻工具 crossover/phase-delay-polarity 不是七族预设（§4），必须拒绝而不是猜"
+            "unsupported family {text:?}: khaen-fir/v1 只允许 linear|min_fast|min_slow|apodizing|brickwall|corrected|lowdelay|nos（§2.2）；相邻工具 crossover/phase-delay-polarity 不是七族预设（§4），必须拒绝而不是猜"
         ),
     ))
 }
@@ -633,7 +633,7 @@ impl FamilyParams {
     }
 }
 
-/// 设计声明（报告输入；对应 tspi-fir/v1 manifest 的 family/fs/taps/delay/reference/design 子集）。
+/// 设计声明（报告输入；对应 khaen-fir/v1 manifest 的 family/fs/taps/delay/reference/design 子集）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeclaredDesign {
     pub family: Family,

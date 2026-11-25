@@ -10,11 +10,11 @@
 use core::sync::atomic::{AtomicU32, AtomicU64};
 
 use crate::abi::{
-    TspiBlockAckV1, TspiBlockDescV1, TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1, TspiRoleV1,
-    TspiWorkerStatsV1,
+    KhaenBlockAckV1, KhaenBlockDescV1, KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1,
+    KhaenWorkerStatsV1,
 };
 
-pub use crate::abi::{ABI_VERSION, TSPI_PLAN_MAGIC};
+pub use crate::abi::{ABI_VERSION, KHAEN_PLAN_MAGIC};
 
 /// DSP worker 编号：0..=3（master = worker0）。
 pub type WorkerId = u8;
@@ -294,7 +294,7 @@ impl RtStatus {
 /// 非拥有、无 Drop 的 plan 借用（只在 block 内有效，见 INV-L1/INV-L2）。
 #[derive(Clone, Copy, Debug)]
 pub struct PlanRef {
-    ptr: core::ptr::NonNull<TspiPlanHeaderV1>,
+    ptr: core::ptr::NonNull<KhaenPlanHeaderV1>,
     version: PlanVersion,
 }
 
@@ -303,7 +303,7 @@ impl PlanRef {
     ///
     /// # Safety
     /// ptr 必须指向一个 alive 且 mlock 的 PlanArena（INV-L2），并保持到本 ref 不再使用。
-    pub unsafe fn from_raw(ptr: *const TspiPlanHeaderV1, version: PlanVersion) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *const KhaenPlanHeaderV1, version: PlanVersion) -> Option<Self> {
         // 调用者保证指针有效；这里只做空指针检查。
         let nn = core::ptr::NonNull::new(ptr.cast_mut())?;
         Some(Self { ptr: nn, version })
@@ -315,7 +315,7 @@ impl PlanRef {
     }
 
     /// plan 头原始指针（[RT] 只读；不得解引用到 owned 类型）。
-    pub fn as_ptr(self) -> *const TspiPlanHeaderV1 {
+    pub fn as_ptr(self) -> *const KhaenPlanHeaderV1 {
         self.ptr.as_ptr()
     }
 
@@ -326,7 +326,7 @@ impl PlanRef {
     /// （retire gate RG-1..RG-4，core-v1 §7.5）。
     pub unsafe fn view(self) -> PlanView<'static> {
         // SAFETY: 见函数 Safety 契约。
-        let header: &'static TspiPlanHeaderV1 = unsafe { &*self.ptr.as_ptr() };
+        let header: &'static KhaenPlanHeaderV1 = unsafe { &*self.ptr.as_ptr() };
         // scaffold：表切片由 T12/T26 按 header 偏移建立；本 stub 返回空表（不会被生产路径使用）。
         PlanView {
             header,
@@ -342,13 +342,13 @@ impl PlanRef {
 #[derive(Clone, Copy, Debug)]
 pub struct PlanView<'a> {
     /// plan 头。
-    pub header: &'a TspiPlanHeaderV1,
+    pub header: &'a KhaenPlanHeaderV1,
     /// 路径表（按 (out_index, in_index) 升序）。
-    pub paths: &'a [TspiPathV1],
+    pub paths: &'a [KhaenPathV1],
     /// 对角 FIR 表（按 out_index 升序）。
-    pub diags: &'a [TspiDiagFirV1],
+    pub diags: &'a [KhaenDiagFirV1],
     /// role 表（按 role_id 升序）。
-    pub roles: &'a [TspiRoleV1],
+    pub roles: &'a [KhaenRoleV1],
     /// 系数 blob（f32 LE 按表顺序拼接）。
     pub coeffs: &'a [u8],
 }
@@ -356,7 +356,7 @@ pub struct PlanView<'a> {
 /// 一个 block 的 planar f32 输入/输出视图（非拥有；core 只见 f32 planar）。
 pub struct BlockIo<'a> {
     /// block 身份。
-    pub desc: &'a TspiBlockDescV1,
+    pub desc: &'a KhaenBlockDescV1,
     /// 输入 planar f32（in_stride 样本/通道）。
     pub input: &'a [f32],
     /// 输出 planar f32（out_stride 样本/通道）。
@@ -372,9 +372,9 @@ pub struct WorkerRtCtx<'a> {
     /// 本 worker 编号。
     pub worker: WorkerId,
     /// 本 block ack（原子字段在内部，不拥有）。
-    pub ack: &'a TspiBlockAckV1,
+    pub ack: &'a KhaenBlockAckV1,
     /// 本 worker 统计。
-    pub stats: &'a mut TspiWorkerStatsV1,
+    pub stats: &'a mut KhaenWorkerStatsV1,
 }
 
 /// RT 控制块（core-v1 §13.2：原子字段+固定数组，needs_drop == false）。
@@ -455,7 +455,7 @@ pub fn master_block(
     plan: PlanRef,
     io: BlockIo<'_>,
     ctl: &RtControl,
-    ack: &TspiBlockAckV1,
+    ack: &KhaenBlockAckV1,
 ) -> RtStatus {
     let _ = (plan, io, ctl, ack);
     // scaffold stub：不是 v1 RT 错误语义；T09 实现后必须替换。

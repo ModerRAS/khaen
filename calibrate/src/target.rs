@@ -83,9 +83,9 @@ fn load_file(path: &std::path::Path, id: &str) -> Result<Curve, String> {
 
 fn parse_doc(text: &str) -> Result<FileDoc, String> {
     let doc: FileDoc = serde_yaml::from_str(text).map_err(|e| format!("目标曲线格式错误: {e}"))?;
-    if doc.schema != "tspi-target-curve/v1" {
+    if doc.schema != "khaen-target-curve/v1" {
         return Err(format!(
-            "目标曲线 schema 必须是 tspi-target-curve/v1（当前 {}）",
+            "目标曲线 schema 必须是 khaen-target-curve/v1（当前 {}）",
             doc.schema
         ));
     }

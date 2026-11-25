@@ -1,0 +1,47 @@
+#!/bin/bash
+# khaen-playback-mode — 正常播放链开关（单路径：Toslink → DSP(48k) → USB → MOTU Main）
+# 用法: khaen-playback-mode on|off|status
+# on  : 设备 48k + 直通关断 + host normal（DSP 路径唯一）
+# off : host 回 mute（安全）
+# status: 打印设备速率/锁、host 状态、CueMix 直通与 USB 路径
+set -u
+MODE="${1:-status}"
+C="python3 /usr/local/lib/khaen/cuemix_client.py --transport ws --host 169.254.111.126"
+MOTU_RATE="${MOTU_RATE:-48000}"
+log(){ echo "[playback-mode] $*"; }
+have_motu(){ awk '/UltraLite|Ultralite/{found=1} END{exit !found}' /proc/asound/cards 2>/dev/null; }
+ensure_net(){ if ! ping -c1 -W1 169.254.111.126 >/dev/null 2>&1; then IF=$(ip -br link | awk '/enx|eth0/{print $1; exit}'); [ -n "$IF" ] && { ip link set "$IF" up 2>/dev/null; ip addr add 169.254.111.200/16 dev "$IF" 2>/dev/null; sleep 1; }; fi; }
+case "$MODE" in
+  status)
+    have_motu && log "MOTU present" || log "MOTU MISSING"
+    have_motu && for d in /proc/asound/card*/pcm0p/sub0/hw_params; do [ -s "$d" ] && { log "hw_params:"; head -4 "$d"; }; done
+    log "host=$(systemctl is-active khaen-rt-host 2>/dev/null || true) safe_mode=$(grep SAFE_MODE /etc/khaen-rt-stack/90-safe-mute.env 2>/dev/null | cut -d= -f2)"
+    ensure_net; $C --read 2 --idle-stop 1 --json /tmp/pbm.json >/dev/null 2>&1
+    python3 - <<PY 2>/dev/null || true
+import json
+v=json.load(open("/tmp/pbm.json")); v=v.get("values",v)
+f=v.get("kiMixFader")
+for k in ("kSampleRate","kClockSource","kFPGALocked","kMainTrim"): print(k,"=",v.get(k))
+phys=set(range(0,18))|{30,31}
+bad=sum(1 for bus in range(14) for i in phys if bus*32+i<len(f or []) and f[bus*32+i]!=0)
+print("physical_input_paths_nonzero =",bad)
+PY
+    ;;
+  on)
+    have_motu || { log "MOTU missing; abort"; exit 3; }
+    ensure_net
+    systemctl stop khaen-rt-host 2>/dev/null || true; sleep 1
+    /usr/local/lib/khaen/motu-set-rate "$MOTU_RATE" >/dev/null 2>&1 || true
+    # 单路径：物理输入全断，USB 播放路径保留
+    $C --mute-inputs --yes >/dev/null 2>&1 || true
+    sed -i "s/^KHAEN_HOST_SAFE_MODE=.*/KHAEN_HOST_SAFE_MODE=normal/" /etc/khaen-rt-stack/90-safe-mute.env
+    systemctl start khaen-rt-host; sleep 4
+    log "host=$(systemctl is-active khaen-rt-host) rate=$(cat /proc/asound/card*/pcm0p/sub0/hw_params 2>/dev/null | awk '/rate:/{print $2; exit}')"
+    ;;
+  off)
+    sed -i "s/^KHAEN_HOST_SAFE_MODE=.*/KHAEN_HOST_SAFE_MODE=mute/" /etc/khaen-rt-stack/90-safe-mute.env
+    systemctl restart khaen-rt-host 2>/dev/null || true; sleep 2
+    log "host=$(systemctl is-active khaen-rt-host) safe_mode=mute"
+    ;;
+  *) echo "usage: $0 on|off|status" >&2; exit 2 ;;
+esac

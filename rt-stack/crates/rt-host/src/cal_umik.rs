@@ -11,7 +11,7 @@ pub fn open_session() -> Result<(), String> {
     close_session();
     STOP.store(false, Ordering::Release);
     let handle = std::thread::Builder::new()
-        .name("tspi-umik".to_string())
+        .name("khaen-umik".to_string())
         .spawn(session)
         .map_err(|error| format!("UMIK 线程启动失败：{error}"))?;
     if let Ok(mut slot) = HOLD.lock() {

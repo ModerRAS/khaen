@@ -290,7 +290,7 @@ pub struct ApplyResponse {
     pub view: ChannelMapView,
 }
 
-/// POST /api/channelmap/apply：保存→校验→tspi-channelmap apply（off 只保存/渲染）。
+/// POST /api/channelmap/apply：保存→校验→khaen-channelmap apply（off 只保存/渲染）。
 pub async fn apply_channelmap(
     State(state): State<AppState>,
     Json(body): Json<DocumentRequest>,
@@ -609,7 +609,7 @@ pub async fn test_tone(
         }));
     }
     let path = std::env::temp_dir().join(format!(
-        "tspi-tone-{}-{}.wav",
+        "khaen-tone-{}-{}.wav",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

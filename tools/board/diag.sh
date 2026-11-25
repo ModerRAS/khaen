@@ -14,6 +14,6 @@ for f in /var/log/syslog /var/log/kern.log /var/log/messages; do
   tail -15 "$f" 2>&1
 done
 echo '== last csv =='
-cat /var/lib/tspi-soak/status.csv
+cat /var/lib/khaen-soak/status.csv
 echo '== dmesg pstore =='
 dmesg -T 2>&1 | grep -iE 'pstore|ramoops|panic|oops|reset' | tail -30

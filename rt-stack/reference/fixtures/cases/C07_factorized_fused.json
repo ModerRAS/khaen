@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C07_factorized_fused",
   "title": "factorized P*(G*u) equals fused F=P*G with D=1 offdiag tail",
   "tags": [

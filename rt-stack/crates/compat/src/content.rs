@@ -14,7 +14,7 @@
 //! 本模块是 rt-stack compat leaf content（WBS T25；deps T24/T23/T44 已 PASS）。职责分两层：
 //!
 //! 1. **S1 契约兼容资料（只记录/只模拟，不驱动 P1）**：把既有板端 S1 内容检测
-//!    daemon（`tspi-upmix autodetect`）的可判语义冻结为纯函数 + 状态机，供退役核对、
+//!    daemon（`khaen-upmix autodetect`）的可判语义冻结为纯函数 + 状态机，供退役核对、
 //!    回归对拍与未来恢复时评审：
 //!    - 读 `GetCaptureSignalRms`（W18）按采集通道索引取 dB，按输入布局 role→index 映射为
 //!      各角色 RMS（缺失/非有限按 -240 dBFS floor 处理，S1 口径）；
@@ -41,16 +41,16 @@
 //!   （GetCaptureSignalRms/SetFaderVolume 兼容口径）、§5 Y18、R47；
 //! - scratch/lead/planner/DSP-HOST-DECISION.md §1（P1 不实现上混/下混/自动内容上混或
 //!   旧 Aux 双路径上混）、§6（不实现内容自动上混 daemon；只保输入 N/目标 O 显式 reject）、
-//!   §7 G-no-C（禁用/移除 `tspi-upmix-autodetect.service` 及其 Camilla 依赖）；
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T25 行与 §1/§7（写域、executed>0、不碰板端）；
+//!   §7 G-no-C（禁用/移除 `khaen-upmix-autodetect.service` 及其 Camilla 依赖）；
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T25 行与 §1/§7（写域、executed>0、不碰板端）；
 //! - 既有 S1 契约与实现（只读参考）：
 //!   - `upmix/docs/INPUT-MODE.md` §1（运行态/覆盖文件字段、优先级、判定规则、启动冻结）、
 //!     §2（双路径 + Aux1/Aux2 fader、默认安全态 `--gain1=-120 --gain2=0`）、§7（已知限制）；
-//!   - `audio/overlay/usr/local/bin/tspi-upmix`（`detect_content` 阈值/迟滞/置信度、
+//!   - `audio/overlay/usr/local/bin/khaen-upmix`（`detect_content` 阈值/迟滞/置信度、
 //!     `cmd_autodetect` 窗口/hold/冻结/override、`_set_faders` 1/2 号 fader -120/0 dB、
 //!     `build_content_state` 字段、`FADER_STEREO=1`/`FADER_PASS=2`）；
-//!   - `audio/overlay/etc/systemd/system/tspi-upmix-autodetect.service`（S1 unit 的
-//!     Wants/After=tspi-camilladsp.service 与 ExecStart hold/freeze 参数）；
+//!   - `audio/overlay/etc/systemd/system/khaen-upmix-autodetect.service`（S1 unit 的
+//!     Wants/After=khaen-camilladsp.service 与 ExecStart hold/freeze 参数）；
 //!   - `web/src/channelmap.rs`（`normalize_input_mode` 别名、`build_input_mode_view`
 //!     override>detector>auto 合并、daemon_running=10 s 窗口）。
 //! - 新栈接口（只读参考，兼容/复用口径、不反向依赖）：T24 `crate::ws` 的 JSON 编解码、
@@ -106,13 +106,13 @@ pub const COMPAT_STATUS: &str = "retired_s1_reference_not_runtime";
 // 冻结常量（S1 契约 / W18·W19 兼容口径；不是 P1 音频调参默认值）
 // ---------------------------------------------------------------------------
 
-/// S1 运行态文件 schema（C01：`/run/tspi/input-content.json`）。
-pub const INPUT_CONTENT_SCHEMA: &str = "tspi-input-content/v1";
-/// S1 覆盖文件 schema（C02：`/etc/tspi-audio/input-mode.json`）。
-pub const INPUT_MODE_SCHEMA: &str = "tspi-input-mode/v1";
+/// S1 运行态文件 schema（C01：`/run/khaen/input-content.json`）。
+pub const INPUT_CONTENT_SCHEMA: &str = "khaen-input-content/v1";
+/// S1 覆盖文件 schema（C02：`/etc/khaen-audio/input-mode.json`）。
+pub const INPUT_MODE_SCHEMA: &str = "khaen-input-mode/v1";
 /// 规范内容模式取值（C02；顺序即线上顺序）。
 pub const INPUT_MODE_CHOICES: [&str; 3] = ["auto", "stereo", "multichannel"];
-/// S1 默认判定阈值（dBFS；`tspi-upmix --threshold-db` 默认 -50.0）。
+/// S1 默认判定阈值（dBFS；`khaen-upmix --threshold-db` 默认 -50.0）。
 pub const DEFAULT_THRESHOLD_DB: f64 = -50.0;
 /// S1 默认迟滞（dB；进入阈值与退出阈值之差，默认 6.0）。
 pub const DEFAULT_HYSTERESIS_DB: f64 = 6.0;
@@ -126,7 +126,7 @@ pub const DEFAULT_SAMPLE_INTERVAL_MS: u32 = 500;
 pub const CONTENT_RMS_FLOOR_DB: f64 = RMS_FLOOR_DB;
 /// S1 Aux 路径打开电平（dB）。
 pub const AUX_OPEN_DB: f64 = 0.0;
-/// S1 Aux 路径静音电平（dB；`tspi-upmix MUTE_DB=-120.0`）。
+/// S1 Aux 路径静音电平（dB；`khaen-upmix MUTE_DB=-120.0`）。
 pub const AUX_MUTE_DB: f64 = -120.0;
 /// S1 上混路径 fader id（Camilla Volume Aux1）。
 pub const FADER_AUX_STEREO: i32 = 1;
@@ -134,7 +134,7 @@ pub const FADER_AUX_STEREO: i32 = 1;
 pub const FADER_AUX_PASS: i32 = 2;
 /// S1 双路径 fader id 表（顺序：上混路径、直通路径）。
 pub const AUX_FADER_IDS: [i32; 2] = [FADER_AUX_STEREO, FADER_AUX_PASS];
-/// S1 daemon 默认输入容器布局（`tspi-upmix autodetect --input-layout h16-7.1.4`）。
+/// S1 daemon 默认输入容器布局（`khaen-upmix autodetect --input-layout h16-7.1.4`）。
 pub const S1_DEFAULT_CONTAINER_LAYOUT: &str = "h16-7.1.4";
 /// `h16-7.1.4` 容器通道数（layout-presets v2：streams [8,4]）。
 pub const H16_7_1_4_CHANNELS: usize = 12;
@@ -194,11 +194,11 @@ pub const P1_NO_CONTENT_UPMMIX_REASON: &str = "p1-no-content-upmix";
 /// P1 input-mode GET 状态壳的 status（R47 冻结字符串）。
 pub const P1_INPUT_MODE_STATUS: &str = "not_supported";
 /// P1 必须退役的 S1 内容检测 unit（C07；必须 disabled/removed 且 inactive）。
-pub const P1_RETIRED_CONTENT_UNIT: &str = "tspi-upmix-autodetect.service";
+pub const P1_RETIRED_CONTENT_UNIT: &str = "khaen-upmix-autodetect.service";
 /// S1 unit 必须清除的 Camilla 依赖项（C07：否则 G-no-C 依赖/socket 检查失败）。
 pub const P1_RETIRED_CONTENT_UNIT_CAMILLA_DEPS: [&str; 2] = [
-    "Wants=tspi-camilladsp.service",
-    "After=tspi-camilladsp.service",
+    "Wants=khaen-camilladsp.service",
+    "After=khaen-camilladsp.service",
 ];
 /// P1 禁止在运行期出现的内容面能力（只作审计字符串，不参与逻辑）。
 pub const P1_FORBIDDEN_CONTENT_FEATURES: [&str; 3] = [
@@ -780,7 +780,7 @@ impl DetectionResult {
     }
 }
 
-/// S1 内容判定（tspi-upmix detect_content 等价语义）。
+/// S1 内容判定（khaen-upmix detect_content 等价语义）。
 ///
 /// 规则（C04/C05，Lead 2026-11-15 裁决）：
 /// 1. 副声道 = CONTENT_SECONDARY_ROLES 中出现且有限的角色（C/SL/SR/height）；**LFE 永不计入**；
@@ -897,7 +897,7 @@ pub const fn h16_internal_upmix(detected: DetectedKind) -> Option<bool> {
 // S1 运行态 / 覆盖文件（C01/C02）：结构、JSON 编解码
 // ---------------------------------------------------------------------------
 
-/// S1 运行态 tspi-input-content/v1（C01）。字段名/类型按契约冻结；本结构只作兼容资料，
+/// S1 运行态 khaen-input-content/v1（C01）。字段名/类型按契约冻结；本结构只作兼容资料，
 /// **P1 不消费**。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContentState {
@@ -1214,7 +1214,7 @@ fn required_array<'a>(value: &'a JsonValue, key: &str) -> Result<&'a [JsonValue]
     })
 }
 
-/// S1 覆盖文件 tspi-input-mode/v1（C02；WebUI/CLI 写，daemon 每轮读）。
+/// S1 覆盖文件 khaen-input-mode/v1（C02；WebUI/CLI 写，daemon 每轮读）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputModeOverride {
     /// 覆盖模式（auto/stereo/multichannel；写入前已归一化 force-* 别名）。
@@ -1928,7 +1928,7 @@ pub struct ContentDaemonTick {
     pub fader_plan: Option<FaderSwitchPlan>,
 }
 
-/// S1 内容检测 daemon 的纯状态机模拟（tspi-upmix autodetect）。
+/// S1 内容检测 daemon 的纯状态机模拟（khaen-upmix autodetect）。
 ///
 /// 语义：每 500 ms 取一次 RMS → detect → 启动冻结/override/hold 迟滞 → 写 state →
 /// 按 content_mode 切 Aux1/Aux2（仅在 effective 位置变化时）。首轮 current=multichannel

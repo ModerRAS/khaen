@@ -43,8 +43,8 @@
 //!   舍入按 T07 冻结的 f32 工程门（相对 L2 <= 1e-5、最大绝对误差 <= 1e-5 * max(1, peak_ref)，
 //!   依据 T03 SPEC §4.2 + docs/E2E-ACCEPTANCE.md 的待冻结默认）。
 //!
-//! 与 plan/ABI 的边界：本模块消费 reference 语义图（A_map/a/g/p/scatter）。TspiPathV1 /
-//! TspiDiagFirV1 融合形式由 T12 编译，公共入口 core::rt::kernel_direct 由 integrator 在 T26
+//! 与 plan/ABI 的边界：本模块消费 reference 语义图（A_map/a/g/p/scatter）。KhaenPathV1 /
+//! KhaenDiagFirV1 融合形式由 T12 编译，公共入口 core::rt::kernel_direct 由 integrator 在 T26
 //! 把 plan view 适配为 DirectTopology + DirectCoeffsF32 后委托本模块（WBS T06 README
 //! 契约偏差 O-4；leaf 不改 rt.rs/lib.rs/Cargo.toml）。
 //!

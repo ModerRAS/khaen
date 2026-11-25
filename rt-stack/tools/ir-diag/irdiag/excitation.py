@@ -1,4 +1,4 @@
-"""Excitation reconstruction for TSPI G0 RAW baseline.
+"""Excitation reconstruction for KHAEN G0 RAW baseline.
 
 The waveform is rebuilt bit-exactly from the same code path that generated the
 played composite, then verified against slices of the byte-identical
@@ -6,7 +6,7 @@ composite.raw captured on the target (see tools/ir-diag/README.md).
 
 Sources of the formula (line numbers as of rt-stack HEAD 2026-11-21):
 
-* build: C:/WorkSpace/Claw/projects/tspi-audio-dsp/calibrate/src/sweep.rs:28-55
+* build: C:/WorkSpace/Claw/projects/khaen-audio-dsp/calibrate/src/sweep.rs:28-55
       (SweepSpec::generate -- this is the binary that measure-multi used)
 * same formula in the RT crate (for reference / future stages):
       rt-stack/crates/calibration/src/sweep.rs:1606-1630 (sample_at) and

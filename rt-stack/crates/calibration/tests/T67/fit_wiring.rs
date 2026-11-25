@@ -31,7 +31,7 @@ static UNIQUE: AtomicU64 = AtomicU64::new(0);
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let id = UNIQUE.fetch_add(1, Ordering::SeqCst);
     let dir =
-        std::env::temp_dir().join(format!("tspi-fit-wiring-{tag}-{}-{id}", std::process::id()));
+        std::env::temp_dir().join(format!("khaen-fit-wiring-{tag}-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create test dir");
     dir
@@ -378,13 +378,13 @@ fn t67_wiring_full_job_reaches_apply_with_artifacts() {
     assert_eq!(json_field(&ack, "state").as_str(), Some("applied"));
     assert_eq!(json_field(&ack, "t3_required").as_bool(), Some(true));
     assert_eq!(json_field(&ack, "camilla_involved").as_bool(), Some(false));
-    // plan.bin 是真实 plan 字节（非空、header size 128B、以 TSPI magic 开头）。
+    // plan.bin 是真实 plan 字节（非空、header size 128B、以 KHAEN magic 开头）。
     let plan = artifact_bytes(&snapshot, "compile/plan.bin");
     assert!(plan.len() > 128, "plan.bin too small: {} bytes", plan.len());
     assert_eq!(
         u32::from_le_bytes([plan[0], plan[1], plan[2], plan[3]]),
-        khaen_core::abi::TSPI_PLAN_MAGIC,
-        "plan.bin 必须以 TSPI_PLAN_MAGIC 开头"
+        khaen_core::abi::KHAEN_PLAN_MAGIC,
+        "plan.bin 必须以 KHAEN_PLAN_MAGIC 开头"
     );
     // snapshot 的 applied version 来自接线 set_applied_version（ack 后）。
     assert!(

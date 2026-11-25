@@ -2,7 +2,7 @@
 //!
 //! 本测试是 T06 scaffold 自证的一部分：证明常量/公式被真实编译并执行断言，不是 0 tests。
 
-use khaen_core::abi::{TspiPlanHeaderV1, TspiWorkerAffinityV1};
+use khaen_core::abi::{KhaenPlanHeaderV1, KhaenWorkerAffinityV1};
 use khaen_core::events::{
     event_name, EV_HOST_INIT, EV_STOPPED, EV_WORKER_LOST, LANE_CONTROL, LANE_WORKER0,
     SEVERITY_FATAL, SEVERITY_INFO,
@@ -64,58 +64,58 @@ fn tick_budget_matches_core_v1_i04() {
     );
 }
 
-/// T105：v1.1 affinity ABI —— `TspiWorkerAffinityV1`（§11.13，32 B/align 8）提升到 core::abi，
-/// 且 `TspiPlanHeaderV1` 具备 v1.1 affinity/ctl 字段（core-v1 v1.1.2 errata E1 定稿：
+/// T105：v1.1 affinity ABI —— `KhaenWorkerAffinityV1`（§11.13，32 B/align 8）提升到 core::abi，
+/// 且 `KhaenPlanHeaderV1` 具备 v1.1 affinity/ctl 字段（core-v1 v1.1.2 errata E1 定稿：
 /// reserved1@94、affinity@96/100、reserved2@102、ctl@104/108、reserved3@112、crc@124）。
 #[test]
 fn abi_v11_affinity_layout_is_repr_c_legal() {
     use core::mem::{align_of, offset_of, size_of};
-    // TspiWorkerAffinityV1：B-18，32 B / align 8（plan POD 表项，align 例外）。
-    assert_eq!(size_of::<TspiWorkerAffinityV1>(), 32);
-    assert_eq!(align_of::<TspiWorkerAffinityV1>(), 8);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, worker_id), 0);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, sched_priority), 1);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, flags), 2);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, cpu_index), 4);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, reserved0), 6);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, irq_dependency_mask), 8);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, reserved1), 16);
-    assert_eq!(offset_of!(TspiWorkerAffinityV1, reserved2), 24);
-    assert!(!core::mem::needs_drop::<TspiWorkerAffinityV1>());
+    // KhaenWorkerAffinityV1：B-18，32 B / align 8（plan POD 表项，align 例外）。
+    assert_eq!(size_of::<KhaenWorkerAffinityV1>(), 32);
+    assert_eq!(align_of::<KhaenWorkerAffinityV1>(), 8);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, worker_id), 0);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, sched_priority), 1);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, flags), 2);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, cpu_index), 4);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, reserved0), 6);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, irq_dependency_mask), 8);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, reserved1), 16);
+    assert_eq!(offset_of!(KhaenWorkerAffinityV1, reserved2), 24);
+    assert!(!core::mem::needs_drop::<KhaenWorkerAffinityV1>());
 
-    // TspiPlanHeaderV1：v1.1 affinity/ctl 字段（errata E1 定稿：96/100/104/108，size 128）。
+    // KhaenPlanHeaderV1：v1.1 affinity/ctl 字段（errata E1 定稿：96/100/104/108，size 128）。
     assert_eq!(
-        size_of::<TspiPlanHeaderV1>(),
+        size_of::<KhaenPlanHeaderV1>(),
         khaen_core::abi::PLAN_HEADER_SIZE
     );
     assert_eq!(
-        align_of::<TspiPlanHeaderV1>(),
+        align_of::<KhaenPlanHeaderV1>(),
         khaen_core::abi::PLAN_HEADER_ALIGN
     );
     assert_eq!(
-        offset_of!(TspiPlanHeaderV1, affinity_table_offset),
+        offset_of!(KhaenPlanHeaderV1, affinity_table_offset),
         khaen_core::abi::PLAN_HEADER_OFFSET_AFFINITY_TABLE
     );
     assert_eq!(
-        offset_of!(TspiPlanHeaderV1, affinity_count),
+        offset_of!(KhaenPlanHeaderV1, affinity_count),
         khaen_core::abi::PLAN_HEADER_OFFSET_AFFINITY_COUNT
     );
     assert_eq!(
-        offset_of!(TspiPlanHeaderV1, ctl_meta_offset),
+        offset_of!(KhaenPlanHeaderV1, ctl_meta_offset),
         khaen_core::abi::PLAN_HEADER_OFFSET_CTL_META
     );
     assert_eq!(
-        offset_of!(TspiPlanHeaderV1, ctl_meta_len),
+        offset_of!(KhaenPlanHeaderV1, ctl_meta_len),
         khaen_core::abi::PLAN_HEADER_OFFSET_CTL_META_LEN
     );
-    assert_eq!(size_of::<TspiPlanHeaderV1>(), 128);
-    assert_eq!(align_of::<TspiPlanHeaderV1>(), 64);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, role_table_count), 92);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, affinity_table_offset), 96);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, affinity_count), 100);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, ctl_meta_offset), 104);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, ctl_meta_len), 108);
-    assert_eq!(offset_of!(TspiPlanHeaderV1, header_crc32c), 124);
+    assert_eq!(size_of::<KhaenPlanHeaderV1>(), 128);
+    assert_eq!(align_of::<KhaenPlanHeaderV1>(), 64);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, role_table_count), 92);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, affinity_table_offset), 96);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, affinity_count), 100);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, ctl_meta_offset), 104);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, ctl_meta_len), 108);
+    assert_eq!(offset_of!(KhaenPlanHeaderV1, header_crc32c), 124);
 }
 
 #[test]

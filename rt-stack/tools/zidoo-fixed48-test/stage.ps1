@@ -30,7 +30,7 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $here '..\..\..')).Path
 if (-not $ApkPath) {
-    $ApkPath = Join-Path $repoRoot 'artifacts\tspi-audio\zidoo-test\zidoo-fixed48-test-v1.0.apk'
+    $ApkPath = Join-Path $repoRoot 'artifacts\khaen-audio\zidoo-test\zidoo-fixed48-test-v1.0.apk'
 }
 if (-not (Test-Path $ApkPath)) { throw ('APK not found: ' + $ApkPath) }
 $apkName = Split-Path -Leaf $ApkPath
@@ -74,11 +74,11 @@ try {
 
 try {
     $apps = Invoke-RestMethod -Uri ('http://' + $ZidooHost + ':9529/ZidooControlCenter/Apps/getApps') -TimeoutSec 10
-    $ours = @($apps.apps | Where-Object { $_.packageName -eq 'com.tspi.fixed48test' })
+    $ours = @($apps.apps | Where-Object { $_.packageName -eq 'com.khaen.fixed48test' })
     if ($ours.Count -gt 0) {
-        Write-Host ('   installed: com.tspi.fixed48test versionName=' + $ours[0].versionName + ' versionCode=' + $ours[0].versionCode)
+        Write-Host ('   installed: com.khaen.fixed48test versionName=' + $ours[0].versionName + ' versionCode=' + $ours[0].versionCode)
     } else {
-        Write-Host '   installed: com.tspi.fixed48test NOT installed yet'
+        Write-Host '   installed: com.khaen.fixed48test NOT installed yet'
     }
 } catch {
     Write-Host ('   app list check failed: ' + $_.Exception.Message)

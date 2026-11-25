@@ -20,7 +20,7 @@
 
 use std::sync::atomic::AtomicU32;
 
-use khaen_core::abi::TspiBlockAckV1;
+use khaen_core::abi::KhaenBlockAckV1;
 use khaen_core::compile::{CompileOptions, FusionForm, COMPILE_NO_SOURCE};
 use khaen_core::direct::{
     direct_block_f32, direct_block_f64, DirectCoeffsF32, DirectCoeffsF64, DirectLayout,
@@ -981,8 +981,7 @@ fn nodes_modal_iir_not_truncated_into_fir_and_commutes() {
     let mut iir_ir = vec![0.0f64; 64];
     for (index, slot) in iir_ir.iter_mut().enumerate() {
         let input = if index == 0 { 1.0 } else { 0.0 };
-        *slot =
-            khaen_core::nodes::biquad_process_df2t_f64(&band.b, &band.a, &mut iir_state, input);
+        *slot = khaen_core::nodes::biquad_process_df2t_f64(&band.b, &band.a, &mut iir_state, input);
     }
     let kernel_then_iir = khaen_core::compile::convolve_linear(&fir, &iir_ir);
     let iir_then_kernel = khaen_core::compile::convolve_linear(&iir_ir, &fir);
@@ -1381,7 +1380,7 @@ fn nodes_kernel_direct_partitioned_workers_agree() {
     let mut partials = WorkerPartials::new();
     let mut stats = WorkerScheduleStats::default();
     let bad_output = AtomicU32::new(0);
-    let mut ack = TspiBlockAckV1::new(0, 0, dag.plan_version, 4);
+    let mut ack = KhaenBlockAckV1::new(0, 0, dag.plan_version, 4);
     ack.flags = WORKER_ACK_FLAG_VALID;
     let status = execute_block_scheduled(
         &dag,

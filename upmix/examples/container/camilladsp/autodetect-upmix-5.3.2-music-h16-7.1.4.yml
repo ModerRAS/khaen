@@ -1,8 +1,8 @@
-# tspi-upmix 生成：autodetect upmix-5.3.2-music
+# khaen-upmix 生成：autodetect upmix-5.3.2-music
 # 输入容器 h16-7.1.4（12ch）-> 输出 5.3.2（10ch）；采样率 48000 Hz
-# 双路径：Aux1=上混(0..N-1)，Aux2=直通(N..2N-1)；由 tspi-upmix autodetect 用 SetFaderVolume 切换（-120=静音）
+# 双路径：Aux1=上混(0..N-1)，Aux2=直通(N..2N-1)；由 khaen-upmix autodetect 用 SetFaderVolume 切换（-120=静音）
 # 用途：独立 CamillaDSP（ALSA）
-title: tspi-upmix autodetect upmix-5.3.2-music（h16-7.1.4 -> 5.3.2）
+title: khaen-upmix autodetect upmix-5.3.2-music（h16-7.1.4 -> 5.3.2）
 description: 输入内容检测双路径：Aux1=2.0 上混路径，Aux2=多声道直通路径；daemon 按 GetCaptureSignalRms 判定切换（-120 dB=静音）。
 devices:
   samplerate: 48000

@@ -166,7 +166,7 @@ fn main() {
 
 fn print_header() {
     println!(
-        "=== TSPI MIMO 12k 修正支路 taps 档 CPU/预算 harness（taps-budget，离线 host-only）==="
+        "=== KHAEN MIMO 12k 修正支路 taps 档 CPU/预算 harness（taps-budget，离线 host-only）==="
     );
     println!(
         "[SCOPE] PREDICTED_HOST_OFFLINE SINGLE_POINT_NOT_SPATIAL NO_MEASUREMENT(board,xrun,end_to_end_latency)"

@@ -21,7 +21,7 @@
 //! （core §3.1 MAX_INPUT_CHANNELS）、采样率 1..=384000（runtime rate 由 session/compile 再校验）。
 //!
 //! 写回：[`encode_wav_f32`] 生成确定性 WAV（float32、16 B fmt、无额外 chunk、奇数 padding 规则），
-//! 用于 runner 输出与 `tspi-fir/v1` 系数文件（spec/fir-toolbox.md §2.1：mono f32、长度 = taps、
+//! 用于 runner 输出与 `khaen-fir/v1` 系数文件（spec/fir-toolbox.md §2.1：mono f32、长度 = taps、
 //! 不做归一化）。
 
 use crate::json::Json;
@@ -536,7 +536,7 @@ pub fn file_sha256(bytes: &[u8]) -> String {
 
 /// 解码浮点 WAV 的原始样本（f32/f64；不做 T22 设备 clip/sanitize）。
 ///
-/// 用于 `tspi-fir/v1` 系数文件（mono f32、值可 >1.0，不能被设备 clip 语义破坏）；返回
+/// 用于 `khaen-fir/v1` 系数文件（mono f32、值可 >1.0，不能被设备 clip 语义破坏）；返回
 /// 未修改的样本值（非有限保留，由调用方拒绝）。仅接受 IEEE-float 格式。
 pub fn decode_float32_samples(bytes: &[u8]) -> RunnerResult<(WavInfo, Vec<f32>)> {
     let info = parse_wav(bytes)?;

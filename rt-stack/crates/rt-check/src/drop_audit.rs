@@ -38,9 +38,9 @@ pub fn audit_types() -> Report {
     }
 
     use khaen_core::abi::{
-        TspiBlockAckV1, TspiBlockDescV1, TspiDiagFirV1, TspiEpochInfoV1, TspiEventV1,
-        TspiHwParamsV1, TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, TspiSpscHeaderV1,
-        TspiWorkerStatsV1,
+        KhaenBlockAckV1, KhaenBlockDescV1, KhaenDiagFirV1, KhaenEpochInfoV1, KhaenEventV1,
+        KhaenHwParamsV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1, KhaenSpscHeaderV1,
+        KhaenWorkerStatsV1,
     };
     use khaen_core::rt::{BlockIo, PlanRef, PlanView, RtControl, RtStatus, WorkerRtCtx};
     use khaen_rt_host::fault::{EventRingLane, SafetyAction, WatchdogAction};
@@ -51,17 +51,17 @@ pub fn audit_types() -> Report {
     no_drop!("PlanView", PlanView<'static>);
     no_drop!("BlockIo", BlockIo<'static>);
     no_drop!("WorkerRtCtx", WorkerRtCtx<'static>);
-    no_drop!("TspiBlockDescV1", TspiBlockDescV1);
-    no_drop!("TspiEpochInfoV1", TspiEpochInfoV1);
-    no_drop!("TspiEventV1", TspiEventV1);
-    no_drop!("TspiHwParamsV1", TspiHwParamsV1);
-    no_drop!("TspiPlanHeaderV1", TspiPlanHeaderV1);
-    no_drop!("TspiBlockAckV1", TspiBlockAckV1);
-    no_drop!("TspiSpscHeaderV1", TspiSpscHeaderV1);
-    no_drop!("TspiWorkerStatsV1", TspiWorkerStatsV1);
-    no_drop!("TspiPathV1", TspiPathV1);
-    no_drop!("TspiDiagFirV1", TspiDiagFirV1);
-    no_drop!("TspiRoleV1", TspiRoleV1);
+    no_drop!("KhaenBlockDescV1", KhaenBlockDescV1);
+    no_drop!("KhaenEpochInfoV1", KhaenEpochInfoV1);
+    no_drop!("KhaenEventV1", KhaenEventV1);
+    no_drop!("KhaenHwParamsV1", KhaenHwParamsV1);
+    no_drop!("KhaenPlanHeaderV1", KhaenPlanHeaderV1);
+    no_drop!("KhaenBlockAckV1", KhaenBlockAckV1);
+    no_drop!("KhaenSpscHeaderV1", KhaenSpscHeaderV1);
+    no_drop!("KhaenWorkerStatsV1", KhaenWorkerStatsV1);
+    no_drop!("KhaenPathV1", KhaenPathV1);
+    no_drop!("KhaenDiagFirV1", KhaenDiagFirV1);
+    no_drop!("KhaenRoleV1", KhaenRoleV1);
     no_drop!("RtControl", RtControl);
     no_drop!("EventRingLane", EventRingLane);
     no_drop!("SafetyAction", SafetyAction);

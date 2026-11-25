@@ -116,7 +116,10 @@ fn runner_report_is_deterministic_canonical_metadata() {
         "sha256-canonical-v1"
     );
     assert_eq!(report_str(&report, &["graph_kind"]), "normal");
-    assert_eq!(report_str(&report, &["runner", "name"]), "khaen-file-runner");
+    assert_eq!(
+        report_str(&report, &["runner", "name"]),
+        "khaen-file-runner"
+    );
     assert_eq!(report_num(&report, &["engine", "abi_version"]), 1.0);
     assert_eq!(report_num(&report, &["engine", "plan_version"]), 1.0);
     assert_eq!(report_num(&report, &["engine", "block_size"]), 128.0);

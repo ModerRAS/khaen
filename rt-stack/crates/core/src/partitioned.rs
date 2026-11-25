@@ -49,7 +49,7 @@
 //! [RT] 入口只借用这些缓冲，不分配、不加锁、不 syscall、无析构、无 panic 分支。
 //!
 //! 与 plan/ABI 的边界：本模块消费 reference 语义图（DirectTopology 的 A_map/a/g/p/scatter
-//! 与 D）。TspiPathV1 融合路径形式由 T12 编译；公共入口 core::rt::kernel_partitioned 由
+//! 与 D）。KhaenPathV1 融合路径形式由 T12 编译；公共入口 core::rt::kernel_partitioned 由
 //! integrator 在 T26 把 plan view 适配为 PartitionedPlan 后委托本模块（leaf 不改
 //! rt.rs/lib.rs/Cargo.toml）。错误码（leaf 约定）：容量/通道 -> ERR_CHANNELS；角色/映射/
 //! scatter -> ERR_ROLES；taps/D/分区数 -> ERR_TAPS；系数长度/路由表 -> ERR_PATH_TABLE；

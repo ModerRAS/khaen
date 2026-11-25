@@ -9,7 +9,7 @@ import json
 import sys
 import datetime
 
-SCHEMA = "tspi-rt-stack/switch-window/v1"
+SCHEMA = "khaen-rt-stack/switch-window/v1"
 REQUIRED = (
     "window_id",
     "authorized_by",

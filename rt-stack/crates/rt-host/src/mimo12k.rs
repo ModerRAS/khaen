@@ -80,12 +80,14 @@ pub fn load_artifact(dir: &Path) -> Result<Mimo12kArtifact, String> {
         taps: json_u32(&text, "taps").ok_or_else(|| "params.json 缺少 taps".to_string())? as usize,
         d12: json_u32(&text, "d12").ok_or_else(|| "params.json 缺少 d12".to_string())? as usize,
         resamp_taps: json_u32(&text, "resamp_taps")
-            .ok_or_else(|| "params.json 缺少 resamp_taps".to_string())? as usize,
+            .ok_or_else(|| "params.json 缺少 resamp_taps".to_string())?
+            as usize,
         dsys_samples: json_u32(&text, "dsys_samples")
             .ok_or_else(|| "params.json 缺少 dsys_samples".to_string())?,
         participants: json_string_array(&text, "participants")
             .ok_or_else(|| "params.json 缺少 participants".to_string())?,
-        g_file: json_string(&text, "g_file").ok_or_else(|| "params.json 缺少 g_file".to_string())?,
+        g_file: json_string(&text, "g_file")
+            .ok_or_else(|| "params.json 缺少 g_file".to_string())?,
         resamp_file: json_string(&text, "resamp_file")
             .ok_or_else(|| "params.json 缺少 resamp_file".to_string())?,
         g_sha256: json_string(&text, "g_sha256").unwrap_or_default(),

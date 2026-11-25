@@ -1,8 +1,8 @@
 //! 运行模式（dante / aes67 / off）切换编排与持久化。
 //!
 //! 原则：Web 服务只做编排与校验，不把具体组件细节写死。
-//! - 优先调用 audio-stack 提供的统一脚本 \`/usr/local/bin/tspi-mode dante|aes67|off\`
-//!   （读 JSON 状态时用 \`tspi-mode status\`），脚本路径可配置；
+//! - 优先调用 audio-stack 提供的统一脚本 \`/usr/local/bin/khaen-mode dante|aes67|off\`
+//!   （读 JSON 状态时用 \`khaen-mode status\`），脚本路径可配置；
 //! - 脚本不可用时使用内置编排（systemctl 启停 + CamillaDSP 配置重载），组件与顺序来自 [mode.*] 配置；
 //! - 同一时间只允许一个切换任务（在途返回 409）；失败回滚到切换前模式并记录错误；
 //! - 当前模式持久化到 state.json，启动时按 restore_on_start 恢复。
@@ -154,11 +154,11 @@ pub struct ProfileView {
     pub default_target_level: u32,
 }
 
-/// audio-stack `tspi-mode status --json` 的状态（schema = tspi-audio/v1）。
+/// audio-stack `khaen-mode status --json` 的状态（schema = khaen-audio/v1）。
 /// 未知/新增字段用 Value 保留，避免 Web 端成为脚本契约的瓶颈。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScriptStatus {
-    /// 契约版本，例如 "tspi-audio/v1"。
+    /// 契约版本，例如 "khaen-audio/v1"。
     #[serde(default)]
     pub schema: Option<String>,
     #[serde(default)]
@@ -188,7 +188,7 @@ pub struct ScriptStatus {
     pub last_error: Option<serde_json::Value>,
 }
 
-/// tspi-mode 退出码含义（audio-stack 契约）。
+/// khaen-mode 退出码含义（audio-stack 契约）。
 pub fn script_exit_meaning(code: i32) -> &'static str {
     match code {
         0 => "就绪",
@@ -549,7 +549,7 @@ impl ModeController {
         if use_script {
             let mut plan = vec![
                 (StepKey::ScriptSwitch, "调用 audio-stack 切换脚本"),
-                (StepKey::ScriptStatus, "读取 tspi-mode status --json"),
+                (StepKey::ScriptStatus, "读取 khaen-mode status --json"),
             ];
             if target != RunMode::Off {
                 plan.push((StepKey::ScriptVerify, "校验脚本切换结果"));
@@ -1115,7 +1115,7 @@ impl ModeController {
         target: RunMode,
         plan: &[(StepKey, &'static str)],
     ) -> Result<(), String> {
-        // 1) tspi-mode <mode> --json
+        // 1) khaen-mode <mode> --json
         if let Some(i) = Self::step_index(plan, StepKey::ScriptSwitch) {
             self.set_step(i, StepStatus::Running, None);
             let timeout = Duration::from_secs(self.cfg.switch_timeout_secs.max(10));
@@ -1176,7 +1176,7 @@ impl ModeController {
             self.pause().await;
         }
 
-        // 2) tspi-mode status --json
+        // 2) khaen-mode status --json
         if let Some(i) = Self::step_index(plan, StepKey::ScriptStatus) {
             self.set_step(i, StepStatus::Running, None);
             let timeout = Duration::from_secs(self.cfg.switch_timeout_secs.clamp(5, 30));
@@ -1197,7 +1197,7 @@ impl ModeController {
                             status.ptp_lock
                         );
                         if let Some(schema) = &status.schema {
-                            if !schema.starts_with("tspi-audio/") {
+                            if !schema.starts_with("khaen-audio/") {
                                 detail.push_str(&format!("（未知 schema {schema}）"));
                             }
                         }
@@ -1206,12 +1206,12 @@ impl ModeController {
                 }
                 Ok(out) => {
                     detail = format!(
-                        "tspi-mode status 退出码 {:?}：{}",
+                        "khaen-mode status 退出码 {:?}：{}",
                         out.status,
                         out.stderr.trim().lines().next().unwrap_or("无错误输出")
                     );
                 }
-                Err(e) => detail = format!("执行 tspi-mode status 失败: {e}"),
+                Err(e) => detail = format!("执行 khaen-mode status 失败: {e}"),
             }
             self.set_step(i, StepStatus::Done, Some(detail));
         }
@@ -1347,7 +1347,7 @@ impl ModeController {
         }
     }
 
-    /// 主动执行 `tspi-mode status --json` 读取脚本契约状态（mock 返回 None）。
+    /// 主动执行 `khaen-mode status --json` 读取脚本契约状态（mock 返回 None）。
     pub async fn query_script_status(self: &Arc<Self>) -> AppResult<Option<ScriptStatus>> {
         if self.mock {
             return Ok(None);
@@ -1365,10 +1365,10 @@ impl ModeController {
             .runner
             .run_with_timeout(path, &["status", "--json"], Duration::from_secs(10))
             .await
-            .map_err(|e| AppError::unavailable(format!("执行 tspi-mode status 失败: {e}")))?;
+            .map_err(|e| AppError::unavailable(format!("执行 khaen-mode status 失败: {e}")))?;
         if !out.success {
             return Err(AppError::unavailable(format!(
-                "tspi-mode status 退出码 {:?}: {}",
+                "khaen-mode status 退出码 {:?}: {}",
                 out.status,
                 out.stderr.trim().lines().next().unwrap_or("无错误输出")
             )));
@@ -1574,8 +1574,8 @@ pub(crate) mod test_support {
             vec![],
         ));
         // 模拟“开机后未启用任何音频链路”的初始状态
-        // F-04：旧 C 板端实际 unit 是 tspi-camilladsp.service；legacy web 不再用通用名 camilladsp.service。
-        services.set_active("tspi-camilladsp.service", false);
+        // F-04：旧 C 板端实际 unit 是 khaen-camilladsp.service；legacy web 不再用通用名 camilladsp.service。
+        services.set_active("khaen-camilladsp.service", false);
         services.set_active("ptp4l.service", false);
         services.set_active("phc2sys.service", false);
         let camilla = Arc::new(MockCamilla::new(CamillaConfig::default()));
@@ -1646,7 +1646,7 @@ mod tests {
         assert_eq!(view.mode, RunMode::Dante);
         assert!(h.services.is_active("inferno.service"));
         assert!(h.services.is_active("statime.service"));
-        assert!(h.services.is_active("tspi-camilladsp.service"));
+        assert!(h.services.is_active("khaen-camilladsp.service"));
         assert_eq!(h.camilla.applied_count(), 1);
         assert_eq!(h.store.get().unwrap().mode, RunMode::Dante);
         // 校验步骤存在且完成
@@ -1689,7 +1689,7 @@ mod tests {
         let view = wait_idle(&h.controller, 5000).await;
         assert_eq!(view.mode, RunMode::Off);
         assert!(!h.services.is_active("aes67-daemon.service"));
-        assert!(!h.services.is_active("tspi-camilladsp.service"));
+        assert!(!h.services.is_active("khaen-camilladsp.service"));
         assert!(!h.services.is_active("ptp4l.service"));
         assert_eq!(h.store.get().unwrap().mode, RunMode::Off);
     }
@@ -1836,7 +1836,7 @@ mod tests {
         // 手动把脚本配成不存在的路径，mock 下应仍然走内置
         let _ = h;
         let cfg = ModeConfig {
-            switch_script: "/nonexistent/tspi-mode".into(),
+            switch_script: "/nonexistent/khaen-mode".into(),
             ..ModeConfig::default()
         };
         let services = Arc::new(MockServiceManager::new());

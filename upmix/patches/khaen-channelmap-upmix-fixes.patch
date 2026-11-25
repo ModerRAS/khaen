@@ -1,0 +1,73 @@
+# khaen-channelmap 上混相关修复（已由 audio-stack 合入：renderer sha256 91e85e18…；本文件存档 + 旧镜像应急）
+# 生成：khaen-upmix 2026-11-15
+# 基线文件：/usr/local/bin/khaen-channelmap（repo overlay，sha256 1e7dc232f9c29cda71404bb98dd0e5c3bdfdfc1470b2af7dcf862db8212675c5，70472 bytes）
+# 板端应用：cd / && patch -p1 --dry-run < khaen-channelmap-upmix-fixes.patch && patch -p1 < khaen-channelmap-upmix-fixes.patch
+#            之后（音频模式在跑时）systemctl restart khaen-camilladsp；本项目测试脚本已用该 patch 的本地副本验证。
+#
+# 三处修复：
+# A. Filter step 语义（关键）：CamillaDSP 的 Filter step 会把 names 里的滤波器依次串到 channels 的每个通道上。
+#    原实现把 (channel, filter) 配对塞进同一 step → 每个通道被串上所有角色的滤波器
+#    （实测 4.1.2 上混 FL 在 1kHz 被衰减约 -42dB）。修复：每 filter 一步（同名 filter 多通道才合并）。
+#    影响所有带 per-role 分频/PEQ/FIR/gain/delay 的 profile，不只上混。
+# B. roles[].sources[].inverted 在渲染时被丢弃 → (L-R) 差信号变成 (L+R) mid。
+#    修复：dest_sources() 里把源 inverted 与角色 polarity 做异或。
+# C. bass_management 的 bass_extract mixer 未直通主声道（CamillaDSP 未映射输出=静音）→ 主声道全静音。
+#    修复：先显式直通 0..pb-1，再追加 extract 通道。
+#
+--- a/usr/local/bin/khaen-channelmap
++++ b/usr/local/bin/khaen-channelmap
+@@ -714,9 +714,9 @@
+         for s in srcs:
+             d = {"channel": s["channel"]}
+             if abs(s["gain_db"]) > 1e-9:
+                 d["gain"] = s["gain_db"]
+-            if inv:
++            if inv != bool(s.get("inverted")):
+                 d["inverted"] = True
+             if float(s["gain_db"]) >= -60 and s.get("mute"):
+                 pass
+             out.append(d)
+@@ -740,8 +740,10 @@
+             rd = bm.get("redirect") or {}
+             n = len(sub_list)
+             mx_ext = {"description": "bass extract：主声道（remap 后）复制到临时声道",
+                       "channels": {"in": pb, "out": pb + n}, "mapping": []}
++            for o in range(pb):  # 未映射输出=静音，主声道必须显式直通
++                mx_ext["mapping"].append({"dest": o, "sources": [{"channel": o}]})
+             for i, rid in enumerate(sub_list):
+                 srcs = []
+                 if rd.get("enabled", True):
+                     for s in rd.get("sources") or []:
+@@ -760,10 +762,11 @@
+                 nm = re.sub(r"[^a-z0-9]+", "_", rid.lower()) + "_lp"
+                 addf(nm, "BiquadCombo", {"type": "LinkwitzRileyLowpass",
+                                          "freq": lpx["freq"], "order": lpx["order"]})
+                 lp_pairs.append((pb + i, nm))
+-            pipeline.append({"type": "Filter", "description": "SUB lowpass（extract 后）",
+-                             "channels": [p[0] for p in lp_pairs], "names": [p[1] for p in lp_pairs]})
++            for ch, nm in lp_pairs:
++                pipeline.append({"type": "Filter", "description": "SUB lowpass（extract 后）",
++                                 "channels": [ch], "names": [nm]})
+             # 第二级 mixer：非 SUB 直通 + SUB = extract + LFE
+             mx2 = {"description": "bass sum：SUB = extract（+ LFE/lfe_to），其余通道直通",
+                    "channels": {"in": pb + n, "out": pb}, "mapping": []}
+             for o in range(pb):
+@@ -813,11 +816,16 @@
+         pipeline.append({"type": "Mixer", "name": "to_outputs"})
+ 
+     # 2) 角色滤波链（HP -> PEQ -> FIR -> gain -> delay；SUB 的 LP 已在 bass 阶段处理）
+     def add_step(desc, pairs):
+-        if pairs:
++        # CamillaDSP 的 Filter step 会把 names 中所有滤波器串到 channels 的每个通道上；
++        # 因此 (channel, filter) 必须拆成每 filter 一步（同 filter 多通道才合并）。
++        by_name = {}
++        for ch, name in pairs:
++            by_name.setdefault(name, []).append(ch)
++        for name, chans in by_name.items():
+             pipeline.append({"type": "Filter", "description": desc,
+-                             "channels": [p[0] for p in pairs], "names": [p[1] for p in pairs]})
++                             "channels": chans, "names": [name]})
+ 
+     hp_pairs, peq_groups, fir_pairs, gain_pairs, delay_pairs = [], {}, [], [], []
+     lp_pairs2 = []
+     for rid in active:

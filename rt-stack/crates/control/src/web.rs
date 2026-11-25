@@ -6,7 +6,7 @@
 //! start/cancel/apply/retest/rollback 全交互）；不是占位按钮，也不是只给 curl 的 API。
 //!
 //! ## 权威输入（只读）
-//! - WBS T70 行与 §1/§6/§7（scratch/lead/planner/TSPI-RT-STACK-WBS.md）。
+//! - WBS T70 行与 §1/§6/§7（scratch/lead/planner/KHAEN-RT-STACK-WBS.md）。
 //! - DSP-HOST-DECISION §6（P1 I/O/control/Web 入口完整性：自有 REST/WS + 真实 Web 页面）。
 //! - rt-stack/spec/compat-matrix.md R01-R51、§4（W01-W22）、K01/K02/K05/K14/K15/K53/K57、
 //!   X01/X14/X15/X21/X22、§6（S1 REST/WS/页面兼容面）。
@@ -54,7 +54,7 @@
 //!   后由 with_plane_factory 注入替换，页面/传输不变。
 //! - E-4：Web 层不实现 TLS/HTTP2；P1 板端由内网反代或直接 HTTP 提供（DEC §6 未要求 TLS）。
 //!   WS 鉴权 = 与 REST 同一套 token/Cookie 会话（浏览器用 Cookie+服务端补 CSRF；非浏览器可用
-//!   X-TSPI-Token 头或 ?token= query 便于脚本/测试），未认证升级直接 401。
+//!   X-KHAEN-Token 头或 ?token= query 便于脚本/测试），未认证升级直接 401。
 //! - E-5：静态资源服务 HEAD 未实现（405）；页面不使用 HEAD。Content-Length/chunked：仅支持
 //!   Content-Length 请求体，Transfer-Encoding 显式 400（浏览器 fetch 默认 Content-Length）。
 //! - E-6（task-245）：accept 循环是**阻塞/事件驱动**（空闲时线程睡在 accept(2)，0 轮询、
@@ -85,7 +85,7 @@ use crate::rest::{JsonValue, Method, RestRequest, RestResponse, RestService, MAX
 // ---------------------------------------------------------------------------
 
 /// 页面 schema（页面自身版本身份；R51 静态资源）。
-pub const WEB_PAGE_SCHEMA: &str = "tspi-web/v1";
+pub const WEB_PAGE_SCHEMA: &str = "khaen-web/v1";
 /// Web 层版本（显示用；不是 REST API 版本）。
 pub const WEB_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// WebSocket 入口路径（T24 传输；浏览器 new WebSocket(location.origin.replace('http','ws') + /ws)）。
@@ -136,7 +136,7 @@ pub const WS_CLOSE_REASON_MAX: usize = 120;
 /// T70 WS 扩展命令：校准进度（T24 冻结命令集之外，见模块文档）。
 pub const WS_CAL_COMMANDS: [&str; 2] = ["GetCalibrationJobs", "GetCalibrationJob"];
 /// T70 WS 扩展命令两个命令的线上 schema（值对象）。
-pub const WS_CAL_SCHEMA: &str = "tspi-ws-cal/v1";
+pub const WS_CAL_SCHEMA: &str = "khaen-ws-cal/v1";
 
 /// 传输层错误码（R50 envelope 复用；非 /api 路径也返回 JSON envelope）。
 pub const CODE_INVALID_REQUEST: &str = "invalid_request";
@@ -599,14 +599,14 @@ pub fn read_http_request<R: BufRead>(reader: &mut R) -> Result<Option<HttpReques
         return Err(HttpError::new(
             405,
             CODE_METHOD_NOT_ALLOWED,
-            "method not supported by the TSPI web entry",
+            "method not supported by the KHAEN web entry",
         ));
     }
     let method = Method::parse(method_text).ok_or_else(|| {
         HttpError::new(
             405,
             CODE_METHOD_NOT_ALLOWED,
-            "method not supported by the TSPI web entry",
+            "method not supported by the KHAEN web entry",
         )
     })?;
     let (path, query) = parse_target(target)?;
@@ -688,7 +688,7 @@ pub fn read_http_request<R: BufRead>(reader: &mut R) -> Result<Option<HttpReques
             return Err(HttpError::new(
                 417,
                 CODE_UNSUPPORTED_VALUE,
-                "Expect: 100-continue is not supported by the TSPI web entry",
+                "Expect: 100-continue is not supported by the KHAEN web entry",
             ));
         }
     }
@@ -857,7 +857,7 @@ fn static_response(content_type: &str, body: &'static str) -> HttpResponse {
         response = response.with_header(name, value);
     }
     response = response.with_header("Cache-Control", "no-store");
-    response = response.with_header("X-TSPI-Web-Version", WEB_VERSION);
+    response = response.with_header("X-KHAEN-Web-Version", WEB_VERSION);
     response
 }
 
@@ -872,13 +872,13 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TSPI RT-first DSP 控制台</title>
+<title>KHAEN RT-first DSP 控制台</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="logo">TSPI</span><span class="sub">RT-first DSP 控制台</span></div>
+  <div class="brand"><span class="logo">KHAEN</span><span class="sub">RT-first DSP 控制台</span></div>
   <div class="badges">
     <span id="ws-badge" class="badge off">WS 未连接</span>
     <span id="auth-badge" class="badge off">未登录</span>
@@ -1024,7 +1024,7 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
 </main>
 
 <footer class="footer">
-  <span>TSPI RT-first DSP · web v?</span>
+  <span>KHAEN RT-first DSP · web v?</span>
   <span class="hint">REST 契约见 /api/runtime/status；WS 命令见 T24 兼容矩阵；本页面无外部资源。</span>
 </footer>
 <noscript class="error-line">本控制台需要启用 JavaScript。</noscript>
@@ -1120,7 +1120,7 @@ td.actions-cell button { padding: 3px 8px; font-size: 12px; margin-right: 4px; }
 
 /// 页面脚本（原生 JS；无外部依赖；无 inline 事件）。
 pub const APP_JS: &str = r##""use strict";
-// TSPI RT-first DSP 控制台（WBS T70）。
+// KHAEN RT-first DSP 控制台（WBS T70）。
 // 数据面：REST /api/*（T42，唯一 actual ack 来源）+ WS /ws（T24 兼容子集 + GetCalibrationJobs）。
 // 本文件无外部依赖、无动态资源；所有按钮通过 data-action 绑定（CSP: script-src self）。
 (function () {
@@ -1144,7 +1144,7 @@ pub const APP_JS: &str = r##""use strict";
     ws: "/ws"
   };
   var state = {
-    token: window.localStorage.getItem("tspi.token") || "",
+    token: window.localStorage.getItem("khaen.token") || "",
     csrf: null,
     authKind: null,
     authenticated: false,
@@ -1215,9 +1215,9 @@ pub const APP_JS: &str = r##""use strict";
 
   function api(method, path, body) {
     var headers = {};
-    if (state.token) { headers["X-TSPI-Token"] = state.token; }
+    if (state.token) { headers["X-KHAEN-Token"] = state.token; }
     if (body !== undefined && body !== null) { headers["Content-Type"] = "application/json"; }
-    if (method !== "GET" && state.csrf) { headers["X-TSPI-CSRF"] = state.csrf; }
+    if (method !== "GET" && state.csrf) { headers["X-KHAEN-CSRF"] = state.csrf; }
     var options = { method: method, headers: headers, credentials: "same-origin" };
     if (body !== undefined && body !== null) { options.body = JSON.stringify(body); }
     return fetch(path, options).then(function (response) {
@@ -1315,7 +1315,7 @@ pub const APP_JS: &str = r##""use strict";
     var token = byId("login-token").value.trim();
     if (!token) { setError("login-error", { message: "请输入 token" }); return; }
     state.token = token;
-    window.localStorage.setItem("tspi.token", token);
+    window.localStorage.setItem("khaen.token", token);
     setError("login-error", null);
     verifySession().catch(function (error) {
       setError("login-error", error);
@@ -1327,7 +1327,7 @@ pub const APP_JS: &str = r##""use strict";
     api("POST", PATHS.authLogout).catch(function () { return null; }).then(function () {
       state.token = "";
       state.csrf = null;
-      window.localStorage.removeItem("tspi.token");
+      window.localStorage.removeItem("khaen.token");
       setAuthenticated(false);
       refreshAuthStatus();
     });
@@ -1931,9 +1931,7 @@ fn static_asset(path: &str) -> HttpResponse {
         FAVICON_SVG_PATH | FAVICON_ICO_PATH => {
             static_response("image/svg+xml; charset=utf-8", FAVICON_SVG)
         }
-        CALIBRATION_PAGE_PATH => {
-            static_response("text/html; charset=utf-8", CALIBRATION_HTML)
-        }
+        CALIBRATION_PAGE_PATH => static_response("text/html; charset=utf-8", CALIBRATION_HTML),
         CALIBRATION_CSS_PATH => static_response("text/css; charset=utf-8", CALIBRATION_CSS),
         CALIBRATION_JS_PATH => static_response("text/javascript; charset=utf-8", CALIBRATION_JS),
         _ => {
@@ -2003,10 +2001,10 @@ fn write_ws_handshake<W: Write>(writer: &mut W, accept_key: &str) -> io::Result<
 pub fn ws_forward_headers(request: &HttpRequest) -> Vec<(String, String)> {
     const FORWARD_HEADERS: [&str; 6] = [
         "Cookie",
-        "X-TSPI-Token",
+        "X-KHAEN-Token",
         "X-Auth-Token",
         "Authorization",
-        "X-TSPI-CSRF",
+        "X-KHAEN-CSRF",
         "X-CSRF-Token",
     ];
     let mut headers = Vec::new();
@@ -2105,7 +2103,7 @@ impl WebServer {
                 HttpError::new(
                     405,
                     CODE_METHOD_NOT_ALLOWED,
-                    "static resources are GET-only on the TSPI web entry",
+                    "static resources are GET-only on the KHAEN web entry",
                 )
                 .into_response(),
             );
@@ -2169,7 +2167,7 @@ impl WebServer {
             .find(|(key, _)| key == "token")
             .filter(|(_, value)| !value.is_empty())
         {
-            headers.push(("X-TSPI-Token".to_string(), token.clone()));
+            headers.push(("X-KHAEN-Token".to_string(), token.clone()));
         }
         let mut session_request = RestRequest::get("/api/auth/session");
         session_request.headers = headers.clone();
@@ -2188,10 +2186,10 @@ impl WebServer {
             return Err(HttpResponse::from_rest(session_response));
         }
         headers.retain(|(name, _)| {
-            !name.eq_ignore_ascii_case("X-TSPI-CSRF") && !name.eq_ignore_ascii_case("X-CSRF-Token")
+            !name.eq_ignore_ascii_case("X-KHAEN-CSRF") && !name.eq_ignore_ascii_case("X-CSRF-Token")
         });
         if let Some(csrf) = csrf {
-            headers.push(("X-TSPI-CSRF".to_string(), csrf));
+            headers.push(("X-KHAEN-CSRF".to_string(), csrf));
         }
         Ok(headers)
     }
@@ -2292,7 +2290,7 @@ impl WebServer {
     fn spawn_connection(self: &Arc<Self>, stream: TcpStream) {
         let server = Arc::clone(self);
         let _ = thread::Builder::new()
-            .name("tspi-web-conn".to_string())
+            .name("khaen-web-conn".to_string())
             .spawn(move || server.serve_connection(stream));
     }
 
@@ -3302,24 +3300,24 @@ impl ws::WsControlPlane for RestWsPlane {
     fn config_path(&self) -> String {
         match self.status().ok() {
             Some(status) => format!(
-                "tspi-plan:{}",
+                "khaen-plan:{}",
                 json_str(&status, "actual_version").unwrap_or_else(|| "unknown".to_string())
             ),
-            None => "tspi-plan:unavailable".to_string(),
+            None => "khaen-plan:unavailable".to_string(),
         }
     }
 
     fn config_title(&self) -> String {
         match self.status().ok() {
             Some(status) => format!(
-                "TSPI RT {} {}",
+                "KHAEN RT {} {}",
                 json_str(&status, "mode").unwrap_or_else(|| "unknown".to_string()),
                 status
                     .get("target")
                     .and_then(|target| json_str(target, "layout"))
                     .unwrap_or_else(|| "layout".to_string())
             ),
-            None => "TSPI RT plan".to_string(),
+            None => "KHAEN RT plan".to_string(),
         }
     }
 

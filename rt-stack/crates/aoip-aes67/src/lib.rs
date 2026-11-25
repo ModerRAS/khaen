@@ -13,7 +13,7 @@
 //!   固定大小写（RTP 头解析、L24 解码、环写入），不产生任何堆分配/格式化。
 //! - **无锁 SPSC 环**：IO 线程（producer）→ RT/capture 线程（consumer）用原子游标 +
 //!   frame valid bitset 通信（`jitter`），不持锁、不 syscall、不等待。
-//! - **固定块**：consumer 每次取 128 帧（48k = 2.667 ms），与 TSPI core-v1 的
+//! - **固定块**：consumer 每次取 128 帧（48k = 2.667 ms），与 KHAEN core-v1 的
 //!   block 合同（64/128）一致；欠载输出整块静音并计数（不半块输出/不阻塞）。
 //! - **媒体时钟**：`clock::MediaClock` trait；离线 = `UsrvClock`（单调时基）；
 //!   真实 `/dev/ptp0` PHC 只剩 trait 接线（`PtpPhcClock` 当前 NOT_WIRED，板端接）。

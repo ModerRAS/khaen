@@ -1,0 +1,57 @@
+# T28/T155 —— khaen-rt-daemon.service（T155 已 BUILT + WIRED serve --config rt-daemon.toml）
+#
+# 状态（2026-11-18 F3 修复）：
+#   * F3：加 RuntimeDirectory/LogsDirectory=khaen-rt-stack（与 host 同）。daemon 的
+#     ReadWritePaths=/run/khaen-rt-stack ... 同样要求目录在 mount namespace 建立时存在；
+#     板端 2026-11-18 实测缺目录会导致 unit 启动失败（No such file or directory）。
+#   * F4：daemon 不打开 PCM，无需 DeviceAllow（保持不限制；host 才持有 ALSA owner）。
+#
+# 状态（2026-11-17）：
+#   * T155 已构建 aarch64 gnu daemon bin 并接线 serve --config（T42 REST/T44 modes/T70 Web/WS 同端口）；
+#     qemu check --config PASS；真实板端运行 NOT_RUN。
+#   * /etc/khaen-rt-stack/rt-daemon.toml 由 deploy/bin/04-install-release.sh 从模板安装（不覆盖既有，T28-P0-2）；
+#     缺失时本 unit 启动即退，01-preflight 与 06-verify 均把它当硬门。
+#   * 不得在 T71 授权窗口之前 install/start。
+#
+# 角色：REST/WS/Web 与校准 job 唯一控制面；设备独占由 host 持有，daemon 不得直接打开 PCM；
+#       保留的 AoIP/PTP unit 生命周期后续由本 daemon 接管（compat-matrix A11），当前 unbounded 部分见 README。
+[Unit]
+Description=KHAEN control/calibration daemon (REST/WS/Web + calibration jobs; no CamillaDSP)
+Documentation=file:///opt/khaen-rt-stack/current/README.deploy.md
+After=khaen-rt-host.service network-online.target
+Wants=khaen-rt-host.service
+PartOf=khaen-rt-stack.target
+ConditionPathExists=!/run/khaen/camilladsp.yml
+ConditionPathExists=!/etc/khaen/last-mode
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/khaen-rt-stack/rt-daemon.env
+Environment=KHAEN_DAEMON_CONFIG=/etc/khaen-rt-stack/rt-daemon.toml
+ExecStart=/opt/khaen-rt-stack/current/bin/khaen-rt-daemon serve --config ${KHAEN_DAEMON_CONFIG}
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=90
+TimeoutStopSec=30
+LimitRTPRIO=49
+LimitMEMLOCK=64M
+Nice=-5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# F3（2026-11-18）：ReadWritePaths 要求 /run、/var/log 目录在 namespace 建立前已存在。
+RuntimeDirectory=khaen-rt-stack
+RuntimeDirectoryMode=0755
+LogsDirectory=khaen-rt-stack
+LogsDirectoryMode=0755
+ReadWritePaths=/run/khaen-rt-stack /var/lib/khaen-rt-stack /var/log/khaen-rt-stack /etc/khaen-rt-stack
+ProtectClock=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=khaen-rt-stack.target

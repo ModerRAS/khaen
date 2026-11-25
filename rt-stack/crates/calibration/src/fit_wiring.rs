@@ -38,7 +38,7 @@
 //! T67-T69 全部 **NOT_RUN**（见 evidence/cursor-fix-fitwiring/NOT-RUN.md）。
 
 use khaen_compat::ws::{json_encode, json_object, JsonValue};
-use khaen_core::abi::TspiBlockAckV1;
+use khaen_core::abi::KhaenBlockAckV1;
 use khaen_core::rt::{PlanVersion, RT_WORKERS};
 use khaen_modal_design::artifact::ArtifactStatus;
 use khaen_rt_host::admission::{AdmissionEnv, MockMemory};
@@ -72,7 +72,7 @@ use khaen_designer::phase::Polarity;
 // ---------------------------------------------------------------------------
 
 /// 接线证据 artifact schema（fitp/compile/apply summary）。
-pub const WIRING_SCHEMA: &str = "tspi-cal-fit-wiring/v1";
+pub const WIRING_SCHEMA: &str = "khaen-cal-fit-wiring/v1";
 /// FitP 阶段接线摘要 artifact（job artifacts_dir 下）。
 pub const FITP_SUMMARY_ARTIFACT_PATH: &str = "wiring/fitp-summary.json";
 /// SolveG 阶段 G 来源 artifact。
@@ -421,7 +421,7 @@ impl FitWiringDesign {
 
 /// all-ack block 来源（T66 ApplySession::note_block_ack 的输入）。
 ///
-/// 真实路径：T09 四 worker / T20 swap 在 block 边界产出 TspiBlockAckV1 并喂入；
+/// 真实路径：T09 四 worker / T20 swap 在 block 边界产出 KhaenBlockAckV1 并喂入；
 /// 本机离线 dry-run：默认 [OfflineSyntheticAck]（T66 标注的 NONRT 离线模型）。
 pub trait ApplyAckSource: Send {
     /// 返回新版本 all-ack block；None = ack 未达（触发 T66 rollback，不视为 applied）。
@@ -430,7 +430,7 @@ pub trait ApplyAckSource: Send {
         session: &ApplySession,
         pending_version: PlanVersion,
         expected_workers: u8,
-    ) -> Option<TspiBlockAckV1>;
+    ) -> Option<KhaenBlockAckV1>;
 }
 
 /// 离线合成 all-ack（T66 synthetic_all_ack_block；非真实 RT 证据）。
@@ -443,7 +443,7 @@ impl ApplyAckSource for OfflineSyntheticAck {
         session: &ApplySession,
         pending_version: PlanVersion,
         expected_workers: u8,
-    ) -> Option<TspiBlockAckV1> {
+    ) -> Option<KhaenBlockAckV1> {
         Some(session.synthetic_all_ack_block(pending_version, expected_workers))
     }
 }
@@ -458,7 +458,7 @@ impl ApplyAckSource for WithheldAck {
         _session: &ApplySession,
         _pending_version: PlanVersion,
         _expected_workers: u8,
-    ) -> Option<TspiBlockAckV1> {
+    ) -> Option<KhaenBlockAckV1> {
         None
     }
 }
@@ -1267,7 +1267,7 @@ impl FitWiring {
         };
         // 2) ack 来源：
         //    - 配置了 host apply：真实 khaen-rt-host plan-arena 进程加载同一 plan 字节并跑
-        //      block，报告里的 swap（note_block_all_ack，synthetic=false）映射为 TspiBlockAckV1；
+        //      block，报告里的 swap（note_block_all_ack，synthetic=false）映射为 KhaenBlockAckV1；
         //    - 未配置：沿用 T66 ApplyAckSource seam（离线模型，证据标 simulated）。
         let host_config = self.host_apply.clone();
         let mut host_evidence: Option<String> = None;
@@ -1555,15 +1555,14 @@ fn peq_sections_for_role(
                 ),
             ));
         }
-        let section = crate::peq_plan::PeqBiquad::new(
-            band.b[0], band.b[1], band.b[2], band.a[1], band.a[2],
-        )
-        .map_err(|detail| {
-            wiring_fail(
-                E_WIRING_PEQ_PLAN,
-                format!("role {role_id:?} band[{index}]: {detail}"),
-            )
-        })?;
+        let section =
+            crate::peq_plan::PeqBiquad::new(band.b[0], band.b[1], band.b[2], band.a[1], band.a[2])
+                .map_err(|detail| {
+                    wiring_fail(
+                        E_WIRING_PEQ_PLAN,
+                        format!("role {role_id:?} band[{index}]: {detail}"),
+                    )
+                })?;
         sections.push(section);
     }
     Ok(sections)
@@ -2250,7 +2249,7 @@ pub fn synthetic_design() -> Result<FitWiringDesign, String> {
 
 /// 确定性 64-hex 夹具 hash（内容 SHA-256，不是全零/全同伪 hash）。
 fn fixture_hash(label: &str) -> String {
-    sha256_hex(format!("tspi-fit-wiring-fixture/v1\n{label}\n").as_bytes())
+    sha256_hex(format!("khaen-fit-wiring-fixture/v1\n{label}\n").as_bytes())
 }
 
 // ---------------------------------------------------------------------------

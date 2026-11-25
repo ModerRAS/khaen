@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn parses_fixture_shaped_document() {
         let document = r#"{
-            "format": "tspi-roomforge-mimo-fixture/v1",
+            "format": "khaen-roomforge-mimo-fixture/v1",
             "seed": 20261122,
             "rir": {"format": "f32", "channels": 1, "length_samples": 24000,
                     "fft_size": 65536, "scale": 0.5},
@@ -452,7 +452,7 @@ mod tests {
         let value = Json::parse(document).unwrap();
         assert_eq!(
             value.get("format").unwrap().as_str(),
-            Some("tspi-roomforge-mimo-fixture/v1")
+            Some("khaen-roomforge-mimo-fixture/v1")
         );
         assert_eq!(value.at(&["rir", "scale"]).unwrap().as_f64(), Some(0.5));
         assert_eq!(value.at(&["room", "length_m"]).unwrap().as_f64(), Some(4.1));

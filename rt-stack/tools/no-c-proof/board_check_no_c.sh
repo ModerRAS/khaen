@@ -5,21 +5,21 @@
 # 输出：JSON（机器可读、可作前后快照）+ 人类可读摘要；供 T72 验收与 T71 窗口前后对比。
 #
 # 检查项（硬门 FAIL -> exit 5）：
-#   N1 进程      ps 等价（/proc 扫描）无 camilladsp / tspi-upmix / khaen-audio-web / tspi-mode / sox DSP 进程
+#   N1 进程      ps 等价（/proc 扫描）无 camilladsp / khaen-upmix / khaen-audio-web / khaen-mode / sox DSP 进程
 #   N2 旧 unit   旧音频 unit 不存在，或 disabled/masked 且 inactive（active/enabled 即 FAIL）
-#   N3 cgroup    任何进程 cgroup / system.slice 无旧 unit（camilladsp/tspi-upmix/khaen-audio-web）
+#   N3 cgroup    任何进程 cgroup / system.slice 无旧 unit（camilladsp/khaen-upmix/khaen-audio-web）
 #   N4 旧端口    1234（CamillaDSP WS）与 18080 无 LISTEN，也无连接
-#   N5 旧入口    /run/tspi/camilladsp.{yml,env}、/etc/tspi/last-mode、/run/tspi/mode 均不存在
-#   N6 socket/pipe  无 camilladsp 命名 socket/FIFO；无进程 fd 指向 camilladsp/tspi-upmix 或旧 /run/tspi 路径
+#   N5 旧入口    /run/khaen/camilladsp.{yml,env}、/etc/khaen/last-mode、/run/khaen/mode 均不存在
+#   N6 socket/pipe  无 camilladsp 命名 socket/FIFO；无进程 fd 指向 camilladsp/khaen-upmix 或旧 /run/khaen 路径
 #   N7 PCM owner 新 host 是 MOTU PCM 唯一 owner（/dev/snd 持有者仅 host；/proc/asound owner_pid 仅 host）
-#   N8 新栈      khaen-rt-host 单实例 active，exe 位于 /opt/tspi-rt-stack 且记录 sha256（--require-daemon 时 daemon 亦 active）
+#   N8 新栈      khaen-rt-host 单实例 active，exe 位于 /opt/khaen-rt-stack 且记录 sha256（--require-daemon 时 daemon 亦 active）
 #   N9 依赖入口  无 *.wants/*.requires 指向旧 unit；新栈 unit 无正向旧 C 依赖（Before= 等 ordering-only 也 FAIL，按 G-no-C）
 #   N10 历史文件 旧 C 二进制/配置存在仅 INFO（历史文件保留 != 旧服务运行；不 FAIL）
 #
 # 用法:
 #   sudo ./board_check_no_c.sh --live --phase post-switch --require-daemon \
-#        --json-out /var/lib/tspi-rt-stack/evidence/no-c-proof/board-post-switch.json \
-#        --human-out /var/lib/tspi-rt-stack/evidence/no-c-proof/board-post-switch.txt
+#        --json-out /var/lib/khaen-rt-stack/evidence/no-c-proof/board-post-switch.json \
+#        --human-out /var/lib/khaen-rt-stack/evidence/no-c-proof/board-post-switch.txt
 #   ./board_check_no_c.sh --live --root /tmp/fixture/board ...   # 本地夹具干跑（不连板）
 #   ./board_check_no_c.sh --dry-run                               # 只打印计划
 #
@@ -146,7 +146,7 @@ for row in "${PROC_LIST[@]}"; do
   _pid="${row%%|*}"; _rest="${row#*|}"; _comm="${_rest%%|*}"; _args="${_rest#*|}"
   case "$_comm $_args" in
     *khaen-rt-host*) HOST_PIDS+=("$_pid") ;;
-    *tspi-rt-daemon*) DAEMON_PIDS+=("$_pid") ;;
+    *khaen-rt-daemon*) DAEMON_PIDS+=("$_pid") ;;
   esac
 done
 HOST_PID=""
@@ -160,9 +160,9 @@ old_proc_kind() {
   case "$args" in *board_check_no_c.sh*) return 0 ;; esac
   case "$comm $args" in
     *camilladsp*) printf 'camilladsp' ;;
-    *tspi-upmix*) printf 'tspi-upmix' ;;
+    *khaen-upmix*) printf 'khaen-upmix' ;;
     *khaen-audio-web*) printf 'khaen-audio-web' ;;
-    *tspi-mode*) printf 'tspi-mode' ;;
+    *khaen-mode*) printf 'khaen-mode' ;;
     *) case " $args " in *"sox "*) printf 'sox' ;; *) return 0 ;; esac ;;
   esac
 }
@@ -175,13 +175,13 @@ for row in "${PROC_LIST[@]}"; do
   if [ -n "$k" ]; then N1_HITS+=("pid=$_pid comm=$_comm kind=$k"); fi
 done
 if [ "${#N1_HITS[@]}" -eq 0 ]; then
-  pass N1.process "无 camilladsp/sox/旧 DSP 进程" "ps 等价 /proc 扫描命中 0（camilladsp|tspi-upmix|khaen-audio-web|tspi-mode|sox）"
+  pass N1.process "无 camilladsp/sox/旧 DSP 进程" "ps 等价 /proc 扫描命中 0（camilladsp|khaen-upmix|khaen-audio-web|khaen-mode|sox）"
 else
   fail N1.process "发现旧 DSP/C 进程" "$(join_detail "${N1_HITS[@]:0:5}")"
 fi
 
 # ---- N2 旧 unit 状态 -------------------------------------------------------
-OLD_UNITS="tspi-camilladsp.service tspi-upmix-autodetect.service tspi-audio.target tspi-boot-mode.service khaen-audio-web.service"
+OLD_UNITS="khaen-camilladsp.service khaen-upmix-autodetect.service khaen-audio.target khaen-boot-mode.service khaen-audio-web.service"
 N2_BAD=(); N2_ROWS=()
 for u in $OLD_UNITS; do
   if systemctl cat "$u" >/dev/null 2>&1; then
@@ -206,18 +206,18 @@ CGROOT="$(p /sys/fs/cgroup)"
 if [ -d "$CGROOT" ]; then
   for d in "$CGROOT"/system.slice/*; do
     [ -e "$d" ] || continue
-    case "${d##*/}" in *camilladsp*|*tspi-upmix*|*khaen-audio-web*) N3_HITS+=("slice=${d##*/}") ;; esac
+    case "${d##*/}" in *camilladsp*|*khaen-upmix*|*khaen-audio-web*) N3_HITS+=("slice=${d##*/}") ;; esac
   done
 fi
 for d in "$(p /proc)"/[0-9]*; do
   [ -r "$d/cgroup" ] || continue
   cg="$(cat "$d/cgroup" 2>/dev/null || true)"
   case "$cg" in
-    *camilladsp*|*tspi-upmix*|*khaen-audio-web*) N3_HITS+=("pid=${d##*/} cgroup=$cg") ;;
+    *camilladsp*|*khaen-upmix*|*khaen-audio-web*) N3_HITS+=("pid=${d##*/} cgroup=$cg") ;;
   esac
 done
 if [ "${#N3_HITS[@]}" -eq 0 ]; then
-  pass N3.cgroup "无进程位于旧 C unit cgroup" "/proc/*/cgroup 与 system.slice 均无 camilladsp/tspi-upmix/khaen-audio-web"
+  pass N3.cgroup "无进程位于旧 C unit cgroup" "/proc/*/cgroup 与 system.slice 均无 camilladsp/khaen-upmix/khaen-audio-web"
 else
   fail N3.cgroup "仍有进程在旧 C unit cgroup" "$(join_detail "${N3_HITS[@]:0:5}")"
 fi
@@ -247,33 +247,33 @@ fi
 
 # ---- N5 旧 C 激活入口文件 --------------------------------------------------
 N5_BAD=()
-for f in /run/tspi/camilladsp.yml /run/tspi/camilladsp.env /etc/tspi/last-mode /run/tspi/mode; do
+for f in /run/khaen/camilladsp.yml /run/khaen/camilladsp.env /etc/khaen/last-mode /run/khaen/mode; do
   if [ -e "$(p "$f")" ]; then N5_BAD+=("$f"); fi
 done
 if [ "${#N5_BAD[@]}" -eq 0 ]; then
-  pass N5.entry-files "旧 C 激活入口文件已清理" "/run/tspi/camilladsp.{yml,env} /etc/tspi/last-mode /run/tspi/mode 均不存在"
+  pass N5.entry-files "旧 C 激活入口文件已清理" "/run/khaen/camilladsp.{yml,env} /etc/khaen/last-mode /run/khaen/mode 均不存在"
 else
   fail N5.entry-files "旧 C 激活入口仍存在" "$(join_detail "${N5_BAD[@]}")"
 fi
 
 # ---- N6 socket/pipe 依赖 ---------------------------------------------------
 N6_BAD=()
-for f in "$(p /run)"/camilladsp* "$(p /run)/tspi-camilladsp"* "$(p /run/tspi)"/camilladsp* "$(p /run/tspi)"/tspi-upmix*; do
+for f in "$(p /run)"/camilladsp* "$(p /run)/khaen-camilladsp"* "$(p /run/khaen)"/camilladsp* "$(p /run/khaen)"/khaen-upmix*; do
   if [ -e "$f" ]; then N6_BAD+=("path=$f"); fi
 done
 if [ "$HAS_SS" = "1" ]; then
-  hit="$(ss -xnp 2>/dev/null | grep -E 'camilladsp|tspi-upmix' | head -n 3 || true)"
+  hit="$(ss -xnp 2>/dev/null | grep -E 'camilladsp|khaen-upmix' | head -n 3 || true)"
   if [ -n "$hit" ]; then N6_BAD+=("unix-socket=$hit"); fi
 fi
 for i in "${!FD_PID[@]}"; do
   pidl="${FD_PID[${i}]}"; tgt="${FD_TGT[${i}]}"
   case "$tgt" in
-    *camilladsp*|*tspi-upmix*) N6_BAD+=("fd pid=$pidl -> $tgt") ;;
-    */run/tspi/*) N6_BAD+=("fd pid=$pidl -> $tgt(旧 run 目录)") ;;
+    *camilladsp*|*khaen-upmix*) N6_BAD+=("fd pid=$pidl -> $tgt") ;;
+    */run/khaen/*) N6_BAD+=("fd pid=$pidl -> $tgt(旧 run 目录)") ;;
   esac
 done
 if [ "${#N6_BAD[@]}" -eq 0 ]; then
-  pass N6.socket-pipe "无对 C 的 socket/pipe 依赖" "旧 socket/FIFO 路径 0；fd 无 camilladsp/tspi-upmix/旧 /run/tspi 目标"
+  pass N6.socket-pipe "无对 C 的 socket/pipe 依赖" "旧 socket/FIFO 路径 0；fd 无 camilladsp/khaen-upmix/旧 /run/khaen 目标"
 else
   fail N6.socket-pipe "存在对 C 的 socket/pipe 依赖" "$(join_detail "${N6_BAD[@]:0:5}")"
 fi
@@ -345,11 +345,11 @@ else
   fi
   _unit_act="$(systemctl is-active khaen-rt-host.service 2>/dev/null || true)"
   _exe_ok=0
-  case "$HOST_EXE" in */opt/tspi-rt-stack/*) _exe_ok=1 ;; esac
+  case "$HOST_EXE" in */opt/khaen-rt-stack/*) _exe_ok=1 ;; esac
   if [ "${_exe_ok}" = "1" ] && [ "${_unit_act:-}" = "active" ]; then
     pass N8.host "新 host 单实例 active 且为部署路径" "pid=$HOST_PID unit=active exe=$HOST_EXE sha256=${HOST_SHA:-unavailable}"
   else
-    fail N8.host "新 host 可执行/unit 状态不符" "pid=$HOST_PID unit=${_unit_act:-unknown} exe=$HOST_EXE（要求 active 且 /opt/tspi-rt-stack）"
+    fail N8.host "新 host 可执行/unit 状态不符" "pid=$HOST_PID unit=${_unit_act:-unknown} exe=$HOST_EXE（要求 active 且 /opt/khaen-rt-stack）"
   fi
 fi
 if [ "${#DAEMON_PIDS[@]}" -gt 0 ]; then
@@ -362,7 +362,7 @@ if [ "${#DAEMON_PIDS[@]}" -gt 0 ]; then
     DAEMON_SHA="$(sha256sum "${_real2}" 2>/dev/null | awk '{print $1}' || true)"
   fi
   if [ "$REQUIRE_DAEMON" = "1" ]; then
-    _dact="$(systemctl is-active tspi-rt-daemon.service 2>/dev/null || true)"
+    _dact="$(systemctl is-active khaen-rt-daemon.service 2>/dev/null || true)"
     if [ "${_dact:-}" = "active" ]; then
       info N8.daemon "daemon active（--require-daemon）" "pid=$DAEMON_PID exe=$DAEMON_EXE sha256=${DAEMON_SHA:-unavailable}"
     else
@@ -373,13 +373,13 @@ if [ "${#DAEMON_PIDS[@]}" -gt 0 ]; then
   fi
 else
   if [ "$REQUIRE_DAEMON" = "1" ]; then
-    fail N8.daemon "daemon 未运行（--require-daemon）" "未找到 tspi-rt-daemon 进程"
+    fail N8.daemon "daemon 未运行（--require-daemon）" "未找到 khaen-rt-daemon 进程"
   else
-    info N8.daemon "daemon 未运行（可选门，未要求）" "未找到 tspi-rt-daemon 进程；--require-daemon 时为硬门"
+    info N8.daemon "daemon 未运行（可选门，未要求）" "未找到 khaen-rt-daemon 进程；--require-daemon 时为硬门"
   fi
 fi
-_tgt_act="$(systemctl is-active tspi-rt-stack.target 2>/dev/null || true)"
-info N8.target "新栈 target 状态" "tspi-rt-stack.target active=${_tgt_act:-unknown}"
+_tgt_act="$(systemctl is-active khaen-rt-stack.target 2>/dev/null || true)"
+info N8.target "新栈 target 状态" "khaen-rt-stack.target active=${_tgt_act:-unknown}"
 
 # ---- N9 依赖/激活入口清理 --------------------------------------------------
 N9_BAD=()
@@ -389,23 +389,23 @@ for d in "$(p /etc/systemd/system)"/*.wants "$(p /etc/systemd/system)"/*.require
     if [ -e "$l" ] || [ -L "$l" ]; then
       bn="${l##*/}"
       case "$bn" in
-        tspi-camilladsp.service|tspi-upmix-autodetect.service|khaen-audio-web.service|tspi-audio.target|tspi-boot-mode.service)
+        khaen-camilladsp.service|khaen-upmix-autodetect.service|khaen-audio-web.service|khaen-audio.target|khaen-boot-mode.service)
           N9_BAD+=("activation-symlink=$l") ;;
       esac
     fi
   done
 done
-for f in "$(p /etc/systemd/system)"/*camilladsp*.socket "$(p /etc/systemd/system)"/*camilladsp*.path "$(p /etc/systemd/system)"/*tspi-audio*.socket; do
+for f in "$(p /etc/systemd/system)"/*camilladsp*.socket "$(p /etc/systemd/system)"/*camilladsp*.path "$(p /etc/systemd/system)"/*khaen-audio*.socket; do
   if [ -e "$f" ]; then N9_BAD+=("socket/path-unit=$f"); fi
 done
-NEW_UNITS="khaen-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target tspi-motu-48k-keeper.service"
+NEW_UNITS="khaen-rt-host.service khaen-rt-daemon.service khaen-rt-stack.target khaen-motu-48k-keeper.service"
 for u in $NEW_UNITS; do
   content="$(systemctl cat "$u" 2>/dev/null || true)"
   [ -n "$content" ] || continue
   while IFS= read -r line; do
     case "$line" in
       '#'*) continue ;;
-      *camilladsp*|*tspi-upmix*|*tspi-audio.target*|*khaen-audio-web*|*tspi-boot-mode*)
+      *camilladsp*|*khaen-upmix*|*khaen-audio.target*|*khaen-audio-web*|*khaen-boot-mode*)
         case "$line" in
           ConditionPathExists=!*|AssertPathExists=!*) continue ;;
           Before=*|After=*) N9_BAD+=("$u ordering-only: $line") ;;
@@ -434,7 +434,7 @@ if [ -d "$(p /etc/camilladsp)" ]; then
 fi
 
 # ---- 保留 AoIP/PTP unit（T72 播放/校准阶段可能 active，仅记录） -----------
-RETAIN_UNITS="tspi-statime-inferno.service tspi-aes67-daemon.service tspi-ravenna-lkm.service tspi-ptp4l-master.service tspi-phc2sys.service"
+RETAIN_UNITS="khaen-statime-inferno.service khaen-aes67-daemon.service khaen-ravenna-lkm.service khaen-ptp4l-master.service khaen-phc2sys.service"
 RETAIN_ROWS=(); RETAIN_ACTIVE=()
 for u in $RETAIN_UNITS; do
   _a="$(systemctl is-active "$u" 2>/dev/null || true)"
@@ -460,7 +460,7 @@ if [ "$FAIL_N" -gt 0 ]; then OVERALL="FAIL"; elif [ "$NV_N" -gt 0 ]; then OVERAL
 build_json() {
   local i sep idx
   printf '{\n'
-  printf ' "schema": "tspi-rt-stack/no-c-proof-board/v1",\n'
+  printf ' "schema": "khaen-rt-stack/no-c-proof-board/v1",\n'
   printf ' "task": "T72",\n'
   printf ' "generator": "%s",\n' "$VERSION"
   printf ' "phase": "%s",\n' "$(json_escape "$PHASE")"

@@ -1,2 +1,0 @@
-# MOTU 48k keeper: reassert 48k after USB enumeration/re-enumeration (silent 1s)
-ACTION=="add", SUBSYSTEM=="sound", KERNEL=="card*", ATTRS{idVendor}=="07fd", ATTRS{idProduct}=="000c", RUN+="/bin/systemctl --no-block restart tspi-motu-48k-keeper.service"

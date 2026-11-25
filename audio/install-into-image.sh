@@ -94,7 +94,7 @@ if [[ "$DRY" == 0 && ! -e "$POLICY" ]]; then
 fi
 cleanup() {
   if [[ "$POLICY_CREATED" == 1 && -e "$POLICY" ]]; then rm -f "$POLICY"; fi
-  rm -rf "$ROOTFS/tmp/tspi-debs" 2>/dev/null || true
+  rm -rf "$ROOTFS/tmp/khaen-debs" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -106,17 +106,17 @@ if [[ "$NO_EXEC" == 0 ]] && compgen -G "$DEBS/*.deb" >/dev/null; then
   if [[ "$DRY" == 1 ]]; then
     log "DRY: 将安装 $(ls -1 "$DEBS"/*.deb | wc -l) 个 .deb"
   else
-    mkdir -p "$ROOTFS/tmp/tspi-debs"
-    cp -f "$DEBS"/*.deb "$ROOTFS/tmp/tspi-debs/"
+    mkdir -p "$ROOTFS/tmp/khaen-debs"
+    cp -f "$DEBS"/*.deb "$ROOTFS/tmp/khaen-debs/"
     log "dpkg -i（chroot）…"
-    chroot "$ROOTFS" env DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/tspi-debs/*.deb >/tmp/tspi-dpkg.log 2>&1 \
-      || warn "dpkg -i 返回非 0（见 /tmp/tspi-dpkg.log）；尝试 dpkg --configure -a"
+    chroot "$ROOTFS" env DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/khaen-debs/*.deb >/tmp/khaen-dpkg.log 2>&1 \
+      || warn "dpkg -i 返回非 0（见 /tmp/khaen-dpkg.log）；尝试 dpkg --configure -a"
     chroot "$ROOTFS" env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/dev/null 2>&1 || true
     if chroot "$ROOTFS" dpkg --audit 2>/dev/null | grep -q .; then
       chroot "$ROOTFS" dpkg --audit >&2 || true
       die "dpkg 安装后仍有未配置包（不允许联网补齐）；检查 release/debs 完整性" 4
     fi
-    log "已安装 $(ls -1 "$ROOTFS/tmp/tspi-debs"/*.deb | wc -l) 个包"
+    log "已安装 $(ls -1 "$ROOTFS/tmp/khaen-debs"/*.deb | wc -l) 个包"
   fi
 else
   [[ "$NO_EXEC" == 0 ]] && warn "--debs 目录没有 .deb：跳过包安装（仅适合已有完整依赖的 rootfs）"
@@ -133,9 +133,9 @@ else
   fi
   chown -R 0:0 "$ROOTFS/usr/local" "$ROOTFS/etc/systemd/system" "$ROOTFS/etc/default" "$ROOTFS/etc/security" "$ROOTFS/etc/modprobe.d" "$ROOTFS/etc/udev" "$ROOTFS/etc/camilladsp" "$ROOTFS/etc/statime" "$ROOTFS/etc/aes67-daemon" "$ROOTFS/etc/asound.conf" "$ROOTFS/etc/ptp4l-master-aes67.conf" "$ROOTFS/etc/tmpfiles.d" "$ROOTFS/usr/share/alsa/ucm2/USB-Audio/MOTU" 2>/dev/null || true
   # 强制修正执行位/权限（Windows 拷贝/共享目录会丢执行位；见 overlay-manifest.md）
-  # 1) 所有 tspi-* 入口脚本；2) /usr/local/lib/tspi 下全部脚本（lib.sh/ucm-backport-mk5.sh/ptp-status-hook/phc-usrvclock）
-  find "$ROOTFS/usr/local/bin" -maxdepth 1 -type f -name 'tspi-*' -exec chmod 755 {} + 2>/dev/null || true
-  find "$ROOTFS/usr/local/lib/tspi" -maxdepth 1 -type f -exec chmod 755 {} + 2>/dev/null || true
+  # 1) 所有 khaen-* 入口脚本；2) /usr/local/lib/khaen 下全部脚本（lib.sh/ucm-backport-mk5.sh/ptp-status-hook/phc-usrvclock）
+  find "$ROOTFS/usr/local/bin" -maxdepth 1 -type f -name 'khaen-*' -exec chmod 755 {} + 2>/dev/null || true
+  find "$ROOTFS/usr/local/lib/khaen" -maxdepth 1 -type f -exec chmod 755 {} + 2>/dev/null || true
   # 3) 配置/unit/udev/limits/modprobe/UCM 文本文件统一 644
   for d in "$ROOTFS/etc/systemd/system" "$ROOTFS/etc/default" "$ROOTFS/etc/security/limits.d" \
            "$ROOTFS/etc/modprobe.d" "$ROOTFS/etc/udev/rules.d" "$ROOTFS/etc/camilladsp" \
@@ -166,7 +166,7 @@ if [[ "$MISSING" -gt 0 ]]; then
   [[ "$NO_VALIDATE" == 1 ]] && warn "$MISSING 个产物缺失（--no-validate 继续）" || die "$MISSING 个必需产物缺失；先 build-all.sh" 3
 fi
 
-# Inferno ALSA 插件（tspi-mode dante 必需；release/lib/*.so* -> 系统 alsa-lib）
+# Inferno ALSA 插件（khaen-mode dante 必需；release/lib/*.so* -> 系统 alsa-lib）
 ALSA_LIB_DIR="usr/lib/aarch64-linux-gnu/alsa-lib"
 PLUGIN_MISSING=0
 if compgen -G "$RELEASE/lib/*.so*" >/dev/null; then
@@ -202,11 +202,11 @@ fi
 
 # --- 6. MOTU UCM 回移（可选） -------------------------------------------------
 if [[ "$MOTU_UCM" == "yes" ]]; then
-  if [[ -x "$OVERLAY/usr/local/lib/tspi/ucm-backport-mk5.sh" || -f "$OVERLAY/usr/local/lib/tspi/ucm-backport-mk5.sh" ]]; then
+  if [[ -x "$OVERLAY/usr/local/lib/khaen/ucm-backport-mk5.sh" || -f "$OVERLAY/usr/local/lib/khaen/ucm-backport-mk5.sh" ]]; then
     if [[ "$DRY" == 1 ]]; then
       echo "DRY: ucm-backport-mk5.sh --rootfs $ROOTFS"
     else
-      bash "$OVERLAY/usr/local/lib/tspi/ucm-backport-mk5.sh" --rootfs "$ROOTFS" \
+      bash "$OVERLAY/usr/local/lib/khaen/ucm-backport-mk5.sh" --rootfs "$ROOTFS" \
         && log "MOTU mk5 UCM 回移完成" \
         || warn "MOTU mk5 UCM 回移失败（可选功能；主音频链路不依赖 UCM）"
     fi
@@ -224,22 +224,22 @@ enable_unit() {
 }
 
 if [[ "$ENABLE_UNITS" == "yes" ]]; then
-  log "enable systemd units（开机条件不满足 => 不启动；由 tspi-mode 控制）"
-  for u in tspi-audio.target tspi-statime-inferno.service tspi-aes67-daemon.service \
-           tspi-ravenna-lkm.service tspi-camilladsp.service tspi-ptp4l-master.service tspi-phc2sys.service \
-           tspi-phc-usrvclock.service; do
+  log "enable systemd units（开机条件不满足 => 不启动；由 khaen-mode 控制）"
+  for u in khaen-audio.target khaen-statime-inferno.service khaen-aes67-daemon.service \
+           khaen-ravenna-lkm.service khaen-camilladsp.service khaen-ptp4l-master.service khaen-phc2sys.service \
+           khaen-phc-usrvclock.service; do
     enable_unit "$u"
   done
-  [[ "$ENABLE_BOOT_MODE" == 1 ]] && enable_unit tspi-boot-mode.service
+  [[ "$ENABLE_BOOT_MODE" == 1 ]] && enable_unit khaen-boot-mode.service
 else
   log "跳过 enable（--enable-units no）"
 fi
-mkdir -p "$ROOTFS/etc/tspi" 2>/dev/null || true
+mkdir -p "$ROOTFS/etc/khaen" 2>/dev/null || true
 
 # --- 8. 生成清单 --------------------------------------------------------------
 if [[ "$DRY" == 0 ]]; then
   {
-    echo "# tspi-audio 安装清单（install-into-image.sh 生成）"
+    echo "# khaen-audio 安装清单（install-into-image.sh 生成）"
     echo "# date: $(date -Is)"
     echo "# rootfs debian: $DEB_VER arch: $ARCH kver: ${KVER:-unknown}"
     echo
@@ -253,8 +253,8 @@ if [[ "$DRY" == 0 ]]; then
     chroot "$ROOTFS" dpkg-query -W -f '${Package} ${Version}\n' 2>/dev/null \
       | grep -E '^(alsa-utils|alsa-ucm-conf|libasound2|linuxptp|avahi-daemon|libavahi|libboost|ethtool|jq|netcat-openbsd|socat) ' \
       | sed "s/^/  /" || true
-  } > "$ROOTFS/etc/tspi-audio-manifest.txt" 2>/dev/null || warn "生成 manifest 失败"
-  log "清单: /etc/tspi-audio-manifest.txt"
+  } > "$ROOTFS/etc/khaen-audio-manifest.txt" 2>/dev/null || warn "生成 manifest 失败"
+  log "清单: /etc/khaen-audio-manifest.txt"
 fi
 
 # --- 9. 校验 ------------------------------------------------------------------
@@ -270,19 +270,19 @@ validate() {
 }
 
 log "校验 …"
-for f in etc/systemd/system/tspi-audio.target \
-         etc/systemd/system/tspi-camilladsp.service \
-         etc/systemd/system/tspi-ptp4l-master.service \
-         etc/systemd/system/tspi-phc2sys.service \
-         etc/systemd/system/tspi-phc-usrvclock.service \
+for f in etc/systemd/system/khaen-audio.target \
+         etc/systemd/system/khaen-camilladsp.service \
+         etc/systemd/system/khaen-ptp4l-master.service \
+         etc/systemd/system/khaen-phc2sys.service \
+         etc/systemd/system/khaen-phc-usrvclock.service \
          etc/statime/inferno-ptpv1.toml \
          etc/ptp4l-master-aes67.conf \
          etc/aes67-daemon/daemon.conf \
          etc/asound.conf \
          etc/camilladsp/dante.yml etc/camilladsp/aes67.yml \
-         usr/local/bin/tspi-mode usr/local/bin/tspi-ptp-status \
-         usr/local/lib/tspi/lib.sh usr/local/lib/tspi/ptp-status-hook \
-         usr/local/lib/tspi/phc-usrvclock ; do
+         usr/local/bin/khaen-mode usr/local/bin/khaen-ptp-status \
+         usr/local/lib/khaen/lib.sh usr/local/lib/khaen/ptp-status-hook \
+         usr/local/lib/khaen/phc-usrvclock ; do
   [[ -e "$ROOTFS/$f" ]] && log "  OK   $f" || { warn "  MISS $f"; FAIL=$((FAIL+1)); }
 done
 [[ -x "$ROOTFS/usr/local/bin/camilladsp" ]] && log "  OK   camilladsp" || { warn "  MISS camilladsp"; FAIL=$((FAIL+1)); }
@@ -292,7 +292,7 @@ if [[ "$NO_EXEC" == 0 ]]; then
     validate "camilladsp --version" chroot "$ROOTFS" /usr/local/bin/camilladsp --version
     validate "statime --version" chroot "$ROOTFS" /usr/local/bin/statime --version
     validate "ptp4l -v" chroot "$ROOTFS" /usr/sbin/ptp4l -v
-    validate "systemd units" chroot "$ROOTFS" systemd-analyze verify /etc/systemd/system/tspi-audio.target
+    validate "systemd units" chroot "$ROOTFS" systemd-analyze verify /etc/systemd/system/khaen-audio.target
   else
     warn "宿主非 aarch64 且无 qemu-aarch64：跳过 chroot 执行校验"
   fi
@@ -301,5 +301,5 @@ fi
 if [[ "$FAIL" -gt 0 ]]; then
   die "校验失败 $FAIL 项（见上）" 5
 fi
-log "完成。镜像内默认状态：off（服务 enabled 但被 ConditionPathExists 守卫）；首次使用执行 tspi-mode dante|aes67|b2"
+log "完成。镜像内默认状态：off（服务 enabled 但被 ConditionPathExists 守卫）；首次使用执行 khaen-mode dante|aes67|b2"
 exit 0

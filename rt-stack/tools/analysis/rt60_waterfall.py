@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """RT60 (EDT/T20/T30) + CSD waterfall analysis for measured impulse responses.
 
-Offline analysis helper for the TSPI calibration chain (goal 6: record
+Offline analysis helper for the KHAEN calibration chain (goal 6: record
 waterfall / RT60 for every measurement). It never touches audio devices.
 
 Method (v2, 2026-11-22)
@@ -667,7 +667,7 @@ def selftest(outdir, rate=48000):
                           "tol_s": tol, "pass": passed, "method": b.get("method"),
                           "flags": b.get("flags")})
     with open(os.path.join(outdir, "selftest.json"), "w", encoding="utf-8") as fh:
-        json.dump({"schema": "tspi-rt60-selftest/v1", "tool": TOOL_VERSION,
+        json.dump({"schema": "khaen-rt60-selftest/v1", "tool": TOOL_VERSION,
                    "passed": bool(ok), "cases": lines}, fh, ensure_ascii=False, indent=2)
     for ln in lines:
         print("selftest rt_true=%.2f fc=%6.1f -> rt=%s method=%s %s"
@@ -730,7 +730,7 @@ def main():
     rows_to_csv(all_rows, os.path.join(args.out, "rt60.csv"))
     plot_rt_summary(all_rows, os.path.join(args.out, "rt60-summary.png"))
     summary = {
-        "schema": "tspi-rt60-waterfall/v2",
+        "schema": "khaen-rt60-waterfall/v2",
         "tool": {"name": "rt60_waterfall.py", "version": TOOL_VERSION},
         "created_unix": int(__import__("time").time()),
         "config": {"bands_hz": bands, "window_ms": args.window_ms,

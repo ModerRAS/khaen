@@ -20,7 +20,7 @@
 - D Aux1/Aux2 0/-120 dB 绑定、双上混=0 不变量、切换计划先关后开、原子提交/失败安全；
 - E override > detector > auto 合并视图（C03）与 input-mode override JSON/别名归一化；
 - F S1 autodetect daemon 状态机：启动冻结 2500 ms、hold 2500 ms、迟滞 6 dB、manual override、fader 错误失败安全、WS error 合成 state、RMS 0.1 dB 取整；
-- G tspi-input-content/v1 state JSON 字段顺序/往返/严格解析/前向未知键容忍；
+- G khaen-input-content/v1 state JSON 字段顺序/往返/严格解析/前向未知键容忍；
 - H P1 显式拒绝：R47 状态壳 NOT_SUPPORTED、PUT not_supported、S1 状态不得驱动播放、Aux 路径切换拒绝、S1 退役 unit 依赖证据（只读读取实际 unit 文件）；
 - I 命令形状、全模式对切换计划安全性、P1 只读快照不变量。
 

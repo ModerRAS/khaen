@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RoomForge -> TSPI low-frequency MIMO pipeline driver (offline, synthetic only).
+"""RoomForge -> KHAEN low-frequency MIMO pipeline driver (offline, synthetic only).
 
 Steps
   1. (optional) generate deterministic fixtures with the RoomForge C# generator;
@@ -9,9 +9,9 @@ Steps
   5. aggregate evidence: summary.json / SUMMARY.csv / MANIFEST.sha256.
 
 Everything this script touches is SIMULATED data: no audio device, no real room, no
-network.  Results must never be reported as measured (TSPI spec/mimo-objective-v1 §0.4).
+network.  Results must never be reported as measured (KHAEN spec/mimo-objective-v1 §0.4).
 
-Usage (from projects/tspi-audio-dsp):
+Usage (from projects/khaen-audio-dsp):
   python rt-stack/tools/analysis/run_mimo_roomforge_pipeline.py \
       --roomforge C:/WorkSpace/CSharp/RoomForge \
       --fixtures rt-stack/evidence/calib-chain-20261121/mimo-opt-20261122/fixtures \
@@ -92,7 +92,7 @@ def verify_fixtures(fixtures: str, validation: str) -> dict:
         manifest = json.load(fh)
 
     report = {
-        "format": "tspi-roomforge-fixture-verify/v1",
+        "format": "khaen-roomforge-fixture-verify/v1",
         "manifest_sha256": sha256_file(manifest_path),
         "scenes": [],
         "ok": True,
@@ -208,12 +208,12 @@ def variant_row(scene_id: str, scene: dict, variant: dict) -> dict:
 
 def aggregate(fixtures: str, runs: str, validation: str, fixture_report: dict) -> dict:
     summary = {
-        "format": "tspi-mimo-roomforge-pipeline-summary/v1",
+        "format": "khaen-mimo-roomforge-pipeline-summary/v1",
         "source": "SIMULATED",
         "honesty_status": "UNPROVEN",
         "claim": "all data are RoomForge shoebox image-source simulations; no real room, no measurement",
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "handwritten_tspi_assumption": HANDWRITTEN_ASSUMPTION,
+        "handwritten_khaen_assumption": HANDWRITTEN_ASSUMPTION,
         "fixtures": {
             "manifest_sha256": fixture_report.get("manifest_sha256"),
             "file_count": fixture_report.get("file_count"),

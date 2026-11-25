@@ -47,7 +47,7 @@ pub struct ScriptStatusResponse {
     pub message: Option<String>,
 }
 
-/// GET /api/mode/script-status：主动读取 audio-stack 的 tspi-mode status --json。
+/// GET /api/mode/script-status：主动读取 audio-stack 的 khaen-mode status --json。
 pub async fn script_status(State(state): State<AppState>) -> AppResult<Json<ScriptStatusResponse>> {
     let script = state.mode.query_script_status().await?;
     let available = script.is_some();
@@ -59,9 +59,9 @@ pub async fn script_status(State(state): State<AppState>) -> AppResult<Json<Scri
         message: if available {
             None
         } else if state.mock {
-            Some("mock 模式不执行 tspi-mode 脚本".into())
+            Some("mock 模式不执行 khaen-mode 脚本".into())
         } else {
-            Some("切换脚本未配置或不存在（/usr/local/bin/tspi-mode）".into())
+            Some("切换脚本未配置或不存在（/usr/local/bin/khaen-mode）".into())
         },
     }))
 }

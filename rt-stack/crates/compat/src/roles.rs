@@ -2,8 +2,8 @@
 //!
 //! 本模块是 rt-stack compat leaf roles（WBS T57，deps T01/T23/T13）。职责：
 //!
-//! 1. 唯一 overlay layout 预设解析：解析板端 audio/overlay/etc/tspi-audio/layout-presets.yml
-//!    （schema tspi-layout-presets/v2，只读）。4.1.2 的唯一 role→DAC 映射由解析结果给出，
+//! 1. 唯一 overlay layout 预设解析：解析板端 audio/overlay/etc/khaen-audio/layout-presets.yml
+//!    （schema khaen-layout-presets/v2，只读）。4.1.2 的唯一 role→DAC 映射由解析结果给出，
 //!    不是代码里的硬编码快照：FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7、容器 ch6 空（8 槽/7 物理角色）。
 //!    解析结果绑定 源文件 SHA-256 与 语义绑定 hash（layout id + 容器宽度 + 角色顺序/输出），
 //!    供 T25/T26/T58/T66 做 graph/profile stale 绑定。
@@ -30,7 +30,7 @@
 //!   高度全频、stereo_strict）；
 //! - rt-stack/spec/mimo-t6.md §3.1（participants/槽位 normative；HFL/HFR 显式排除、不靠名字推断）；
 //! - rt-stack/spec/fir-toolbox.md §5.1/§5.3（规范链序、无默认角色 HP/LP）；
-//! - scratch/lead/planner/TSPI-RT-STACK-WBS.md T57 行与 §1/§5/§7、DSP-HOST-DECISION.md §0/§1；
+//! - scratch/lead/planner/KHAEN-RT-STACK-WBS.md T57 行与 §1/§5/§7、DSP-HOST-DECISION.md §0/§1；
 //! - T13 实装 crates/compat/src/calibration.rs（LayoutRoleTable/RenderRoleBase/sha256_hex）。
 //!
 //! # 非目标 / 边界
@@ -69,7 +69,7 @@ use crate::calibration::{sha256_hex, LayoutRole, LayoutRoleTable, RenderRoleBase
 // ---------------------------------------------------------------------------
 
 /// overlay layout-presets 的唯一 schema（Y10；不匹配即拒收，不尽量解析）。
-pub const LAYOUT_PRESETS_SCHEMA: &str = "tspi-layout-presets/v2";
+pub const LAYOUT_PRESETS_SCHEMA: &str = "khaen-layout-presets/v2";
 /// P1 当前验收布局 id（WBS §3/DEC §1；布局本身仍来自 overlay 解析，不在代码里复制映射表）。
 pub const TARGET_LAYOUT_4_1_2: &str = "4.1.2";
 /// corrected 基线 profile id（T58 双 graph 的 corrected 侧；legacy_s1 不由此模块产出）。
@@ -77,14 +77,14 @@ pub const CORRECTED_PROFILE_ID: &str = "corrected_fullrange_height";
 /// P1 4.1.2 MIMO participants（显式任务边界，WBS §3/mimo-t6 §3.1）：不是按 role 名/频响推导。
 pub const P1_MIMO_PARTICIPANT_IDS: [&str; 5] = ["FL", "FR", "SL", "SR", "SUB1"];
 /// layout 语义绑定 hash 的域分隔字符串（版本化；改格式必须换域名）。
-pub const LAYOUT_BINDING_HASH_DOMAIN: &str = "tspi-layout-binding/v1";
+pub const LAYOUT_BINDING_HASH_DOMAIN: &str = "khaen-layout-binding/v1";
 /// 角色修正链 hash 的域分隔字符串。
-pub const CORRECTION_HASH_DOMAIN: &str = "tspi-role-correction/v1";
+pub const CORRECTION_HASH_DOMAIN: &str = "khaen-role-correction/v1";
 /// MIMO participants 绑定 hash 的域分隔字符串。
-pub const MIMO_PARTICIPANTS_HASH_DOMAIN: &str = "tspi-mimo-participants/v1";
+pub const MIMO_PARTICIPANTS_HASH_DOMAIN: &str = "khaen-mimo-participants/v1";
 /// 布局 id 最大字节数（防超长 key 注入报告/哈希）。
 pub const MAX_LAYOUT_ID_BYTES: usize = 64;
-/// 角色 id 最大字节数（与 TspiRoleV1 ctl_meta/name_hash 报告口径一致）。
+/// 角色 id 最大字节数（与 KhaenRoleV1 ctl_meta/name_hash 报告口径一致）。
 pub const MAX_ROLE_ID_BYTES: usize = 64;
 
 // ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ pub enum RolesErrorCode {
     YamlUnsupported,
     /// YAML 顶层不是 mapping。
     YamlRoot,
-    /// schema 缺失/不是 tspi-layout-presets/v2。
+    /// schema 缺失/不是 khaen-layout-presets/v2。
     Schema,
     /// 必填字段缺失（schema/output_layouts/roles/id/outputs 等）。
     MissingField,
@@ -1148,7 +1148,7 @@ pub struct RemapPreset {
     pub routes: Vec<RemapRoute>,
 }
 
-/// 解析后的 overlay layout 预设文档（tspi-layout-presets/v2）。
+/// 解析后的 overlay layout 预设文档（khaen-layout-presets/v2）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayoutPresets {
     schema: String,
@@ -1369,7 +1369,7 @@ fn layout_binding_hash(schema: &str, layout: &OutputLayoutPreset) -> String {
 /// 输出布局解析后的绑定结果（role 索引 = 文件顺序；容器槽位显式）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BoundRole {
-    /// 角色索引（0..O-1；与 TspiRoleV1.role_id/T23 roles[i] 对齐）。
+    /// 角色索引（0..O-1；与 KhaenRoleV1.role_id/T23 roles[i] 对齐）。
     pub role_index: u16,
     /// 角色 id（只作 CTL 元数据/name_hash；不参与滤波/路由决策）。
     pub id: String,

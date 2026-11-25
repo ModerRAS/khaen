@@ -1,8 +1,8 @@
-# tspi layout/remap presets v2 — 内置模板（随固件发布，只读；WebUI 可复制到 profile 后编辑）
+# khaen layout/remap presets v2 — 内置模板（随固件发布，只读；WebUI 可复制到 profile 后编辑）
 # 口径（2026-11-15）：不做跨布局 downmix/upmix；输入布局与输出布局角色同名直通；remap 只保留同布局（如 5.1.2->5.1.2）。16ch/扩展 SUB 暂停。
 # 说明：input_layouts 的通道顺序/通道数是“待 h16-research 核实”的假设；H16 换 layout 后通道数和顺序都会变。
 #       输出布局的 outputs 是 MOTU/其他声卡上的物理通道索引假设，WebUI 可改。
-schema: tspi-layout-presets/v2
+schema: khaen-layout-presets/v2
 
 input_layouts:
   h16-5.1:

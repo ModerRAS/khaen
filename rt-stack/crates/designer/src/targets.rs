@@ -1,11 +1,11 @@
-//! T11：目标曲线导入（`tspi-target-draft/v1`）。
+//! T11：目标曲线导入（`khaen-target-draft/v1`）。
 //!
 //! 本模块是 rt-stack 设计器 leaf `targets`（WBS T11，deps T10/T04）。
 //! 目标曲线是**期望响应**（设计输入），不是实测 CSV；CSV 是 `freq_hz,mag_db[,phase_deg]`，
 //! sidecar/单 JSON 提供 schema/单位/采样率/相位/归一化/插值/端点/哈希元数据。
 //!
 //! 权威契约（只读）：
-//! - `rt-stack/spec/fir-toolbox.md` §6（tspi-target-draft/v1：§6.2 文件形式、§6.3 字段、
+//! - `rt-stack/spec/fir-toolbox.md` §6（khaen-target-draft/v1：§6.2 文件形式、§6.3 字段、
 //!   §6.4 频点约束、§6.5 normalization/reference_gain、§6.6 相位语义、§6.7 插值/端点、
 //!   §6.8 内置目标、§6.9 28 个 E_TGT_* 拒收码、§6.9.1 唯一码优先级、§6.10 消费映射）——
 //!   现行 v1.2-draft；fs/2 边界按 Lead 裁决（`evidence/T04/RULING-fs2-2026-11-17.md`）：
@@ -68,7 +68,7 @@ use std::path::{Path, PathBuf};
 // ---------------------------------------------------------------------------
 
 /// 目标文件 schema（§6.3）。
-pub const TARGET_SCHEMA: &str = "tspi-target-draft/v1";
+pub const TARGET_SCHEMA: &str = "khaen-target-draft/v1";
 /// CSV 表头：仅有幅度（§6.2）。
 pub const CSV_HEADER_MAG: &str = "freq_hz,mag_db";
 /// CSV 表头：幅度 + 相位（§6.2）。
@@ -135,7 +135,7 @@ pub const CANONICAL_POINTS_HASH_ALGO: &str = "es-number-shortest-canonical-point
 /// 目标导入拒收码（§6.9 全 28 码）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TargetErrorCode {
-    /// 1 schema 缺失/不等于 `tspi-target-draft/v1`（含 JSON 语法/非对象根）。
+    /// 1 schema 缺失/不等于 `khaen-target-draft/v1`（含 JSON 语法/非对象根）。
     Schema,
     /// 2 顶层未知非 `x_` 字段。
     FieldUnknown,
@@ -3725,7 +3725,7 @@ impl TargetCurve {
             &mut out,
             &mut first,
             "schema",
-            "tspi-target-report-draft/v1",
+            "khaen-target-report-draft/v1",
         );
         push_json_str(&mut out, &mut first, "tool", "khaen-designer/targets");
         push_json_str(&mut out, &mut first, "form", report.form.as_str());

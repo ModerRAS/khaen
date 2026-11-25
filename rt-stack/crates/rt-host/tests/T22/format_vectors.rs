@@ -12,7 +12,7 @@
 
 use super::*;
 use crate::alsa::{sample_bytes, DeviceSelector, DuplexRequest, DuplexSession, FakeBackend};
-use khaen_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
+use khaen_core::abi::{sample_format, KhaenHwParamsV1, ABI_VERSION};
 use khaen_core::rt::RtStatus;
 
 const FMT_S24: u16 = sample_format::S24_3LE_INTERLEAVED;
@@ -47,9 +47,9 @@ fn hw_with(
     buffer: u32,
     flags: u32,
     seed: u64,
-) -> TspiHwParamsV1 {
+) -> KhaenHwParamsV1 {
     let bytes = device_sample_bytes(format).expect("test format must be device format") as u32;
-    TspiHwParamsV1 {
+    KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: format,
         n_in,
@@ -64,11 +64,11 @@ fn hw_with(
     }
 }
 
-fn hw(format: u16, n_in: u16, n_out: u16) -> TspiHwParamsV1 {
+fn hw(format: u16, n_in: u16, n_out: u16) -> KhaenHwParamsV1 {
     hw_with(format, n_in, n_out, 48_000, 64, 256, 0, 0)
 }
 
-fn cfg_of(hw: TspiHwParamsV1, dither: DitherCfg) -> FormatConfig {
+fn cfg_of(hw: KhaenHwParamsV1, dither: DitherCfg) -> FormatConfig {
     FormatConfig { hw, dither }
 }
 
@@ -76,7 +76,7 @@ fn cfg(format: u16, n_in: u16, n_out: u16) -> FormatConfig {
     cfg_of(hw(format, n_in, n_out), DitherCfg::Off)
 }
 
-fn cfg_dither(hw: TspiHwParamsV1) -> FormatConfig {
+fn cfg_dither(hw: KhaenHwParamsV1) -> FormatConfig {
     FormatConfig {
         hw,
         dither: DitherCfg::Tpdf,
@@ -84,8 +84,8 @@ fn cfg_dither(hw: TspiHwParamsV1) -> FormatConfig {
 }
 
 /// T01 E1 实测 MOTU 基线 hwparams（T17 校验产物）。
-fn motu_hw() -> TspiHwParamsV1 {
-    TspiHwParamsV1 {
+fn motu_hw() -> KhaenHwParamsV1 {
+    KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: FMT_S24,
         n_in: 20,

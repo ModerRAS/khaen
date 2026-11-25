@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-reference-fixture/v1",
+  "schema": "khaen-reference-fixture/v1",
   "id": "C12_dense_5x5_D3_exact",
   "title": "dense 5x5 integer modal matrix, D=3, variable P lengths, 32-sample input",
   "tags": [

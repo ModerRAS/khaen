@@ -1,6 +1,6 @@
 # HAND-CALC — T03 手算 impulse/卷积向量（P0，独立于任何 Rust/rt-check）
 
-2026-11-16 · rt-reference（WBS T03 / team task-23）。写域：`projects/tspi-audio-dsp/rt-stack/reference/`。
+2026-11-16 · rt-reference（WBS T03 / team task-23）。写域：`projects/khaen-audio-dsp/rt-stack/reference/`。
 
 本文是 [SPEC.md](SPEC.md) 数学模型的**手算可复现证据**：每个小用例的全部系数、输入、输出都小到可以人算，
 数值全部取整数或二进制可精确表示的分数（0.25/0.5/1.5…），因此正确结果在 binary64 中**逐位精确**，

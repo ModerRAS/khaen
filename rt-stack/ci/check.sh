@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# TSPI RT stack 离线检查（WBS T06）
+# KHAEN RT stack 离线检查（WBS T06）
 #
 # 用法（在 rt-stack/ 或任意目录）：
 #   sh ci/check.sh

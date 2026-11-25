@@ -1,8 +1,8 @@
-# tspi-upmix 生成：upmix-4.1.2-music
+# khaen-upmix 生成：upmix-4.1.2-music
 # 输入 2.0（2ch）-> 输出 4.1.2（8ch）；采样率 48000 Hz
 # 低电平环绕/高度，尽量保留立体声结像；低音管理 80Hz LR4
 # 用途：独立 CamillaDSP（ALSA）
-title: tspi-upmix upmix-4.1.2-music（2.0 -> 4.1.2）
+title: khaen-upmix upmix-4.1.2-music（2.0 -> 4.1.2）
 description: 低电平环绕/高度，尽量保留立体声结像；低音管理 80Hz LR4
 devices:
   samplerate: 48000

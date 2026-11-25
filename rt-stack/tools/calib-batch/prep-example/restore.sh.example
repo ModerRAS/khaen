@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TSPI 校准批量窗口：restore/rollback 包装（示例；仅授权窗口使用）
+# KHAEN 校准批量窗口：restore/rollback 包装（示例；仅授权窗口使用）
 # 用法：restore.sh <step_dir>
 # 约束：只允许回自研 last-good 或 mute；C（CamillaDSP）永不回退（runbook §2 C8）。
 set -u
@@ -8,13 +8,13 @@ STEP_DIR="$1"
 mkdir -p "$STEP_DIR"
 OUT="$STEP_DIR/restored.json"
 LOG="$STEP_DIR/restore.log"
-echo "# tspi-cal-batch restore $(date -Is)" | tee "$LOG"
+echo "# khaen-cal-batch restore $(date -Is)" | tee "$LOG"
 # 示例：L1 校准级 rollback（REST）/ L2 栈级 08-rollback.sh --mute
 # 必须记录 last_good_version；失败不得重启 C。
 RC=3
 echo "NOT_RUN 真实 rollback/mute 需窗口授权与本文件 hash 冻结" | tee -a "$LOG"
 cat > "$OUT" <<EOF
-{"schema":"tspi-cal-batch-restore-cmd/v1","step_dir":"$STEP_DIR","rc":$RC,
+{"schema":"khaen-cal-batch-restore-cmd/v1","step_dir":"$STEP_DIR","rc":$RC,
  "restored":false,"c_policy":"never-camilladsp","not_run":["真实 rollback/mute 需授权窗口"]}
 EOF
 exit "$RC"

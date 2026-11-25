@@ -1,4 +1,4 @@
-//! TSPI 模态 MIMO 设计（crate khaen-modal-design） ——WBS T06。
+//! KHAEN 模态 MIMO 设计（crate khaen-modal-design） ——WBS T06。
 //!
 //! **真实现状（非 stub）**：已公开 leaf 模块 `artifact` / `ingest` / `timebase` / `target` /
 //! `solve` / `regularize` / `validate`；各模块由对应 WBS 任务实现，并通过 crate 内

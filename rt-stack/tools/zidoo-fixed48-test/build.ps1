@@ -5,7 +5,7 @@
     SDK toolchain (aapt2 + javac + d8 + zipalign + apksigner). No gradle, no AndroidX.
 
 .DESCRIPTION
-    Produces zidoo-fixed48-test-v1.0.apk in artifacts/tspi-audio/zidoo-test/ and writes
+    Produces zidoo-fixed48-test-v1.0.apk in artifacts/khaen-audio/zidoo-test/ and writes
     build evidence (log, apk info, toolchain, hashes) into
     rt-stack/evidence/calib-chain-20261121/zidoo-apk48/build-record/.
 
@@ -21,7 +21,7 @@ param(
     [string]$BuildTools = '35.0.0',
     [string]$Platform = 'android-35',
     [string]$KeystorePath = '',
-    [string]$KeystorePass = 'tspi48test',
+    [string]$KeystorePass = 'khaen48test',
     [string]$KeyAlias = 'zidoo-fixed48',
     [switch]$NoArtifactCopy
 )
@@ -53,7 +53,7 @@ $scratchDir = Join-Path $repoRoot 'scratch\apk48'
 $workDir = Join-Path $scratchDir 'build'
 $classesDir = Join-Path $workDir 'classes'
 $dexDir = Join-Path $workDir 'dex'
-$distDir = Join-Path $repoRoot 'artifacts\tspi-audio\zidoo-test'
+$distDir = Join-Path $repoRoot 'artifacts\khaen-audio\zidoo-test'
 $evidenceRoot = Join-Path $repoRoot 'rt-stack\evidence\calib-chain-20261121\zidoo-apk48'
 # NOTE: do not name this directory "build": the repo .gitignore ignores **/build/.
 $evidenceBuild = Join-Path $evidenceRoot 'build-record'
@@ -184,7 +184,7 @@ if (-not (Test-Path $KeystorePath)) {
     Write-Log ('generating throw-away test keystore: ' + $KeystorePath)
     $keytoolArgs = @('-genkeypair', '-keystore', $KeystorePath, '-storetype', 'PKCS12',
         '-alias', $KeyAlias, '-keyalg', 'RSA', '-keysize', '2048', '-validity', '36500',
-        '-dname', 'CN=TSPI Fixed48 Test, OU=TSPI, O=TSPI, L=NA, ST=NA, C=CN',
+        '-dname', 'CN=KHAEN Fixed48 Test, OU=KHAEN, O=KHAEN, L=NA, ST=NA, C=CN',
         '-storepass', $KeystorePass, '-keypass', $KeystorePass, '-noprompt')
     Invoke-Logged -Name 'keytool -genkeypair' -Exe $keytool.Source -Arguments $keytoolArgs
 } else {
@@ -247,7 +247,7 @@ $apkInfo += ('builtAt   : ' + (Get-Date).ToString('o'))
 $apkInfo += ('file      : ' + $signedApk)
 $apkInfo += ('size      : ' + $apkSize + ' bytes')
 $apkInfo += ('sha256    : ' + $apkHash)
-$apkInfo += ('package   : com.tspi.fixed48test')
+$apkInfo += ('package   : com.khaen.fixed48test')
 $apkInfo += ('minSdk    : 30   targetSdk : 30   versionCode : 1   versionName : 1.0')
 $apkInfo += ('keystore  : ' + $KeystorePath)
 $apkInfo += ('keystoreSha256 : ' + $keystoreSha)
@@ -303,7 +303,7 @@ $summary = [ordered]@{
     apkPath = (Join-Path $distDir $apkName)
     sha256 = $apkHash
     sizeBytes = $apkSize
-    package = 'com.tspi.fixed48test'
+    package = 'com.khaen.fixed48test'
     versionName = '1.0'
     versionCode = 1
     minSdk = 30

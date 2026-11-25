@@ -5,7 +5,7 @@
 //! artifact 记录/manifest、失败/取消时只回自研 last-good 或安全 mute。
 //!
 //! 权威输入（只读）：
-//! - WBS T60 行与 §1/§5/§7（scratch/lead/planner/TSPI-RT-STACK-WBS.md）；
+//! - WBS T60 行与 §1/§5/§7（scratch/lead/planner/KHAEN-RT-STACK-WBS.md）；
 //! - DSP-HOST-DECISION §2（新 daemon 拥有 job/state/progress/cancel/失败恢复）与 §2.6 状态集；
 //! - rt-stack/spec/core-v1.md §5.4（DeviceOwner 唯一 owner）、§9（安全动作）、§12.1（本 crate 无 RT 区）；
 //! - rt-stack/spec/compat-matrix.md R48/P08/P12/Y16/Y24/K14/K33/K56（job 状态集/扫频安全/应用回滚/stale/互斥）；
@@ -2596,7 +2596,7 @@ impl JobManager {
         let inner = self.inner.clone();
         let worker_slot = slot.clone();
         let handle = thread::Builder::new()
-            .name(format!("tspi-cal-job-{}", job_id.0))
+            .name(format!("khaen-cal-job-{}", job_id.0))
             .spawn(move || worker_main(inner, worker_slot, backend))
             .map_err(|e| JobError::Thread(e.to_string()))?;
         state.active = Some(ActiveHandle {
@@ -2784,7 +2784,7 @@ impl JobManager {
         let inner = self.inner.clone();
         let worker_slot = slot.clone();
         let handle = thread::Builder::new()
-            .name(format!("tspi-cal-job-resume-{}", job_id.0))
+            .name(format!("khaen-cal-job-resume-{}", job_id.0))
             .spawn(move || worker_main(inner, worker_slot, backend))
             .map_err(|e| JobError::Thread(e.to_string()))?;
         state.active = Some(ActiveHandle {
@@ -3910,7 +3910,7 @@ mod tests {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let number = COUNTER.fetch_add(1, Ordering::SeqCst);
         let root = std::env::temp_dir().join(format!(
-            "tspi-caljob-t60-{}-{}-{}",
+            "khaen-caljob-t60-{}-{}-{}",
             std::process::id(),
             tag,
             number

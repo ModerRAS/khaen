@@ -1,6 +1,6 @@
 ---
 # example-532-crossover.yml — 5.3.2 十路完整示例（IIR 分频 + 每路 PEQ/Delay + MOTU 22ch 补零）
-# 用法：复制到 /etc/camilladsp/ 或渲染后作为 /run/tspi/camilladsp.yml 手工调试（camilladsp --check 先校验）。
+# 用法：复制到 /etc/camilladsp/ 或渲染后作为 /run/khaen/camilladsp.yml 手工调试（camilladsp --check 先校验）。
 # 采样率：AES67=48000（本示例）；Dante 改 96000。分频点/斜率/延迟/极性按实际音箱与测量调整。
 # 输入：H16-AIP 16ch（AES67 48k / Dante 96k）；容器顺序假设见 mixer 注释，待 H16 实测核对（CamillaDSP 不解码 Atmos/DTS）。
 devices:

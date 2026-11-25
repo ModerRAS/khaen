@@ -2,7 +2,7 @@
 //!
 //! 本模块是 rt-stack compat leaf `calibration`（WBS T13，deps T11/T12/T05）。职责是把
 //! **既有 `khaen-calibration/v1` 与 `/v1.1` YAML（只读、语义不改）** 适配成 P1 自研栈的
-//! **内部 IR 草案**（`tspi-cal-ir-draft/v1`），再投影成 T12 编译入口可消费的 P 阶段，
+//! **内部 IR 草案**（`khaen-cal-ir-draft/v1`），再投影成 T12 编译入口可消费的 P 阶段，
 //! 并绑定 T11 目标曲线（期望响应）引用，供 T26/T60/T66 在 prepare/apply 期使用。
 //!
 //! 权威契约（只读输入）：
@@ -12,9 +12,9 @@
 //!   未知项策略、→渲染映射、IR/manifest version/hash/role/fs/taps/placement/P/phase/D/stale）；
 //! - `rt-stack/spec/fir-toolbox.md` v1.2-draft §5.1（P_post 规范链序）、§5.2/§5.8（PEQ 消费语义、
 //!   与 calibration v1.1 的关系）、§7.1/§7.4（P/G 行列、stale/版本/确定性）、§6（目标曲线仅设计输入）；
-//! - `rt-stack/spec/core-v1.md` v1.1.1 §11.10（`TspiRoleV1`/`TspiDiagFirV1` 的 delay/delay_q16/
+//! - `rt-stack/spec/core-v1.md` v1.1.1 §11.10（`KhaenRoleV1`/`KhaenDiagFirV1` 的 delay/delay_q16/
 //!   gain/polarity 字段与总时延口径）、§5.3（stale 双条件）、§15.1 N3（分数 D 折入 A/P 后对拍）；
-//! - `scratch/lead/planner/TSPI-RT-STACK-WBS.md` T13 行与 §1/§5/§6/§7；
+//! - `scratch/lead/planner/KHAEN-RT-STACK-WBS.md` T13 行与 §1/§5/§6/§7；
 //! - `scratch/lead/planner/DSP-HOST-DECISION.md` §2（完整校准）、§3（FIR/融合/目标草案）；
 //! - T11 实装 `crates/designer/src/targets.rs`（目标曲线 `TargetCurve` 公共访问器）与
 //!   T12 实装 `crates/core/src/compile.rs`（`CompileOptions`/`CompileInput`/`StagePlan`/
@@ -26,7 +26,7 @@
 //!    只 warning（CONTRACT §5 规则 12、compat-matrix Y14）。
 //! 2. 与渲染基线角色表**合并**（CONTRACT §4.1）：`delay_samples` 相加、`polarity` XOR、
 //!    `gain_db` 相加、PEQ 按序追加且 **type 原样保留**；重复应用检测（同一校准二次应用即拒收）。
-//! 3. **内部 IR 草案** `tspi-cal-ir-draft/v1`：`ir_version`、内容 `ir_hash`（规范化序列化
+//! 3. **内部 IR 草案** `khaen-cal-ir-draft/v1`：`ir_version`、内容 `ir_hash`（规范化序列化
 //!    SHA-256）、role/fs/layout 绑定、`P/phase/D/taps/placement` 记录、stereo mask/目标 profile、
 //!    以及 **stale 判定**（input/fs/role/P/hash 变化原因逐条给出）。
 //! 4. **curve 不双叠**：目标曲线（T11 期望响应）在 IR 中最多绑定一次，且只落在基线 P 设计
@@ -95,11 +95,11 @@ pub const CAL_SCHEMA_V1: &str = "khaen-calibration/v1";
 /// 既有校准 schema v1.1（新增 shelf type 与 peaking q 放宽；本模块只读）。
 pub const CAL_SCHEMA_V11: &str = "khaen-calibration/v1.1";
 /// 内部 IR 草案 schema（P1 新，不是 CONTRACT 字段）。
-pub const IR_SCHEMA: &str = "tspi-cal-ir-draft/v1";
+pub const IR_SCHEMA: &str = "khaen-cal-ir-draft/v1";
 /// IR 草案整数版本；字段语义变化必须升版（compat-matrix Y24）。
 pub const IR_VERSION: u32 = 1;
 /// IR `ir_hash` 规范化序列化算法标识（f64 以 `to_bits` 十六进制，键序固定，无空白）。
-pub const IR_HASH_ALGO: &str = "tspi-cal-ir-canonical-v1";
+pub const IR_HASH_ALGO: &str = "khaen-cal-ir-canonical-v1";
 /// 渠道数上限（CONTRACT §5 规则 3）。
 pub const CAL_MAX_CHANNELS: usize = 32;
 /// 每通道 PEQ 段数上限（CONTRACT §5 规则 8 / channelmap 硬上限）。
@@ -3372,7 +3372,7 @@ impl TargetCurveRef {
 }
 
 // ===========================================================================
-// 内部 IR 草案（tspi-cal-ir-draft/v1）——version/hash/role/stale/placement
+// 内部 IR 草案（khaen-cal-ir-draft/v1）——version/hash/role/stale/placement
 // ===========================================================================
 
 /// 曲线应用点：P1 只允许基线 P 的输出目标 FIR（TargetFir）阶段。
@@ -3495,7 +3495,7 @@ pub enum PostEncoding {
     /// 折入 P FIR 系数（P = delta(D) * polarity；role 字段 delay=0/polarity=+1）。
     CoeffEmbedded,
     /// 放 role 元数据（P = [1.0]；role 字段 delay=D/polarity=±1；对应 core-v1
-    /// TspiRoleV1.delay_samples/delay_q16/polarity 与 TspiDiagFirV1 语义）。
+    /// KhaenRoleV1.delay_samples/delay_q16/polarity 与 KhaenDiagFirV1 语义）。
     RoleMetadata,
 }
 
@@ -3532,7 +3532,7 @@ pub struct IrPostRole {
     pub p_taps: u32,
 }
 
-/// 内部 IR 草案（`tspi-cal-ir-draft/v1`；P1 新 schema，不是 CONTRACT 字段）。
+/// 内部 IR 草案（`khaen-cal-ir-draft/v1`；P1 新 schema，不是 CONTRACT 字段）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrDraft {
     schema: String,
@@ -4334,7 +4334,7 @@ impl IrDraft {
 // 与 T12 接口：P 阶段投影（StagePlan/CompileOptions/design_delay_to_plan）
 // ===========================================================================
 
-/// IR 的单角色 plan 元数据（对齐 core-v1 §11.10 TspiRoleV1/TspiDiagFirV1 语义；
+/// IR 的单角色 plan 元数据（对齐 core-v1 §11.10 KhaenRoleV1/KhaenDiagFirV1 语义；
 /// 具体 plan 字节打包归 T26/T66）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct RolePlanMetadata {

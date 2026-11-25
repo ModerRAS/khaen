@@ -13,7 +13,7 @@ use super::*;
 
 use crate::sweep::{compile_timeline, SweepConfig, SweepOutput, SweepStimulus, SweepTimeline};
 use khaen_core::abi::{sample_format, ABI_VERSION};
-use khaen_rt_host::format::{DitherCfg, TspiHwParamsV1};
+use khaen_rt_host::format::{DitherCfg, KhaenHwParamsV1};
 
 const FS: u32 = 48_000;
 const EPOCH_START_NS: u64 = 1_000_000_000;
@@ -173,7 +173,7 @@ fn t62_hw_format(hw_format: u16, n_in: u16, n_out: u16, period_frames: u32) -> F
     let in_min = period * n_in as u32 * bytes;
     let out_min = period * n_out as u32 * bytes;
     FormatConfig {
-        hw: TspiHwParamsV1 {
+        hw: KhaenHwParamsV1 {
             abi_version: ABI_VERSION,
             sample_format: hw_format,
             n_in,
@@ -1011,12 +1011,12 @@ fn umik_capture_report_json_is_deterministic_and_contract_shaped() {
     .expect("finalize");
     let json = report.to_json();
     assert_eq!(json, report.to_json());
-    assert!(json.contains("\"schema\":\"tspi-umik-capture/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-umik-capture/v1\""));
     assert!(json.contains("\"purpose\":\"acoustic\""));
     assert!(json.contains("\"drift_source\":\"umik_repeat_grid\""));
     assert!(json.contains("\"phase_reference\":\"umik_direct_onset\""));
     assert!(json.contains("\"serial\":\"718-7696\""));
-    assert!(json.contains("\"schema\":\"tspi-umik-timebase/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-umik-timebase/v1\""));
     assert!(json.contains("\"clock_ppm\":"));
     assert!(json.contains("\"drift_significant\":"));
     assert!(json.contains("\"residual_phase_claim\":"));
@@ -1100,7 +1100,7 @@ fn umik_capture_calibration_stays_incomplete_until_t67_sign_self_test() {
 
 /// 契约样例：带显著漂移与 MOTU auxiliary electrical reference 的声学报告 JSON。
 ///
-/// 仅当 `TSPI_T62_EVIDENCE_DIR` 设置时才落盘（证据生成用）；普通 CI 无环境变量，只做离线断言、
+/// 仅当 `KHAEN_T62_EVIDENCE_DIR` 设置时才落盘（证据生成用）；普通 CI 无环境变量，只做离线断言、
 /// 不写任何文件。样例给 T63/T64/T49/T66 看 schema（含时间轴/时钟/auxiliary 隔离字段）。
 #[test]
 fn umik_capture_writes_evidence_example_when_requested() {
@@ -1123,8 +1123,8 @@ fn umik_capture_writes_evidence_example_when_requested() {
     .expect("finalize example");
     let json = report.to_json();
     assert_eq!(json, report.to_json());
-    assert!(json.contains("\"schema\":\"tspi-umik-capture/v1\""));
-    assert!(json.contains("\"schema\":\"tspi-umik-timebase/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-umik-capture/v1\""));
+    assert!(json.contains("\"schema\":\"khaen-umik-timebase/v1\""));
     let auxiliary_summary = report.auxiliary_reference.as_ref().expect("aux summary");
     assert_eq!(auxiliary_summary.role, CaptureStreamRole::MotuElectrical);
     assert_eq!(auxiliary_summary.device, "hw:motu,0");
@@ -1136,7 +1136,7 @@ fn umik_capture_writes_evidence_example_when_requested() {
     assert!((ppm - injected_ppm).abs() <= 2.0, "example ppm {ppm}");
     assert!(report.timebase.clock.drift_significant);
     assert!(report.timebase.clock.residual_phase_claim.applicable);
-    if let Some(dir) = std::env::var_os("TSPI_T62_EVIDENCE_DIR") {
+    if let Some(dir) = std::env::var_os("KHAEN_T62_EVIDENCE_DIR") {
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).expect("create evidence dir");
         let path = dir.join("capture-report-example.json");
@@ -1489,15 +1489,15 @@ fn umik_capture_onset_fix_rejects_noise_misalignment_and_isolated_pop() {
     assert_eq!(popped_error.code(), "E_CAPTURE_NO_ONSETS");
 }
 
-/// 真实失败采集离线复算（不碰设备、不发声）：TSPI_T62_REAL_RAW 指向 14:30 窗口
+/// 真实失败采集离线复算（不碰设备、不发声）：KHAEN_T62_REAL_RAW 指向 14:30 窗口
 /// job-wrap2 的 cap-111114.raw（sha256 665522f1…；stereo S24_3LE、729600 帧）。
 ///
 /// 该采集旧检测器在 seed≈1.19 s 时返回 None（真实 T3 NoOnsets）；新检测器必须检出 2 个
 /// repeat，且起点落在插桩互相关实测的 2.717 s / 8.218 s 附近（±10 ms）。
 #[test]
-#[ignore = "需要真实采集夹具：TSPI_T62_REAL_RAW=<14:30 wrap2 cap-111114.raw>"]
+#[ignore = "需要真实采集夹具：KHAEN_T62_REAL_RAW=<14:30 wrap2 cap-111114.raw>"]
 fn umik_capture_onset_fix_real_failing_capture_offline() {
-    let Some(path) = std::env::var_os("TSPI_T62_REAL_RAW") else {
+    let Some(path) = std::env::var_os("KHAEN_T62_REAL_RAW") else {
         return;
     };
     let bytes = std::fs::read(&path).expect("read real raw");

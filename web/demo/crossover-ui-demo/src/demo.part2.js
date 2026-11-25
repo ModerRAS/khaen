@@ -10,7 +10,7 @@ function buildBcConfig() {
   const m = state.groups.mains, s = state.groups.surround;
   const hp = (g) => ({ freq_hz: g.freq, slope_db_oct: g.slope, order: g.slope / 6, type: 'LinkwitzRiley' });
   return {
-    schema: 'tspi-crossover-demo/v1',
+    schema: 'khaen-crossover-demo/v1',
     generated_at: now,
     note: '演示导出，不写入设备。由 2026-11-18 板端实测 FR 驱动的分频设计。',
     measurement: { source: 'board-window-20261118-calib/analysis/board-pilot/B/fr/UMIK', seat: 'B', mic: 'UMIK-1' },
@@ -42,7 +42,7 @@ function buildBcYaml() {
   const roles = [
     ['FL', m], ['FR', m], ['SL', s], ['SR', s],
   ].map(([id, g]) => '  - id: ' + id + '\n    highpass: {freq: ' + fmtHz(g.freq) + ', order: ' + o(g) + ', type: LinkwitzRiley}').join('\n');
-  return '# tspi channelmap 片段（演示导出，未写入设备）\n' +
+  return '# khaen channelmap 片段（演示导出，未写入设备）\n' +
     'bass_management:\n  enabled: true\n  lfe_role: SUB1\n  sub_gain_db: ' + state.sub.gain.toFixed(1) + '\n' +
     '  mains_highpass_hz: ' + fmtHz(m.freq) + '\n  mains_highpass_order: ' + o(m) + '\n' +
     '  sub_lowpass_hz: ' + fmtHz(m.freq) + '\n  sub_lowpass_order: ' + o(m) + '\n' +
@@ -399,7 +399,7 @@ function buildArtConfig() {
     if (k.on) conns.push({ main_group: r.id, support_group: c, support_level_db: k.level, f_support_low_hz: k.low, f_support_high_hz: k.high });
   }
   return {
-    schema: 'tspi-art-support-demo/v1',
+    schema: 'khaen-art-support-demo/v1',
     generated_at: new Date().toISOString(),
     note: '演示导出，不写入设备；衰减预览为示意模型。',
     art: { fsiso_hz: state.art.fsiso, main_groups: ART_ROWS.map(r => r.id), support_groups: ART_COLS, connections: conns },
@@ -409,7 +409,7 @@ function buildArtConfig() {
 }
 function round1Arr(a) { return a.map(v => Math.round(v * 100) / 100); }
 function buildArtYaml() {
-  const lines = ['# tspi ART 支持配置片段（演示导出，未写入设备）', 'art:', '  fsiso_hz: ' + state.art.fsiso, '  main_groups: [FL, FR, SL, SR, LFE]', '  support_groups: [FL, FR, SL, SR, SUB1]', '  connections:'];
+  const lines = ['# khaen ART 支持配置片段（演示导出，未写入设备）', 'art:', '  fsiso_hz: ' + state.art.fsiso, '  main_groups: [FL, FR, SL, SR, LFE]', '  support_groups: [FL, FR, SL, SR, SUB1]', '  connections:'];
   for (const r of ART_ROWS) for (const c of ART_COLS) {
     if (r.id === c) continue;
     const k = getConn(r.id, c);

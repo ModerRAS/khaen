@@ -1,6 +1,6 @@
-# /etc/tspi-ptp/ptp4l-master-l2.conf -- TSPI PTPv2 grandmaster, IEEE 802.3 (L2/Ethernet) profile.
+# /etc/khaen-ptp/ptp4l-master-l2.conf -- KHAEN PTPv2 grandmaster, IEEE 802.3 (L2/Ethernet) profile.
 # Same GM dataset as the UDP profile; only the transport differs. Selected with
-#   TSPI_PTP_CONF=/etc/tspi-ptp/ptp4l-master-l2.conf
+#   KHAEN_PTP_CONF=/etc/khaen-ptp/ptp4l-master-l2.conf
 # Use this when the slaves (RAVENNA/AES67 gear, some ST 2110 endpoints) listen for L2 PTP.
 # linuxptp config parser has no inline-comment support: keep comments on their own lines.
 
@@ -28,4 +28,4 @@ ptp_dst_mac                 01:1B:19:00:00:00
 tx_timestamp_timeout        10
 free_running                0
 kernel_leap                 1
-uds_address                 /run/tspi-ptp/ptp4l.uds
+uds_address                 /run/khaen-ptp/ptp4l.uds

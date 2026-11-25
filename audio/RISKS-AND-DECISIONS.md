@@ -13,12 +13,12 @@
 | R5 | LKM 与 PREEMPT_RT 内核兼容性 | 模式 B 抖动/崩溃 | 中 | 驱动近期用 tasklet + HRTIMER_MODE_HARD、CPU-pinned timer（6.15+）；RT 内核下 hrtimer/netfilter 行为与主线不同 | 上板跑 cyclictest + 24 h 流；准备非 RT 内核镜像做对照；必要时给 LKM 打 RT 适配补丁（预留工作量 2–3 人日） | 待验证 |
 | R6 | LKM 与目标内核 6.1 编译 | 模式 B 起不来 | 低 | 上游明确支持 5.15→6.2 区间（`ce46ebd` stdarg 5.15、`ee262e9` 6.2/6.3、6.8/6.12/6.15/6.18 各有修复） | 用 firmware-builder 产出的 6.1(+RT) kernel build 目录编译；保留 kernel 日志；失败则回退到主线 6.1.99-rt36 头文件交叉验证 | 待验证 |
 | R7 | 切换模式短暂断音/爆音 | 用户体验 | 确定（可接受） | 停 DSP→停 AoIP→等 PTP lock→起 DSP，秒级 | 先停 CamillaDSP 再动时钟；切换完成前不出声；报告“断音 2–10 s”为设计行为；web-manager 展示 transition 状态 | 已确认（可接受） |
-| R8 | 切换失败留下半死状态 | 设备无声且难排查 | 中 | 任何一步都可能失败（PTP 不 lock、设备没插、daemon 起不来） | 脚本内置回滚（恢复切换前模式，exit 9）+ `--dry-run` + `/run/tspi/state.json` 记录 last_error + /var/log/tspi/mode.log；回滚本身失败则退到 off（fail-safe） | 已确认（需验收） |
+| R8 | 切换失败留下半死状态 | 设备无声且难排查 | 中 | 任何一步都可能失败（PTP 不 lock、设备没插、daemon 起不来） | 脚本内置回滚（恢复切换前模式，exit 9）+ `--dry-run` + `/run/khaen/state.json` 记录 last_error + /var/log/khaen/mode.log；回滚本身失败则退到 off（fail-safe） | 已确认（需验收） |
 | R9 | Debian 12 的 alsa-ucm-conf 1.2.8 没有 MOTU mk5 UCM | 无 UCM 便捷设备/路由 | 确定 | bookworm=1.2.8-1（sources.debian.org）；上游 mk5 UCM 2024-05-27 加入（commit 2bd2aca），首个含它的 release=v1.2.13；v1.2.13 的 UCM 树用 Syntax 7，而 bookworm alsa-lib 1.2.8 只支持 ≤Syntax 6（ucm_local.h） | **不整树替换**（会破坏所有 UCM）。方案：回移 mk5 两个文件 + 在 1.2.8 的 USB-Audio.conf 插入 Syntax 6 的 mk5 分支（`ucm-backport-mk5.sh`，幂等）；**主音频链路不依赖 UCM**（CamillaDSP 直接 hw: + mixer 映射），UCM 失败只降级为“无便捷 stereo 设备” | 已确认（回移待验证） |
-| R10 | MOTU 96 kHz 下通道数/格式未知 | 96k 配置可能打不开 | 中 | UCM 的 22/20 通道是 1FS 口径；96k 下 ADAT 通道会变化，USB 流通道数需实测 | tspi-mode 在切换时 `aplay --dump-hw-params` 探测实际 CHANNELS/FORMAT，按探测值渲染 CamillaDSP；`S24_3_LE` 不接受则回落不指定 format | 待验证（上板） |
+| R10 | MOTU 96 kHz 下通道数/格式未知 | 96k 配置可能打不开 | 中 | UCM 的 22/20 通道是 1FS 口径；96k 下 ADAT 通道会变化，USB 流通道数需实测 | khaen-mode 在切换时 `aplay --dump-hw-params` 探测实际 CHANNELS/FORMAT，按探测值渲染 CamillaDSP；`S24_3_LE` 不接受则回落不指定 format | 待验证（上板） |
 | R11 | 32 帧（chunksize）在 96k/FIR 重载下达不到 | 延迟指标不达标 | 高（96k 0.33 ms/块） | 96 kHz chunksize 32 = 0.333 ms；RT 抖动 + USB + FIR 计算叠加 | 32 帧定位为“目标/最好情况”，验收以 24 h 0 xrun 的**稳定最小值**交付（ACCEPTANCE-MATRIX.md）；96k 建议从 64 起测，48k 从 32 起测 | 已确认（验收口径） |
 | R12 | Inferno alpha 质量 / PTPv1 时钟抖动 | Dante 偶发断流 | 中 | 上游 README 自述“Highly experimental”；PTPv1 需要 statime fork；NTP 会污染时钟（README 明确） | 镜像禁用 PTP 网卡上的 NTP（chrony/timesyncd 排除 eth0 或直接停用），statime 用 `virtual-system-clock-base = monotonic_raw`；RT 权限（limits+systemd）强制；24 h soak | 已确认（需验收） |
-| R13 | RT 权限缺失导致静默降级 | 抖动/xrun、无法复现 | 高（Debian 默认） | Debian13.7 VM 实测：普通用户 `ulimit -r=0`，Inferno loopback_trx 普通用户失败、root 通过 | overlay 预置 `/etc/security/limits.d/95-tspi-audio.conf`（`@audio rtprio 99/memlock unlimited`）、所有音频 unit `LimitRTPRIO=99`/`LimitMEMLOCK=infinity`、`RealtimePriority` 检查；验收含 `ulimit -r` 与 `chrt -f 80 true` | 已确认（需验收） |
+| R13 | RT 权限缺失导致静默降级 | 抖动/xrun、无法复现 | 高（Debian 默认） | Debian13.7 VM 实测：普通用户 `ulimit -r=0`，Inferno loopback_trx 普通用户失败、root 通过 | overlay 预置 `/etc/security/limits.d/95-khaen-audio.conf`（`@audio rtprio 99/memlock unlimited`）、所有音频 unit `LimitRTPRIO=99`/`LimitMEMLOCK=infinity`、`RealtimePriority` 检查；验收含 `ulimit -r` 与 `chrt -f 80 true` | 已确认（需验收） |
 | R14 | USB 音频 IRQ / 线程优先级未调 | USB xrun | 中 | USB xHCI 中断与 MOTU 周期传输；RT 下需绑核/提优先级 | 建议（写进 unit/文档，不强制）：CamillaDSP 主线程由 `audio_thread_priority` 自动提升（CamillaDSP 内置），xHCI IRQ 绑 A72 核、避开 isolcpus 的系统核；`cyclictest` 与 `cat /proc/interrupts` 对照。具体 IRQ 号上板确认 | 待验证 |
 | R15 | 离线包/工具链版本漂移 | 构建不可复现 | 中 | Debian 点版本会更新 | packages.list 固定版本（source 版本）；`fetch-debs.sh` 记录实际 .deb 文件名+sha256 到 `release/debs/MANIFEST.txt`；Rust 工具链用 rustup 固定版本（建议 1.90.x 或 1.100.x，记录 rustc -V） | 已确认 |
 | R16 | 服务以 root 运行面过大 | 安全 | 中 | 音频栈需要 CAP_SYS_TIME/CAP_NET_ADMIN/RT | v1 全部 root（简单可靠）；文档列出收紧路线（daemon: CAP_NET_ADMIN+CAP_SYS_RAWIO? statime: CAP_SYS_TIME；camilladsp: 仅 RT），列为后续加固项 | 已确认（技术债） |
@@ -80,7 +80,7 @@ B2 的接收端对比：
 
 ### D4 是否开机自动恢复模式
 
-- 默认不自动（安全）：`tspi-boot-mode.service` 默认 disabled；若开启则读 `/etc/tspi/last-mode` 调 `tspi-mode --restore`。**待用户确认**。
+- 默认不自动（安全）：`khaen-boot-mode.service` 默认 disabled；若开启则读 `/etc/khaen/last-mode` 调 `khaen-mode --restore`。**待用户确认**。
 
 ### D5 是否升级 alsa-lib + 整棵 ucm2
 
@@ -90,14 +90,14 @@ B2 的接收端对比：
 
 | 决策 | 内容 | 依据 |
 | --- | --- | --- |
-| DEC-1 | dante / aes67 / off 三模式互斥，统一入口 `tspi-mode` | Lead 2026-11-15 明确 |
+| DEC-1 | dante / aes67 / off 三模式互斥，统一入口 `khaen-mode` | Lead 2026-11-15 明确 |
 | DEC-2 | AES67 默认 B1（daemon=PTP slave，外部 GM） | R4 + Lead 同意按 B1 写默认，B2/B3 写决策点 |
 | DEC-3 | 采样率：AES67 48k、Dante 96k；输出 24-bit；处理率跟输入，不默认 192k | 用户口径 |
 | DEC-4 | CamillaDSP 输出到 MOTU 用硬件通道 + mixer 映射（不依赖 UCM/route 插件） | R9、R20；便于多路分频扩展 |
 | DEC-5 | 离线预装：二进制 + 配置 + unit 进 overlay；.deb 包池离线安装；服务安装但不开机自启（ConditionPathExists 守卫） | 用户 OEM 要求 + Lead 契约 |
 | DEC-6 | LKM 只在模式 B 加载，切走 rmmod | R2 |
 | DEC-7 | 32 帧不是硬承诺，以 24 h 0 xrun 的最小值为准 | Lead 口径 |
-| DEC-8 | **D4 已定：默认不自动恢复模式**，tspi-boot-mode.service 保持 disabled；镜像首次开机为 off，由 web-manager/人工切换 | Lead 验收 2026-11-15 |
+| DEC-8 | **D4 已定：默认不自动恢复模式**，khaen-boot-mode.service 保持 disabled；镜像首次开机为 off，由 web-manager/人工切换 | Lead 验收 2026-11-15 |
 | DEC-9 | **D5 已定：接受 MOTU mk5 UCM 回移方案**（只回移 mk5 文件 + Syntax 6 分派补丁；主音频链路不依赖 UCM，失败仅降级） | Lead 验收 2026-11-15 |
 | DEC-10 | D1 维持默认 B1（AES67 daemon=PTPv2 slave，外部 GM）；B2/B3 仍为决策点待用户选择 | Lead 2026-11-15 |
 | DEC-11 | D2（Dante PTPv1 主钟来源）待用户确认 | Lead 2026-11-15 |
@@ -125,11 +125,11 @@ aplay -D hw:<motu>,0 --dump-hw-params /dev/zero 2>&1 | head -30   # 记录 CHANN
 # 3) RT 权限
 ulimit -r; chrt -f 80 true && echo RT-OK
 # 4) Dante 模式
-tspi-mode dante --json; tspi-mode status --json
+khaen-mode dante --json; khaen-mode status --json
 #   检查 statime 观测 socket:
-socat - UNIX-CONNECT:/run/tspi/statime-observe.sock | head -c 400   # 或 nc -U
+socat - UNIX-CONNECT:/run/khaen/statime-observe.sock | head -c 400   # 或 nc -U
 # 5) AES67 模式（B1，需外部 PTPv2 GM）
-tspi-mode aes67 --json; tspi-mode status --json
+khaen-mode aes67 --json; khaen-mode status --json
 curl -s http://127.0.0.1:8080/api/ptp/status
 arecord -D hw:ravenna,0 -c 2 -f S32_LE -r 48000 -d 5 /tmp/t.wav && aplay -D hw:<motu>,0 /tmp/t.wav
 # 6) 24h soak（见 ACCEPTANCE-MATRIX.md）

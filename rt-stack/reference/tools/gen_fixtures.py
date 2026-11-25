@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Deterministic fixture generator for the TSPI f64 reference (WBS T03).
+"""Deterministic fixture generator for the KHAEN f64 reference (WBS T03).
 
 Writes reference/fixtures/cases/*.json and reference/fixtures/index.json.
 Expected outputs are computed with exact rational arithmetic from the *parsed*
@@ -28,8 +28,8 @@ from pathlib import Path
 REF_ROOT = Path(__file__).resolve().parents[1]
 CASES_DIR = REF_ROOT / "fixtures" / "cases"
 INDEX_PATH = REF_ROOT / "fixtures" / "index.json"
-SCHEMA = "tspi-reference-fixture/v1"
-INDEX_SCHEMA = "tspi-reference-fixtures-index/v1"
+SCHEMA = "khaen-reference-fixture/v1"
+INDEX_SCHEMA = "khaen-reference-fixtures-index/v1"
 GEN_NAME = "tools/gen_fixtures.py"
 
 # ---------------------------------------------------------------------------

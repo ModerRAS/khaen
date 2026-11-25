@@ -147,7 +147,7 @@ def build_plan(mode, n_out):
         roles += struct.pack("<Ihbb", 0, 32767, 1, 0)     # delay, gain_q15, polarity, res1
         roles += struct.pack("<HHIII", 0, 0, 0, 0, 0)     # peq, res2, name_hash, res3, res4
 
-    graph_id = hashlib.sha256(("tspi-plan-h16-16in-%s-v1" % mode).encode()).digest()
+    graph_id = hashlib.sha256(("khaen-plan-h16-16in-%s-v1" % mode).encode()).digest()
     header = bytearray(HEADER_SIZE)
     struct.pack_into("<I", header, 0, MAGIC)
     struct.pack_into("<H", header, 4, ABI_V1)

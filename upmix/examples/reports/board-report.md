@@ -172,7 +172,7 @@
 ## 结论
 
 - 所有信号级检查通过：CamillaDSP 实际输出与参考 DSP 仿真逐样本一致（max|diff| ~1e-8，float32 量化级），说明配置/滤波器/延迟/矩阵与设计一致。
-- 独立生成的 CamillaDSP 配置与 tspi-channelmap 渲染路径（修复后）输出逐样本相同。
+- 独立生成的 CamillaDSP 配置与 khaen-channelmap 渲染路径（修复后）输出逐样本相同。
 - 电平、频带、延迟、反相/差信号隔离均符合设计；未发现非预期的梳状/抵消（r(lag0)≈0，合成通道与前声道的最大相关出现在配置延迟处）。
 - 已知设计取舍：SL/SR 为反相差信号（相关 -1）、HFL/HFR 为单声道高度（相关 +1），需要扩散感请用 wide 预设（左右延迟差）或 decor.mode=allpass。
 
@@ -207,6 +207,6 @@ ALSA 配置 camilladsp --check（不打开设备，验证结构与取值）：
 - upmix-4.1.2-music：PASS
 - upmix-5.3.2-music：PASS
 
-板端环境：LCKFB TaishanPi 3M RK3576 Board | Linux version 6.1.99-rt36 (builder@tspi-audio-build) (aarch64-none-linux-gnu-gcc (GNU Toolchain for the A-profile Architecture 10.3-2021.07 (arm-10.29)) 10.3.1 20210621, GNU ld (GNU Toolchain for the A-profile Architecture 10.3-2021.07 (arm-10.29)) 2.36.1.20210621) #3 SMP PREEMPT_RT Sun Nov 15 11:54:41 CST 2026 | CamillaDSP 4.1.3 (05e9cfc)
+板端环境：LCKFB TaishanPi 3M RK3576 Board | Linux version 6.1.99-rt36 (builder@khaen-audio-build) (aarch64-none-linux-gnu-gcc (GNU Toolchain for the A-profile Architecture 10.3-2021.07 (arm-10.29)) 10.3.1 20210621, GNU ld (GNU Toolchain for the A-profile Architecture 10.3-2021.07 (arm-10.29)) 2.36.1.20210621) #3 SMP PREEMPT_RT Sun Nov 15 11:54:41 CST 2026 | CamillaDSP 4.1.3 (05e9cfc)
 
 注：文件后端的 wall 时间包含文件 I/O；cs=128 在板端受小盘 I/O 影响 wall 偏大，CPU 时间才是 DSP 负载（20s 音频约 0.35–0.75s，约单核 2–4%）。

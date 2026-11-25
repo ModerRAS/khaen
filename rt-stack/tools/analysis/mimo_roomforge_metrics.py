@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""TSPI RoomForge MIMO fixture -- Python independent reference metrics.
+"""KHAEN RoomForge MIMO fixture -- Python independent reference metrics.
 
 This script is the *independent* (numpy-only) recomputation of the MIMO
 objective/validation metrics for the RoomForge shoe-box ISM fixtures.  It is
 used to cross-check the Rust implementation in rt-stack/crates/room-sim,
 rt-stack/crates/mimo-design and rt-stack/tools/mimo-opt, and to produce the
-evidence for "RoomForge simulation vs TSPI hand-written assumptions".
+evidence for "RoomForge simulation vs KHAEN hand-written assumptions".
 
 Authoritative documents (read them before touching formulas):
   * rt-stack/spec/mimo-objective-v1.md                     (metric definitions)
@@ -100,9 +100,9 @@ import numpy as np
 
 TOOL_NAME = "mimo_roomforge_metrics.py"
 TOOL_VERSION = "1.0.0"
-REPORT_FORMAT = "tspi-mimo-sim-report/v1"
-PY_METRICS_FORMAT = "tspi-mimo-python-metrics/v1"
-T60_FORMAT = "tspi-mimo-python-t60/v1"
+REPORT_FORMAT = "khaen-mimo-sim-report/v1"
+PY_METRICS_FORMAT = "khaen-mimo-python-metrics/v1"
+T60_FORMAT = "khaen-mimo-python-t60/v1"
 
 SOURCE = "SIMULATED"
 HONESTY = "UNPROVEN"
@@ -117,7 +117,7 @@ TOL_RATIO = 1e-6              # relative tolerance for ratio-valued metrics
 TOL_DB = 1e-6                 # absolute tolerance for dB-valued metrics
 ENERGY_NEAR_ZERO = 1e-12      # fraction-of-max threshold for N/A bands
 
-# Hand-written TSPI low-frequency assumption that must be contrasted with the
+# Hand-written KHAEN low-frequency assumption that must be contrasted with the
 # RoomForge/Sabine values (see CONTRACT section 2 and T60 analysis below).
 HAND_T60_LOW_S = 0.35
 HAND_T60_HIGH_S = 0.45
@@ -459,7 +459,7 @@ def load_scene(scene_dir: Path) -> SceneFixture:
     gt = load_json(gt_path)
     if not isinstance(gt, dict):
         raise MetricsError("%s: ground-truth.json is not an object" % gt_path)
-    if not str(gt.get("format", "")).startswith("tspi-roomforge-mimo-fixture/"):
+    if not str(gt.get("format", "")).startswith("khaen-roomforge-mimo-fixture/"):
         raise MetricsError("%s: unexpected format %r" % (gt_path, gt.get("format")))
     for key in ("scene_id", "sample_rate_hz", "rir", "room", "sources", "mics",
                 "design_mic_ids", "holdout_mic_ids", "frequency_grid_hz", "bands",
@@ -2189,7 +2189,7 @@ def render_t60_markdown(t60: Dict[str, Any]) -> str:
     lines.append("   For 4.10 x 5.20 x 2.70 m (V = 57.564 m^3) with all six reflection")
     lines.append("   coefficients r = 0.866 (alpha = 1 - 0.866^2 = 0.250044, total surface")
     lines.append("   A = 92.86 m^2): T60 = 0.161 * 57.564 / 23.219 = **0.3991 s**.")
-    lines.append("   This is exactly the TSPI hand-written low-frequency assumption 0.35-0.45 s")
+    lines.append("   This is exactly the KHAEN hand-written low-frequency assumption 0.35-0.45 s")
     lines.append("   (0.3991 s sits at the centre). The r = 0.866 scene is therefore the")
     lines.append("   physically consistent stand-in for the hand-written 0.40 s assumption.")
     lines.append("2. **RoomForge default reflections** (4 walls at r = 0.7, floor/ceiling at")
@@ -2689,14 +2689,14 @@ def run_selftest() -> int:
     print("[selftest] objective-v2: report structure validation ...")
     with tempfile.TemporaryDirectory(prefix="mimo-obj-selftest-") as tmp:
         tmpdir = Path(tmp)
-        good = {"format": "tspi-mimo-sim-report/v1", "scene_id": "scene-x",
+        good = {"format": "khaen-mimo-sim-report/v1", "scene_id": "scene-x",
                 "variants": {vid: {"design": {}, "holdout": {}}
                              for vid in ("B0", "B1", "B2", "B3")}}
         good_path = tmpdir / "good.json"
         good_path.write_text(json.dumps(good), encoding="utf-8")
         loaded = load_obj_report(good_path)
         _check(loaded["scene_id"] == "scene-x", "load_obj_report accepts 4 variants")
-        bad = {"format": "tspi-mimo-sim-report/v1",
+        bad = {"format": "khaen-mimo-sim-report/v1",
                "variants": {"B0": {"design": {}, "holdout": {}}}}
         bad_path = tmpdir / "bad.json"
         bad_path.write_text(json.dumps(bad), encoding="utf-8")
@@ -2885,7 +2885,7 @@ def plot_t60(t60: Dict[str, Any], path: Path) -> None:
     ]
     colors = ["#333333", "#1f77b4", "#5fa8d3", "#2ca02c", "#ff7f0e"]
     ax.axhspan(HAND_T60_LOW_S, HAND_T60_HIGH_S, color="#d9d9d9", alpha=0.6,
-               label="TSPI hand-written 0.35-0.45 s")
+               label="KHAEN hand-written 0.35-0.45 s")
     for k, (label, values) in enumerate(series):
         vals = [float(v) if v is not None else float("nan") for v in values]
         ax.bar(xs + (k - 2) * width, vals, width, label=label, color=colors[k])
@@ -4298,11 +4298,11 @@ def process_obj_scene(fx: SceneFixture, report: Dict[str, Any], tag: str,
     P0_holdout = P0[fx.holdout_idx]
     scene_id = fx.scene_id
     report_format = str(report.get("format", ""))
-    if not report_format.startswith("tspi-mimo-sim-report/"):
+    if not report_format.startswith("khaen-mimo-sim-report/"):
         issues.append({"kind": "report_schema", "scene": scene_id, "tag": tag,
                        "message": "unexpected report format %r" % report_format})
     diffs.add_bool(scene_id, "-", "report", "report.format_prefix_ok",
-                   True, report_format.startswith("tspi-mimo-sim-report/"))
+                   True, report_format.startswith("khaen-mimo-sim-report/"))
     report_objective = report.get("objective")
     if isinstance(report_objective, dict):
         objective_name = report_objective.get("name") or report_objective.get("objective")
@@ -5166,7 +5166,7 @@ def run_objectives_pipeline(args: argparse.Namespace) -> int:
                 tag_issues.append({"kind": "v1_regression_missing",
                                    "message": "--v1-runs %s not found" % v1_dir})
         payload = {
-            "format": "tspi-mimo-python-metrics-objectives/v1",
+            "format": "khaen-mimo-python-metrics-objectives/v1",
             "source": SOURCE,
             "provenance": {"data_kind": SOURCE, "honesty_status": HONESTY,
                            "claim": "synthetic offline objective study only; no "
@@ -5240,7 +5240,7 @@ def run_objectives_pipeline(args: argparse.Namespace) -> int:
     else:
         overall = "PASS"
     summary = {
-        "format": "tspi-mimo-python-metrics-objectives-summary/v1",
+        "format": "khaen-mimo-python-metrics-objectives-summary/v1",
         "source": SOURCE,
         "provenance": {"data_kind": SOURCE, "honesty_status": HONESTY},
         "generated_at_utc": now_utc_iso(),

@@ -1,14 +1,14 @@
 //! [NONRT] 公共时间轴/相位/ppm（T49） ——WBS T49 写域。
 //!
 //! 本模块是 P1 低频 MIMO 设计链的**时间轴/相位重建层**：把 T48 ingest
-//! （`khaen-modal-design::ingest`，契约 `tspi-modal-ingest/v1`）已经校验过的
+//! （`khaen-modal-design::ingest`，契约 `khaen-modal-ingest/v1`）已经校验过的
 //! raw/source/diag/position 产物读成**公共时间基准**，供 T50（target）/T52–T54
 //! （solver/validate/artifact）与 T63/T66/T67/T68（多点/编译应用/复测/独立
 //! checker）消费。本模块是纯计算：**不采音、不写盘、不做解卷积、不打开任何音频
 //! 设备/进程**；所有输入都来自 T48 的强类型结构（或真实 `read_bundle()` 结果）。
 //!
 //! 权威输入（只读）：
-//! - WBS T49 行与 §1/§6/§7（scratch/lead/planner/TSPI-RT-STACK-WBS.md）；
+//! - WBS T49 行与 §1/§6/§7（scratch/lead/planner/KHAEN-RT-STACK-WBS.md）；
 //! - DSP-HOST-DECISION §2.3（公共时间轴/clock_ppm：按实际 crop/coarse/frac/slot
 //!   恢复，不盲套 CSV 标签或**双扣 fractional delay**，避免**物理极性重复乘**）；
 //! - docs/MIMO-COEFF-PLAN.md §2.4a（fr.csv 相位语义：`absolute_phase_deg =
@@ -21,7 +21,7 @@
 //!   无 RT 区，[NONRT]）；
 //! - rt-stack/README.md §3（写域纪律）与 evidence/T48/INPUT-FORMAT.md（输入契约）。
 //!
-//! # 冻结的时基模型（tspi-modal-timebase/v1）
+//! # 冻结的时基模型（khaen-modal-timebase/v1）
 //!
 //! 一个 position 是一次连续 UMIK 1ch 采集；其中按 slot 依次播放 M 个 participant
 //! 的扫频（每个 slot R 遍）。MOTU render frame 域与 UMIK capture sample 域是**两个独立
@@ -122,7 +122,7 @@ use khaen_core::rt::{
 // ===========================================================================
 
 /// 时基重建产物 schema（T50/T54/T63/T66 报告引用）。
-pub const TIMEBASE_SCHEMA: &str = "tspi-modal-timebase/v2";
+pub const TIMEBASE_SCHEMA: &str = "khaen-modal-timebase/v2";
 
 /// 独立 ppm 估计之间允许的最大偏差（ppm；另有 3σ 项）。
 pub const CLOCK_AGREEMENT_TOLERANCE_PPM: f64 = 2.0;

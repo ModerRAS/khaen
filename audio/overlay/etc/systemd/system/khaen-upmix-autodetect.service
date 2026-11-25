@@ -1,0 +1,17 @@
+[Unit]
+Description=khaen-audio: input content autodetect (stereo upmix vs multichannel passthrough)
+Documentation=file:///etc/khaen-audio/upmix/
+After=khaen-camilladsp.service
+Wants=khaen-camilladsp.service
+
+[Service]
+Type=simple
+# 只读 CamillaDSP websocket 的 GetCaptureSignalRms，写 state + 切 Aux1/Aux2 fader；
+# 不启动/重启 CamillaDSP，不打开声卡。输入容器布局按需修改 --input-layout。
+Environment=KHAEN_CAMILLADSP_PORT=1234
+ExecStart=/usr/local/bin/khaen-upmix --presets /etc/khaen-audio/upmix/presets.yml autodetect --input-layout h16-7.1.4 --state /run/khaen/input-content.json --mode-file /etc/khaen-audio/input-mode.json --hold-ms 2500 --startup-freeze-ms 2500
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

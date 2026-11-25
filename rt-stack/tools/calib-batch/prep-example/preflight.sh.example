@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TSPI 校准批量窗口：preflight 包装（示例，窗口前按 runbook §3 G0-G10 冻结）
+# KHAEN 校准批量窗口：preflight 包装（示例，窗口前按 runbook §3 G0-G10 冻结）
 # 用法（由 plan 生成的 argv 调用）：preflight.sh <step_dir>
 # 纪律：只读；任一硬门失败 exit 3，零变更。真实命令需在板端窗口准备时冻结 hash。
 set -u
@@ -9,12 +9,12 @@ STEP_DIR="$1"
 mkdir -p "$STEP_DIR"
 OUT="$STEP_DIR/preflight.json"
 LOG="$STEP_DIR/preflight.log"
-echo "# tspi-cal-batch preflight $(date -Is)" | tee "$LOG"
+echo "# khaen-cal-batch preflight $(date -Is)" | tee "$LOG"
 
 # 示例：调用板端既有 board-window.sh（路径/参数以窗口冻结为准，NOT_RUN 直到窗口授权）
-BOARD_WINDOW_SH="$TSPI_BOARD_WINDOW_SH"
+BOARD_WINDOW_SH="$KHAEN_BOARD_WINDOW_SH"
 if [ -z "$BOARD_WINDOW_SH" ]; then BOARD_WINDOW_SH=/var/tmp/board-window.sh; fi
-AUTH_JSON="$TSPI_WINDOW_AUTH"
+AUTH_JSON="$KHAEN_WINDOW_AUTH"
 if [ -z "$AUTH_JSON" ]; then AUTH_JSON=/var/tmp/w-cal.json; fi
 RC=0
 if [ -x "$BOARD_WINDOW_SH" ]; then
@@ -28,7 +28,7 @@ fi
 # 期望：PF C_RETIRED=1 / PF ALSA_BACKEND=alsa / PF KEEPER_48K=1 / PF NO_192K=1 / PF PCM_FREE=1 ...
 # 任一 !=1 -> exit 3，不启动任何东西（runbook §3）。
 cat > "$OUT" <<EOF
-{"schema":"tspi-cal-batch-preflight-cmd/v1","step_dir":"$STEP_DIR","board_window_sh":"$BOARD_WINDOW_SH",
+{"schema":"khaen-cal-batch-preflight-cmd/v1","step_dir":"$STEP_DIR","board_window_sh":"$BOARD_WINDOW_SH",
  "rc":$RC,"not_run":["板端 G0-G10 结果以板端 preflight.json 为准；本文件只是包装取证"]}
 EOF
 exit "$RC"

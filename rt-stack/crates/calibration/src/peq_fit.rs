@@ -8,7 +8,7 @@
 //!   `design_target_fir` 与 compile_apply::linear_phase_group_delay_samples）；
 //! - 目标只接受内置 flat/tilt10（用户裁决 F-15：自定义 sha256 一律 E_FIT_TARGET）；
 //! - 每通道 trim 与 D7 削波/headroom 报告（预测峰值 <= -6 dBFS、headroom >= 6 dB）；
-//! - 发布 tspi-modal-peq/v1 系数、目标 FIR 系数与 tspi-peq-fit/v1 报告；
+//! - 发布 khaen-modal-peq/v1 系数、目标 FIR 系数与 khaen-peq-fit/v1 报告；
 //! - 模态残差（PEQ 后 / P 后）与给 T50/G 的残余曲线同在报告里，G 不得重复切同一 tone。
 //!
 //! 依赖（只读上游实现，不改其文件）：T41 modal_peq（RBJ/检测/原图比对）、T11 targets
@@ -40,18 +40,18 @@ use crate::positions::{MultipointPlan, MultipointPosition, PositionQualityReport
 // ---------------------------------------------------------------------------
 
 /// 报告 schema。
-pub const PEQ_FIT_SCHEMA: &str = "tspi-peq-fit/v1";
+pub const PEQ_FIT_SCHEMA: &str = "khaen-peq-fit/v1";
 /// 目标 FIR 系数产物 schema。
-pub const TARGET_FIR_SCHEMA: &str = "tspi-target-fir/v1";
+pub const TARGET_FIR_SCHEMA: &str = "khaen-target-fir/v1";
 /// 报告 artifact 相对路径（job artifacts_dir 下）。
 pub const FIT_REPORT_ARTIFACT_PATH: &str = "fit/design-report.json";
-/// tspi-modal-peq/v1 系数 artifact 相对路径。
+/// khaen-modal-peq/v1 系数 artifact 相对路径。
 pub const FIT_MODAL_PEQ_ARTIFACT_PATH: &str = "fit/modal-peq.json";
 /// 目标 FIR 系数 artifact 相对路径。
 pub const FIT_TARGET_FIR_ARTIFACT_PATH: &str = "fit/target-fir.json";
 
-/// 工具名（写进 tspi-modal-peq/v1 tool.name）。
-pub const FIT_TOOL_NAME: &str = "tspi-peq-fit";
+/// 工具名（写进 khaen-modal-peq/v1 tool.name）。
+pub const FIT_TOOL_NAME: &str = "khaen-peq-fit";
 /// 工具版本。
 pub const FIT_TOOL_VERSION: &str = "t64-1";
 
@@ -143,7 +143,7 @@ pub const RULE_2A_LIMIT_DB: f64 = 3.0;
 /// 设计原则：**不放宽任何门限**。标准拟合 rule_2a FAIL 时，仅从当前残差峰推导
 /// 一个额外 peaking 段，复用既有 2a 修复循环，并且只有在恢复后 rule_2a 两 clause
 /// 真正通过时才采纳；否则保留原 FAIL 并在证据里写 unresolved 原因。
-pub const RECOVERY_SCHEMA: &str = "tspi-target-aware-recovery/v1";
+pub const RECOVERY_SCHEMA: &str = "khaen-target-aware-recovery/v1";
 /// 恢复证据 artifact（仅触发时生成；否则不产生新 artifact）。
 pub const RECOVERY_ARTIFACT_PATH: &str = "fit/recovery.json";
 /// 候选频率偏移（相对最大正残差峰，octave；固定顺序保证确定性）。
@@ -851,7 +851,7 @@ fn prepare_target(
 }
 
 // ---------------------------------------------------------------------------
-// 公开报告结构（tspi-peq-fit/v1）
+// 公开报告结构（khaen-peq-fit/v1）
 // ---------------------------------------------------------------------------
 
 /// 一个 Band 的报告视图。
@@ -1336,7 +1336,7 @@ pub struct FitChecks {
     pub all_boost_limits_pass: bool,
 }
 
-/// 一次完整 PEQ fit 报告（tspi-peq-fit/v1）。
+/// 一次完整 PEQ fit 报告（khaen-peq-fit/v1）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeqFitReport {
     pub tool_name: String,
@@ -1550,7 +1550,7 @@ impl TargetFirDesign {
 
     fn coeff_sha256(&self) -> String {
         let mut canonical = String::with_capacity(self.coeffs.len() * 26 + 32);
-        canonical.push_str("tspi-target-fir-coeffs/v1\n");
+        canonical.push_str("khaen-target-fir-coeffs/v1\n");
         canonical.push_str(&format!(
             "taps={} band={:.17e},{:.17e}\n",
             self.taps, self.band_hz[0], self.band_hz[1]
@@ -1605,7 +1605,7 @@ pub struct FitArtifact {
     pub sha256: String,
 }
 
-/// 待发布的 artifact 集合（report + tspi-modal-peq 系数 + 目标 FIR）。
+/// 待发布的 artifact 集合（report + khaen-modal-peq 系数 + 目标 FIR）。
 #[derive(Clone, Debug)]
 pub struct FitArtifacts {
     pub report_sha256: String,
@@ -2030,7 +2030,7 @@ fn measurement_digest(plan: &MultipointPlan, curves: &[PositionCurve]) -> String
         (a.position.as_str(), a.channel.as_str()).cmp(&(b.position.as_str(), b.channel.as_str()))
     });
     let mut canonical = String::with_capacity(sorted.len() * 4096);
-    canonical.push_str("tspi-peq-fit-measurements/v1\n");
+    canonical.push_str("khaen-peq-fit-measurements/v1\n");
     canonical.push_str(&plan.plan_sha256());
     canonical.push('\n');
     for curve in sorted {
@@ -4009,7 +4009,7 @@ fn p_digest(outcomes: &[ChannelFitOutcome]) -> String {
     // P 内容摘要：只绑定 P 本身（段表/trim/FIR），不绑定输入 hash，
     // 这样 holdout/validation 曲线变化不影响“基线 P 是否相同”的判定；
     // stale 由报告里的 plan_sha256 / target.sha256 / measurement.sha256 字段单独表达。
-    canonical.push_str("tspi-peq-fit-p/v1\n");
+    canonical.push_str("khaen-peq-fit-p/v1\n");
     for outcome in outcomes {
         let channel = &outcome.channel;
         canonical.push_str(&format!("channel={}/{}\n", channel.name, channel.index));

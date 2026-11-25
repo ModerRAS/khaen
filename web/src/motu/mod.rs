@@ -1,6 +1,6 @@
 //! MOTU UltraLite-mk5 / CueMix 控制。
 //!
-//! 协议见 `codec`（对齐 `tools/motu/cuemix_client.py`）。`MockMotu` 在 `TSPI_MOCK=1`
+//! 协议见 `codec`（对齐 `tools/motu/cuemix_client.py`）。`MockMotu` 在 `KHAEN_MOCK=1`
 //! 下提供内存设备，不打开套接字、不执行系统命令；`RealMotu` 只在真机模式构造。
 
 mod codec;

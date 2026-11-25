@@ -2,7 +2,7 @@
 //!
 //! 用途：为「生产多点窗口」预先准备并验证代码路径：
 //! 1) fixtures：生成合成旧工具 analysis JSON（2 design + 1 独立 validation，FL/FR）
-//!    与 spec v2（tspi-cal-measured-design/v2）；全部纯离线、确定性字节。
+//!    与 spec v2（khaen-cal-measured-design/v2）；全部纯离线、确定性字节。
 //! 2) report：读回 spec v2 -> 生产 measured 构建 -> T64 fit -> 写
 //!    measured summary / T64 report / 多点证据（逐位置残差 + 座位间 spread + holdout 预测口径）。
 //!
@@ -94,7 +94,7 @@ fn validation_db(freq_hz: f64) -> f64 {
     -0.5 + bump(freq_hz, 100.0, 2.0, 0.10) + bump(freq_hz, 1_000.0, -4.0, 0.30)
 }
 
-/// 旧工具 analysis JSON（schema tspi-channel-measurement/v1；1/24 oct 20–20k）。
+/// 旧工具 analysis JSON（schema khaen-channel-measurement/v1；1/24 oct 20–20k）。
 ///
 /// 相位约定：工具 phase_deg=0（已按互相关对齐）；delay_samples 声明实测到达延迟，
 /// measured 桥按 +2*pi*f*tau/fs 重建 T65 复响应。
@@ -117,7 +117,7 @@ fn analysis_json<F: Fn(f64) -> f64>(channel: u64, delay_samples: f64, shape: F) 
         index += 1;
     }
     format!(
-        "{{\"schema\":\"tspi-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay_samples:.6},\"snr_band_db\":31.0,\"polarity_confidence\":\"high\",\"meta\":{{\"sample_rate\":{FS_HZ},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
+        "{{\"schema\":\"khaen-channel-measurement/v1\",\"channel\":{channel},\"delay_samples\":{delay_samples:.6},\"snr_band_db\":31.0,\"polarity_confidence\":\"high\",\"meta\":{{\"sample_rate\":{FS_HZ},\"sweep_start_hz\":20.0,\"sweep_end_hz\":20000.0}},\"fr\":[{fr}]}}"
     )
 }
 
@@ -214,7 +214,7 @@ fn write_fixtures(args: &Args) -> Result<(), String> {
         spec_bytes.len(),
     ));
     let mut manifest = String::new();
-    manifest.push_str("{\n  \"schema\": \"tspi-cal-multipoint-fixtures/v1\",\n");
+    manifest.push_str("{\n  \"schema\": \"khaen-cal-multipoint-fixtures/v1\",\n");
     manifest.push_str("  \"note\": \"SYNTHETIC/OFFLINE fixtures only; not a real room measurement; 2 design + 1 independent validation positions\",\n");
     manifest.push_str("  \"files\": [\n");
     for (index, (name, sha, bytes)) in written.iter().enumerate() {
@@ -289,7 +289,7 @@ fn write_report(args: &Args) -> Result<(), String> {
         .map(|position| position.label.as_str())
         .collect();
     let fitp_summary = format!(
-        "{{\n  \"schema\": \"tspi-cal-multipoint-fitp-probe/v1\",\n  \"spec\": {:?},\n  \"multipoint_report_schema\": {:?},\n  \"design_positions\": {},\n  \"validation_positions\": {},\n  \"position_labels\": {:?},\n  \"curves\": {},\n  \"phase_responses\": {},\n  \"measurement_sha256\": {:?},\n  \"p_sha256\": {:?},\n  \"t64_checks\": {{\"all_rule_2a_pass\": {}, \"all_rule_2b_pass\": {}, \"all_headroom_pass\": {}, \"all_boost_limits_pass\": {}}},\n  \"per_position_residual_after_p\": [{}],\n  \"verdict\": \"EXPERIMENT\",\n  \"acceptability\": \"NON_ACCEPTABLE\",\n  \"note\": \"synthetic/pilot multipoint code-path probe; measured-at-validation-positions predicted holdout only; real remeasure/T3/T6/T68 NOT_RUN\"\n}}\n",
+        "{{\n  \"schema\": \"khaen-cal-multipoint-fitp-probe/v1\",\n  \"spec\": {:?},\n  \"multipoint_report_schema\": {:?},\n  \"design_positions\": {},\n  \"validation_positions\": {},\n  \"position_labels\": {:?},\n  \"curves\": {},\n  \"phase_responses\": {},\n  \"measurement_sha256\": {:?},\n  \"p_sha256\": {:?},\n  \"t64_checks\": {{\"all_rule_2a_pass\": {}, \"all_rule_2b_pass\": {}, \"all_headroom_pass\": {}, \"all_boost_limits_pass\": {}}},\n  \"per_position_residual_after_p\": [{}],\n  \"verdict\": \"EXPERIMENT\",\n  \"acceptability\": \"NON_ACCEPTABLE\",\n  \"note\": \"synthetic/pilot multipoint code-path probe; measured-at-validation-positions predicted holdout only; real remeasure/T3/T6/T68 NOT_RUN\"\n}}\n",
         slash(spec_path),
         MEASURED_MULTIPOINT_SCHEMA,
         design.plan.design_count(),

@@ -8,7 +8,7 @@
   procs.tsv       三列：pid<TAB>comm<TAB>cmdline
   runtime.tsv     四列：path<TAB>exists<TAB>size<TAB>sha256
   raw/            各只读命令原始输出（*.txt）与 *.exit
-输出：<dir>/snapshot.json（schema tspi-rt-stack/old-c-snapshot/v1）
+输出：<dir>/snapshot.json（schema khaen-rt-stack/old-c-snapshot/v1）
 只读输入；exit 0=成功，2=结构缺失（缺 meta/files），3=快照自检失败（integrity_equal=false）。
 """
 import hashlib
@@ -16,7 +16,7 @@ import json
 import os
 import sys
 
-SCHEMA = "tspi-rt-stack/old-c-snapshot/v1"
+SCHEMA = "khaen-rt-stack/old-c-snapshot/v1"
 
 
 def read_tsv(path, min_cols):

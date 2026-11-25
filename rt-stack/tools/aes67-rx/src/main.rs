@@ -69,7 +69,9 @@ struct Cli {
 impl Cli {
     fn parse(argv: Vec<String>) -> Result<Self, String> {
         let mut args = argv.into_iter();
-        let command = args.next().ok_or("缺少子命令（run|selftest|tone|sdp-info）")?;
+        let command = args
+            .next()
+            .ok_or("缺少子命令（run|selftest|tone|sdp-info）")?;
         let mut kv = Vec::new();
         let mut flags = Vec::new();
         let mut pending: Option<String> = None;
@@ -281,7 +283,7 @@ fn generated_selftest_sdp(channels: u16, port: u16) -> String {
     format!(
         "v=0\r\n\
 o=- 424242 424242 IN IP4 127.0.0.1\r\n\
-s=TSPI dsp-host AES67 selftest\r\n\
+s=KHAEN dsp-host AES67 selftest\r\n\
 c=IN IP4 127.0.0.1\r\n\
 t=0 0\r\n\
 m=audio {port} RTP/AVP 96\r\n\
@@ -964,11 +966,9 @@ struct ToneConfig {
 }
 
 fn run_tone_sender(config: &ToneConfig, stop: &AtomicBool) -> Result<u64, String> {
-    let mut sender = Aes67RtpSender::bind(SenderConfig::unicast(
-        config.dest,
-        config.channels as u16,
-    ))
-    .map_err(|e| e.name().to_string())?;
+    let mut sender =
+        Aes67RtpSender::bind(SenderConfig::unicast(config.dest, config.channels as u16))
+            .map_err(|e| e.name().to_string())?;
     sender.config().frames_per_packet = config.frames_per_packet;
     let frames = config.frames_per_packet;
     let mut interleaved = vec![0f32; frames * config.channels];
@@ -996,8 +996,8 @@ fn run_tone_sender(config: &ToneConfig, stop: &AtomicBool) -> Result<u64, String
             for channel in 0..config.channels {
                 let sample = phase[channel].sin() as f32 * config.amplitude * gain;
                 interleaved[frame * config.channels + channel] = sample;
-                phase[channel] += 2.0 * std::f64::consts::PI * config.tones[channel] as f64
-                    / RATE_HZ as f64;
+                phase[channel] +=
+                    2.0 * std::f64::consts::PI * config.tones[channel] as f64 / RATE_HZ as f64;
                 if phase[channel] > 2.0 * std::f64::consts::PI {
                     phase[channel] -= 2.0 * std::f64::consts::PI;
                 }
@@ -1112,7 +1112,11 @@ fn cmd_run(cli: &Cli) -> Result<(), String> {
     eprintln!(
         "[aes67-rx] 接收 {}（{}）ch={} latency={} us ring={}；本地绑定 {}",
         summary.media,
-        if summary.multicast { "组播" } else { "单播" },
+        if summary.multicast {
+            "组播"
+        } else {
+            "单播"
+        },
         channels,
         latency_us,
         ring_frames,
@@ -1140,8 +1144,10 @@ fn cmd_run(cli: &Cli) -> Result<(), String> {
             fade_in_frames,
             fade_out_frames,
             stop_mute_frames: (stop_mute_ms as usize * RATE_HZ as usize / 1000).max(BLOCK_FRAMES),
-            stream_end_frames: (stream_end_ms as u64 * RATE_HZ as u64 / 1000).max(BLOCK_FRAMES as u64),
-            notdue_hold_frames: (notdue_hold_ms as u64 * RATE_HZ as u64 / 1000).max(BLOCK_FRAMES as u64),
+            stream_end_frames: (stream_end_ms as u64 * RATE_HZ as u64 / 1000)
+                .max(BLOCK_FRAMES as u64),
+            notdue_hold_frames: (notdue_hold_ms as u64 * RATE_HZ as u64 / 1000)
+                .max(BLOCK_FRAMES as u64),
             stay_on_stream_end,
             reanchor: Arc::clone(&reanchor),
             dump: dump_spec.clone(),
@@ -1250,7 +1256,10 @@ fn cmd_run(cli: &Cli) -> Result<(), String> {
         .enumerate()
         .map(|(src, dst)| {
             if channels == 7 {
-                format!("{{\"src\":{src},\"name\":\"{}\",\"dest\":{dst}}}", FOUR_ONE_TWO[src])
+                format!(
+                    "{{\"src\":{src},\"name\":\"{}\",\"dest\":{dst}}}",
+                    FOUR_ONE_TWO[src]
+                )
             } else {
                 format!("{{\"src\":{src},\"dest\":{dst}}}")
             }
@@ -1467,8 +1476,10 @@ fn cmd_selftest(cli: &Cli) -> Result<(), String> {
             fade_in_frames,
             fade_out_frames,
             stop_mute_frames: (stop_mute_ms as usize * RATE_HZ as usize / 1000).max(BLOCK_FRAMES),
-            stream_end_frames: (stream_end_ms as u64 * RATE_HZ as u64 / 1000).max(BLOCK_FRAMES as u64),
-            notdue_hold_frames: (notdue_hold_ms as u64 * RATE_HZ as u64 / 1000).max(BLOCK_FRAMES as u64),
+            stream_end_frames: (stream_end_ms as u64 * RATE_HZ as u64 / 1000)
+                .max(BLOCK_FRAMES as u64),
+            notdue_hold_frames: (notdue_hold_ms as u64 * RATE_HZ as u64 / 1000)
+                .max(BLOCK_FRAMES as u64),
             stay_on_stream_end,
             reanchor: Arc::clone(&reanchor),
             dump: dump_spec.clone(),
@@ -1567,7 +1578,10 @@ fn cmd_selftest(cli: &Cli) -> Result<(), String> {
         .enumerate()
         .map(|(src, dst)| {
             if channels == 7 {
-                format!("{{\"src\":{src},\"name\":\"{}\",\"dest\":{dst}}}", FOUR_ONE_TWO[src])
+                format!(
+                    "{{\"src\":{src},\"name\":\"{}\",\"dest\":{dst}}}",
+                    FOUR_ONE_TWO[src]
+                )
             } else {
                 format!("{{\"src\":{src},\"dest\":{dst}}}")
             }
@@ -1774,7 +1788,11 @@ fn cmd_sdp_info(cli: &Cli) -> Result<(), String> {
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    if argv.first().map(|s| s == "--help" || s == "-h").unwrap_or(true) {
+    if argv
+        .first()
+        .map(|s| s == "--help" || s == "-h")
+        .unwrap_or(true)
+    {
         print_help();
         return;
     }
@@ -1847,7 +1865,15 @@ mod tests {
             0,
             0,
         );
-        for (dest, src) in [(0usize, 0usize), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (7, 6)] {
+        for (dest, src) in [
+            (0usize, 0usize),
+            (1, 1),
+            (2, 2),
+            (3, 3),
+            (4, 4),
+            (5, 5),
+            (7, 6),
+        ] {
             let expect = (((src as i32) + 1) << 16) >> 8;
             for frame in [0usize, 1, 63, 127] {
                 assert_eq!(
@@ -1968,8 +1994,14 @@ mod tests {
             tail = decode(&out, playback, 127, 0) as f64;
         }
         let first = first.unwrap();
-        assert!(first.abs() < 0.02 * full, "起播首帧≈0（got {first}, full {full}）");
-        assert!((tail - full).abs() / (full) < 0.01, "10ms 淡入完成后≈满幅（got {tail}, full {full}）");
+        assert!(
+            first.abs() < 0.02 * full,
+            "起播首帧≈0（got {first}, full {full}）"
+        );
+        assert!(
+            (tail - full).abs() / (full) < 0.01,
+            "10ms 淡入完成后≈满幅（got {tail}, full {full}）"
+        );
         assert!(!fade.in_pending, "淡入完成后 in_pending 应清除");
     }
 

@@ -1,6 +1,6 @@
-# tspi-channelmap 上混相关修复（存档，已合入）
+# khaen-channelmap 上混相关修复（存档，已合入）
 
-`tspi-channelmap-upmix-fixes.patch` 是 pinned 基线（overlay 文件，sha256 1e7dc232…）上的
+`khaen-channelmap-upmix-fixes.patch` 是 pinned 基线（overlay 文件，sha256 1e7dc232…）上的
 统一 diff，修复 3 个改变渲染结果的 bug：
 
 | # | 问题 | 影响 | 修复 |
@@ -13,9 +13,9 @@
 OEM v5 镜像已包含）。本 patch 作为历史记录与旧镜像应急使用：
 
 ```bash
-cd / && patch -p1 --dry-run < tspi-channelmap-upmix-fixes.patch
-cd / && patch -p1 < tspi-channelmap-upmix-fixes.patch
-# 音频模式在跑时：systemctl restart tspi-camilladsp
+cd / && patch -p1 --dry-run < khaen-channelmap-upmix-fixes.patch
+cd / && patch -p1 < khaen-channelmap-upmix-fixes.patch
+# 音频模式在跑时：systemctl restart khaen-camilladsp
 ```
 
 验证：用打了 patch 的渲染器重渲染 4.1.2/5.3.2 profile，与独立生成的正确配置逐电平一致；

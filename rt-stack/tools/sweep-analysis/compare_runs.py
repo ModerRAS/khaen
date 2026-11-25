@@ -48,7 +48,7 @@ def main():
     for k, r in runs.items():
         curves[k] = fr_at(r, BANDS_CMP)
     comp = {
-        "schema": "tspi-sweep-comparison/v2",
+        "schema": "khaen-sweep-comparison/v2",
         "field_semantics": {
             "ir_relative_to_segment_ms": "IR 提取段内相对峰值位置；只能段内对齐/相对比较，不是绝对直达延迟",
             "ir_distance_status": "VALID / SUSPECT_TOO_CLOSE_FOR_ROOM_MIC / INVALID_NO_COMMON_TIMEBASE / INVALID_TIMEBASE / INVALID_NEGATIVE_DELAY / INVALID_SPEED_OF_SOUND",

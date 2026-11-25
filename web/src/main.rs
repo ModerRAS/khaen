@@ -23,18 +23,18 @@ khaen-audio-web —— 泰山派3M 音频 DSP 设备 Web 管理服务
   -c, --config <路径>   配置文件路径（默认 Linux: /etc/khaen-audio-web/config.toml；
                         Windows 开发: ./config.toml）
   -l, --listen <地址>   监听地址，例如 0.0.0.0:80（默认；被占用时回退 0.0.0.0:8088）
-      --mock            内存 mock 模式（等价于 TSPI_MOCK=1，不执行任何系统命令）
+      --mock            内存 mock 模式（等价于 KHAEN_MOCK=1，不执行任何系统命令）
       --print-token     打印当前访问 token 后退出（便于找回）
   -h, --help            显示帮助
   -V, --version         显示版本
 
 环境变量:
-  TSPI_CONFIG           配置文件路径（低于 --config）
-  TSPI_MOCK=1           mock 模式
-  TSPI_LISTEN           监听地址
-  TSPI_TOKEN            覆盖配置文件 token（临时）
-  TSPI_ALLOW_REBOOT=1   开启重启按钮（仍默认关闭）
-  TSPI_ALLOW_SHUTDOWN=1 开启关机按钮
+  KHAEN_CONFIG           配置文件路径（低于 --config）
+  KHAEN_MOCK=1           mock 模式
+  KHAEN_LISTEN           监听地址
+  KHAEN_TOKEN            覆盖配置文件 token（临时）
+  KHAEN_ALLOW_REBOOT=1   开启重启按钮（仍默认关闭）
+  KHAEN_ALLOW_SHUTDOWN=1 开启关机按钮
 ";
 
 fn parse_args() -> Result<Args, String> {
@@ -132,7 +132,7 @@ async fn main() {
         }
     };
 
-    let mock_requested = args.mock || config::env_truthy("TSPI_MOCK").unwrap_or(false);
+    let mock_requested = args.mock || config::env_truthy("KHAEN_MOCK").unwrap_or(false);
 
     let (mut config, report) = match config::load(args.config.clone(), mock_requested) {
         Ok(v) => v,

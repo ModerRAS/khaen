@@ -18,35 +18,35 @@ function renderWarnings(list) {
   return '<div class="cal-warnings">' + list.map(w => '<div class="cal-warn" data-code="' + w.code + '"><b>' + w.code + '</b><span>' + w.message + '</span></div>').join('') + '</div>';
 }
 
-async function tspiLoadSettings() {
-  const payload = await tspiApi('GET', CAL_API.settings);
+async function khaenLoadSettings() {
+  const payload = await khaenApi('GET', CAL_API.settings);
   if (payload && payload.settings) state.settings = payload.settings;
   state.settingsValidation = payload ? payload.validation : null;
   state.settingsSaved = true;
   if (state.settings && state.settings.target_mode) state.design.target = state.settings.target_mode;
 }
-async function tspiLoadStatus() {
-  const payload = await tspiApi('GET', CAL_API.status);
+async function khaenLoadStatus() {
+  const payload = await khaenApi('GET', CAL_API.status);
   state.serverStatus = payload;
   state.calApplied = payload.applied || null;
 }
-async function tspiSaveSettings() {
-  const payload = await tspiApi('POST', CAL_API.settings, settingsDeepCopy());
+async function khaenSaveSettings() {
+  const payload = await khaenApi('POST', CAL_API.settings, settingsDeepCopy());
   if (payload && payload.settings) state.settings = payload.settings;
   state.settingsValidation = payload ? payload.validation : null;
   state.settingsSaved = true;
   if (state.settings && state.settings.target_mode) state.design.target = state.settings.target_mode;
   toast('校准设置已保存（' + calValidationText() + '）');
 }
-async function tspiBoot() {
-  state.authOk = await tspiLoadSession();
+async function khaenBoot() {
+  state.authOk = await khaenLoadSession();
   try {
-    await tspiLoadSettings();
+    await khaenLoadSettings();
   } catch (error) {
     state.settingsSaved = false;
-    state.settingsError = tspiErrorText(error);
+    state.settingsError = khaenErrorText(error);
   }
-  try { await tspiLoadStatus(); } catch (error) { /* status is optional */ }
+  try { await khaenLoadStatus(); } catch (error) { /* status is optional */ }
   const footerRun = document.getElementById('btn-run-all');
   if (footerRun) footerRun.addEventListener('click', runAll);
   renderStep();
@@ -73,7 +73,7 @@ async function onCalFileSelected(event) {
     renderStep();
     toast('已选择 ' + file.name + (sha ? '（SHA-256 已计算）' : '（SHA-256 不可用）'));
   } catch (error) {
-    toast('读取校准文件失败：' + tspiErrorText(error));
+    toast('读取校准文件失败：' + khaenErrorText(error));
   }
 }
 
@@ -105,7 +105,7 @@ function renderStep3() {
       '</div></div>' +
       '<div class="panel"><div class="panel-h">校准文件（可选） <span class="badge3 sim">绝对/相对</span></div><div class="panel-b">' +
         '<div class="cal-form">' +
-          '<label>host 可读路径 <input id="cal-file-path" data-test="cal-file-path" type="text" spellcheck="false" placeholder="/var/lib/tspi-rt-stack/cal/umik1-90deg.txt" value="' + (cal && cal.path ? cal.path : '') + '"></label>' +
+          '<label>host 可读路径 <input id="cal-file-path" data-test="cal-file-path" type="text" spellcheck="false" placeholder="/var/lib/khaen-rt-stack/cal/umik1-90deg.txt" value="' + (cal && cal.path ? cal.path : '') + '"></label>' +
           '<label>或选择文件（浏览器计算 SHA-256；上传落盘 pending host） <input id="cal-file-input" data-test="cal-file-input" type="file" accept=".txt,.cal,.csv"></label>' +
         '</div>' +
         '<div class="cal-file-state" data-test="cal-file-state">' + (cal
@@ -155,17 +155,17 @@ function renderStep3() {
   }
   $('#btn-settings-save').addEventListener('click', function () {
     readSettingsInputs();
-    tspiSaveSettings().then(function () { renderStep(); }).catch(function (error) {
-      state.settingsError = tspiErrorText(error);
+    khaenSaveSettings().then(function () { renderStep(); }).catch(function (error) {
+      state.settingsError = khaenErrorText(error);
       toast('保存设置失败：' + state.settingsError);
       renderStep();
     });
   });
   $('#btn-settings-reload').addEventListener('click', function () {
-    tspiLoadSettings().then(function () { renderStep(); }).catch(function (error) { toast('读取设置失败：' + tspiErrorText(error)); });
+    khaenLoadSettings().then(function () { renderStep(); }).catch(function (error) { toast('读取设置失败：' + khaenErrorText(error)); });
   });
   $('#btn-settings-status').addEventListener('click', function () {
-    tspiLoadStatus().then(function () { renderStep(); toast('状态已刷新'); }).catch(function (error) { toast('状态刷新失败：' + tspiErrorText(error)); });
+    khaenLoadStatus().then(function () { renderStep(); toast('状态已刷新'); }).catch(function (error) { toast('状态刷新失败：' + khaenErrorText(error)); });
   });
   $('#cal-file-input').addEventListener('change', onCalFileSelected);
   $('#btn-cal-file-clear').addEventListener('click', function () {
@@ -415,7 +415,7 @@ function bindBassSettings() {
   const save = $('#btn-bass-save');
   if (save) save.addEventListener('click', function () {
     readBassForm();
-    tspiSaveSettings().then(function () { renderStep(); toast('Bass/多炮设置已保存'); }).catch(function (error) { toast('保存 Bass 设置失败：' + tspiErrorText(error)); });
+    khaenSaveSettings().then(function () { renderStep(); toast('Bass/多炮设置已保存'); }).catch(function (error) { toast('保存 Bass 设置失败：' + khaenErrorText(error)); });
   });
 }
 
@@ -458,7 +458,7 @@ function bindFirSettings() {
   const save = $('#btn-fir-save');
   if (save) save.addEventListener('click', function () {
     readFirForm();
-    tspiSaveSettings().then(function () { renderStep(); toast('全频 FIR 设置已保存'); }).catch(function (error) { toast('保存 FIR 失败：' + tspiErrorText(error)); });
+    khaenSaveSettings().then(function () { renderStep(); toast('全频 FIR 设置已保存'); }).catch(function (error) { toast('保存 FIR 失败：' + khaenErrorText(error)); });
   });
 }
 
@@ -502,7 +502,7 @@ function bindModalSettings() {
   const save = $('#btn-modal-save');
   if (save) save.addEventListener('click', function () {
     readModalForm();
-    tspiSaveSettings().then(function () { renderStep(); toast('Modal 设置已保存'); }).catch(function (error) { toast('保存 Modal 失败：' + tspiErrorText(error)); });
+    khaenSaveSettings().then(function () { renderStep(); toast('Modal 设置已保存'); }).catch(function (error) { toast('保存 Modal 失败：' + khaenErrorText(error)); });
   });
 }
 
@@ -542,7 +542,7 @@ async function runAll() {
   renderStep();
   if (dryRun) {
     try {
-      const payload = await tspiApi('POST', CAL_API.run, { dry_run: true, stages: RUN_ORDER });
+      const payload = await khaenApi('POST', CAL_API.run, { dry_run: true, stages: RUN_ORDER });
       const stages = payload.stages || [];
       state.runner.stages = stages;
       state.runner.total = stages.length || RUN_ORDER.length;
@@ -557,7 +557,7 @@ async function runAll() {
     } catch (error) {
       state.runner.running = false;
       state.runner.failedStage = 'dry-run';
-      state.runner.error = tspiErrorText(error);
+      state.runner.error = khaenErrorText(error);
       state.runner.progressText = 'dry-run 失败：' + state.runner.error;
       renderStep();
     }
@@ -625,13 +625,13 @@ async function startStage(kind) {
   slot.lanes = []; if (kind === 'bass') slot.result = null;
   renderStep();
   try {
-    const payload = await tspiPostJob(kind);
+    const payload = await khaenPostJob(kind);
     slot.jobId = payload.job_id;
     slot.progressText = payload.progress_text || ('job ' + payload.job_id + ' 已创建');
     const firstLanes = payload.lanes || (payload.job && payload.job.lanes) || null;
     if (firstLanes && firstLanes.lanes) slot.lanes = firstLanes.lanes;
     if (firstLanes && firstLanes.bass) slot.result = firstLanes;
-    const job = await tspiPollJob(payload.job_id, function (update) {
+    const job = await khaenPollJob(payload.job_id, function (update) {
       slot.progressText = update.progress_text || slot.progressText;
       const lanes = update.lanes || (update.job && update.job.lanes) || null;
       if (lanes && lanes.lanes) slot.lanes = lanes.lanes;
@@ -644,7 +644,7 @@ async function startStage(kind) {
     slot.progressText = job.progress_text || slot.progressText;
     if (job.state !== 'complete') slot.error = job.failure || ('job 状态 ' + job.state);
   } catch (error) {
-    slot.error = tspiErrorText(error) + (error && error.code === 'pending_host_field'
+    slot.error = khaenErrorText(error) + (error && error.code === 'pending_host_field'
       ? '（host 字段未就绪；可点“跳过”继续，但绝不会标 applied）'
       : '');
   }
@@ -656,10 +656,10 @@ async function cancelStage(kind) {
   const slot = stageState(kind);
   if (!slot.jobId) return;
   try {
-    await tspiApi('POST', CAL_API.jobs + '/' + encodeURIComponent(slot.jobId) + '/cancel', {});
+    await khaenApi('POST', CAL_API.jobs + '/' + encodeURIComponent(slot.jobId) + '/cancel', {});
     slot.progressText = '已取消 ' + slot.jobId;
   } catch (error) {
-    slot.error = '取消失败：' + tspiErrorText(error);
+    slot.error = '取消失败：' + khaenErrorText(error);
   }
   renderStep();
 }
@@ -672,12 +672,12 @@ async function applyStage(kind) {
   if (kind === 'fir') body.fir = state.settings.fir;
   if (kind === 'modal') body.modal = state.settings.modal;
   try {
-    const payload = await tspiApi('POST', CAL_API.apply, body);
+    const payload = await khaenApi('POST', CAL_API.apply, body);
     slot.applied = true; slot.skipped = false;
     state.calApplied = payload.applied || state.calApplied;
     toast(kind + ' 已应用（daemon 回执；applied_to_audio=false）');
   } catch (error) {
-    slot.error = '应用失败：' + tspiErrorText(error) + (error && error.code === 'pending_host_field' ? '（host 字段未就绪，不标 applied）' : '');
+    slot.error = '应用失败：' + khaenErrorText(error) + (error && error.code === 'pending_host_field' ? '（host 字段未就绪，不标 applied）' : '');
     slot.applied = false;
   }
   renderStep(); renderRail(); renderHeader();
@@ -685,12 +685,12 @@ async function applyStage(kind) {
 async function clearStage(kind) {
   const slot = stageState(kind);
   try {
-    const payload = await tspiApi('POST', CAL_API.clear, { targets: [kind] });
+    const payload = await khaenApi('POST', CAL_API.clear, { targets: [kind] });
     slot.applied = false; slot.skipped = false;
     state.calApplied = payload.applied || null;
     toast(kind + ' 已清除（daemon 回执）');
   } catch (error) {
-    slot.error = '清除失败：' + tspiErrorText(error);
+    slot.error = '清除失败：' + khaenErrorText(error);
   }
   renderStep(); renderRail(); renderHeader();
 }

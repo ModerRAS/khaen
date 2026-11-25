@@ -104,7 +104,7 @@ fn endpoint_measured(freq_hz: f64, mag_db: f64) -> Json {
     ])
 }
 
-/// 构造 `tspi-fir/v1` manifest（nos = 纯延迟，reference_gain_db=0；与 T14 fixture 同口径）。
+/// 构造 `khaen-fir/v1` manifest（nos = 纯延迟，reference_gain_db=0；与 T14 fixture 同口径）。
 fn fir_manifest(coeffs: &[f32], file: &str) -> Result<Json, String> {
     let bytes = raw_f32le(coeffs);
     let sha = sha256_hex(&bytes);
@@ -343,7 +343,7 @@ pub fn run_session(
 
 fn write_report(path: &Path, outcome: &HostFileOutcome) -> Result<(), String> {
     let text = format!(
-        "{{\"schema\":\"tspi-host-file-report/v1\",\"host\":{},\"runner\":{}}}",
+        "{{\"schema\":\"khaen-host-file-report/v1\",\"host\":{},\"runner\":{}}}",
         outcome.summary_json(),
         outcome.runner_report
     );

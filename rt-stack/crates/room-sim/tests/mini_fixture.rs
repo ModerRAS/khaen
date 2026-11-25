@@ -59,7 +59,7 @@ fn mini_mics() -> Vec<(&'static str, Position, &'static str)> {
 }
 
 const GROUND_TRUTH_TEMPLATE: &str = r#"{
-  "format": "tspi-roomforge-mimo-fixture/v1",
+  "format": "khaen-roomforge-mimo-fixture/v1",
   "generator": "khaen-room-sim mini fixture test",
   "generator_version": "0.0.0",
   "scene_id": "scene-mini",

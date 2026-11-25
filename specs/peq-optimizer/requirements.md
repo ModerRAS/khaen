@@ -77,7 +77,7 @@
 
 #### 验收标准
 
-1. When 加载 schema `tspi-target-curve/v1` 的曲线文件时，khaen-calibrate shall 在对数频率上对 dB 线性插值，端点外保持端值，并拒绝频率非递增或 dB 非有限的曲线。
+1. When 加载 schema `khaen-target-curve/v1` 的曲线文件时，khaen-calibrate shall 在对数频率上对 dB 线性插值，端点外保持端值，并拒绝频率非递增或 dB 非有限的曲线。
 2. When 传入 `--target flat|<id>|@file` 时，khaen-calibrate shall 使用对应曲线。缺省是 `flat`。
 3. The khaen-calibrate shall 随程序提供 `flat`。其他命名曲线只是示例数据，不改变缺省，也不代表某间房的听感。
 4. While 目标在低频需要整体抬升或在高频需要整体倾斜，when 宽带拟合使用 shelf 更省段时，khaen-calibrate shall 可以用 `low_shelf` / `high_shelf` 表达这段形状，其余仍用 Peaking。

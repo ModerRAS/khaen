@@ -1,4 +1,4 @@
-"""TSPI 校准批量闭环：计划执行器（板端只跑采集/应用命令；本地 freeze/analyze/report）。
+"""KHAEN 校准批量闭环：计划执行器（板端只跑采集/应用命令；本地 freeze/analyze/report）。
 
 执行纪律：
 - 只执行 plan.json 里冻结的 argv，不拼命令、不改参数、不删步骤。
@@ -21,7 +21,7 @@ from . import config as cfgmod
 from . import measure
 from . import plan as planmod
 
-RUN_SCHEMA = "tspi-cal-batch-run/v1"
+RUN_SCHEMA = "khaen-cal-batch-run/v1"
 ABORT_PHASES = ("preflight", "measure", "apply")
 
 
@@ -82,7 +82,7 @@ class Runner:
         os.makedirs(step_dir, exist_ok=True)
         plan = self.plan
         frozen = {
-            "schema": "tspi-cal-batch-frozen/v1",
+            "schema": "khaen-cal-batch-frozen/v1",
             "batch_label": plan["batch_label"],
             "round": plan["round"],
             "step": step["id"],
@@ -120,7 +120,7 @@ class Runner:
         step_dir = self._step_dir(step)
         os.makedirs(step_dir, exist_ok=True)
         preflight = {
-            "schema": "tspi-cal-batch-preflight/v1",
+            "schema": "khaen-cal-batch-preflight/v1",
             "simulated": True,
             "step": step["id"],
             "created_at": _now(),
@@ -156,7 +156,7 @@ class Runner:
         self.applied = state
         self._write_json(os.path.join(self.workdir, "applied-state.json"), state)
         applied_json = {
-            "schema": "tspi-cal-batch-apply-summary/v1",
+            "schema": "khaen-cal-batch-apply-summary/v1",
             "simulated": True,
             "scenario": self.scenario,
             "fitted_from_design_points": design_ids,
@@ -176,7 +176,7 @@ class Runner:
         if os.path.isfile(os.path.join(self.workdir, "applied-state.json")):
             os.remove(os.path.join(self.workdir, "applied-state.json"))
         path = os.path.join(step_dir, "restored.json")
-        self._write_json(path, {"schema": "tspi-cal-batch-restore-summary/v1", "simulated": True,
+        self._write_json(path, {"schema": "khaen-cal-batch-restore-summary/v1", "simulated": True,
                                 "restored": True, "note": "fake：清除合成补偿状态；真实 rollback/mute 由 prep/restore.sh 覆盖，NOT_RUN"})
         return {"status": "ok", "artifacts": [path], "simulated": True}
 
@@ -284,7 +284,7 @@ class Runner:
             return self._do_freeze(step)
         if step["phase"] in ("analyze", "report"):
             return {"status": "deferred", "artifacts": [],
-                    "note": "由 tspi_cal_batch analyze 在工作站执行（窗口内不现场分析）"}
+                    "note": "由 khaen_cal_batch analyze 在工作站执行（窗口内不现场分析）"}
         return {"status": "skipped", "artifacts": [], "note": "local step %s" % step["id"]}
 
     # -------------------------------------------------------------------- main

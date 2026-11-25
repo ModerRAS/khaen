@@ -1,10 +1,10 @@
 //! [RT] 固定容量 SPSC 环（core-v1 §6.3 / §11.7）——WBS T16 写域。
 //!
-//! 一个环 = `TspiSpscHeaderV1` 原子头（64 B）+ 固定 4 个 desc 槽。capture→DSP
+//! 一个环 = `KhaenSpscHeaderV1` 原子头（64 B）+ 固定 4 个 desc 槽。capture→DSP
 //! （cap ring）与 DSP→playback（pb ring）都用本模块，容量固定为
 //! `SPSC_CAPTURE_SLOTS == SPSC_PLAYBACK_SLOTS == 4`（P-01：禁止扩容/无界队列/链表）。
 //! payload（B 帧 × N/O 个 f32）在 `RtArena` 的固定槽里，由 I/O 区在 push 之前写、
-//! 由消费侧在 pop 之后只读；**环本身只存 `TspiBlockDescV1` 值，不存指针**（§6.3）。
+//! 由消费侧在 pop 之后只读；**环本身只存 `KhaenBlockDescV1` 值，不存指针**（§6.3）。
 //!
 //! 发布/消费配方（§6.3 逐字实现，P-02；只用 Acquire/Release/Relaxed，禁止 SeqCst/fence）：
 //!
@@ -21,7 +21,7 @@
 //! 语义边界（本模块负责 / 不负责）：
 //! - 负责：固定容量；单写单读的 Acquire/Release 发布；满时丢**新**块
 //!   `RT_E_QUEUE_OVERRUN`（绝不覆盖消费者未读完的块）；空 `RT_E_QUEUE_UNDERRUN`；
-//!   desc 结构/flag/valid_frames/frame_index/epoch/slot 校验；`TspiSpscHeaderV1`
+//!   desc 结构/flag/valid_frames/frame_index/epoch/slot 校验；`KhaenSpscHeaderV1`
 //!   位置 u64 回绕（wrapping 算术，F-23）；`dropped` 计数；环当前 `epoch_id`；
 //!   P-09 预检查（`next_slot`/`free_slots`：capture 必须在写 payload 前判断满）。
 //! - 不负责：payload 内容与 finite/sanitize（T22/format）；deadline/gate/hard cutoff
@@ -38,7 +38,7 @@
 use core::cell::UnsafeCell;
 use core::sync::atomic::Ordering;
 
-pub use khaen_core::abi::{TspiBlockDescV1, TspiSpscHeaderV1, ABI_VERSION, TSPI_RING_MAGIC};
+pub use khaen_core::abi::{KhaenBlockDescV1, KhaenSpscHeaderV1, ABI_VERSION, KHAEN_RING_MAGIC};
 pub use khaen_core::rt::RtStatus;
 use khaen_core::rt::{
     BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SPSC_CAPTURE_SLOTS, SPSC_PLAYBACK_SLOTS,
@@ -47,7 +47,7 @@ use khaen_core::rt::{
 /// 固定环容量：v1 为 4 槽（§3.3/§11.7；P-01 禁止扩容/无界队列）。
 pub const SPSC_CAPACITY: usize = SPSC_CAPTURE_SLOTS;
 
-/// 每槽字节数 = `size_of::<TspiBlockDescV1>()`（§11.3/§11.7 entry_bytes/entry_stride）。
+/// 每槽字节数 = `size_of::<KhaenBlockDescV1>()`（§11.3/§11.7 entry_bytes/entry_stride）。
 pub const SPSC_ENTRY_BYTES: u16 = 64;
 
 /// `flags` 位 0 `VALID`：块有效；=0 只允许内部占位，禁止发布（§6.2）。
@@ -75,22 +75,22 @@ pub const FLAG_KNOWN_MASK: u32 = 0xFF;
 /// Drop、无分配、无锁。槽数组由 admission 一次性分配并 mlock（INV-L3），地址稳定到
 /// 进程退出；`slot_index` 只能来自本环固定槽（P-07）。
 #[repr(transparent)]
-pub struct DescSlot(UnsafeCell<TspiBlockDescV1>);
+pub struct DescSlot(UnsafeCell<KhaenBlockDescV1>);
 
 impl DescSlot {
-    /// 空槽（写 `TspiBlockDescV1::ZERO`；VALID=0，未发布前不可见）。
+    /// 空槽（写 `KhaenBlockDescV1::ZERO`；VALID=0，未发布前不可见）。
     pub const fn empty() -> Self {
-        Self(UnsafeCell::new(TspiBlockDescV1::ZERO))
+        Self(UnsafeCell::new(KhaenBlockDescV1::ZERO))
     }
 
     /// [NONRT] 由 RtArena 中连续的 desc 区建立槽数组视图（admission/T26 使用）。
     ///
     /// # Safety
-    /// - `desc_base` 指向 `capacity` 个连续、按 `TspiBlockDescV1` 对齐（64 B）、
+    /// - `desc_base` 指向 `capacity` 个连续、按 `KhaenBlockDescV1` 对齐（64 B）、
     ///   地址稳定到进程退出的 desc 槽（INV-L3：RtArena 运行期不 realloc/munmap）；
     /// - 返回借用期内不得存在与之冲突的 Rust 引用或第二个环实例（P-02/INV-L4）。
     pub unsafe fn slice_from_raw<'a>(
-        desc_base: *mut TspiBlockDescV1,
+        desc_base: *mut KhaenBlockDescV1,
         capacity: usize,
     ) -> Result<&'a [DescSlot], RtStatus> {
         if desc_base.is_null() {
@@ -99,18 +99,18 @@ impl DescSlot {
         if capacity != SPSC_CAPACITY {
             return Err(RtStatus::ERR_BAD_LAYOUT);
         }
-        if (desc_base as usize) % core::mem::align_of::<TspiBlockDescV1>() != 0 {
+        if (desc_base as usize) % core::mem::align_of::<KhaenBlockDescV1>() != 0 {
             return Err(RtStatus::ERR_BAD_LAYOUT);
         }
         // SAFETY: 调用者保证指针/长度/对齐/稳定性（见本函数 Safety 契约）；DescSlot 是
-        // repr(transparent) 的 UnsafeCell 包装，布局与对齐同 TspiBlockDescV1。
+        // repr(transparent) 的 UnsafeCell 包装，布局与对齐同 KhaenBlockDescV1。
         Ok(unsafe { core::slice::from_raw_parts(desc_base as *const DescSlot, capacity) })
     }
 }
 
 /// 校验环头（非 RT 建立路径）：magic/ABI/entry/容量固定为 §11.7 值。
-fn validate_header(header: &TspiSpscHeaderV1) -> Result<(), RtStatus> {
-    if header.magic != TSPI_RING_MAGIC {
+fn validate_header(header: &KhaenSpscHeaderV1) -> Result<(), RtStatus> {
+    if header.magic != KHAEN_RING_MAGIC {
         return Err(RtStatus::ERR_MAGIC);
     }
     if header.abi_version != ABI_VERSION {
@@ -132,7 +132,7 @@ pub const fn is_runtime_block_size(block_size: u16) -> bool {
 }
 
 /// desc 结构与块身份校验（§6.1/§6.2/P-07/P-08），与 epoch 无关的部分。
-fn validate_desc_common(desc: &TspiBlockDescV1, slot_index: u32) -> RtStatus {
+fn validate_desc_common(desc: &KhaenBlockDescV1, slot_index: u32) -> RtStatus {
     if desc.abi_version != ABI_VERSION {
         return RtStatus::RT_E_ABI_RUNTIME;
     }
@@ -178,7 +178,7 @@ fn validate_desc_common(desc: &TspiBlockDescV1, slot_index: u32) -> RtStatus {
 /// `slot_index` 是**本环**为该块分配的槽号；playback/DSP 必须用消费槽号
 /// （`read_pos % CAP`）传入，跨环引用返回 `RT_E_SLOT_STATE`。
 pub fn validate_block_desc(
-    desc: &TspiBlockDescV1,
+    desc: &KhaenBlockDescV1,
     slot_index: u32,
     expected_epoch: u64,
 ) -> RtStatus {
@@ -193,7 +193,11 @@ pub fn validate_block_desc(
 }
 
 /// 发布前校验（§6.1/§6.2/INV-L7/INV-L8）：结构 + epoch 不得倒退（环当前 epoch 或更新）。
-fn validate_desc_for_publish(desc: &TspiBlockDescV1, slot_index: u32, ring_epoch: u64) -> RtStatus {
+fn validate_desc_for_publish(
+    desc: &KhaenBlockDescV1,
+    slot_index: u32,
+    ring_epoch: u64,
+) -> RtStatus {
     let status = validate_desc_common(desc, slot_index);
     if !status.is_ok() {
         return status;
@@ -207,7 +211,7 @@ fn validate_desc_for_publish(desc: &TspiBlockDescV1, slot_index: u32, ring_epoch
 
 /// 固定容量 SPSC 生产者（唯一写者；capture 或 DSP 的 output 侧）。
 pub struct Producer<'a> {
-    header: &'a TspiSpscHeaderV1,
+    header: &'a KhaenSpscHeaderV1,
     slots: &'a [DescSlot],
 }
 
@@ -219,7 +223,7 @@ impl<'a> Producer<'a> {
     /// - **全生命周期只有一个 `Producer`** 且只有一个 `Consumer`（P-02/INV-L4）；
     /// - payload 槽的写只经本生产者的发布配方（P-09：满时不得开始写 payload）。
     pub unsafe fn new(
-        header: &'a TspiSpscHeaderV1,
+        header: &'a KhaenSpscHeaderV1,
         slots: &'a [DescSlot],
     ) -> Result<Self, RtStatus> {
         validate_header(header)?;
@@ -230,7 +234,7 @@ impl<'a> Producer<'a> {
     }
 
     /// 环头（只读）。
-    pub fn header(&self) -> &'a TspiSpscHeaderV1 {
+    pub fn header(&self) -> &'a KhaenSpscHeaderV1 {
         self.header
     }
 
@@ -272,7 +276,7 @@ impl<'a> Producer<'a> {
     /// `dropped`、返回 `RT_E_QUEUE_OVERRUN`（P-03；绝不覆盖未读块）。desc 非法时
     /// 不发布并返回对应 `RtStatus`（`RT_E_ABI_RUNTIME`/`RT_E_BLOCK_INVALID`/
     /// `RT_E_SLOT_STATE`/`RT_E_EPOCH_MISMATCH`）。
-    pub fn try_push(&mut self, desc: TspiBlockDescV1) -> Result<(), RtStatus> {
+    pub fn try_push(&mut self, desc: KhaenBlockDescV1) -> Result<(), RtStatus> {
         let capacity = self.slots.len() as u64;
         // 生产者是 write_pos 唯一写者，Relaxed 自读；消费者用 Release 释放 read_pos。
         let write = self.header.write_pos.load(Ordering::Relaxed);
@@ -319,7 +323,7 @@ impl<'a> Producer<'a> {
 
 /// 固定容量 SPSC 消费者（唯一读者；DSP 或 playback 侧）。
 pub struct Consumer<'a> {
-    header: &'a TspiSpscHeaderV1,
+    header: &'a KhaenSpscHeaderV1,
     slots: &'a [DescSlot],
 }
 
@@ -330,7 +334,7 @@ impl<'a> Consumer<'a> {
     /// - `header` 与本环 `slots` 同属一个 RtArena ring，地址稳定到进程退出（INV-L3）；
     /// - **全生命周期只有一个 `Consumer`** 且只有一个 `Producer`（P-02/INV-L4）。
     pub unsafe fn new(
-        header: &'a TspiSpscHeaderV1,
+        header: &'a KhaenSpscHeaderV1,
         slots: &'a [DescSlot],
     ) -> Result<Self, RtStatus> {
         validate_header(header)?;
@@ -341,7 +345,7 @@ impl<'a> Consumer<'a> {
     }
 
     /// 环头（只读）。
-    pub fn header(&self) -> &'a TspiSpscHeaderV1 {
+    pub fn header(&self) -> &'a KhaenSpscHeaderV1 {
         self.header
     }
 
@@ -367,7 +371,7 @@ impl<'a> Consumer<'a> {
     /// 返回 `None` 表示环空或位置非法（`RT_E_QUEUE_UNDERRUN` 由调用方按 P-04 计数）。
     /// **生产 playback/DSP 必须用 `try_pop_checked`** 以执行 §6.3 步骤 4 的校验；
     /// 本方法只给出配方最小实现（跨模块/基准工具用）。
-    pub fn try_pop(&mut self) -> Option<TspiBlockDescV1> {
+    pub fn try_pop(&mut self) -> Option<KhaenBlockDescV1> {
         let capacity = self.slots.len() as u64;
         // 消费者是 read_pos 唯一写者，Relaxed 自读；生产者用 Release 发布 write_pos。
         let read = self.header.read_pos.load(Ordering::Relaxed);
@@ -394,7 +398,7 @@ impl<'a> Consumer<'a> {
     ///   调用方按返回码写）并返回具体码：`RT_E_EPOCH_MISMATCH`（不是本 epoch）、
     ///   `RT_E_SLOT_STATE`（跨环槽）、`RT_E_BLOCK_INVALID`（VALID=0/valid_frames 非法）、
     ///   `RT_E_ABI_RUNTIME`（结构/flag/frame 非法）、`RT_E_INVARIANT`（位置非法）。
-    pub fn try_pop_checked(&mut self, expected_epoch: u64) -> Result<TspiBlockDescV1, RtStatus> {
+    pub fn try_pop_checked(&mut self, expected_epoch: u64) -> Result<KhaenBlockDescV1, RtStatus> {
         let capacity = self.slots.len() as u64;
         let read = self.header.read_pos.load(Ordering::Relaxed);
         let write = self.header.write_pos.load(Ordering::Acquire);
@@ -435,11 +439,11 @@ const _: () = {
     assert!(SPSC_CAPACITY == SPSC_CAPTURE_SLOTS);
     assert!(SPSC_CAPACITY == SPSC_PLAYBACK_SLOTS);
     assert!(SPSC_ENTRY_BYTES == 64);
-    assert!(core::mem::size_of::<TspiBlockDescV1>() == SPSC_ENTRY_BYTES as usize);
-    assert!(core::mem::align_of::<TspiBlockDescV1>() == 64);
-    assert!(core::mem::size_of::<DescSlot>() == core::mem::size_of::<TspiBlockDescV1>());
-    assert!(core::mem::align_of::<DescSlot>() == core::mem::align_of::<TspiBlockDescV1>());
-    assert!(!core::mem::needs_drop::<TspiBlockDescV1>());
+    assert!(core::mem::size_of::<KhaenBlockDescV1>() == SPSC_ENTRY_BYTES as usize);
+    assert!(core::mem::align_of::<KhaenBlockDescV1>() == 64);
+    assert!(core::mem::size_of::<DescSlot>() == core::mem::size_of::<KhaenBlockDescV1>());
+    assert!(core::mem::align_of::<DescSlot>() == core::mem::align_of::<KhaenBlockDescV1>());
+    assert!(!core::mem::needs_drop::<KhaenBlockDescV1>());
     assert!(!core::mem::needs_drop::<DescSlot>());
     assert!(!core::mem::needs_drop::<Producer<'static>>());
     assert!(!core::mem::needs_drop::<Consumer<'static>>());

@@ -1,16 +1,16 @@
 #!/bin/bash
-# tspi-upmix 热部署脚本（板端运行；不重烧镜像、不主动启动/重启音频服务）
+# khaen-upmix 热部署脚本（板端运行；不重烧镜像、不主动启动/重启音频服务）
 #
 # 安装内容：
-#   /usr/local/bin/tspi-upmix                       生成器（Python，PyYAML）
-#   /etc/tspi-audio/upmix/presets.yml               预设参数
-#   /etc/tspi-audio/profiles/upmix-*.yml            channelmap v2 profile（WebUI 可见；含 *-safe）
+#   /usr/local/bin/khaen-upmix                       生成器（Python，PyYAML）
+#   /etc/khaen-audio/upmix/presets.yml               预设参数
+#   /etc/khaen-audio/profiles/upmix-*.yml            channelmap v2 profile（WebUI 可见；含 *-safe）
 #   （无 FIR；allpass 去相关已改用 Biquad）
-#   /etc/tspi-audio/upmix/camilladsp-examples/*     独立 CamillaDSP 示例（参考；含 autodetect 双路径）
-#   /etc/tspi-audio/profiles/*-from-h16-*.yml       H16 容器输入的上混 profile（--from 容器）
-#   /etc/tspi-audio/profiles/passthrough-*.yml      多声道直通 profile（手动强制直通用）
-#   /etc/tspi-audio/upmix/tspi-upmix-autodetect.service.example  输入内容检测 daemon（示例，不启用）
-#   /etc/tspi-audio/profiles/upmix-off-restore.yml  首次安装时快照当前 active（用于关闭上混）
+#   /etc/khaen-audio/upmix/camilladsp-examples/*     独立 CamillaDSP 示例（参考；含 autodetect 双路径）
+#   /etc/khaen-audio/profiles/*-from-h16-*.yml       H16 容器输入的上混 profile（--from 容器）
+#   /etc/khaen-audio/profiles/passthrough-*.yml      多声道直通 profile（手动强制直通用）
+#   /etc/khaen-audio/upmix/khaen-upmix-autodetect.service.example  输入内容检测 daemon（示例，不启用）
+#   /etc/khaen-audio/profiles/upmix-off-restore.yml  首次安装时快照当前 active（用于关闭上混）
 #
 # 用法（在板端 /tmp/upmix-dist 下）：
 #   bash install-upmix.sh --dry-run
@@ -28,13 +28,13 @@ SRC="$SELF_DIR"
 MODE="install"
 DRY=0
 NO_VALIDATE=0
-PROFILE_DIR="/etc/tspi-audio/profiles"
-UMIX_DIR="/etc/tspi-audio/upmix"
-FIR_DIR="/etc/tspi-audio/fir/upmix"
+PROFILE_DIR="/etc/khaen-audio/profiles"
+UMIX_DIR="/etc/khaen-audio/upmix"
+FIR_DIR="/etc/khaen-audio/fir/upmix"
 EXAMPLES_DIR="$UMIX_DIR/camilladsp-examples"
-BACKUP_ROOT="/var/lib/tspi/upmix/install-backups"
-BIN="/usr/local/bin/tspi-upmix"
-LAYOUT_PRESETS="/etc/tspi-audio/layout-presets.yml"
+BACKUP_ROOT="/var/lib/khaen/upmix/install-backups"
+BIN="/usr/local/bin/khaen-upmix"
+LAYOUT_PRESETS="/etc/khaen-audio/layout-presets.yml"
 TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="$BACKUP_ROOT/$TS"
 
@@ -127,7 +127,7 @@ if [[ "$MODE" == "uninstall" ]]; then
   mkdir -p "$BACKUP_DIR"
   for f in "$BIN" "$UMIX_DIR/presets.yml" "$PROFILE_DIR"/upmix-*.yml "$PROFILE_DIR"/*-from-h16-*.yml \
            "$PROFILE_DIR"/passthrough-*.yml "$FIR_DIR"/*.wav "$EXAMPLES_DIR"/*.yml \
-           "$UMIX_DIR"/tspi-upmix-autodetect.service.example; do
+           "$UMIX_DIR"/khaen-upmix-autodetect.service.example; do
     [[ -e "$f" ]] || continue
     if [[ "$DRY" == "1" ]]; then
       info "DRY 删除 $f"
@@ -146,10 +146,10 @@ info "源目录：$SRC"
 info "目标：$PROFILE_DIR/upmix-*.yml + $BIN"
 mkdir -p "$BACKUP_DIR"
 
-[[ -f "$SRC/tspi-upmix" ]] || die "缺少 $SRC/tspi-upmix（先运行 tspi-upmix all -o dist）" 3
+[[ -f "$SRC/khaen-upmix" ]] || die "缺少 $SRC/khaen-upmix（先运行 khaen-upmix all -o dist）" 3
 [[ -d "$SRC/profiles" ]] || die "缺少 $SRC/profiles/" 3
 
-install_file "$SRC/tspi-upmix" "$BIN" 755
+install_file "$SRC/khaen-upmix" "$BIN" 755
 if [[ -f "$SRC/presets/upmix-presets.yml" ]]; then
   install_file "$SRC/presets/upmix-presets.yml" "$UMIX_DIR/presets.yml" 644
 fi
@@ -181,13 +181,13 @@ if [[ -d "$SRC/container/camilladsp" ]]; then
     install_file "$f" "$EXAMPLES_DIR/$(basename "$f")" 644
   done
 fi
-if [[ -f "$SRC/autodetect/tspi-upmix-autodetect.service" ]]; then
-  install_file "$SRC/autodetect/tspi-upmix-autodetect.service" \
-    "$UMIX_DIR/tspi-upmix-autodetect.service.example" 644
+if [[ -f "$SRC/autodetect/khaen-upmix-autodetect.service" ]]; then
+  install_file "$SRC/autodetect/khaen-upmix-autodetect.service" \
+    "$UMIX_DIR/khaen-upmix-autodetect.service.example" 644
 fi
 
-if [[ "$DRY" == "0" && -f "/etc/tspi-audio/channelmap.yml" && ! -f "$PROFILE_DIR/upmix-off-restore.yml" ]]; then
-  cp -a "/etc/tspi-audio/channelmap.yml" "$PROFILE_DIR/upmix-off-restore.yml"
+if [[ "$DRY" == "0" && -f "/etc/khaen-audio/channelmap.yml" && ! -f "$PROFILE_DIR/upmix-off-restore.yml" ]]; then
+  cp -a "/etc/khaen-audio/channelmap.yml" "$PROFILE_DIR/upmix-off-restore.yml"
   record_new "$PROFILE_DIR/upmix-off-restore.yml"
   info "已快照当前 active -> $PROFILE_DIR/upmix-off-restore.yml（WebUI 可加载它关闭上混）"
 fi
@@ -248,10 +248,10 @@ if [[ "$NO_VALIDATE" == "0" ]]; then
   fi
 fi
 
-if [[ -f /usr/local/bin/tspi-channelmap ]] && ! grep -q "by_name.setdefault" /usr/local/bin/tspi-channelmap 2>/dev/null; then
-  echo "[upmix] 警告：/usr/local/bin/tspi-channelmap 看起来是没有合入 upmix 修复的旧渲染器。" >&2
+if [[ -f /usr/local/bin/khaen-channelmap ]] && ! grep -q "by_name.setdefault" /usr/local/bin/khaen-channelmap 2>/dev/null; then
+  echo "[upmix] 警告：/usr/local/bin/khaen-channelmap 看起来是没有合入 upmix 修复的旧渲染器。" >&2
   echo "        WebUI/channelmap profile 路线会输出错误音频（Filter step/inverted/bass 三处 bug）；" >&2
-  echo "        请先部署 audio-stack 修复后的 tspi-channelmap（OEM v5 已包含），或暂用独立路径 tspi-upmix apply。" >&2
+  echo "        请先部署 audio-stack 修复后的 khaen-channelmap（OEM v5 已包含），或暂用独立路径 khaen-upmix apply。" >&2
 fi
 
 cat <<EOF2
@@ -263,17 +263,17 @@ cat <<EOF2
      渲染器未修复时用 *-safe）-> 加载 -> 校验 -> 应用。
      关闭：加载 upmix-off-restore（首次安装时的 active 快照）。
   B) SSH/命令行（独立配置，不依赖 channelmap 渲染器）：
-     tspi-upmix apply upmix-4.1.2-music            # 模式 off 时只渲染/校验，不启动服务
-     tspi-upmix apply upmix-5.3.2-movie --dry-run  # 先看配置
-     tspi-upmix rollback                           # 回滚最近一次 apply
+     khaen-upmix apply upmix-4.1.2-music            # 模式 off 时只渲染/校验，不启动服务
+     khaen-upmix apply upmix-5.3.2-movie --dry-run  # 先看配置
+     khaen-upmix rollback                           # 回滚最近一次 apply
 
 输入内容检测（H16 容器里只有 2.0 时自动上混；task-19）：
-  - 手动覆盖：tspi-upmix input-mode set auto|stereo|multichannel
-              （force-stereo/force-multichannel 别名也接受；文件 /etc/tspi-audio/input-mode.json）
-  - 运行态：  /run/tspi/input-content.json（WebUI 只读；schema tspi-input-content/v1）
-  - daemon：  tspi-upmix autodetect --input-layout h16-7.1.4（读 CamillaDSP websocket RMS，
+  - 手动覆盖：khaen-upmix input-mode set auto|stereo|multichannel
+              （force-stereo/force-multichannel 别名也接受；文件 /etc/khaen-audio/input-mode.json）
+  - 运行态：  /run/khaen/input-content.json（WebUI 只读；schema khaen-input-content/v1）
+  - daemon：  khaen-upmix autodetect --input-layout h16-7.1.4（读 CamillaDSP websocket RMS，
               用 Aux1/Aux2 fader 在“上混/直通”间切换，不重启服务）
-              服务示例：$UMIX_DIR/tspi-upmix-autodetect.service.example（默认不启用）
+              服务示例：$UMIX_DIR/khaen-upmix-autodetect.service.example（默认不启用）
   - 建议 CamillaDSP 启动参数带 --gain1=-120 --gain2=0（默认直通，等 daemon 接管），
     或在 enabled 后由 daemon 首次连接立即设置；详见 docs/INPUT-MODE.md。
 

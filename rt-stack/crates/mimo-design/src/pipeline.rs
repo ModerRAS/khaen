@@ -15,7 +15,7 @@ use crate::report::{self, Json};
 use crate::solve::{self, Cx};
 use crate::target;
 
-pub const REPORT_FORMAT: &str = "tspi-mimo-sim-report/v1";
+pub const REPORT_FORMAT: &str = "khaen-mimo-sim-report/v1";
 pub const TOOL_NAME: &str = "khaen-mimo-opt";
 pub const CLAIM: &str = "synthetic offline study only; no real room, no measurement";
 

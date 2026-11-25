@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # T28 dry-run mock：systemd 语义子集；状态/MOCK_LOG 由 tests/run_dryrun_tests.sh 提供。绝不触碰真实系统。
 # T28-P3-6 增强（2026-11-17）：
-#   * cat/is-active 回落到夹具安装目录 $TSPI_DEPLOY_ROOT/etc/systemd/system（04 安装的 unit 可被 06 查到）；
+#   * cat/is-active 回落到夹具安装目录 $KHAEN_DEPLOY_ROOT/etc/systemd/system（04 安装的 unit 可被 06 查到）；
 #   * start target 按 unit 文件的 Wants= 建模（不再无条件拉起 host+daemon）；
 #   * show -p Environment 按 systemd.exec 语义合成有效环境：Environment= 在前、EnvironmentFile= 在后覆盖。
 set -u
 S="${MOCK_STATE:?MOCK_STATE 未设置}"; L="${MOCK_LOG:-$S/log}"; U="$S/units"; A="$S/active"; E="$S/enabled"; EN="$S/envs"
 mkdir -p "$U" "$A" "$E" "$EN" 2>/dev/null || true
-FIXTURE_ROOT="${TSPI_DEPLOY_ROOT:-/}"
+FIXTURE_ROOT="${KHAEN_DEPLOY_ROOT:-/}"
 FIXTURE_SYS=""
 if [ "$FIXTURE_ROOT" != "/" ] && [ -n "$FIXTURE_ROOT" ]; then FIXTURE_SYS="${FIXTURE_ROOT%/}/etc/systemd/system"; fi
 printf "systemctl %s\n" "$*" >> "$L"
@@ -31,15 +31,15 @@ _unit_opt_all() { # key unit -> 该 unit 文件里 key= 的值（多行合并）
 _add_proc() { # service -> MOCK_PROCS 追加进程行（幂等）
   [ -n "${MOCK_PROCS:-}" ] && [ -f "${MOCK_PROCS:-}" ] || return 0
   case "$1" in
-    tspi-rt-host.service) grep -q "tspi-rt-host" "$MOCK_PROCS" || printf "4321 tspi-rt-host run --config /etc/tspi-rt-stack/rt-host.toml\n" >> "$MOCK_PROCS" ;;
-    tspi-rt-daemon.service) grep -q "tspi-rt-daemon" "$MOCK_PROCS" || printf "4322 tspi-rt-daemon serve --config /etc/tspi-rt-stack/rt-daemon.toml\n" >> "$MOCK_PROCS" ;;
+    khaen-rt-host.service) grep -q "khaen-rt-host" "$MOCK_PROCS" || printf "4321 khaen-rt-host run --config /etc/khaen-rt-stack/rt-host.toml\n" >> "$MOCK_PROCS" ;;
+    khaen-rt-daemon.service) grep -q "khaen-rt-daemon" "$MOCK_PROCS" || printf "4322 khaen-rt-daemon serve --config /etc/khaen-rt-stack/rt-daemon.toml\n" >> "$MOCK_PROCS" ;;
   esac
 }
 _del_proc() { # service -> 从 MOCK_PROCS 删除对应进程行
   [ -n "${MOCK_PROCS:-}" ] && [ -f "${MOCK_PROCS:-}" ] || return 0
   case "$1" in
-    tspi-rt-host.service) grep -v "tspi-rt-host" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true ;;
-    tspi-rt-daemon.service) grep -v "tspi-rt-daemon" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true ;;
+    khaen-rt-host.service) grep -v "khaen-rt-host" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true ;;
+    khaen-rt-daemon.service) grep -v "khaen-rt-daemon" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true ;;
   esac
 }
 _fixture_abs() { # /etc/x -> $FIXTURE_ROOT/etc/x（live "/" 原样）
@@ -143,7 +143,7 @@ case "$cmd" in
   stop)
     for u in "$@"; do rm -f "$A/$u"; _del_proc "$u"; done ;;
   start)
-    # task-192：按 unit 文件 Wants=/Requires= 递归拉起依赖（含 tspi-rt-host Requires tspi-irq-affinity）
+    # task-192：按 unit 文件 Wants=/Requires= 递归拉起依赖（含 khaen-rt-host Requires khaen-irq-affinity）
     for u in "$@"; do _start_unit "$u"; done ;;
   restart|try-restart|reload-or-restart)
     for u in "$@"; do _start_unit "$u"; done ;;
@@ -190,8 +190,8 @@ case "$cmd" in
         pid=0
         if [ -f "$A/$u" ]; then
           case "$u" in
-            tspi-rt-host.service) pid=4321 ;;
-            tspi-rt-daemon.service) pid=4322 ;;
+            khaen-rt-host.service) pid=4321 ;;
+            khaen-rt-daemon.service) pid=4322 ;;
             *) pid=4300 ;;
           esac
           [ -n "${MOCK_MAINPID:-}" ] && pid="$MOCK_MAINPID"

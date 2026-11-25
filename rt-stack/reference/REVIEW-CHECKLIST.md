@@ -1,6 +1,6 @@
 # REVIEW-CHECKLIST — T03 人工 review 清单（reference-author → Lead）
 
-2026-11-16 · 交付：`projects/tspi-audio-dsp/rt-stack/reference/`（team task-23）。
+2026-11-16 · 交付：`projects/khaen-audio-dsp/rt-stack/reference/`（team task-23）。
 本文是 WBS T03 DoD 的**逐条可判检查表**：机器可判的条目给出命令/exit code/证据文件，人读条目给出手算/规范页码。
 reviewer 只需按顺序勾选；任一 "FAIL" 即整包不进 PASS。
 
@@ -50,7 +50,7 @@ reviewer 只需按顺序勾选；任一 "FAIL" 即整包不进 PASS。
 - [x] E1 三套实现互证：gen（多项式乘精确）、verify（逐样本精确直接卷积）、ref_f64（binary64 状态机）互不 import 核心逻辑（verify 仅 import f64 参考作为第二实现）。
 - [x] E2 不依赖 T06/rt-check/Rust：无 Cargo 根、无 cargo test、无网络；只 Python 3 标准库。
 - [x] E3 未触板：未运行 board.py、未开 ALSA、未改 CamillaDSP/S1/服务；未 git commit。
-- [x] E4 写域：仅 `projects/tspi-audio-dsp/rt-stack/reference/`（含其 evidence 子目录）；未写其它目录、未建 Cargo.toml。
+- [x] E4 写域：仅 `projects/khaen-audio-dsp/rt-stack/reference/`（含其 evidence 子目录）；未写其它目录、未建 Cargo.toml。
 - [x] E5 证据纪律：manifest 记录输入/输出 hash、实际命令、cwd、exit code、未测项、假设、not_claimed；无 "只编译/0 测试" 声明，实际执行 108 项非零断言。
 - [ ] E6 reviewer 复核：抽查 manifest 中 3 个输出文件的 sha256 与磁盘一致；确认无板端/服务改动。
 

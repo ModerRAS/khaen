@@ -23,10 +23,20 @@ Most room-correction stacks recompile a graph at runtime and hope the swap is sm
 
 ## Naming
 
-Crates are published as `khaen-*`. The executables they build keep the historical
-`tspi-*` names (`tspi-rt-host`, `tspi-rt-daemon`, `tspi-calibrate`), because deployment
-units and install paths reference those names; renaming the binaries is a separate,
-coordinated change.
+The project is named `khaen` throughout. Everything uses that one name:
+
+- crates are published as `khaen-*`;
+- the executables they build are `khaen-*` (`khaen-rt-host`, `khaen-rt-daemon`, `khaen-cal`);
+- install paths are `/opt/khaen-rt-stack`, `/etc/khaen-rt-stack` and `/var/lib/khaen-rt-stack`;
+- systemd units are `khaen-*.service`, `khaen-*.timer` and `khaen-*.target`;
+- environment variables use the `KHAEN_` prefix;
+- on-the-wire identifiers (schema tags such as `khaen-plan/v1` and
+  `khaen-layout-presets/v2`, hash domain separators, and the plan sha256 / graph_id
+  values derived from them) all carry the same name.
+
+Renaming those identifiers changes the size of the plan hash domain by one byte, so it
+changes every recorded `graph_id` and plan `sha256`. That was done deliberately in one
+commit; older plans hashed under the previous name are not byte-compatible.
 
 ## Build
 

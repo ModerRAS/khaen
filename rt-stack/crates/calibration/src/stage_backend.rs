@@ -40,7 +40,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use khaen_core::abi::{sample_format, ABI_VERSION};
 use khaen_core::rt::{BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
 use khaen_modal_design::ingest::SampleFormat;
-use khaen_rt_host::format::{self, DitherCfg, FormatConfig, TspiHwParamsV1};
+use khaen_rt_host::format::{self, DitherCfg, FormatConfig, KhaenHwParamsV1};
 
 use crate::capture::{
     self, CaptureError, ElectricalReferenceCapture, ElectricalReferenceChannel,
@@ -67,7 +67,7 @@ use crate::sweep::{
 // ---------------------------------------------------------------------------
 
 /// 证据/report schema（本模块产物）。
-pub const STAGE_BACKEND_SCHEMA: &str = "tspi-cal-stage-backend/v1";
+pub const STAGE_BACKEND_SCHEMA: &str = "khaen-cal-stage-backend/v1";
 /// backend 版本（artifact version 用）。
 pub const STAGE_BACKEND_VERSION: &str = "stage-backend-v1";
 
@@ -713,7 +713,7 @@ impl RemeasurePlayback {
 /// 本 crate 的 arecord 采集（与 acoustic-verify A/B 实验同一路径）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemeasureHostConfig {
-    /// khaen-rt-host 可执行文件（默认 env `TSPI_RT_HOST_BIN` 或 PATH 中 `khaen-rt-host`）。
+    /// khaen-rt-host 可执行文件（默认 env `KHAEN_RT_HOST_BIN` 或 PATH 中 `khaen-rt-host`）。
     pub host_bin: PathBuf,
     /// host ALSA backend：`alsa`（真实 MOTU 播放/窗口）|`fake`（仅离线接线诊断，不打开设备，
     /// 因此产不出声音 → 保护门会如实失败，不得当真实测量）。
@@ -733,7 +733,7 @@ pub struct RemeasureHostConfig {
 impl Default for RemeasureHostConfig {
     fn default() -> Self {
         RemeasureHostConfig {
-            // 与 host_apply 同语义：env TSPI_RT_HOST_BIN 优先，否则 PATH 中 khaen-rt-host。
+            // 与 host_apply 同语义：env KHAEN_RT_HOST_BIN 优先，否则 PATH 中 khaen-rt-host。
             host_bin: crate::host_apply::HostApplyConfig::default().host_bin,
             backend: "alsa".to_string(),
             capture_channels: 20,
@@ -888,10 +888,7 @@ impl Rt60StageConfig {
             .validate()
             .map_err(|message| invalid("rt60", message))?;
         if !self.tail_ms.is_finite() || !(50.0..=5000.0).contains(&self.tail_ms) {
-            return Err(invalid(
-                "rt60.tail_ms",
-                "must be finite and in 50..=5000",
-            ));
+            return Err(invalid("rt60.tail_ms", "must be finite and in 50..=5000"));
         }
         let mut seen: Vec<&str> = Vec::with_capacity(self.external_irs.len());
         for ir in &self.external_irs {
@@ -948,8 +945,7 @@ pub fn build_rt60_artifacts(
         files.push(Rt60ArtifactFile {
             kind: "rt60_status",
             path: format!("{base}rt60/status.json"),
-            bytes: status_json(false, stage, "disabled by configuration (--no-rt60)")
-                .into_bytes(),
+            bytes: status_json(false, stage, "disabled by configuration (--no-rt60)").into_bytes(),
         });
         return files;
     }
@@ -999,7 +995,10 @@ pub fn build_rt60_artifacts(
             }
         }
     } else {
-        match (measurement.timeline.as_ref(), measurement.samples.is_empty()) {
+        match (
+            measurement.timeline.as_ref(),
+            measurement.samples.is_empty(),
+        ) {
             (Some(timeline), false) => {
                 let extract_config = IrExtractConfig {
                     tail_s: config.tail_ms / 1000.0,
@@ -1023,12 +1022,7 @@ pub fn build_rt60_artifacts(
                                 path: wav_path.clone(),
                                 bytes: wav.clone(),
                             });
-                            match analyze_ir(
-                                &ir.ir,
-                                ir.sample_rate_hz,
-                                &ir.label,
-                                &rt60_config,
-                            ) {
+                            match analyze_ir(&ir.ir, ir.sample_rate_hz, &ir.label, &rt60_config) {
                                 Ok(analysis) => entries.push(Rt60AnalyzedIr {
                                     analysis,
                                     source_path: None,
@@ -2373,7 +2367,7 @@ impl ToolsEngine {
                 return Err(StageError::new(
                     E_PLAYBACK_FAILED,
                     format!(
-                        "host-plan: spawn {} 失败：{error}（离线需 --host-bin 指向已构建的 khaen-rt-host；板端为 /opt/tspi-rt-stack/current/bin/khaen-rt-host）",
+                        "host-plan: spawn {} 失败：{error}（离线需 --host-bin 指向已构建的 khaen-rt-host；板端为 /opt/khaen-rt-stack/current/bin/khaen-rt-host）",
                         spec.host_bin.display()
                     ),
                 ));
@@ -2589,7 +2583,7 @@ fn playback_format_config(devices: &StageDeviceConfig) -> Result<FormatConfig, S
     let bytes = devices.bytes_per_sample() as u32;
     let period = devices.block_frames as u32;
     let n_out = devices.playback_channels as u32;
-    let hw = TspiHwParamsV1 {
+    let hw = KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: sample_format::S24_3LE_INTERLEAVED,
         n_in: 1,
@@ -2786,10 +2780,10 @@ pub fn read_host_plan_geometry(bytes: &[u8]) -> Result<HostPlanGeometry, String>
         ])
     };
     let magic = u32_at(0);
-    if magic != khaen_core::abi::TSPI_PLAN_MAGIC {
+    if magic != khaen_core::abi::KHAEN_PLAN_MAGIC {
         return Err(format!(
-            "plan header.magic={magic:#010x} != TSPI_PLAN_MAGIC={:#010x}（不是 plan.bin）",
-            khaen_core::abi::TSPI_PLAN_MAGIC
+            "plan header.magic={magic:#010x} != KHAEN_PLAN_MAGIC={:#010x}（不是 plan.bin）",
+            khaen_core::abi::KHAEN_PLAN_MAGIC
         ));
     }
     let abi_version = u16_at(4);
@@ -2857,12 +2851,7 @@ pub fn resolve_remeasure_plan(
         let plan_path = bundle.join(crate::host_apply::HOST_PLAN_FILE);
         let manifest_path = bundle.join(crate::host_apply::HOST_MANIFEST_FILE);
         if plan_path.is_file() {
-            (
-                "apply-bundle",
-                plan_path,
-                manifest_path,
-                String::new(),
-            )
+            ("apply-bundle", plan_path, manifest_path, String::new())
         } else {
             (
                 "compile-artifact",
@@ -3031,7 +3020,7 @@ pub fn remeasure_host_config_text(
     use std::fmt::Write as _;
     let toml_path = |path: &Path| path.to_string_lossy().replace('\\', "/");
     let mut text = String::with_capacity(1024);
-    text.push_str("# tspi-cal remeasure playback: T61 timeline -> 2ch WAV -> plan-arena host (stereo 2.0 points)\n");
+    text.push_str("# khaen-cal remeasure playback: T61 timeline -> 2ch WAV -> plan-arena host (stereo 2.0 points)\n");
     text.push_str("[host]\n");
     let _ = writeln!(text, "block_size = {}", geometry.block_size);
     let _ = writeln!(text, "sample_rate = {}", devices.sample_rate);
@@ -3132,7 +3121,10 @@ fn render_host_plan_input_wav(
     if pcm.len() > (u32::MAX as usize) - 64 {
         return Err(StageError::new(
             E_PLAYBACK_FAILED,
-            format!("host-plan: WAV data {} bytes exceeds RIFF 32-bit size", pcm.len()),
+            format!(
+                "host-plan: WAV data {} bytes exceeds RIFF 32-bit size",
+                pcm.len()
+            ),
         ));
     }
     Ok(encode_wav_pcm24_interleaved(&pcm, channels, sample_rate))
@@ -3219,7 +3211,9 @@ pub fn host_plan_playback_evidence_json(
             push_json_text(&mut out, &host.config_path.to_string_lossy());
             out.push_str(",\"host_report\":");
             push_json_text(&mut out, &host.report_path.to_string_lossy());
-            out.push_str(",\"stereo_2_0_single_point\":true,\"seven_ch_or_4_1_2\":\"NOT_IMPLEMENTED\"");
+            out.push_str(
+                ",\"stereo_2_0_single_point\":true,\"seven_ch_or_4_1_2\":\"NOT_IMPLEMENTED\"",
+            );
             if !host_executed {
                 out.push_str(",\"note\":\"engine=fake-synth: measurement synthesized offline; host not spawned (simulated, not acoustic)\"");
             }
@@ -3614,7 +3608,7 @@ fn build_sweep_session(
 /// - 门值 `gate_min_snr_db` 可配置，并**原样写进 summary 证据**（冻结口径）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct SnrGateReport {
-    /// 估计器 schema（tspi-robust-snr/v1）。
+    /// 估计器 schema（khaen-robust-snr/v1）。
     pub schema: &'static str,
     /// 门实现口径（robust-broadband；T63 带限/相干门仍 NOT_WIRED）。
     pub mode: &'static str,
@@ -3881,14 +3875,12 @@ pub fn run_acoustic_measurement_with_playback(
                     ),
                 ));
             }
-            if config.outputs.len() != 2
-                || {
-                    let mut channels: Vec<u32> =
-                        config.outputs.iter().map(|output| output.channel).collect();
-                    channels.sort_unstable();
-                    channels != vec![0, 1]
-                }
-            {
+            if config.outputs.len() != 2 || {
+                let mut channels: Vec<u32> =
+                    config.outputs.iter().map(|output| output.channel).collect();
+                channels.sort_unstable();
+                channels != vec![0, 1]
+            } {
                 return Err(StageFailure::failed(
                     E_REMEASURE_PLAYBACK_CONFIG,
                     "remeasure-playback=host-plan 本轮只实现 stereo-2.0 单点（outputs 必须正好 FL@0/FR@1）；7ch/4.1.2 = NOT_IMPLEMENTED",
@@ -4215,7 +4207,7 @@ pub fn run_loopback_measurement(
 fn duplex_format_config(devices: &StageDeviceConfig) -> Result<FormatConfig, StageFailure> {
     let bytes = devices.bytes_per_sample() as u32;
     let period = devices.block_frames as u32;
-    let hw = TspiHwParamsV1 {
+    let hw = KhaenHwParamsV1 {
         abi_version: ABI_VERSION,
         sample_format: sample_format::S24_3LE_INTERLEAVED,
         n_in: devices.capture_channels,
@@ -4463,11 +4455,7 @@ impl StageBackend {
     /// 只有真实执行 host 的引擎才会写出这些文件（FakeEngine 不启动 host → 跳过；summary
     /// 的 plan_playback.host_executed=false 如实标注 simulated）。host-report 每次内容不同，
     /// 走 write_artifact_lenient（重入时落 .rN）。
-    fn register_host_plan_evidence(
-        &self,
-        ctx: &mut StageCtx<'_>,
-        playback: &MeasurementPlayback,
-    ) {
+    fn register_host_plan_evidence(&self, ctx: &mut StageCtx<'_>, playback: &MeasurementPlayback) {
         let MeasurementPlayback::HostPlan(host) = playback else {
             return;
         };
@@ -4480,11 +4468,11 @@ impl StageBackend {
             if !path.is_file() {
                 continue;
             }
-            let Some(relative) = path.strip_prefix(&artifacts_dir).ok().map(|relative| {
-                relative
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            }) else {
+            let Some(relative) = path
+                .strip_prefix(&artifacts_dir)
+                .ok()
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            else {
                 // 自定义 --remeasure-work-dir 在 artifacts 之外：不登记，但仍留在磁盘上。
                 continue;
             };
@@ -4921,7 +4909,10 @@ impl StageBackend {
         report.push_str(",\"capture_report\":");
         report.push_str(&output.capture_report_json);
         report.push_str(",\"plan_playback\":");
-        report.push_str(&host_plan_playback_evidence_json(&playback, self.engine.name()));
+        report.push_str(&host_plan_playback_evidence_json(
+            &playback,
+            self.engine.name(),
+        ));
         report.push('}');
         write_artifact_lenient(
             ctx,
@@ -5192,4 +5183,3 @@ mod t76_tests {
         "/tests/T76/host_plan_remeasure.rs"
     ));
 }
-
