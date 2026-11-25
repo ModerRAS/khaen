@@ -21,6 +21,8 @@ pub mod fault;
 pub mod format;
 /// task-253（rt-mimo12k）：MIMO 12 kHz 低频修正支路 host 接线（plan-arena 直通 + 12k 修正量）。
 pub mod mimo12k;
+/// 运行时控制面（status/mute/volume）：挂在校准同一只 Unix socket 上，音频线程只发布原子快照。
+pub mod runtime_control;
 pub mod scheduler;
 pub mod spsc;
 pub mod swap;

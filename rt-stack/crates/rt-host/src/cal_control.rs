@@ -1,7 +1,12 @@
-//! 校准控制面。
+//! host 控制面：校准 op + 运行时 op，共用同一只 Unix socket。
 //!
-//! Unix socket 在非实时线程上接受 `status`、`enter`、`measure`、`solve`、
-//! `remeasure`、`leave`。音频线程只在校准模式改写输入缓冲，播放模式立刻返回。
+//! Unix socket 在非实时线程上接受两类请求：
+//! - 校准：`enter`、`measure`、`solve`、`remeasure`、`leave`（既有行为不变）；
+//! - 运行时：`status`（actual 快照）、`mute`（整块静音，块边界生效）、`volume`
+//!   （无音频通路，显式 `unsupported`）——实现在 `crate::runtime_control`，
+//!   本文件只负责分发与 `calibration` 子对象合并；`cal_status` 保留旧校准体。
+//!
+//! 音频线程只在校准模式改写输入缓冲，播放模式立刻返回。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -198,14 +203,33 @@ impl CalControl {
         let op = json_string(line, "op").unwrap_or_default();
         let audible = json_bool(line, "audible").unwrap_or(false);
         match op.as_str() {
-            "status" => self.status_json(true, ""),
+            // `status` = host 运行时 actual 快照（crate::runtime_control）+ 既有校准状态
+            // 放在 `calibration` 子对象里；旧校准体可用 `cal_status` 原样取回。
+            "status" => self.runtime_status_json(),
+            "cal_status" => self.status_json(true, ""),
             "enter" => self.enter(audible),
             "leave" => self.leave(),
             "measure" => self.measure(audible),
             "remeasure" => self.remeasure(audible),
             "solve" => self.solve(line),
-            _ => self.status_json(false, "unknown_op"),
+            other => match crate::runtime_control::shared().handle(other, line) {
+                Some(response) => response,
+                // 未知 op 保持既有行为：校准侧 status 体 + error=unknown_op。
+                None => self.status_json(false, "unknown_op"),
+            },
         }
+    }
+
+    /// `status` op：host 运行时快照（actual）+ 校准状态子对象。
+    fn runtime_status_json(&self) -> String {
+        let runtime = crate::runtime_control::shared().status_json();
+        let calibration = self.status_body(true, "");
+        let mut out = String::with_capacity(runtime.len() + calibration.len() + 24);
+        out.push_str(runtime.strip_suffix('}').unwrap_or(&runtime));
+        out.push_str(",\"calibration\":");
+        out.push_str(&calibration);
+        out.push('}');
+        out
     }
 
     fn enter(&self, audible: bool) -> String {
@@ -696,6 +720,13 @@ impl CalControl {
     }
 
     fn status_json(&self, ok: bool, error: &str) -> String {
+        let body = self.status_body(ok, error);
+        write_job_file("status.json", &body);
+        body
+    }
+
+    /// 校准状态体（不落盘；`status_json` 负责写 job 文件）。
+    fn status_body(&self, ok: bool, error: &str) -> String {
         let cal = self.mode.load(Ordering::Acquire) == MODE_CAL;
         let mode = if cal { "calibration" } else { "playback" };
         let source = if cal { "cal" } else { "program" };
@@ -727,7 +758,6 @@ impl CalControl {
             side = if self.side_path_open() { "true" } else { "false" },
             post = if self.post_is_identity() { "true" } else { "false" },
         );
-        write_job_file("status.json", &body);
         body
     }
 
@@ -886,22 +916,28 @@ pub fn socket_path() -> String {
 
 /// 在调用线程上绑定 socket，再把 accept 丢到后台。绑定失败不改变播放模式。
 pub fn spawn_server() -> Result<(), String> {
-    let control = shared();
     if SERVER_STARTED.swap(true, Ordering::AcqRel) {
         return Ok(());
     }
+    spawn_server_at(&socket_path())
+}
+
+/// 在指定路径监听（生产路径 = `KHAEN_HOST_SOCK`/默认；单测/离线 harness 直接传临时
+/// 路径，不改进程环境变量）。`bind_listener` 在调用线程完成，accept 丢到后台线程。
+pub fn spawn_server_at(path: &str) -> Result<(), String> {
+    let control = shared();
     #[cfg(unix)]
     {
-        let listener = bind_listener(&socket_path())?;
+        let listener = bind_listener(path)?;
         std::thread::Builder::new()
-            .name("khaen-cal-sock".to_string())
+            .name("khaen-host-sock".to_string())
             .spawn(move || accept_loop(listener, control))
-            .map_err(|error| format!("校准 socket 线程启动失败：{error}"))?;
+            .map_err(|error| format!("host socket 线程启动失败：{error}"))?;
         Ok(())
     }
     #[cfg(not(unix))]
     {
-        let _ = control;
+        let _ = (path, control);
         Ok(())
     }
 }
@@ -980,7 +1016,7 @@ fn accept_loop(listener: std::os::unix::net::UnixListener, control: &'static Cal
 #[path = "cal_umik.rs"]
 mod umik;
 
-fn json_string(line: &str, key: &str) -> Option<String> {
+pub(crate) fn json_string(line: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{key}\":\"");
     let start = line.find(&pattern)? + pattern.len();
     let rest = line.get(start..)?;
@@ -988,7 +1024,7 @@ fn json_string(line: &str, key: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-fn json_bool(line: &str, key: &str) -> Option<bool> {
+pub(crate) fn json_bool(line: &str, key: &str) -> Option<bool> {
     let pattern = format!("\"{key}\":");
     let start = line.find(&pattern)? + pattern.len();
     let rest = line.get(start..)?.trim_start();
@@ -1001,7 +1037,7 @@ fn json_bool(line: &str, key: &str) -> Option<bool> {
     }
 }
 
-fn json_f64(line: &str, key: &str) -> Option<f64> {
+pub(crate) fn json_f64(line: &str, key: &str) -> Option<f64> {
     let pattern = format!("\"{key}\":");
     let start = line.find(&pattern)? + pattern.len();
     let rest = line.get(start..)?.trim_start();
@@ -1613,5 +1649,171 @@ mod tests {
                 f64::from(state >> 8) / f64::from(1u32 << 24) - 0.5
             })
             .collect()
+    }
+
+    /// `status` op = host 运行时 actual 快照（crate::runtime_control）+ calibration 子对象；
+    /// 旧校准体仍可由 `cal_status` 原样取回。
+    #[test]
+    fn status_op_reports_runtime_snapshot_and_calibration() {
+        let control = CalControl::new();
+        let body = control.handle(r#"{"op":"status"}"#);
+        assert!(body.contains("\"op\":\"status\""), "{body}");
+        for key in [
+            "runtime_state",
+            "graph",
+            "sample_rate",
+            "chunksize",
+            "blocks",
+            "frames",
+            "xruns",
+            "underruns",
+            "faults",
+            "deadline_misses",
+            "silence_blocks",
+            "forced_mute",
+            "safe_mode",
+            "epoch",
+            "actual_version",
+            "graph_id",
+            "last_good_coeff",
+        ] {
+            assert!(
+                body.contains(&format!("\"{key}\":")),
+                "缺字段 {key}：{body}"
+            );
+        }
+        assert!(body.contains("\"calibration\":{"), "{body}");
+        assert!(
+            body.contains("\"mode\":\"playback\""),
+            "校准体必须在 calibration 子对象里：{body}"
+        );
+        let cal = control.handle(r#"{"op":"cal_status"}"#);
+        assert!(cal.contains("\"mode\":\"playback\""), "{cal}");
+        assert!(cal.contains("\"capture_source\":\"program\""), "{cal}");
+        assert!(!cal.contains("\"runtime_state\""), "{cal}");
+    }
+
+    /// 未知 op 保持既有行为：ok=false + error=unknown_op（校准 status 体）。
+    #[test]
+    fn unknown_op_keeps_unknown_op_json() {
+        let control = CalControl::new();
+        let response = control.handle(r#"{"op":"bogus"}"#);
+        assert!(response.contains("\"ok\":false"), "{response}");
+        assert!(response.contains("\"error\":\"unknown_op\""), "{response}");
+        assert!(response.contains("\"mode\":\"playback\""), "{response}");
+    }
+
+    /// socket 端到端：假块循环 harness（不打开声卡）+ 真 Unix socket。
+    ///
+    /// Windows 开发机没有 `std::os::unix`，用例标记 ignored（编译仍覆盖类型检查）；
+    /// host（Linux）上真实执行 status / mute / volume / unknown_op 往返。
+    #[test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "unix socket 只在 host（Linux）上可用；Windows 开发机跳过"
+    )]
+    fn runtime_control_socket_status_mute_roundtrip() {
+        use crate::runtime_control;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        if !cfg!(unix) {
+            return;
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("khaen-host-sock-{}-{stamp}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp socket dir");
+        let sock_path = dir.join("host.sock");
+        let sock = sock_path.to_string_lossy().to_string();
+
+        // 假后端：只推进块边界，不打开声卡、不启动真实 RT 线程。
+        let stop = Arc::new(AtomicBool::new(false));
+        let harness = {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                runtime_control::shared().start_run(runtime_control::RuntimeMeta {
+                    graph: "stereo_identity".to_string(),
+                    graph_id: String::new(),
+                    graph_id_source: "none".to_string(),
+                    backend: "fake".to_string(),
+                    safe_mode: "normal".to_string(),
+                    sample_rate: 48_000,
+                    block_size: 128,
+                    epoch: 1,
+                    plan_version: 1,
+                    last_good: "{\"present\":false}".to_string(),
+                });
+                let mut block = 0u64;
+                while !stop.load(Ordering::Acquire) {
+                    let forced = runtime_control::shared().begin_block(block);
+                    runtime_control::shared().publish_block(runtime_control::BlockSnapshot {
+                        block_seq: block,
+                        mute_this_block: forced,
+                        forced_mute: forced,
+                        ..runtime_control::BlockSnapshot::default()
+                    });
+                    block += 1;
+                    std::thread::sleep(Duration::from_micros(200));
+                }
+                runtime_control::shared().mark_stopped();
+            })
+        };
+
+        spawn_server_at(&sock).expect("spawn unix socket server");
+        let call = |request: &str| exchange(&sock, request).expect("exchange over socket");
+
+        // 等假块循环进入 Running（socket 可能先于第一块就绪）。
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut status = String::new();
+        while Instant::now() < deadline {
+            status = call(r#"{"op":"status"}"#);
+            if status.contains("\"runtime_state\":\"Running\"") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(status.contains("\"runtime_state\":\"Running\""), "{status}");
+        assert!(status.contains("\"graph\":\"stereo_identity\""), "{status}");
+        assert!(status.contains("\"chunksize\":128"), "{status}");
+        assert!(status.contains("\"blocks\":"), "{status}");
+        assert!(status.contains("\"calibration\":{"), "{status}");
+        assert!(status.contains("\"volume_db\":null"), "{status}");
+
+        // mute：块边界生效，回执带 actual mute 与生效块号；重复写幂等。
+        let muted = call(r#"{"op":"mute","mute":true}"#);
+        assert!(muted.contains("\"ok\":true"), "{muted}");
+        assert!(muted.contains("\"requested_mute\":true"), "{muted}");
+        assert!(muted.contains("\"mute\":true"), "{muted}");
+        assert!(muted.contains("\"applied_block\":"), "{muted}");
+        let again = call(r#"{"op":"mute","mute":true}"#);
+        assert!(again.contains("\"idempotent\":true"), "{again}");
+        let unmuted = call(r#"{"op":"mute","mute":false}"#);
+        assert!(unmuted.contains("\"mute\":false"), "{unmuted}");
+
+        // volume：越界显式拒绝；合法值明确 unsupported（无音频通路）。
+        let too_loud = call(r#"{"op":"volume","db":51}"#);
+        assert!(
+            too_loud.contains("\"error\":\"volume_out_of_range\""),
+            "{too_loud}"
+        );
+        let unsupported = call(r#"{"op":"volume","db":-6}"#);
+        assert!(
+            unsupported.contains("\"error\":\"unsupported\""),
+            "{unsupported}"
+        );
+
+        // 未知 op 保持既有 unknown_op。
+        let unknown = call(r#"{"op":"bogus"}"#);
+        assert!(unknown.contains("\"error\":\"unknown_op\""), "{unknown}");
+
+        stop.store(true, Ordering::Release);
+        harness.join().expect("harness");
+        let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

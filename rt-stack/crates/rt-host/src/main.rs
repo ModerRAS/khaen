@@ -6544,6 +6544,13 @@ trait PlaybackSink {
     fn stop(&mut self) -> Result<(), String>;
     /// 证据/JSON 报告（`alsa` 字段；backend=fake 不使用）。
     fn report(&self) -> String;
+    /// 运行时控制面（host socket `status` op）的实时计数快照。
+    ///
+    /// 默认全零（fake/file sink 没有设备计数）；块循环每块调用一次，必须零分配、
+    /// 不加锁、不做设备 I/O —— 只读本结构的普通计数。
+    fn live_counters(&self) -> khaen_rt_host::runtime_control::SinkCounters {
+        khaen_rt_host::runtime_control::SinkCounters::default()
+    }
 }
 
 /// ALSA sink 计数（T21 口径：xrun/恢复/mute/fault；非 RT 导出）。
@@ -7133,6 +7140,26 @@ impl<B: PcmDuplexBackend> PlaybackSink for PcmPlaybackSink<B> {
                 self.state_name()
             )
         })
+    }
+
+    /// 运行时控制面（host socket `status` op）：实时设备计数，零分配、不加锁。
+    fn live_counters(&self) -> khaen_rt_host::runtime_control::SinkCounters {
+        let counters = &self.counters;
+        khaen_rt_host::runtime_control::SinkCounters {
+            blocks: counters.blocks,
+            bytes_written: counters.bytes_written,
+            silence_blocks: counters.silence_blocks,
+            xruns: counters.xruns as u64,
+            underruns: counters.underruns as u64,
+            overruns: counters.overruns as u64,
+            recoveries: counters.recoveries as u64,
+            muted_blocks: counters.muted_blocks as u64,
+            faults: counters.faults as u64,
+            short_reads: counters.short_reads as u64,
+            clipped_samples: self.fmt_stats.clipped,
+            nonfinite_in: self.fmt_stats.nonfinite_in,
+            nonfinite_out: self.fmt_stats.nonfinite_out,
+        }
     }
 
     fn report(&self) -> String {
@@ -9558,6 +9585,19 @@ fn run_plan_arena_command(
     let mut safety_mute_reason = 0u32;
     // 2b) backend sink（fake 契约 / alsa 真实 duplex 由 prepare_backend 接线）。
     let (fake_alsa_contract, mut sink) = prepare_backend(config, containers)?;
+    // 运行时控制面（host socket status）：启动期登记 actual 元数据；计数由块循环发布。
+    khaen_rt_host::runtime_control::start_run(khaen_rt_host::runtime_control::RuntimeMeta {
+        graph: "plan-arena".to_string(),
+        graph_id: hex32(&prepared.graph_id),
+        graph_id_source: "plan-header".to_string(),
+        backend: if sink.is_none() { "fake" } else { "alsa" }.to_string(),
+        safe_mode: config.safe_mode.clone(),
+        sample_rate: config.sample_rate,
+        block_size: config.block_size,
+        epoch: EPOCH_ID,
+        plan_version: prepared.version,
+        last_good: last_good_report(&config.last_good),
+    });
     // F-v5-2：起播预填（同 run_command_with_sink；plan-arena 生产路径同样受 host 输出
     // 节拍缺陷影响，不能只修旧 stereo/2x2 路径）。
     if let Some(sink_box) = sink.as_mut() {
@@ -9619,12 +9659,19 @@ fn run_plan_arena_command(
                 capture.note_paced();
             }
         }
+        if blocks == 0 {
+            khaen_rt_host::runtime_control::mark_running();
+        }
+        let forced_mute = khaen_rt_host::runtime_control::begin_block(blocks);
         let gate = sched.gate_block(&sched_topo);
         let admit = matches!(gate, SchedGate::Admit);
         if !admit {
             gate_rejects += 1;
         }
-        let mut mute_this_block = safe_mode_mute || !admit || block_stats_failed();
+        let mut mute_this_block = safe_mode_mute || !admit || block_stats_failed() || forced_mute;
+        // 安全静音归因（safe_mode/调度门/capture 失流）；forced mute 单独计，
+        // 两者同时成立时按安全侧计，保证 silence = safety + forced。
+        let mut safety_muted = safe_mode_mute || !admit || block_stats_failed();
         if safety_mute_reason == 0 {
             if !admit {
                 safety_mute_reason = RtStatus::RT_E_GUARD_FAIL.code();
@@ -9646,6 +9693,7 @@ fn run_plan_arena_command(
                 // F1 SafetyMute：本块不处理新块（输入已清零），只写静音并计数。
                 safety_mute_reason = reason;
                 mute_this_block = true;
+                safety_muted = true;
             }
         } else {
             synth_input_into(blocks as usize, &mut input, stride, block);
@@ -9824,12 +9872,29 @@ fn run_plan_arena_command(
         if !matches!(action, WatchdogAction::None) {
             watchdog_actions += 1;
         }
+        // 运行时控制面：发布本块完成的 actual 快照（原子写，零分配、不加锁）。
+        khaen_rt_host::runtime_control::publish_block(
+            khaen_rt_host::runtime_control::BlockSnapshot {
+                block_seq: blocks,
+                mute_this_block,
+                safety_mute: safety_muted && mute_this_block,
+                forced_mute: forced_mute && mute_this_block && !safety_muted,
+                deadline_misses,
+                gate_rejects,
+                watchdog_actions: watchdog_actions as u64,
+                sink: sink
+                    .as_ref()
+                    .map(|sink| sink.live_counters())
+                    .unwrap_or_default(),
+            },
+        );
         blocks += 1;
         if file_eof_after_block {
             exit_reason = "eof";
             break;
         }
     }
+    khaen_rt_host::runtime_control::mark_stopped();
     // 仅 backend=fake（无 ALSA sink）需要 loop 级汇总事件：ALSA 路径的进入事件由 sink 在
     // 真实迁移点上报（每 epoch 恰一次），此处不重复合成。F2：severity=4、value_a=原因码、
     // value_b=epoch_id（core-v1 §8.2 冻结表；safe_mode 显式配置的原因码为 0）。
@@ -12596,6 +12661,20 @@ fn run_command_with_sink(
     // 2b) backend sink：设备打开/流启动放到非 RT 初始化（web/worker/缓冲）之后。
     let (fake_alsa_contract, mut sink) =
         prepare_backend_with_sink(&config, containers_for_sink, injected_sink)?;
+    // 运行时控制面（host socket status）：启动期登记 actual 元数据；计数由块循环发布。
+    khaen_rt_host::runtime_control::start_run(khaen_rt_host::runtime_control::RuntimeMeta {
+        graph: config.graph.clone(),
+        // legacy 图没有 T20 plan，graph_id 如实留空，不编造 32 B hash。
+        graph_id: String::new(),
+        graph_id_source: "none".to_string(),
+        backend: if sink.is_none() { "fake" } else { "alsa" }.to_string(),
+        safe_mode: config.safe_mode.clone(),
+        sample_rate: config.sample_rate,
+        block_size: config.block_size,
+        epoch: EPOCH_ID,
+        plan_version: PLAN_VERSION,
+        last_good: last_good_report(&config.last_good),
+    });
     // F-v5-2：起播预填（T17 D-07 不变：设备仍由首次 writei 自动启动）。块循环稳态只
     // 写 1 period/块，若不预填则 sw 缓冲只有 1 period 余量 → 每 2 次写 1 次 underrun。
     if let Some(sink_box) = sink.as_mut() {
@@ -12657,12 +12736,19 @@ fn run_command_with_sink(
                 capture.note_paced();
             }
         }
+        if blocks == 0 {
+            khaen_rt_host::runtime_control::mark_running();
+        }
+        let forced_mute = khaen_rt_host::runtime_control::begin_block(blocks);
         let gate = sched.gate_block(&topo);
         let admit = matches!(gate, SchedGate::Admit);
         if !admit {
             gate_rejects += 1;
         }
-        let mut mute_this_block = safe_mode_mute || !admit || block_stats_failed();
+        let mut mute_this_block = safe_mode_mute || !admit || block_stats_failed() || forced_mute;
+        // 安全静音归因（safe_mode/调度门/capture 失流）；forced mute 单独计，
+        // 两者同时成立时按安全侧计，保证 silence = safety + forced。
+        let mut safety_muted = safe_mode_mute || !admit || block_stats_failed();
         if safety_mute_reason == 0 {
             if !admit {
                 safety_mute_reason = RtStatus::RT_E_GUARD_FAIL.code();
@@ -12684,6 +12770,7 @@ fn run_command_with_sink(
                 // F1 SafetyMute：本块不处理新块（输入已清零），只写静音并计数。
                 safety_mute_reason = reason;
                 mute_this_block = true;
+                safety_muted = true;
             }
         } else {
             synth_input_into(blocks as usize, &mut input, stride, block);
@@ -12829,13 +12916,31 @@ fn run_command_with_sink(
             quarantine_entered += 1;
             quarantine_pending_release = true;
             swap_switches += 1;
+            khaen_rt_host::runtime_control::publish_plan_version(2);
         }
+        // 运行时控制面：发布本块完成的 actual 快照（原子写，零分配、不加锁）。
+        khaen_rt_host::runtime_control::publish_block(
+            khaen_rt_host::runtime_control::BlockSnapshot {
+                block_seq: blocks,
+                mute_this_block,
+                safety_mute: safety_muted && mute_this_block,
+                forced_mute: forced_mute && mute_this_block && !safety_muted,
+                deadline_misses,
+                gate_rejects,
+                watchdog_actions: watchdog_actions as u64,
+                sink: sink
+                    .as_ref()
+                    .map(|sink| sink.live_counters())
+                    .unwrap_or_default(),
+            },
+        );
         blocks += 1;
         if file_eof_after_block {
             exit_reason = "eof";
             break;
         }
     }
+    khaen_rt_host::runtime_control::mark_stopped();
     // 仅 backend=fake（无 ALSA sink）需要 loop 级汇总事件：ALSA 路径的进入事件由 sink 在
     // 真实迁移点上报（每 epoch 恰一次），此处不重复合成。F2：severity=4、value_a=原因码、
     // value_b=epoch_id（core-v1 §8.2 冻结表；safe_mode 显式配置的原因码为 0）。
