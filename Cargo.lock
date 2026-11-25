@@ -15,6 +15,10 @@ version = "0.1.0"
 [[package]]
 name = "khaen-calibration"
 version = "0.1.0"
+dependencies = [
+ "khaen-designer",
+ "khaen-modal-design",
+]
 
 [[package]]
 name = "khaen-core"
@@ -32,6 +36,7 @@ version = "0.1.0"
 name = "khaen-host"
 version = "0.1.0"
 dependencies = [
+ "khaen-core",
  "serde_json",
 ]
 
