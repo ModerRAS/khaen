@@ -47,6 +47,12 @@
 | abort | engine_token | 丢弃草稿，无副作用 |
 | coeff | — | 当前系数版本与 last-good |
 
+### B.1.1 字段形状
+
+- `wired`：已实现 op 的名字数组，例如 `["status","mute"]`。
+- `not_wired`：对象数组 `{"op": "...", "reason": "..."}`，reason 不得为空。
+- `reasons`：`status` 的附加字段；凡是当前没有数据来源的字段（值为 null）必须在这里给出原因，禁止编造数值。
+
 ### B.2 语义
 
 - `status` 为原子快照，不阻塞音频线程。
