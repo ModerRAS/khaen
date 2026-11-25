@@ -420,6 +420,15 @@ fn weighted_json(points: &[(String, f64)]) -> Json {
     )
 }
 
+/// 座位离散量序列化：无定义（design 点 < 2）时写 null（M=1 显式退化，不伪造 0 值成功）。
+fn seat_std_json(defined: bool, value: f64) -> Json {
+    if defined {
+        Json::num(value)
+    } else {
+        Json::Null
+    }
+}
+
 fn design_json(d: &DesignBlock) -> Json {
     Json::Obj(vec![
         ("r_k".to_string(), opt_arr(&d.r_k)),
@@ -447,11 +456,11 @@ fn design_json(d: &DesignBlock) -> Json {
         ),
         (
             "seat_std_mean_db".to_string(),
-            Json::num(d.obj.seat_std_mean_db),
+            seat_std_json(d.obj.seat_std_defined, d.obj.seat_std_mean_db),
         ),
         (
             "seat_std_max_db".to_string(),
-            Json::num(d.obj.seat_std_max_db),
+            seat_std_json(d.obj.seat_std_defined, d.obj.seat_std_max_db),
         ),
         ("max_dev_db".to_string(), Json::num(d.obj.max_dev_db)),
         (
@@ -489,11 +498,11 @@ fn holdout_json(h: &HoldoutBlock) -> Json {
         ),
         (
             "seat_std_mean_db".to_string(),
-            Json::num(h.obj.seat_std_mean_db),
+            seat_std_json(h.obj.seat_std_defined, h.obj.seat_std_mean_db),
         ),
         (
             "seat_std_max_db".to_string(),
-            Json::num(h.obj.seat_std_max_db),
+            seat_std_json(h.obj.seat_std_defined, h.obj.seat_std_max_db),
         ),
         ("max_dev_db".to_string(), Json::num(h.obj.max_dev_db)),
         (
@@ -1278,6 +1287,19 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
         ));
     }
 
+    if cfg.objective.kind == ObjectiveKind::SinglePoint {
+        all_notes.push(format!(
+            "4.3 single-point objective: value = w_e*e_modal_db + w_null*(-null_depth_mean_db); seat-dispersion term is structurally absent (w_std = 0); band target A_b and band constants reuse OBJECTIVES-V2 (beta_level = {:.3}, same band_targets/target_per_bin), IRLS weights = null-depth weights.",
+            cfg.objective.beta
+        ));
+    }
+    if design.len() < 2 {
+        all_notes.push(
+            "4.3 M=1 degenerate branch: only 1 design point -> seat_std undefined (reported null, value defined as 0, no NaN/Inf); inter-source null depth identically 0 dB (null_depth_defined = false); CV has no in/out folds -> B3 uses nominal target_level + B2 lambda (cv_skipped = true). Single-point valley control is carried by the null-depth IRLS weights 1+k_null*((A-|P|)/A)^2."
+                .to_string(),
+        );
+    }
+
     let mut report_fields = vec![
         ("format".to_string(), Json::str(REPORT_FORMAT)),
         ("tool".to_string(), Json::str(TOOL_NAME)),
@@ -1426,6 +1448,21 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
         report_fields.push(("outcome".to_string(), Json::str(state)));
         report_fields.push(("outcome_variant".to_string(), Json::str("B3")));
     }
+    // 4.3 目标报告：目标指标（衰减/谷深）与三态（FULL/PARTIAL/NONE + 残差）同块输出，
+    // 让调用者一眼分开"算法认为修到什么程度"与"限值允许修到什么程度"。
+    // 仅在 single_point 或启用安全钳位时出现 → 默认 emodal 报告逐位不变。
+    if cfg.safety.enabled || cfg.objective.kind == ObjectiveKind::SinglePoint {
+        report_fields.push((
+            "objective_outcome".to_string(),
+            objective_outcome_json(
+                cfg,
+                &outcome.b3,
+                &b3_design.obj,
+                outcome.b3.objective_value,
+                input.design_mics.len(),
+            ),
+        ));
+    }
     let report = Json::Obj(report_fields);
 
     // ---- metrics.csv：每 variant × 点 × 带一行 ----
@@ -1482,13 +1519,14 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
 // OBJECTIVES-V2：变体输出结构 / 可行化 / 目标分派
 // ===========================================================================
 
-/// 目标名（冻结 schema：emodal | seat_std | null_depth | combined）。
+/// 目标名（schema：emodal | seat_std | null_depth | combined | single_point）。
 fn objective_name(obj: &ObjectiveConfig) -> &'static str {
     match obj.kind {
         ObjectiveKind::EModal => "emodal",
         ObjectiveKind::SeatStd => "seat_std",
         ObjectiveKind::NullDepth => "null_depth",
         ObjectiveKind::Combined => "combined",
+        ObjectiveKind::SinglePoint => "single_point",
     }
 }
 
@@ -1547,6 +1585,150 @@ fn variant_objective_json(
     ])
 }
 
+// ===========================================================================
+// 4.3 单点目标 / 目标报告：目标指标（衰减/谷深）+ 三态（FULL/PARTIAL/NONE）+ 残差
+// ===========================================================================
+
+/// 目标指标 JSON：模态衰减（emodal 口径）+ 谷深（null-depth 口径）+ 座位离散（仅参考）。
+fn target_metrics_json(m: &objective::ObjMetrics) -> Json {
+    Json::Obj(vec![
+        // 衰减：v1 同口径 E_modal（B0 = 0 dB；负值 = 能量下降/衰减到位）
+        ("e_modal_db".to_string(), Json::num(m.e_modal_db)),
+        ("r_max".to_string(), Json::opt_num(m.r_max)),
+        // 谷深：10log10(min_m E_m,b / mean_m E_m,b)，0 dB = 无源间干涉谷（越接近 0 越好）
+        (
+            "null_depth_mean_db".to_string(),
+            Json::num(m.null_depth_mean_db),
+        ),
+        (
+            "null_depth_worst_db".to_string(),
+            Json::num(m.null_depth_worst_db),
+        ),
+        (
+            "null_depth_defined".to_string(),
+            Json::Bool(m.null_depth_defined),
+        ),
+        // 座位离散：single_point 目标不含该权重；design 点 < 2 时无定义 → null
+        (
+            "seat_std_mean_db".to_string(),
+            seat_std_json(m.seat_std_defined, m.seat_std_mean_db),
+        ),
+        (
+            "seat_std_max_db".to_string(),
+            seat_std_json(m.seat_std_defined, m.seat_std_max_db),
+        ),
+        (
+            "seat_std_defined".to_string(),
+            Json::Bool(m.seat_std_defined),
+        ),
+        ("max_dev_db".to_string(), Json::num(m.max_dev_db)),
+    ])
+}
+
+/// 4.3 目标报告块：同一块里同时给出
+/// - target_metrics：最终交付解（安全钳位后）的目标指标（衰减/谷深）→ "限值允许修到什么程度"；
+/// - algorithm_metrics：安全钳位前的目标指标（算法自评）→ "算法认为修到什么程度"；
+/// - outcome + residuals：FULL/PARTIAL/NONE 与逐项残差（安全限永不越过）；
+/// - objective_value：钳位前/后的目标函数值。
+///
+/// 只新增键，不改既有键语义；默认（emodal + 安全关闭）不出现该块。
+fn objective_outcome_json(
+    cfg: &RunConfig,
+    variant: &FirVariantResult,
+    delivered_metrics: &objective::ObjMetrics,
+    delivered_value: f64,
+    n_design: usize,
+) -> Json {
+    let safety = variant.safety.as_ref();
+    let mut notes: Vec<&str> = Vec::new();
+    if n_design < 2 {
+        notes.push(
+            "design 点只有 1 个（单点退化）：seat_std 无定义（seat_std_defined=false → 字段 null），single_point 目标本就不含该权重；源间干涉 null 口径退化为 0 dB（null_depth_defined=false），单点谷深由 null-depth IRLS 权重承担。最终判据看 e_modal_db（衰减）与安全残差。",
+        );
+    }
+    if safety.is_none() {
+        notes.push(
+            "safety 未启用：outcome=null、residuals=[]；target_metrics 即最终交付解指标（无钳位）。启用 --safety 可得到 FULL/PARTIAL/NONE + 逐项残差。",
+        );
+    } else {
+        notes.push(
+            "target_metrics = 安全钳位后的最终交付解；algorithm_metrics = 钳位前的算法自评；outcome/residuals = 限值允许修到什么程度（FULL=无钳位且达标；PARTIAL=撞限或残差；NONE=限内无解）。完整钳位明细见 variants.B3.safety。",
+        );
+    }
+    let outcome = match safety {
+        Some(s) => Json::str(s.state.as_str()),
+        None => Json::Null,
+    };
+    let residuals = match safety {
+        Some(s) => s.residuals_json(),
+        None => Json::Arr(Vec::new()),
+    };
+    let safety_summary = match safety {
+        Some(s) => Json::Obj(vec![
+            ("never_exceeded".to_string(), Json::Bool(s.never_exceeded)),
+            ("exhausted".to_string(), Json::Bool(s.exhausted)),
+            (
+                "target_deficit_max_db".to_string(),
+                Json::num(s.target_deficit_max_db),
+            ),
+            ("pre_gain_db".to_string(), Json::num(s.pre_gain_db)),
+            ("target_scale_db".to_string(), Json::num(s.target_scale_db)),
+            ("final_guard_db".to_string(), Json::num(s.final_guard_db)),
+            ("clamp_hits".to_string(), Json::Num(s.hits.len() as f64)),
+        ]),
+        None => Json::Null,
+    };
+    Json::Obj(vec![
+        (
+            "objective".to_string(),
+            Json::str(objective_name(&cfg.objective)),
+        ),
+        ("variant".to_string(), Json::str("B3")),
+        ("design_points".to_string(), Json::Num(n_design as f64)),
+        (
+            "single_point_degenerate".to_string(),
+            Json::Bool(n_design < 2),
+        ),
+        (
+            "target_metrics".to_string(),
+            target_metrics_json(delivered_metrics),
+        ),
+        (
+            "algorithm_metrics".to_string(),
+            match &variant.pre_safety_metrics {
+                Some(m) => target_metrics_json(m),
+                None => Json::Null,
+            },
+        ),
+        (
+            "objective_value".to_string(),
+            Json::Obj(vec![
+                (
+                    "algorithm".to_string(),
+                    Json::opt_num(variant.pre_safety_objective_value),
+                ),
+                ("delivered".to_string(), Json::num(delivered_value)),
+            ]),
+        ),
+        // 单点（M=1）只覆盖"皇帝位"：其余位置未验证（计划 5.3），不得据此声称空间效果。
+        (
+            "spatial_scope".to_string(),
+            Json::str(if n_design < 2 {
+                "SINGLE_POINT_NOT_SPATIAL"
+            } else {
+                "MULTI_POINT_DESIGN"
+            }),
+        ),
+        ("outcome".to_string(), outcome),
+        ("outcome_variant".to_string(), Json::str("B3")),
+        ("safety".to_string(), safety_summary),
+        ("residuals".to_string(), residuals),
+        (
+            "notes".to_string(),
+            Json::Arr(notes.iter().map(|s| Json::str(*s)).collect()),
+        ),
+    ])
+}
 #[derive(Clone, Debug, Default)]
 struct FeasibilityResult {
     design_check: objective::RiseCheck,
@@ -1572,6 +1754,10 @@ struct FirVariantResult {
     feasibility: FeasibilityResult,
     /// 4.4 安全钳位 + 三态报告（默认关闭时 None）
     safety: Option<SafetyReport>,
+    /// 4.3 目标报告：安全钳位前的 design 目标指标（算法自评；仅安全钳位启用时 Some）
+    pre_safety_metrics: Option<objective::ObjMetrics>,
+    /// 安全钳位前的目标函数值（与 pre_safety_metrics 同源）
+    pre_safety_objective_value: Option<f64>,
 }
 
 struct VariantOutcome {
@@ -1710,6 +1896,18 @@ fn apply_safety_limits(
 ) -> Result<(), String> {
     let mut eval_mics: Vec<usize> = input.design_mics.clone();
     eval_mics.extend_from_slice(&input.holdout_mics);
+    // 4.3 目标报告：先记录"算法自评"（安全钳位前的 design 目标指标 + 目标值），再钳位。
+    // 这样 objective_outcome 块能同时给出"算法认为修到什么程度"与"限值允许修到什么程度"。
+    let pre_metrics = objective::metrics_for_points(
+        &variant.p_after,
+        p_b0,
+        &input.design_mics,
+        plan,
+        e_k0,
+        alpha,
+    );
+    variant.pre_safety_objective_value = Some(cfg.objective.objective_value(&pre_metrics));
+    variant.pre_safety_metrics = Some(pre_metrics);
     let clamp_input = limits::ClampInput {
         h: &variant.h,
         h_matrix: &input.h,
@@ -2093,6 +2291,8 @@ fn compute_emodal_variants(
             objective_value: objv2,
             feasibility: feas2,
             safety: None,
+            pre_safety_metrics: None,
+            pre_safety_objective_value: None,
         },
         b3: FirVariantResult {
             p_after: p_b3,
@@ -2106,6 +2306,8 @@ fn compute_emodal_variants(
             objective_value: objv3,
             feasibility: feas3,
             safety: None,
+            pre_safety_metrics: None,
+            pre_safety_objective_value: None,
         },
         cv,
     })
@@ -2180,8 +2382,28 @@ fn compute_v2_variants(
     let levels = obj_cfg.ladder_levels();
     let n = h_design.len();
     let folds = cfg.cv_folds.max(2).min(n);
+    // 计划 4.3 显式退化分支：design 点只有 1 个（单点）时 folds < 2，折内/折外无法划分。
+    // 单点目标不伪造 CV 分数：B3 直接采用名义 target_level + B2 的 λ（CV 块标 cv_skipped）。
+    // 这里对全部 v2 幅度目标生效（M=1 是合法输入：只做"单点"校准；emodal 的 v1 冻结路径不动）。
+    let cv_skipped = folds < 2;
     let mut candidates: Vec<V2Candidate> = Vec::new();
-    for &level in &levels {
+    if cv_skipped {
+        candidates.push(V2Candidate {
+            level: obj_cfg.beta,
+            lambda_rel: cfg.lambda_b2_rel,
+            mean_objective: f64::NAN,
+            fold_objective: Vec::new(),
+            fold_rises: Vec::new(),
+            fold_violations: Vec::new(),
+            cv_feasible: true,
+        });
+    }
+    let levels_used: Vec<f64> = if cv_skipped {
+        Vec::new()
+    } else {
+        levels.clone()
+    };
+    for &level in &levels_used {
         for &lambda_rel in &cfg.lambda_grid_rel {
             let lambda_abs = lambda_rel * h_scale;
             let mut fold_objective = Vec::new();
@@ -2220,7 +2442,19 @@ fn compute_v2_variants(
                     e_k0,
                     alpha,
                 );
-                fold_objective.push(obj_cfg.objective_value(&m));
+                // 兼容既有目标逐位不变：3 折 × 3 design 点的标准配置下，每折验证集恰好 1 个点
+                // （M=1 退化）。历史口径里 seat-std/combined 的折目标值是 NaN（seat_std 无定义），
+                // 这里保留该口径，否则 B3 的 CV 选择会变（虽然 M=1 的 seat 离散度本身没有意义）。
+                let fold_value = if !m.seat_std_defined
+                    && matches!(
+                        obj_cfg.kind,
+                        ObjectiveKind::SeatStd | ObjectiveKind::Combined
+                    ) {
+                    f64::NAN
+                } else {
+                    obj_cfg.objective_value(&m)
+                };
+                fold_objective.push(fold_value);
                 let chk =
                     objective::rise_check(&p_val_after, &p_val_before, &local, plan, max_rise);
                 fold_rises.push(chk.max_rise_db);
@@ -2350,7 +2584,7 @@ fn compute_v2_variants(
     let c = &candidates[chosen.idx];
     let level_selected = Some(c.level);
     let lambda_selected = c.lambda_rel;
-    let cv = Json::Obj(vec![
+    let mut cv_fields: Vec<(String, Json)> = vec![
         ("folds".to_string(), Json::Num(folds as f64)),
         ("objective".to_string(), Json::str(objective_name(obj_cfg))),
         (
@@ -2365,9 +2599,7 @@ fn compute_v2_variants(
                             ("mean_objective".to_string(), Json::num(c.mean_objective)),
                             (
                                 "fold_objective".to_string(),
-                                Json::Arr(
-                                    c.fold_objective.iter().map(|v| Json::num(*v)).collect(),
-                                ),
+                                Json::Arr(c.fold_objective.iter().map(|v| Json::num(*v)).collect()),
                             ),
                             (
                                 "fold_max_rise_db".to_string(),
@@ -2389,9 +2621,22 @@ fn compute_v2_variants(
         ),
         (
             "selection".to_string(),
-            Json::str("design-only 3-fold CV objective + holdout-safe max_db_rise feasibility; holdout never used"),
+            Json::str(if cv_skipped {
+                "CV skipped (design points < 2): B3 = nominal target_level + B2 lambda_rel; holdout never used"
+            } else {
+                "design-only 3-fold CV objective + holdout-safe max_db_rise feasibility; holdout never used"
+            }),
         ),
-    ]);
+    ];
+    if cv_skipped {
+        // 单点退化：如实标注没有 CV，不伪造折分数（B3 = 名义 target_level + B2 λ）。
+        cv_fields.push(("cv_skipped".to_string(), Json::Bool(true)));
+        cv_fields.push((
+            "cv_skip_reason".to_string(),
+            Json::str("design 点 < 2：单点无法做折内/折外划分；B3 采用名义 target_level 与 B2 的 lambda_rel（不伪造 CV 分数）"),
+        ));
+    }
+    let cv = Json::Obj(cv_fields);
     Ok(VariantOutcome {
         b2: FirVariantResult {
             p_after: p_b2,
@@ -2405,6 +2650,8 @@ fn compute_v2_variants(
             objective_value: objv2,
             feasibility: feas2,
             safety: None,
+            pre_safety_metrics: None,
+            pre_safety_objective_value: None,
         },
         b3: FirVariantResult {
             p_after: chosen.p_after,
@@ -2418,6 +2665,8 @@ fn compute_v2_variants(
             objective_value: chosen.objective_value,
             feasibility: chosen.feasibility,
             safety: None,
+            pre_safety_metrics: None,
+            pre_safety_objective_value: None,
         },
         cv,
     })

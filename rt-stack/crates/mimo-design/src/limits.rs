@@ -218,6 +218,37 @@ pub struct SafetyReport {
 }
 
 impl SafetyReport {
+    /// 逐项残差 JSON（PARTIAL/NONE 的"差多少 dB、撞了哪条安全限"）。
+    ///
+    /// 4.3 目标报告（pipeline 的 objective_outcome 块）直接复用本方法，
+    /// 保证"目标指标 + 三态 + 残差"用的是同一份残差数据。
+    pub fn residuals_json(&self) -> Json {
+        let residuals: Vec<Json> = self
+            .residuals
+            .iter()
+            .map(|r| {
+                Json::Obj(vec![
+                    ("role".to_string(), Json::str(r.role.clone())),
+                    (
+                        "band_center_hz".to_string(),
+                        Json::opt_num(r.band_center_hz),
+                    ),
+                    ("target_db".to_string(), Json::num(r.target_db)),
+                    ("achieved_db".to_string(), Json::num(r.achieved_db)),
+                    ("deficit_db".to_string(), Json::num(r.deficit_db)),
+                    (
+                        "limit".to_string(),
+                        match r.limit {
+                            Some(k) => Json::str(k.as_str()),
+                            None => Json::Null,
+                        },
+                    ),
+                ])
+            })
+            .collect();
+        Json::Arr(residuals)
+    }
+
     /// 报告 JSON。
     pub fn json(&self, source_ids: &[String], plan: &BandPlan) -> Json {
         let hits: Vec<Json> = self
@@ -248,29 +279,7 @@ impl SafetyReport {
                 ])
             })
             .collect();
-        let residuals: Vec<Json> = self
-            .residuals
-            .iter()
-            .map(|r| {
-                Json::Obj(vec![
-                    ("role".to_string(), Json::str(r.role.clone())),
-                    (
-                        "band_center_hz".to_string(),
-                        Json::opt_num(r.band_center_hz),
-                    ),
-                    ("target_db".to_string(), Json::num(r.target_db)),
-                    ("achieved_db".to_string(), Json::num(r.achieved_db)),
-                    ("deficit_db".to_string(), Json::num(r.deficit_db)),
-                    (
-                        "limit".to_string(),
-                        match r.limit {
-                            Some(k) => Json::str(k.as_str()),
-                            None => Json::Null,
-                        },
-                    ),
-                ])
-            })
-            .collect();
+        let residuals = self.residuals_json();
         let per_source: Vec<Json> = self
             .max_band_gain_db
             .iter()
@@ -345,7 +354,7 @@ impl SafetyReport {
             ("never_exceeded".to_string(), Json::Bool(self.never_exceeded)),
             ("per_source".to_string(), Json::Arr(per_source)),
             ("hits".to_string(), Json::Arr(hits)),
-            ("residuals".to_string(), Json::Arr(residuals)),
+            ("residuals".to_string(), residuals),
             (
                 "semantics".to_string(),
                 Json::str("FULL = 无钳位且达标；PARTIAL = 撞安全限或目标残差（残差逐项列出）；NONE = 安全限内无可行解。安全限永不越过，顶满仍不达标不得报成功。"),

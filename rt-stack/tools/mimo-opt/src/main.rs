@@ -9,6 +9,11 @@
 //!       [--out-dir <artifacts-dir>]
 //!   cargo run --release -p khaen-mimo-opt -- --verify <artifacts-dir>
 //!
+//! 4.3 单点目标（例：单点校准，模态衰减 + 皇帝位谷深，座位离散权重为 0；
+//! 可与 --authority/--safety 同时开启）：
+//!   cargo run --release -p khaen-mimo-opt -- --fixtures <dir> --out <runs-dir> --scene <id> \
+//!       --objective single-point --authority --safety --out-dir <artifacts-dir>
+//!
 //! 4.5 产物语义（见 src/artifact.rs）：
 //! - 一次成功运行产出一个自洽目录（默认 <out>/run-<params_sha256 前 16 位>/，可用 --out-dir 指定）：
 //!   params.json（完整输入快照）+ report.json + metrics.csv + fir/*.csv + manifest.json；
@@ -152,12 +157,14 @@ fn parse_args() -> Result<Args, String> {
             "--help" | "-h" => {
                 println!(
                     "用法: mimo-opt --fixtures <dir> --out <runs-dir> [--scene <id>] [--verify-fixtures] [--solver own|modal]\n\
-                     \x20      [--objective emodal|seat-std|null-depth|combined] [--beta 0.70] [--target-level 1.0]\n\
+                     \x20      [--objective emodal|seat-std|null-depth|combined|single-point] [--beta 0.70] [--target-level 1.0]\n\
                      \x20      [--p-norm 6] [--w-std 1.0] [--w-null 1.0] [--w-e 1.0] [--max-db-rise 2.0] [--maxdev-weight 0.1]\n\
                      \x20      [--min-snr-db 15] [--authority|--no-authority] [--authority-eps-rel 1e-6] [--authority-max-gamma 1e4]\n\
                      \x20      [--safety|--no-safety] [--max-band-boost-db 3] [--max-positive-sum-db 6] [--max-predicted-peak-dbfs -1]\n\
                      \x20      [--out-dir <artifacts-dir>]\n\
-                     \x20      mimo-opt --verify <artifacts-dir>"
+                     \x20      mimo-opt --verify <artifacts-dir>\n\
+                     \x20  例（计划 4.3 单点目标 + 权威 + 安全钳位）:\n\
+                     \x20      mimo-opt --fixtures <dir> --out <runs-dir> --objective single-point --authority --safety"
                 );
                 std::process::exit(0);
             }
@@ -208,11 +215,18 @@ fn build_config(args: &Args) -> Result<RunConfig, String> {
         None => ObjectiveKind::EModal,
         Some(s) => ObjectiveKind::parse(s).ok_or_else(|| {
             format!(
-                "未知 --objective {}（支持 emodal|seat-std|null-depth|combined）",
+                "未知 --objective {}（支持 emodal|seat-std|null-depth|combined|single-point）",
                 s
             )
         })?,
     };
+    // 计划 4.3：single-point 的座位离散项权重固定为 0（目标里结构上不存在该项）。
+    // 显式给非零 --w-std 时 fail-closed，不静默忽略用户参数。
+    if kind == ObjectiveKind::SinglePoint && args.w_std.map(|v| v != 0.0).unwrap_or(false) {
+        return Err(
+            "--objective single-point 的座位离散项权重固定为 0，不接受非零 --w-std".to_string(),
+        );
+    }
     // --beta 是 emodal 的 beta；--target-level 是 band-target 目标的 beta_level（优先级更高）
     let level_override = args.target_level.or(args.beta);
     let mut obj = ObjectiveConfig::for_kind(kind, level_override);

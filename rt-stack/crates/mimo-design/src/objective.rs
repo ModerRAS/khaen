@@ -1,11 +1,11 @@
-//! 目标函数扩展 v2（OBJECTIVES-V2.md）：emodal | seat-std | null-depth | combined。
+//! 目标函数扩展 v2（OBJECTIVES-V2.md）：emodal | seat-std | null-depth | combined | single-point。
 //!
 //! 全部只用 design 点；holdout 绝不参与选择。SIMULATED / UNPROVEN。
 //!
 //! 口径：
-//! - 目标幅度（seat-std/null-depth/combined）：每 evaluated 1/3 oct 带常数
+//! - 目标幅度（seat-std/null-depth/combined/single-point）：每 evaluated 1/3 oct 带常数
 //!   A_b = beta_level · mean_{m∈D} sqrt(mean_{f∈B_b}|P0_m(f)|²)（功率均值再开方）；
-//!   频带外 bin 用最近带常数外推。
+//!   频带外 bin 用最近带常数外推。**五类目标共用同一套幅度/频带常数，没有第二套口径。**
 //! - emodal 保持 v1 逐频点 target（build_target，beta=0.70），本模块只提供附加指标；
 //! - 指标：e_modal（v1 同口径）、seat_std_mean_db / seat_std_max_db（带内 10log10(E_m,b) 的总体 std）、
 //!   max_dev_db（相对 B0 的逐点逐带 |ΔdB| 最大）、null_depth_mean_db / worst
@@ -14,7 +14,17 @@
 //!   seat-std: r=||P_m(f)|-A(f)|，w=clamp((r/r̄)^p, w_min, w_max)（r̄ 为该频点跨 mic 均值，尺度无关），
 //!            再按频点归一化 mean_m w = 1（保持 λ 口径不变）；
 //!   null-depth: |P|<A 时 w=1+k_null·((A-|P|)/A)²，否则 1，再归一化 mean=1；
-//!   combined: w = w_std·seat_w + w_null·null_w，再归一化 mean=1。
+//!   combined: w = w_std·seat_w + w_null·null_w，再归一化 mean=1；
+//!   single-point: 结构上等价于 combined 且 w_std = 0，即 IRLS 权重 = null-depth 权重（座位离散
+//!            项**不参与**目标值与权重，不是"乘 0 后碰 NaN"）。
+//!
+//! single-point（计划 4.3「单点目标函数」）：
+//! - 目标值 = w_e·e_modal_db + w_null·(−null_depth_mean_db)，**不含** seat_std 项；
+//!   语义 = 模态衰减（emodal 口径）+ 皇帝位谷深（null-depth 口径）。
+//! - M=1（只有 1 个 design 麦，合法输入）显式退化：seat_std 无定义（seat_std_defined=false，
+//!   值定义为 0，报告里写 null），源间干涉 null-depth 恒为 0 dB（min=mean，null_depth_defined=false）；
+//!   单点谷深实际由 null-depth IRLS 权重 1+k_null·((A−|P|)/A)² 承担，目标值退化为 e_modal_db。
+//!   全程无除零 / 无 NaN / 无 Inf（有单测）。
 
 use crate::evaluate::{delta_db, residual_ratios, BandPlan, ENERGY_MIGRATION_RATIO};
 use crate::solve::Cx;
@@ -26,6 +36,8 @@ pub enum ObjectiveKind {
     SeatStd,
     NullDepth,
     Combined,
+    /// 计划 4.3 单点目标：模态衰减 + 皇帝位谷深；座位离散项结构上不参与。
+    SinglePoint,
 }
 
 impl ObjectiveKind {
@@ -35,6 +47,7 @@ impl ObjectiveKind {
             "seat-std" | "seat_std" => Some(ObjectiveKind::SeatStd),
             "null-depth" | "null_depth" => Some(ObjectiveKind::NullDepth),
             "combined" => Some(ObjectiveKind::Combined),
+            "single-point" | "single_point" => Some(ObjectiveKind::SinglePoint),
             _ => None,
         }
     }
@@ -44,15 +57,20 @@ impl ObjectiveKind {
             ObjectiveKind::SeatStd => "seat-std",
             ObjectiveKind::NullDepth => "null-depth",
             ObjectiveKind::Combined => "combined",
+            ObjectiveKind::SinglePoint => "single-point",
         }
     }
     /// 名义 beta_level（OBJECTIVES-V2 §1）。
+    ///
+    /// single-point 不是新的一套幅度口径：它是 combined 去掉座位离散项后的特例，
+    /// 所以沿用 combined 的 beta_level = 0.85（同一 A_b 公式、同一阶梯/IRLS 框架）。
     pub fn default_beta(self) -> f64 {
         match self {
             ObjectiveKind::EModal => 0.70,
             ObjectiveKind::SeatStd => 1.00,
             ObjectiveKind::NullDepth => 1.00,
             ObjectiveKind::Combined => 0.85,
+            ObjectiveKind::SinglePoint => 0.85,
         }
     }
     /// emodal 之外的幅度目标；seat-std 用 Lp/minimax 幅度残差。
@@ -116,6 +134,11 @@ impl ObjectiveConfig {
         cfg.kind = kind;
         cfg.beta = beta_override.unwrap_or_else(|| kind.default_beta());
         cfg.ladder_enabled = kind.is_band_target();
+        if kind == ObjectiveKind::SinglePoint {
+            // 计划 4.3：单点目标 = 模态衰减 + 皇帝位谷深，座位离散项权重置 0。
+            // 不是"乘 0"：objective_value / irls_weights 里座位项整项不存在（见下）。
+            cfg.w_std = 0.0;
+        }
         cfg
     }
 
@@ -148,6 +171,12 @@ impl ObjectiveConfig {
                 self.w_e * m.e_modal_db
                     + self.w_std * m.seat_std_mean_db
                     + self.w_null * (-m.null_depth_mean_db)
+            }
+            // 计划 4.3：显式分支——座位离散项**整项不出现**（不是 w_std*NaN）。
+            // M=1 时 seat_std 无定义，若写成 0·seat_std_mean_db 会得到 0（值已定义成 0），
+            // 但语义上单点目标本就没有"座位间"这一项，故结构上直接省略。
+            ObjectiveKind::SinglePoint => {
+                self.w_e * m.e_modal_db + self.w_null * (-m.null_depth_mean_db)
             }
         }
     }
@@ -217,9 +246,15 @@ pub struct ObjMetrics {
     pub energy_migration: bool,
     pub seat_std_mean_db: f64,
     pub seat_std_max_db: f64,
+    /// 座位离散量是否有定义：design 点 < 2（单点）时为 false，
+    /// 此时 seat_std_* 定义为 0（M=1 显式分支，不产生 NaN/Inf），报告里写 null。
+    pub seat_std_defined: bool,
     pub max_dev_db: f64,
     pub null_depth_mean_db: f64,
     pub null_depth_worst_db: f64,
+    /// 源间干涉谷深是否有定义：design 点 < 2（单点）时为 false；
+    /// 此时 null_depth_* 恒为 0 dB（min=mean），单点谷深由 null-depth IRLS 权重承担。
+    pub null_depth_defined: bool,
     pub per_point_band_db: Vec<Vec<Option<f64>>>,
 }
 
@@ -312,37 +347,47 @@ pub fn metrics_for_points(
         })
         .collect();
     // 座位离散度：seat_std = std_b(10log10 E_m,b)；max_dev_db = max_{b,m}|level_{m,b} - mean_b|
-    let mut stds = Vec::new();
+    //
+    // M=1（单点）**显式分支**：只有 1 个 design 点时"座位间"没有定义，不去算 0/0：
+    // seat_std_* 定义为 0 且 seat_std_defined=false（报告里写 null），全程无 NaN/Inf。
     let mut max_dev = 0.0f64;
-    for b in 0..nb {
-        let mut levels = Vec::new();
-        for mi in 0..mics.len() {
-            let ea = after_mic_band[mi][b];
-            if ea > 0.0 {
-                levels.push(energy_db(ea));
+    if mics.len() >= 2 {
+        let mut stds = Vec::new();
+        for b in 0..nb {
+            let mut levels = Vec::new();
+            for mi in 0..mics.len() {
+                let ea = after_mic_band[mi][b];
+                if ea > 0.0 {
+                    levels.push(energy_db(ea));
+                }
             }
-        }
-        if levels.len() >= 2 {
-            let mean = levels.iter().sum::<f64>() / levels.len() as f64;
-            let var =
-                levels.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / levels.len() as f64;
-            stds.push(var.sqrt());
-            for v in &levels {
-                max_dev = max_dev.max((v - mean).abs());
+            if levels.len() >= 2 {
+                let mean = levels.iter().sum::<f64>() / levels.len() as f64;
+                let var = levels.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>()
+                    / levels.len() as f64;
+                stds.push(var.sqrt());
+                for v in &levels {
+                    max_dev = max_dev.max((v - mean).abs());
+                }
             }
-        } else if levels.len() == 1 {
-            // 单点集合无离散度，取 0
+            let _ = &before_mic_band;
         }
-        let _ = &before_mic_band;
-    }
-    out.seat_std_mean_db = if stds.is_empty() {
-        f64::NAN
+        out.seat_std_defined = !stds.is_empty();
+        out.seat_std_mean_db = if stds.is_empty() {
+            f64::NAN
+        } else {
+            stds.iter().sum::<f64>() / stds.len() as f64
+        };
+        out.seat_std_max_db = stds.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     } else {
-        stds.iter().sum::<f64>() / stds.len() as f64
-    };
-    out.seat_std_max_db = stds.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        out.seat_std_defined = false;
+        out.seat_std_mean_db = 0.0;
+        out.seat_std_max_db = 0.0;
+    }
     out.max_dev_db = max_dev;
-    // 源间干涉 null
+    // 源间干涉 null（谷深）：10log10(min_m E_m,b / mean_m E_m,b)，越接近 0 越好。
+    // M=1 时 min=mean → 恒 0 dB：该量不可定义（null_depth_defined=false），
+    // 单点谷深由 null-depth IRLS 权重承担（见 irls_weights）；不产生 NaN/Inf。
     let mut nulls = Vec::new();
     for b in 0..nb {
         let energies: Vec<f64> = (0..mics.len())
@@ -356,12 +401,25 @@ pub fn metrics_for_points(
         let mean_e = energies.iter().sum::<f64>() / energies.len() as f64;
         nulls.push(10.0 * (min_e / mean_e).log10());
     }
+    out.null_depth_defined = mics.len() >= 2 && !nulls.is_empty();
     out.null_depth_mean_db = if nulls.is_empty() {
-        f64::NAN
+        if mics.len() < 2 {
+            0.0
+        } else {
+            f64::NAN
+        }
     } else {
         nulls.iter().sum::<f64>() / nulls.len() as f64
     };
-    out.null_depth_worst_db = nulls.iter().cloned().fold(f64::INFINITY, f64::min);
+    out.null_depth_worst_db = if nulls.is_empty() {
+        if mics.len() < 2 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        nulls.iter().cloned().fold(f64::INFINITY, f64::min)
+    };
     // 逐点逐带 dB 变化（before = 该点自身 B0）
     out.per_point_band_db = (0..mics.len())
         .map(|mi| {
@@ -379,6 +437,40 @@ pub fn metrics_for_points(
         })
         .collect();
     out
+}
+
+/// null-depth 的 per-(mic,bin) IRLS 权重：|P|<A 时 w=1+k_null*((A-|P|)/A)^2，否则 1；
+/// 再按频点归一化 mean_m w = 1（保持 lambda 口径不变）。
+///
+/// 提取成独立函数供 null-depth 与 single-point 共用：single-point 的座位离散项权重为 0，
+/// 其 IRLS 权重就是本函数，与 combined(w_std=0) 逐位一致。
+fn null_depth_weights(
+    n: usize,
+    k: usize,
+    p_after_design: &[Vec<Cx>],
+    target_per_bin: &[f64],
+    k_null: f64,
+) -> Vec<Vec<f64>> {
+    let mut weights = vec![vec![1.0f64; k]; n];
+    for kj in 0..k {
+        let a = target_per_bin[kj];
+        let mut sum = 0.0;
+        for mi in 0..n {
+            let mag = p_after_design[mi][kj].abs();
+            let w = if a > 1e-30 && mag < a {
+                1.0 + k_null * ((a - mag) / a).powi(2)
+            } else {
+                1.0
+            };
+            weights[mi][kj] = w;
+            sum += w;
+        }
+        let norm = if sum > 0.0 { n as f64 / sum } else { 1.0 };
+        for mi in 0..n {
+            weights[mi][kj] *= norm;
+        }
+    }
+    weights
 }
 
 /// 由当前迭代的压力计算 per-(mic,bin) IRLS 权重（design 点，长度 [n_design][K]）。
@@ -419,25 +511,12 @@ pub fn irls_weights(
             weights
         }
         ObjectiveKind::NullDepth => {
-            for kj in 0..k {
-                let a = target_per_bin[kj];
-                let mut sum = 0.0;
-                for mi in 0..n {
-                    let mag = p_after_design[mi][kj].abs();
-                    let w = if a > 1e-30 && mag < a {
-                        1.0 + cfg.k_null * ((a - mag) / a).powi(2)
-                    } else {
-                        1.0
-                    };
-                    weights[mi][kj] = w;
-                    sum += w;
-                }
-                let norm = if sum > 0.0 { n as f64 / sum } else { 1.0 };
-                for mi in 0..n {
-                    weights[mi][kj] *= norm;
-                }
-            }
-            weights
+            null_depth_weights(n, k, p_after_design, target_per_bin, cfg.k_null)
+        }
+        // 计划 4.3 单点目标：座位离散项权重为 0 -> IRLS 权重 = null-depth 权重；
+        // 与 combined(w_std=0) 逐位一致（有单测）。
+        ObjectiveKind::SinglePoint => {
+            null_depth_weights(n, k, p_after_design, target_per_bin, cfg.k_null)
         }
         ObjectiveKind::Combined => {
             let w_seat = irls_weights(
@@ -685,6 +764,142 @@ mod tests {
         );
         for w in lv.windows(2) {
             assert!((w[0] - w[1] - 0.05).abs() < 1e-9);
+        }
+    }
+
+    // ---------- 计划 4.3：single-point 目标 ----------
+
+    #[test]
+    fn single_point_parses_and_defaults() {
+        assert_eq!(
+            ObjectiveKind::parse("single-point"),
+            Some(ObjectiveKind::SinglePoint)
+        );
+        assert_eq!(
+            ObjectiveKind::parse("single_point"),
+            Some(ObjectiveKind::SinglePoint)
+        );
+        assert_eq!(ObjectiveKind::SinglePoint.tag(), "single-point");
+        // 不新造幅度口径：沿用 combined 的 beta_level = 0.85、band target、阶梯。
+        assert!((ObjectiveKind::SinglePoint.default_beta() - 0.85).abs() < 1e-12);
+        assert!(ObjectiveKind::SinglePoint.is_band_target());
+        let cfg = ObjectiveConfig::for_kind(ObjectiveKind::SinglePoint, None);
+        assert_eq!(cfg.w_std, 0.0, "single-point 座位离散项权重必须为 0");
+        assert!(cfg.ladder_enabled);
+        // beta 覆盖仍生效（--beta/--target-level）
+        let cfg2 = ObjectiveConfig::for_kind(ObjectiveKind::SinglePoint, Some(0.62));
+        assert!((cfg2.beta - 0.62).abs() < 1e-12);
+    }
+
+    #[test]
+    fn single_point_objective_value_excludes_seat_term() {
+        let m = ObjMetrics {
+            e_modal_db: -6.0,
+            seat_std_mean_db: 4.0,
+            seat_std_defined: true,
+            max_dev_db: 2.0,
+            null_depth_mean_db: -2.0,
+            null_depth_defined: true,
+            ..Default::default()
+        };
+        let sp = ObjectiveConfig::for_kind(ObjectiveKind::SinglePoint, None);
+        // -6 + 1*(-(-2)) = -4；若错误地带上座位项会得到 -6+4+2 = 0
+        assert!(
+            (sp.objective_value(&m) - (-4.0)).abs() < 1e-12,
+            "single_point value={}",
+            sp.objective_value(&m)
+        );
+        // 与 combined(w_std=0) 逐位一致（同一模态衰减 + 谷深口径）
+        let mut comb0 = ObjectiveConfig::for_kind(ObjectiveKind::Combined, None);
+        comb0.w_std = 0.0;
+        assert_eq!(
+            sp.objective_value(&m).to_bits(),
+            comb0.objective_value(&m).to_bits()
+        );
+    }
+
+    #[test]
+    fn single_point_irls_weights_equal_null_depth_and_combined_zero_seat() {
+        let plan = BandPlan::from_centers(&[40.0], &[40.0]);
+        let cfg = ObjectiveConfig::for_kind(ObjectiveKind::SinglePoint, None);
+        // 2 个 design 点：一个低于目标（谷）、一个高于目标
+        let p = vec![vec![cx(0.5, 0.0)], vec![cx(2.0, 0.0)]];
+        let sp = irls_weights(ObjectiveKind::SinglePoint, &cfg, &p, &[1.0], &plan);
+        let nd = irls_weights(ObjectiveKind::NullDepth, &cfg, &p, &[1.0], &plan);
+        let mut comb0 = ObjectiveConfig::for_kind(ObjectiveKind::Combined, None);
+        comb0.w_std = 0.0;
+        let cw = irls_weights(ObjectiveKind::Combined, &comb0, &p, &[1.0], &plan);
+        assert_eq!(sp, nd, "single-point IRLS 权重必须等于 null-depth");
+        assert_eq!(sp, cw, "single-point IRLS 权重必须等于 combined(w_std=0)");
+        // 谷点权重高于非谷点 + 均值归一化为 1（λ 口径不变）
+        assert!(sp[0][0] > sp[1][0], "weights={:?}", sp);
+        let mean = (sp[0][0] + sp[1][0]) / 2.0;
+        assert!((mean - 1.0).abs() < 1e-12, "mean={}", mean);
+    }
+
+    #[test]
+    fn m1_single_point_metrics_are_finite_and_explicit() {
+        let plan = BandPlan::from_centers(&[40.0, 100.0], &[40.0, 100.0]);
+        // 单 design 麦：40 Hz 带 0.25 能量（谷），100 Hz 带 4.0
+        let p_before = vec![vec![cx(1.0, 0.0), cx(1.0, 0.0)]];
+        let p_after = vec![vec![cx(0.5, 0.0), cx(2.0, 0.0)]];
+        let denom = vec![1.0, 1.0];
+        let alpha = vec![1.0, 1.0];
+        let m = metrics_for_points(&p_after, &p_before, &[0], &plan, &denom, &alpha);
+        // 显式退化：座位离散无定义（值 0，不是 NaN/Inf）
+        assert!(!m.seat_std_defined);
+        assert_eq!(m.seat_std_mean_db, 0.0);
+        assert_eq!(m.seat_std_max_db, 0.0);
+        assert_eq!(m.max_dev_db, 0.0);
+        // 源间干涉谷深：min=mean → 恒 0 dB，且标记不可定义
+        assert!(!m.null_depth_defined);
+        assert_eq!(m.null_depth_mean_db, 0.0);
+        assert_eq!(m.null_depth_worst_db, 0.0);
+        // 全部指标有限（无 NaN/Inf）
+        let fields = [
+            m.e_modal,
+            m.e_modal_db,
+            m.e_modal_eq_db,
+            m.seat_std_mean_db,
+            m.seat_std_max_db,
+            m.max_dev_db,
+            m.null_depth_mean_db,
+            m.null_depth_worst_db,
+        ];
+        for (i, v) in fields.iter().enumerate() {
+            assert!(v.is_finite(), "field[{}]={} 非有限", i, v);
+        }
+        for row in &m.per_point_band_db {
+            for v in row.iter().flatten() {
+                assert!(v.is_finite(), "per_point_band_db 含非有限值 {}", v);
+            }
+        }
+        // single_point 目标值有限（不因座位项 NaN 传播）
+        let cfg = ObjectiveConfig::for_kind(ObjectiveKind::SinglePoint, None);
+        let value = cfg.objective_value(&m);
+        assert!(value.is_finite(), "single_point value={}", value);
+        // 单点（M=1）时谷深项恒 0 → 目标值就是模态衰减
+        assert!((value - m.e_modal_db).abs() < 1e-12);
+    }
+
+    #[test]
+    fn m1_single_point_irls_weights_are_finite() {
+        let plan = BandPlan::from_centers(&[40.0], &[40.0]);
+        let cfg = ObjectiveConfig::for_kind(ObjectiveKind::SinglePoint, None);
+        // 单点：谷（0.5 < A）、峰（2 > A）、恰好等于 A 三种情况都不能出 NaN/除零
+        for mag in [0.5f64, 2.0, 1.0, 0.0] {
+            let p = vec![vec![cx(mag, 0.0)]];
+            let w = irls_weights(ObjectiveKind::SinglePoint, &cfg, &p, &[1.0], &plan);
+            assert_eq!(w.len(), 1);
+            assert_eq!(w[0].len(), 1);
+            assert!(
+                w[0][0].is_finite() && w[0][0] > 0.0,
+                "mag={} w={:?}",
+                mag,
+                w
+            );
+            // 单点归一化 mean_m w = 1 → 唯一权重必然是 1
+            assert!((w[0][0] - 1.0).abs() < 1e-12, "mag={} w={:?}", mag, w);
         }
     }
 }
