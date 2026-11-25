@@ -8,8 +8,10 @@
 //! - state-machine：NOT_IMPLEMENTED（T21/T26 实现状态机模型测试）
 //!
 //! v2 迁移说明：
-//! - core v2 尚未提供 ABI/RT 公共类型，abi-layout / drop-audit 暂时对 [`contract`] 里的
-//!   core-v1 v1.1.2 冻结镜像运行（TODO(core)：替换回 khaen-core 类型并按 v2 ABI v3 重写期望值）；
+//! - BlockDesc 与通道/采样率等冻结契约常量直接引用 `khaen-core`（唯一来源，不在本 crate 镜像）；
+//!   v1 plan 头 / ring / worker 统计 / rt-host 类型尚未进入 v2 公共 API，abi-layout / drop-audit
+//!   暂时对 [`contract`] 里的 core-v1 v1.1.2 冻结镜像运行（TODO(core)：v2 对应类型落地后替换，
+//!   预期值按 v2 契约重写）；
 //! - legacy 的 `host-file`（T26 WAV -> session/plan -> 4-worker DAG -> WAV）子命令依赖
 //!   khaen-file-runner，该 crate 不在 v2 workspace 内，故本 crate 不迁入该子命令。
 //!

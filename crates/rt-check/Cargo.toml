@@ -16,3 +16,5 @@ name = "rt-check"
 path = "src/main.rs"
 
 [dependencies]
+# RT 可见的 BlockDesc 与冻结契约常量（core 是唯一来源，rt-check 不再镜像这些）。
+khaen-core = { path = "../core" }

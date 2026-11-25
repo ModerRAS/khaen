@@ -2,8 +2,9 @@
 //!
 //! 类型清单对照 core-v1 §13.2：RT 可见类型必须 core::mem::needs_drop == false。
 //!
-//! v2 迁移说明：core v2 尚未提供 ABI/RT 公共类型，类型清单暂时对 [`crate::contract`] 里的
-//! v1.1.2 冻结镜像运行（TODO(core)：替换回 khaen-core / khaen-rt-host 类型）。
+//! v2 迁移说明：BlockDesc 已由 [`khaen_core::rt::BlockDesc`] 提供，清单直接审计真实 core 类型；
+//! 其余 v1 结构 / rt-host 类型尚未进入 v2 公共 API，暂时对 [`crate::contract`] 的 v1.1.2 冻结
+//! 镜像运行（TODO(core)：v2 对应类型落地后替换）。
 //! 静态扫描对象：RT-MODULE .rs 文件中的 impl Drop / owned 容器 / 引用计数 / 手动释放。
 
 use std::fs;
@@ -40,10 +41,11 @@ pub fn audit_types() -> Report {
         }};
     }
 
+    use khaen_core::rt::BlockDesc;
+
     use crate::contract::abi::{
-        KhaenBlockAckV1, KhaenBlockDescV1, KhaenDiagFirV1, KhaenEpochInfoV1, KhaenEventV1,
-        KhaenHwParamsV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1, KhaenSpscHeaderV1,
-        KhaenWorkerStatsV1,
+        KhaenBlockAckV1, KhaenDiagFirV1, KhaenEpochInfoV1, KhaenEventV1, KhaenHwParamsV1,
+        KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1, KhaenSpscHeaderV1, KhaenWorkerStatsV1,
     };
     use crate::contract::rt::{BlockIo, PlanRef, PlanView, RtControl, RtStatus, WorkerRtCtx};
     use crate::contract::rt_host::{
@@ -55,7 +57,7 @@ pub fn audit_types() -> Report {
     no_drop!("PlanView", PlanView<'static>);
     no_drop!("BlockIo", BlockIo<'static>);
     no_drop!("WorkerRtCtx", WorkerRtCtx<'static>);
-    no_drop!("KhaenBlockDescV1", KhaenBlockDescV1);
+    no_drop!("BlockDesc", BlockDesc);
     no_drop!("KhaenEpochInfoV1", KhaenEpochInfoV1);
     no_drop!("KhaenEventV1", KhaenEventV1);
     no_drop!("KhaenHwParamsV1", KhaenHwParamsV1);

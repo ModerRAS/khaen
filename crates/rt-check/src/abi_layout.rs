@@ -3,8 +3,9 @@
 //! 期望值来源：core-v1 **v1.1.2** 附录 B.1/B.3/B.4（Python struct 独立复算）+ §11.2
 //! 布局常量表（errata E1/E2）。本文件断言数 = `RT_CHECK_ABI_LAYOUT_SCANNED`（§11.2）。
 //!
-//! v2 迁移说明：core v2 尚未提供 ABI/RT 公共类型，本检查暂时对 [`crate::contract`] 里的
-//! v1.1.2 冻结镜像运行（TODO(core)：替换回 khaen-core 类型，并按 v2 ABI v3 重写期望值）。
+//! v2 迁移说明：BlockDesc 已由 [`khaen_core::rt::BlockDesc`] 提供（v2 冻结布局与 v1 逐字段
+//! 一致），本检查直接校验真实 core 类型；其余 v1 结构仍对 [`crate::contract`] 的 v1.1.2 冻结
+//! 镜像运行（TODO(core)：v2 对应类型落地后替换，预期值按 v2 契约重写）。
 
 /// core-v1 §11.2 v1.1.2 期望的 abi-layout 检查项数（旧 109；errata E1 +11 → 120）。
 ///
@@ -13,10 +14,11 @@ pub const RT_CHECK_ABI_LAYOUT_SCANNED: usize = 120;
 
 use core::mem::{align_of, offset_of, size_of};
 
+use khaen_core::rt::{self as core_rt, BlockDesc};
+
 use crate::contract::abi::{
-    KhaenBlockAckV1, KhaenBlockDescV1, KhaenDiagFirV1, KhaenEpochInfoV1, KhaenEventV1,
-    KhaenHwParamsV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1, KhaenSpscHeaderV1,
-    KhaenWorkerAffinityV1, KhaenWorkerStatsV1,
+    KhaenBlockAckV1, KhaenDiagFirV1, KhaenEpochInfoV1, KhaenEventV1, KhaenHwParamsV1, KhaenPathV1,
+    KhaenPlanHeaderV1, KhaenRoleV1, KhaenSpscHeaderV1, KhaenWorkerAffinityV1, KhaenWorkerStatsV1,
 };
 use crate::contract::rt;
 
@@ -60,46 +62,16 @@ macro_rules! check_offset {
 pub fn run() -> Report {
     let mut report = Report::default();
 
-    check_size_align!(report, "KhaenBlockDescV1", KhaenBlockDescV1, 64, 64);
-    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, epoch_id, 8);
-    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, block_seq, 16);
-    check_offset!(
-        report,
-        "KhaenBlockDescV1",
-        KhaenBlockDescV1,
-        frame_index,
-        24
-    );
-    check_offset!(
-        report,
-        "KhaenBlockDescV1",
-        KhaenBlockDescV1,
-        plan_version,
-        32
-    );
-    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, flags, 36);
-    check_offset!(
-        report,
-        "KhaenBlockDescV1",
-        KhaenBlockDescV1,
-        valid_frames,
-        40
-    );
-    check_offset!(report, "KhaenBlockDescV1", KhaenBlockDescV1, slot_index, 44);
-    check_offset!(
-        report,
-        "KhaenBlockDescV1",
-        KhaenBlockDescV1,
-        mono_publish_ns,
-        48
-    );
-    check_offset!(
-        report,
-        "KhaenBlockDescV1",
-        KhaenBlockDescV1,
-        play_deadline_ns,
-        56
-    );
+    check_size_align!(report, "BlockDesc", BlockDesc, 64, 64);
+    check_offset!(report, "BlockDesc", BlockDesc, epoch_id, 8);
+    check_offset!(report, "BlockDesc", BlockDesc, block_seq, 16);
+    check_offset!(report, "BlockDesc", BlockDesc, frame_index, 24);
+    check_offset!(report, "BlockDesc", BlockDesc, plan_version, 32);
+    check_offset!(report, "BlockDesc", BlockDesc, flags, 36);
+    check_offset!(report, "BlockDesc", BlockDesc, valid_frames, 40);
+    check_offset!(report, "BlockDesc", BlockDesc, slot_index, 44);
+    check_offset!(report, "BlockDesc", BlockDesc, mono_publish_ns, 48);
+    check_offset!(report, "BlockDesc", BlockDesc, play_deadline_ns, 56);
 
     check_size_align!(report, "KhaenEpochInfoV1", KhaenEpochInfoV1, 64, 64);
     check_offset!(
@@ -506,8 +478,9 @@ pub fn run() -> Report {
     }
     report.scanned += 1;
     // 附录 B.3：128 帧 f32 的 capture/playback payload 字节 = 通道数 × 128 × 4。
-    let capture_bytes = rt::MAX_INPUT_CHANNELS as u64 * 128 * 4;
-    let playback_bytes = rt::MAX_OUTPUT_CHANNELS as u64 * 128 * 4;
+    // 通道上限直接取自 khaen-core 的冻结契约常量。
+    let capture_bytes = core_rt::MAX_INPUT_CHANNELS as u64 * 128 * 4;
+    let playback_bytes = core_rt::MAX_OUTPUT_CHANNELS as u64 * 128 * 4;
     if capture_bytes != 10_240 || playback_bytes != 11_264 {
         report.push(
             "capacity",

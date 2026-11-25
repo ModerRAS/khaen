@@ -1,54 +1,23 @@
 //! 本地 ABI / RT 契约镜像（TODO(core)：等 khaen-core 提供 ABI/RT 类型后替换并删除本模块）。
 //!
 //! rt-check 的 `abi-layout` 与 `drop-audit` 按 core-v1 **v1.1.2** 的期望布局（§11.2 常量表、
-//! 附录 B.1..B.4）检查**真实** core / rt-host 公共类型。v2 重写期 `khaen-core` 只提供方案文件
-//! ABI v3（docs/CONTRACTS.md A），尚未提供 RT 可见类型，因此这里按 core-v1 冻结定义保留最小
-//! 镜像，让离线检查工具可以独立编译、独立跑门禁：
+//! 附录 B.1..B.4）检查真实公共类型。v2 已由 [`khaen_core::rt`] 提供 BlockDesc 与冻结契约常量；
+//! v1 的 plan 头 / ring / worker 统计等结构、§3.5 时限公式与 rt-host 类型尚未进入 v2 公共 API，
+//! 因此这里按 core-v1 冻结定义保留最小镜像，让离线检查工具可以独立编译、独立跑门禁：
 //!
 //! - [`abi`]：§11.5..§11.10 的 POD 结构（字段/顺序/对齐与 v1.1.2 冻结版一致）；
-//! - [`rt`]：§3.5 时限/长度公式 + §13.2 的 RT 可见类型；
+//!   **BlockDesc 例外**：v2 已由 [`khaen_core::rt::BlockDesc`] 提供（布局与 v1 逐字段一致），
+//!   rt-check 直接引用 core，不在这里镜像；
+//! - [`rt`]：§3.5 时限/长度公式 + §13.2 的 RT 可见类型（BlockDesc 来自 core）；
 //! - [`rt_host`]：§13.2 中 rt-host 的 5 个 RT 可见类型。
 //!
-//! **TODO(core)**：core v2 的 ABI/RT 模块落地后，`abi_layout` / `drop_audit` 应改回
-//! `khaen_core::abi` / `khaen_core::rt` / `khaen_rt_host::*` 并同步 spec 的检查项数
-//! （v2 方案文件 ABI v3 与 v1 plan 结构不同，预期值需要按 v3 重写）；本模块届时删除。
-//! 在替换之前，本模块是 rt-check 唯一允许的"契约替身"，不改动检查规则。
+//! **TODO(core)**：剩余 v1 结构按 v2 方案文件 ABI v3 / 控制协议重新定义后，`abi_layout` /
+//! `drop_audit` 应改为直接引用 core（届时预期值需要按 v3 重写、检查项数同步 spec），本模块
+//! 相应收缩或删除。在替换之前，本模块是 rt-check 唯一允许的"契约替身"，不改动检查规则。
 
 /// core-v1 §11 ABI 结构镜像（size/align/offset 由 [`crate::abi_layout`] 校验）。
 pub mod abi {
     use core::sync::atomic::{AtomicU32, AtomicU64};
-
-    /// block 身份（64 B，align 64；core-v1 §11.4）。
-    #[repr(C, align(64))]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct KhaenBlockDescV1 {
-        /// = ABI_VERSION。
-        pub abi_version: u16,
-        /// 块大小 B（64/128）。
-        pub block_size: u16,
-        /// 本块输入通道数。
-        pub n_in: u16,
-        /// 本块输出通道数。
-        pub n_out: u16,
-        /// 时间轴 ID。
-        pub epoch_id: u64,
-        /// epoch 内块序号。
-        pub block_seq: u64,
-        /// 输入绝对帧号。
-        pub frame_index: u64,
-        /// plan 版本。
-        pub plan_version: u32,
-        /// 状态位。
-        pub flags: u32,
-        /// 有效帧数。
-        pub valid_frames: u32,
-        /// payload 槽号。
-        pub slot_index: u32,
-        /// capture 发布时刻。
-        pub mono_publish_ns: u64,
-        /// 本块截止时刻。
-        pub play_deadline_ns: u64,
-    }
 
     /// epoch 元数据（64 B，align 64；core-v1 §11.4）。
     #[repr(C, align(64))]
@@ -385,15 +354,12 @@ pub mod abi {
 pub mod rt {
     use core::ptr::NonNull;
 
-    use super::abi::{
-        KhaenBlockAckV1, KhaenBlockDescV1, KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1,
-        KhaenRoleV1, KhaenWorkerStatsV1,
-    };
+    use khaen_core::rt::BlockDesc;
 
-    /// MOTU UltraLite-mk5 capture 上限（core-v1 §3）。
-    pub const MAX_INPUT_CHANNELS: usize = 20;
-    /// MOTU playback 上限（core-v1 §3）。
-    pub const MAX_OUTPUT_CHANNELS: usize = 22;
+    use super::abi::{
+        KhaenBlockAckV1, KhaenDiagFirV1, KhaenPathV1, KhaenPlanHeaderV1, KhaenRoleV1,
+        KhaenWorkerStatsV1,
+    };
 
     /// DSP worker 编号：0..=3。
     pub type WorkerId = u8;
@@ -467,8 +433,8 @@ pub mod rt {
 
     /// 一个 block 的 planar f32 输入/输出视图（非拥有）。
     pub struct BlockIo<'a> {
-        /// block 身份。
-        pub desc: &'a KhaenBlockDescV1,
+        /// block 身份（core v2 BlockDesc，布局与 v1 一致）。
+        pub desc: &'a BlockDesc,
         /// 输入 planar f32。
         pub input: &'a [f32],
         /// 输出 planar f32。
