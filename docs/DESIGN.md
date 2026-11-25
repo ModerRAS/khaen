@@ -122,3 +122,37 @@
 | 3 kHz 矩阵域重解算 | 系数不兼容 | 重新求解，不复用 12 kHz 库 |
 | 真实闭环依赖出声窗口 | 排期不确定 | 离线部分先行，窗口只用于 T42 |
 | 未来源码与部署再次漂移 | 回到今天的困境 | 约束 2 用 CI + manifest 强制 |
+
+
+## 设备生命周期与采样率归属（T70，系统级，不靠补丁）
+
+### 为什么定这一节
+
+MOTU UltraLite-mk5 的采样率是**设备自身保存的状态**：空闲或 USB 重枚举后回落到上次速率（历史现场是 192 kHz），而 192 kHz 下 TOSLink 带不动 PCM、AES67/桥接链路也可能整体错位。v1 的做法是"48k keeper 定时灌 1 秒静音"+"面板把默认值改成 48k"，这两者都是**补丁**：
+
+- keeper 是定时器，抓不住"刚枚举、还没开流"的窗口；
+- 面板默认值是人工状态，换设备/换人/恢复出厂就丢；
+- 两者都没有把"速率"纳入系统的准入与观测，出错时是静默的。
+
+### 设计：宿主拥有速率，设备只是执行者
+
+1. **速率是方案数据**：`Plan.sample_rate`（ABI v3 已有）是唯一事实来源；daemon 在 `prepare` 时校验"方案速率 == 播放链路速率 == AES67 流速率"，不一致直接 `admission_rejected`，不允许靠重采样掩盖配置错误。
+2. **设备监督器（device supervisor）持有设备**：khaen-host 内唯一所有者，监听 USB/网络设备事件（udev/netlink 或轮询 + 去抖），而不是等定时器。
+3. **状态机（每一步都有进入条件与失败码）**：
+
+   | 状态 | 进入条件 | 失败码 |
+   | --- | --- | --- |
+   | Absent | 设备不在总线上 | `device_absent` |
+   | Enumerated | USB 音频设备出现 | `device_open_failed` |
+   | ControlReady | 控制通道可用（MOTU：CDC 网口 up + 地址 + ping/WS；ALSA：控制项可读） | `control_channel_unavailable` |
+   | RateAsserted | **写入/设置速率并回读一致** | `rate_assert_failed` |
+   | Streaming | 按方案速率打开音频流 | `stream_open_failed` |
+
+4. **每次枚举都重新断言速率**：`RateAsserted` 不是一次性动作；设备事件触发后自动重跑。速率写不进去就 **fail-closed**（进安全静音 + 状态上报），**绝不静默接受设备保存的旧速率**。
+5. **控制通道归监督器管**：v1 的 `motu-net-up` 本质就是这一步，但它挂在 oneshot unit 上、不在设备事件上触发，所以每次重插都要人工补 —— 这是"补丁感"的根源。v2 把它并进监督器状态机。
+6. **观测**：`status` 必须暴露 `device_rate` / `plan_rate` / `rate_asserted` / 失败原因；出现不一致时上报 `rate_mismatch`，而不是让用户靠面板去猜。
+7. **不保底也不猜**：没有"保持 48k 静音流"这类隐藏动作；需要占住设备时由监督器的 `Streaming` 状态显式声明（例如 idle 时保持一条静音流，理由与状态一起上报）。
+
+### 与现有 v1 部署的关系
+
+v1 的 `tspi-motu-48k-keeper` 与 `tspi-motu-net.service` 在 v2 里被**监督器取代**，不再是独立服务；迁移期保留它们作为只读诊断（`WRITE_BACK=0`），不再靠它们保证正确性。
