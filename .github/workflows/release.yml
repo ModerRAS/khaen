@@ -19,20 +19,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: System deps (ALSA dev headers)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
-      - name: Build daemon and real-time host
-        run: cargo build --release --locked -p khaen-daemon -p khaen-rt-host
+      - name: Build daemon, real-time host and calibration tools
+        run: cargo build --release --locked -p khaen-daemon -p khaen-rt-host -p khaen-cal-tools
       - name: Package and describe
         run: |
           set -euo pipefail
           COMMIT="$(git rev-parse HEAD)"
           VERSION="${GITHUB_REF_NAME#v}"
           STAGE="khaen-${VERSION}-linux-x86_64"
-          mkdir -p "dist/${STAGE}/bin" "dist/${STAGE}/deploy"
+          mkdir -p "dist/${STAGE}/bin" "dist/${STAGE}/deploy" "dist/${STAGE}/docs"
           cp target/release/khaen-daemon target/release/khaen-rt-host "dist/${STAGE}/bin/"
-          cp deploy/install.sh deploy/rollback.sh \
+          cp target/release/khaen-single-point target/release/khaen-plan-levels \
+             target/release/khaen-band-levels target/release/khaen-closed-loop \
+             target/release/khaen-closed-loop-run \
+             "dist/${STAGE}/bin/"
+          cp deploy/install.sh deploy/rollback.sh deploy/closed-loop-verdict.sh \
              deploy/khaen-daemon.service deploy/khaen-rt-host.service \
              deploy/daemon.env.example deploy/rt-host.env.example \
              "dist/${STAGE}/deploy/"
+          cp docs/CLOSED-LOOP.md "dist/${STAGE}/docs/"
+          cp crates/cal-tools/README.md "dist/${STAGE}/docs/calibration-cli.md"
           ( cd "dist/${STAGE}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
           ( cd "dist/${STAGE}" && sha256sum -c SHA256SUMS > /dev/null )
           python3 - "${STAGE}" "${VERSION}" "${COMMIT}" <<'PY'

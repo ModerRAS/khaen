@@ -119,3 +119,25 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 | `khaen-rt-host` Linux 编译 | 由 CI 覆盖（本机无 libasound/pkg-config，交叉检查跑不通） |
 | `khaen-rt-host` 真机出声（30 min / 8 h） | **NOT_RUN**（需要设备窗口 + 你的许可，且需要部署方提供 MOTU 速率辅助脚本） |
 | release 打包 `khaen-rt-host` + 两个 unit + 环境变量模板 | 本次已改 `release.yml`/打包清单；**NOT_RUN**（需下次打 tag 实测） |
+
+| 五个校准命令行工具离线测试（Windows） | 实测通过（`cargo test -p khaen-cal-tools`，含 WAV/判定/运行包） |
+| 发布包打包校准工具 + 闭环文档 + 包装脚本 | **NOT_RUN**（本次已改打包清单，需下次打 tag 实测） |
+| 真机闭环复测（基线录音 → 下发 → 施加录音 → 判定） | **NOT_RUN**（需要 MOTU ALSA PCM 名 + 出声窗口许可） |
+
+## 6. 校准命令行工具包与闭环复测入口
+
+发布包（`linux-x86_64`）现在除 `khaen-daemon`、`khaen-rt-host` 外，还包含五个离线校准工具：
+
+| 二进制 | 作用 |
+| --- | --- |
+| `khaen-single-point` | 合成场景单点求解 → 参数/报告/方案/清单 |
+| `khaen-plan-levels` | 方案文件 → 预测电平 |
+| `khaen-band-levels` | 两段 WAV → 实测相对电平 |
+| `khaen-closed-loop` | 两份电平集合 → 三态报告 |
+| `khaen-closed-loop-run` | 方案 + 两段 WAV → 四文件证据包 |
+
+包内同时带 `docs/calibration-cli.md`（命令行用法）与 `docs/CLOSED-LOOP.md`（闭环协议与现场手册），以及 `deploy/closed-loop-verdict.sh` 设备侧包装脚本。
+
+现场流程与判据见 `docs/CLOSED-LOOP.md`：只读枚举 → 30 分钟基线 → 8 小时浸泡 → 基线录音 → 下发方案 → 施加录音 → `khaen-closed-loop-run` 判定 → 不通过回滚。
+
+验证状态（如实）：离线工具与判定链路在 Windows 上测试通过；发布包打包与设备上执行 **NOT_RUN**（需要打 tag 与出声窗口）。

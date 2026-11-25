@@ -203,3 +203,48 @@
 - 三态必须出现在 report.json；PARTIAL 必须带残差，不允许以“顶满”冒充成功。
 - **浮点规范化**：canonical JSON 里的浮点数先量化到 10 位有效数字再输出（见 `khaen_mimo_design::report::CANONICAL_SIG_DIGITS`）。理由：Windows 与 Linux 的 libm 末位可差 1 ulp，直接输出最短表示会让同一输入产出不同 sha；量化后中文文本与普通数值跨平台稳定，10 位远超 dB/Hz/延迟的物理精度需求。
 - **跨平台边界（如实声明）**：迭代求解器（MIMO/模态拟合）的收敛步数依赖平台 libm 的末位比较，Windows 与 Linux 的解可能在第 7~10 位有效数字上不同。因此"同输入同参数必同 sha"**在同一平台内成立**；跨平台比较不承诺 byte-identical。交付/CI 平台是 Linux，冻结摘要按平台记录（测试里 `LINUX_REFERENCE` / `WINDOWS_REFERENCE` 两张表）。
+
+## D. 单点闭环复测产物
+
+**用途**：把「方案 + 基线录音 + 施加方案后的录音」变成可审计、可复现的判定证据包。三个 schema 都是确定性 JSON（固定键序、10 位有效数字科学计数、末尾换行）；清单里禁止时间戳/主机名/绝对路径。
+
+### D.1 电平集合（`khaen-closed-loop-levels/v1`）
+
+| 字段 | 含义 |
+| --- | --- |
+| schema | 固定 `khaen-closed-loop-levels/v1` |
+| sample_rate_hz | 采样率（Hz），同一份对账的两边必须一致 |
+| points[] | name（测点名，集合内唯一）+ bands[] |
+| bands[] | center_hz（1/3 oct 中心，升序）+ level_db（可空 = 缺数据） |
+
+### D.2 判定报告（`khaen-closed-loop-report/v1`）
+
+| 字段 | 含义 |
+| --- | --- |
+| verdict | `PASS` / `FAIL` / `INCOMPLETE` |
+| tolerance_db / min_compared_bands | 判定配置（默认 2.0 dB / 3 带） |
+| compared_bands / missing_bands / violations | 合计可比较 / 缺数据 / 超容差带数 |
+| max_abs_delta_db | 最大 |实测−预测|，无数据时 null |
+| points[] | 逐测点：compared/missing/max_abs_delta + bands[] |
+| bands[] | center_hz、predicted_db、observed_db、delta_db、within_tolerance（可空） |
+| notes[] | 固定说明文本（缺数据不算通过、INCOMPLETE 不是通过等） |
+
+### D.3 运行包清单（`khaen-closed-loop-run-manifest/v1`）
+
+| 字段 | 含义 |
+| --- | --- |
+| tool / schema | `khaen-closed-loop-run` / 固定 schema |
+| verdict / point / lane | 判定、测点名、方案 lane |
+| sample_rate_hz / tolerance_db / min_compared_bands / window_len | 分析配置 |
+| compared_bands / missing_bands / violations / max_abs_delta_db | 判定摘要 |
+| centers_hz[] | 本次使用的 1/3 oct 中心 |
+| inputs | plan_sha256、baseline_wav_sha256、applied_wav_sha256 |
+| outputs | predicted_json_sha256、observed_json_sha256、report_json_sha256 |
+
+### D.4 规则
+
+- 输出目录必须为空或不存在；四份文件固定命名 `predicted.json` / `observed.json` / `report.json` / `manifest.json`。
+- 同输入重跑四份文件逐字节相同（清单无时间戳）；清单 sha256 可作一次复测的身份。
+- 任一侧带功率为 0 记 null（missing）；`min_compared_bands` 不足判 INCOMPLETE，绝不把缺数据当通过。
+- 预测只覆盖方案保护段（PEQ + 每 lane 增益）；方案含非恒等的内容/分频/矩阵/路由段时预测阶段直接报 `E_PLAN_LEVELS_PLAN`。
+- 命令行退出码：0 PASS / 3 FAIL / 4 INCOMPLETE / 2 输入或方案错误 / 1 写输出失败。
