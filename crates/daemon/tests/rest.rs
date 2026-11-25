@@ -109,6 +109,24 @@ async fn status_reports_capabilities_over_http() {
     assert_eq!(body["graph_id"], Value::Null);
     assert_eq!(body["epoch"], Value::Null);
     assert!(body["reasons"]["graph_id"].is_string());
+    // 设备监督器默认未接线：如实上报 wired=false + 原因，不编造 device_rate。
+    assert_eq!(body["device"]["wired"], Value::Bool(false));
+    assert!(body["device"]["reason"]
+        .as_str()
+        .is_some_and(|r| !r.is_empty()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn device_endpoint_reports_not_wired_and_retry_is_harmless() {
+    let (server, _state) = spawn().await;
+    let (status, body) = request("GET", &format!("{}/api/device", server.base), None).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["wired"], Value::Bool(false));
+    assert_eq!(body["device_rate"], Value::Null);
+
+    let (status, body) = request("POST", &format!("{}/api/device/retry", server.base), None).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["wired"], Value::Bool(false));
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -13,6 +13,8 @@
 //! - `engine_token_invalid` → 409：没有对应草稿或 token 不符（先 prepare / 用正确 token）。
 //! - 其余 → 500。
 
+pub mod device;
+
 use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
@@ -25,18 +27,30 @@ use serde_json::Value;
 use khaen_host::control::{error, ControlError};
 use khaen_host::{ControlState, EngineConfig};
 
+pub use device::DeviceMonitor;
+
 /// daemon 共享状态。
 #[derive(Debug)]
 pub struct DaemonState {
     control: Mutex<ControlState>,
+    device: Mutex<DeviceMonitor>,
 }
 
 impl DaemonState {
-    /// 用主机默认配置新建。
+    /// 用主机默认配置新建；设备监督器默认未接线（原因随 status 一起上报）。
     pub fn new(config: EngineConfig) -> Result<Self, khaen_host::EngineError> {
         Ok(Self {
             control: Mutex::new(ControlState::new(config)?),
+            device: Mutex::new(DeviceMonitor::disabled(
+                "device supervisor is not wired: no probe/rate-control configured in this process",
+            )),
         })
+    }
+
+    /// 接线设备监督器（由 `main` 按配置构造；测试也用真实监督器 + 假组件）。
+    pub fn with_device(mut self, monitor: DeviceMonitor) -> Self {
+        self.device = Mutex::new(monitor);
+        self
     }
 
     /// 控制面（测试与内部使用）。
@@ -44,6 +58,31 @@ impl DaemonState {
         self.control
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 设备监督器（测试与内部使用）。
+    pub fn device(&self) -> std::sync::MutexGuard<'_, DeviceMonitor> {
+        self.device
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 轮询设备监督器，并在锁存时把引擎静音（fail-closed）。返回最新设备快照。
+    ///
+    /// 恢复必须是用户显式 `/api/mute false`，这里绝不自动解除静音。
+    pub fn poll_device(&self) -> Value {
+        let snapshot = self.device().poll();
+        // 锁存期间每次轮询都重新下发静音：请求是块边界幂等的，代价只是一次控制面锁；
+        // 用户若在锁存期间显式解除静音，下一次轮询必须把它重新压回去（fail-closed）。
+        if self.device().requires_mute() {
+            let _ = self.control().mute_json(true);
+        }
+        snapshot
+    }
+
+    /// 最近一次设备快照（不轮询）。
+    pub fn device_json(&self) -> Value {
+        self.device().status()
     }
 }
 
@@ -56,6 +95,8 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/api/commit", post(commit))
         .route("/api/abort", post(abort))
         .route("/api/coeff", get(coeff))
+        .route("/api/device", get(device_status))
+        .route("/api/device/retry", post(device_retry))
         .with_state(state)
 }
 
@@ -68,8 +109,19 @@ pub async fn serve(
 }
 
 async fn status(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
-    let body = state.control().status_json();
+    let mut body = state.control().status_json();
+    if let Some(object) = body.as_object_mut() {
+        object.insert("device".to_string(), state.device_json());
+    }
     (StatusCode::OK, Json(body))
+}
+
+async fn device_status(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
+    (StatusCode::OK, Json(state.device_json()))
+}
+
+async fn device_retry(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
+    (StatusCode::OK, Json(state.device().request_retry()))
 }
 
 async fn mute(

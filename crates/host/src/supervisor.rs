@@ -998,3 +998,48 @@ fn parse_first_u32(bytes: &[u8]) -> Option<u32> {
     }
     value
 }
+
+// ---- trait 对象适配 ---------------------------------------------------------
+// daemon 等上层需要在运行期选择实现（真实 sysfs/命令 vs 测试假件），因此允许把实现装进
+// `Box<dyn Trait>` 再交给同一个监督器；这里为 Box 补齐四个注入接口的实现。
+// 这些是普通控制面代码，不涉及实时路径。
+
+impl<P: DeviceProbe + ?Sized> DeviceProbe for Box<P> {
+    fn device_id(&self) -> &DeviceId {
+        (**self).device_id()
+    }
+
+    fn is_present(&mut self) -> bool {
+        (**self).is_present()
+    }
+
+    fn bring_up_control(&mut self) -> Result<(), ProbeError> {
+        (**self).bring_up_control()
+    }
+}
+
+impl<R: RateControl + ?Sized> RateControl for Box<R> {
+    fn read_rate(&mut self) -> Result<u32, ProbeError> {
+        (**self).read_rate()
+    }
+
+    fn assert_rate(&mut self, rate: u32) -> Result<u32, ProbeError> {
+        (**self).assert_rate(rate)
+    }
+}
+
+impl<S: StreamControl + ?Sized> StreamControl for Box<S> {
+    fn open_stream(&mut self, rate: u32) -> Result<(), ProbeError> {
+        (**self).open_stream(rate)
+    }
+
+    fn close_stream(&mut self) -> Result<(), ProbeError> {
+        (**self).close_stream()
+    }
+}
+
+impl<C: ClockSource + ?Sized> ClockSource for Box<C> {
+    fn now_ms(&mut self) -> u64 {
+        (**self).now_ms()
+    }
+}
