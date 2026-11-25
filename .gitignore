@@ -1,0 +1,10 @@
+/target/
+**/target/
+node_modules/
+dist/
+*.pcap
+*.wav
+!*/tests/fixtures/*.wav
+evidence/
+artifacts/
+HANDOFF/
