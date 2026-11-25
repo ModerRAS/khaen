@@ -25,6 +25,9 @@
 | 4 | protection | 每 lane：延迟（样本）、极性、增益、PEQ 段、保护滤波器 |
 | 5 | routing | lane → DAC 通道映射，空通道填静音 |
 
+区段在文件中按 kind 升序（1 content → 2 crossover → 3 matrix → 4 protection → 5 routing）排列，
+每个 kind 至多一次；这是规范形式，见 A.3。
+
 ### A.3 规则
 
 - 解析必须校验每段 crc32c 与总长；任一不符拒绝加载（fail-closed）。
@@ -36,6 +39,21 @@
   编码后总长超 u32 `total_bytes`），绝不静默截断成"encode 得出来、decode 不回去"的文件；
   `Plan::encode()` 是它的 panic 包装（已由 `Plan::decode` 或 plan-builder 校验过的方案不会触发）。
   字段域之外的区段语义（矩阵系数个数、lane/DAC 引用）仍归准入与组装器校验，本层不重复。
+- **规范形式（canonical form）**：`Plan::encode_checked()` 的输出是唯一合法字节串，`Plan::decode()`
+  只接受它。规范形式 = ① 区段表按 kind 严格升序（1→5）、每个 kind 至多一次；② payload 从 header
+  之后连续排布：第一个 payload 的 offset = 32，后续每个 payload 紧跟上一个（无重叠、无间隙、
+  无重复引用），区段表紧跟最后一个 payload（`table_offset = 32 + Σ payload bytes`）。
+  违反任一条都 fail-closed 拒绝，错误码依次为 `DuplicateSection` / `SectionOrder` /
+  `SectionLayout` / `SectionTableOffset`，不静默重排或去重。
+  **推论**：任何被接受的字节串都满足 `encode(decode(data)) == data`，同一语义的方案只有一种
+  字节串，graph_id 才真正是内容寻址。
+- **无保留字段 / 填充字节**：v3 的 header（32 B）、表项（22 B）、trailer（36 B）每个字节都有定义，
+  没有保留位、保留字节或对齐填充；因此不存在"同一语义两串字节"的填充歧义，decode 也不做保留
+  字节校验（没有可校验的保留字节）。将来若新增保留字段，规则是 encoder 写 0、decode 校验为 0。
+- **解码不 panic**：任何恶意字节都必须走 `Result` / `PlanError` 返回，不得 panic（fail-closed 的
+  "拒绝"是错误码，不是控制面线程崩溃）。长度 / 维度乘法一律用 checked 运算：例如 matrix 的
+  `rows * cols * taps` 溢出返回 `BadPayload("matrix coefficient count overflow")`，
+  偏移加长度用 checked 加法，表项长度先做上界检查再分配。
 
 ### A.4 采样率：plan ABI 接受集合与运行时能力
 
@@ -45,10 +63,13 @@
 - **运行时接受集合（唯一可执行集合）**：`khaen_core::rt::SAMPLE_RATES_HZ = [48_000, 96_000]`。
   "plan ABI v3 接受的采样率集合"指的就是这个可执行集合：host 引擎、ALSA 输出后端、AES67 流，
   以及校准的 sweep / positions / phase-fit 共用该常量。
-- **host 的 fail-closed 行为**：`PlanGraph::compile` 要求 `plan.sample_rate ==
-  EngineConfig.sample_rate`，不一致返回 `CompileError::SampleRateMismatch`（不静默重采样）；
-  注意 `CompileError::UnsupportedRates` 指的是 **matrix 抽取/插值因子**（变比 ASRC 或超过因子上限），
-  **不是**采样率拒绝码。`EngineConfig::validate` 与 host 准入只要求 `sample_rate > 0`。
+- **host 的 fail-closed 行为（三层，均以 `SAMPLE_RATES_HZ` 为准）**：① `EngineConfig::validate`
+  拒绝不在集合里的速率（`EngineError::BadConfig`）；daemon / rt-host 用 `KHAEN_SAMPLE_RATE` 构造
+  `EngineConfig` 后都经该收口；② 准入 `admit()` 对 `plan.sample_rate` 不在集合里给拒绝码
+  `sample_rate`；③ `PlanGraph::compile` 要求 `plan.sample_rate == EngineConfig.sample_rate`，
+  不一致返回 `CompileError::SampleRateMismatch`（不静默重采样）。注意
+  `CompileError::UnsupportedRates` 指的是 **matrix 抽取/插值因子**（变比 ASRC 或超过因子上限），
+  **不是**采样率拒绝码。
 - **组装器与校准入口的 fail-closed**：`khaen-plan-builder` 的 `PlanConfig::validate` 用
   `SAMPLE_RATES_HZ` 校验，44.1 kHz 返回 `UnsupportedSampleRate`；校准 sweep / positions /
   phase-fit 也用该常量拒绝非 48k/96k。
@@ -57,11 +78,9 @@
   速率）是**设计目标候选集合**（设计域口径），不是 plan 可执行集合；这些速率上的设计产物进入
   本运行时前必须转换或拒绝。`khaen-calibration::job` 的 `44100 | 48000 | 88200 | 96000` 同样
   是设计/校准域口径，不是运行时集合。
-- **已知缺口（如实声明，未修）**：host 的准入与 `PlanGraph::compile` 目前没有直接引用
-  `SAMPLE_RATES_HZ` 做成员校验（只校验非零 + 方案与运行配置一致）。把 `EngineConfig.sample_rate`
-  配成 44.1 kHz 时，host 层不会以"速率不在运行时集合"为由拒绝；当前兜底在 plan-builder 与校准
-  入口。后续二选一：host 编译期补成员校验，或设备实测确认后把 `rt::SAMPLE_RATES_HZ` 扩到 4 个
-  速率；两者长期并存就是口径漂移。
+- **单一事实来源**：运行时速率集合只由 `khaen_core::rt::SAMPLE_RATES_HZ` 决定。要把
+  44.1 kHz / 88.2 kHz 纳入可执行集合，必须先改这一处并完成设备实测，不能在各 crate 自行放宽
+  （modal-design / designer / calibration job 的设计域常量不参与运行时判定）。
 
 ## B. 主机控制协议
 

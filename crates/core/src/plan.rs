@@ -5,6 +5,8 @@
 //! - 解析必须校验每段 CRC-32C 与整体 CRC，任一不符拒绝加载（fail-closed）。
 //! - graph_id = sha256("khaen-plan/v3" || 除 trailer 外的全部字节)。
 //! - 未知区段类型拒绝加载，不静默跳过。
+//! - 解码只接受**规范形式**（= encode 的输出）：区段表按 kind 升序无重复、payload 连续
+//!   不重叠、表紧跟最后一个 payload；违反即拒绝，保证 encode(decode(data)) == data。
 
 use crate::crc32c::crc32c;
 use crate::sha256::sha256;
@@ -71,6 +73,18 @@ pub enum PlanError {
     TooManyRoutes { count: usize, limit: usize },
     /// 编码后的总字节数超过头部 `total_bytes` 的 u32 域。
     EncodedTooLarge { bytes: u64 },
+    /// 解码时同一区段 kind 在区段表里出现多次（规范形式要求每个 kind 至多一次）。
+    DuplicateSection { kind: u16 },
+    /// 解码时区段表未按规范顺序（kind 严格升序）排列。
+    SectionOrder { previous: u16, current: u16 },
+    /// 解码时区段 payload 布局非规范：未紧跟上一个 payload（重叠 / 间隙 / 起点不对）。
+    SectionLayout {
+        kind: u16,
+        expected_offset: u64,
+        actual_offset: u64,
+    },
+    /// 解码时区段表位置非规范：表必须紧跟在最后一个 payload 之后。
+    SectionTableOffset { expected: u64, actual: u64 },
 }
 
 impl core::fmt::Display for PlanError {
@@ -115,6 +129,25 @@ impl core::fmt::Display for PlanError {
             PlanError::EncodedTooLarge { bytes } => {
                 write!(f, "encoded plan is {bytes} bytes (ABI v3 total_bytes is u32)")
             }
+            PlanError::DuplicateSection { kind } => {
+                write!(f, "duplicate section kind {kind} in section table")
+            }
+            PlanError::SectionOrder { previous, current } => write!(
+                f,
+                "section table not in canonical order: kind {current} after {previous} (must be strictly ascending)"
+            ),
+            PlanError::SectionLayout {
+                kind,
+                expected_offset,
+                actual_offset,
+            } => write!(
+                f,
+                "section {kind} payload at offset {actual_offset}, canonical layout expects {expected_offset}"
+            ),
+            PlanError::SectionTableOffset { expected, actual } => write!(
+                f,
+                "section table at offset {actual}, canonical layout expects {expected} (immediately after the last payload)"
+            ),
         }
     }
 }
@@ -373,6 +406,13 @@ impl Plan {
     }
 
     /// 从字节解码并做全部校验。
+    ///
+    /// 只接受**规范形式**（[Plan::encode_checked] 的输出）：区段表按 kind 严格升序、
+    /// 每个 kind 至多一次，payload 从 header 之后连续排布（无重叠 / 间隙），区段表紧跟
+    /// 最后一个 payload。违反任一条都 fail-closed 拒绝（[PlanError::DuplicateSection] /
+    /// [PlanError::SectionOrder] / [PlanError::SectionLayout] /
+    /// [PlanError::SectionTableOffset]），不静默重排或去重。因此任何被接受的字节串都满足
+    /// encode(decode(data)) == data，同一语义方案只有一种字节串。
     pub fn decode(data: &[u8]) -> Result<Plan, PlanError> {
         if data.len() < HEADER_BYTES + TRAILER_BYTES {
             return Err(PlanError::Truncated);
@@ -387,9 +427,10 @@ impl Plan {
         let stage_count = u16::from_le_bytes([data[10], data[11]]);
         let block_size = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
         let sample_rate = u32::from_le_bytes([data[16], data[17], data[18], data[19]]);
-        let table_offset = u64::from_le_bytes([
+        let table_offset = usize::try_from(u64::from_le_bytes([
             data[20], data[21], data[22], data[23], data[24], data[25], data[26], data[27],
-        ]) as usize;
+        ]))
+        .map_err(|_| PlanError::Truncated)?;
         let total = u32::from_le_bytes([data[28], data[29], data[30], data[31]]) as usize;
         if total != data.len() {
             return Err(PlanError::BadTotalBytes {
@@ -428,51 +469,63 @@ impl Plan {
         if table.len() != 2 + count * TABLE_ENTRY_BYTES {
             return Err(PlanError::Truncated);
         }
+        // ---- 规范形式校验（fail-closed）：区段表按 kind 严格升序、每个 kind 至多一次；
+        // payload 从 header 之后连续排布（互不重叠、无间隙），表紧跟最后一个 payload。
+        // 先整表校验完再解析 payload：非规范文件不会先"部分解出"再随机报别的错。
+        let mut entries: Vec<TableEntry> = Vec::with_capacity(count);
+        let mut cursor = HEADER_BYTES;
+        let mut previous_kind: Option<u16> = None;
+        for index in 0..count {
+            let entry = parse_table_entry(table, index)?;
+            let kind_raw = entry.kind as u16;
+            if let Some(previous) = previous_kind {
+                if kind_raw == previous {
+                    return Err(PlanError::DuplicateSection { kind: kind_raw });
+                }
+                if kind_raw < previous {
+                    return Err(PlanError::SectionOrder {
+                        previous,
+                        current: kind_raw,
+                    });
+                }
+            }
+            if entry.offset != cursor {
+                return Err(PlanError::SectionLayout {
+                    kind: kind_raw,
+                    expected_offset: cursor as u64,
+                    actual_offset: entry.offset as u64,
+                });
+            }
+            if entry.end > table_offset {
+                return Err(PlanError::SectionTableOffset {
+                    expected: entry.end as u64,
+                    actual: table_offset as u64,
+                });
+            }
+            previous_kind = Some(kind_raw);
+            cursor = entry.end;
+            entries.push(entry);
+        }
+        if cursor != table_offset {
+            return Err(PlanError::SectionTableOffset {
+                expected: cursor as u64,
+                actual: table_offset as u64,
+            });
+        }
+
         let mut plan = Plan {
             block_size,
             sample_rate,
             ..Plan::default()
         };
-        for index in 0..count {
-            let base = 2 + index * TABLE_ENTRY_BYTES;
-            let kind_raw = u16::from_le_bytes([table[base], table[base + 1]]);
-            let offset = u64::from_le_bytes([
-                table[base + 2],
-                table[base + 3],
-                table[base + 4],
-                table[base + 5],
-                table[base + 6],
-                table[base + 7],
-                table[base + 8],
-                table[base + 9],
-            ]) as usize;
-            let bytes = u64::from_le_bytes([
-                table[base + 10],
-                table[base + 11],
-                table[base + 12],
-                table[base + 13],
-                table[base + 14],
-                table[base + 15],
-                table[base + 16],
-                table[base + 17],
-            ]) as usize;
-            let crc = u32::from_le_bytes([
-                table[base + 18],
-                table[base + 19],
-                table[base + 20],
-                table[base + 21],
-            ]);
-            let kind =
-                SectionKind::from_u16(kind_raw).ok_or(PlanError::UnknownSection(kind_raw))?;
-            let end = offset.checked_add(bytes).ok_or(PlanError::Truncated)?;
-            if offset < HEADER_BYTES || end > table_offset {
-                return Err(PlanError::Truncated);
+        for entry in entries {
+            let payload = &data[entry.offset..entry.end];
+            if crc32c(payload) != entry.crc {
+                return Err(PlanError::SectionCrc {
+                    kind: entry.kind as u16,
+                });
             }
-            let payload = &data[offset..end];
-            if crc32c(payload) != crc {
-                return Err(PlanError::SectionCrc { kind: kind_raw });
-            }
-            match kind {
+            match entry.kind {
                 SectionKind::Content => plan.content = Some(decode_content(payload)?),
                 SectionKind::Crossover => plan.crossover = Some(decode_crossover(payload)?),
                 SectionKind::Matrix => plan.matrix = Some(decode_matrix(payload)?),
@@ -492,6 +545,60 @@ impl Plan {
         let body_end = bytes.len() - TRAILER_BYTES;
         crate::sha256::hex_lower(&bytes[body_end + 4..body_end + 36])
     }
+}
+
+/// 区段表项（22 字节）：kind(2) + offset(8) + bytes(8) + crc32c(4)。
+struct TableEntry {
+    /// 已解析的区段类型（未知类型在 parse 阶段即拒绝）。
+    kind: SectionKind,
+    /// payload 起点。
+    offset: usize,
+    /// payload 终点（不含）。
+    end: usize,
+    /// payload 的 crc32c。
+    crc: u32,
+}
+
+/// 解析第 index 个区段表项；长度域一律显式转换，不在 32 位平台上静默截断。
+fn parse_table_entry(table: &[u8], index: usize) -> Result<TableEntry, PlanError> {
+    let base = 2 + index * TABLE_ENTRY_BYTES;
+    let kind_raw = u16::from_le_bytes([table[base], table[base + 1]]);
+    let offset = usize::try_from(u64::from_le_bytes([
+        table[base + 2],
+        table[base + 3],
+        table[base + 4],
+        table[base + 5],
+        table[base + 6],
+        table[base + 7],
+        table[base + 8],
+        table[base + 9],
+    ]))
+    .map_err(|_| PlanError::Truncated)?;
+    let bytes = usize::try_from(u64::from_le_bytes([
+        table[base + 10],
+        table[base + 11],
+        table[base + 12],
+        table[base + 13],
+        table[base + 14],
+        table[base + 15],
+        table[base + 16],
+        table[base + 17],
+    ]))
+    .map_err(|_| PlanError::Truncated)?;
+    let crc = u32::from_le_bytes([
+        table[base + 18],
+        table[base + 19],
+        table[base + 20],
+        table[base + 21],
+    ]);
+    let kind = SectionKind::from_u16(kind_raw).ok_or(PlanError::UnknownSection(kind_raw))?;
+    let end = offset.checked_add(bytes).ok_or(PlanError::Truncated)?;
+    Ok(TableEntry {
+        kind,
+        offset,
+        end,
+        crc,
+    })
 }
 
 fn put_u16(out: &mut Vec<u8>, value: u16) {
@@ -685,7 +792,12 @@ fn decode_matrix(data: &[u8]) -> Result<MatrixSection, PlanError> {
     let interpolation = reader.u8()?;
     let taps = reader.u32()?;
     let len = reader.u32()? as usize;
-    let expected = rows as usize * cols as usize * taps as usize;
+    // rows*cols*taps 的代数上界 < 2^64，在 64 位 usize 上不会溢出，但在 32 位平台会；
+    // 用 checked 乘法保证任何平台上恶意维度都返回 BadPayload 而不是 panic（解码不 panic 是契约）。
+    let expected = (rows as usize)
+        .checked_mul(cols as usize)
+        .and_then(|cells| cells.checked_mul(taps as usize))
+        .ok_or(PlanError::BadPayload("matrix coefficient count overflow"))?;
     if len != expected || len > 1 << 22 {
         return Err(PlanError::BadPayload("matrix coefficient count mismatch"));
     }
