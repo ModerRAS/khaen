@@ -4,11 +4,13 @@
 //! 实时约束：`BlockEngine::run_block` 与 `AudioBackend::capture/playout` 不得分配、加锁或做 IO。
 
 pub mod backend;
+pub mod control;
 pub mod engine;
 pub mod owner;
 pub mod ring;
 
 pub use backend::{AudioBackend, BackendError, DeviceConfig, NullBackend};
+pub use control::{ControlState, PROTOCOL_VERSION};
 pub use engine::{
     BlockEngine, EngineConfig, EngineError, EngineStats, MuteReceipt, Passthrough, Processor,
     Silent, DEFAULT_BLOCK_FRAMES, MAX_BLOCK_FRAMES,
