@@ -302,6 +302,7 @@ name = "khaen-plan-builder"
 version = "0.1.0"
 dependencies = [
  "khaen-core",
+ "khaen-host",
 ]
 
 [[package]]
@@ -313,6 +314,14 @@ name = "khaen-rt-check"
 version = "0.1.0"
 dependencies = [
  "khaen-core",
+]
+
+[[package]]
+name = "khaen-rt-host"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+ "khaen-host",
 ]
 
 [[package]]
