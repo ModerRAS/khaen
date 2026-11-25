@@ -183,3 +183,15 @@ v1 的 `tspi-motu-48k-keeper` 与 `tspi-motu-net.service` 在 v2 里被**监督�
 1. **设备单一 owner**：设备监督器在 daemon 里（`/api/device` 是其快照）；实时侧打开 PCM 之前，必须由监督器把设备推进到 `Streaming` 且速率已回读断言——否则 fail-closed。
 2. **进程边界未定（T70f）**：当前 `Runtime` 与 daemon 在同一台机器上、进程边界待定；两进程之间的方案切换通道（共享内存 ring 或 unix socket）**尚未实现**。在它有之前，daemon 的 `prepare/commit` 只作用于 daemon 自己的 `SlotEngine` 副本，**不宣称**已影响正在出声的 `Runtime`；`/api/status` 不会把这种状态报成"已生效"。
 3. **单进程模式可行**：若短期先要一处出声，可把 `Runtime` 跑在独占设备的进程里、daemon 只做只读观测；这条路径不需要 IPC，但方案切换要重启该进程（UX 上明确标注）。
+
+## 五个语义界面（surface）进度（如实）
+
+| 界面 | 状态 | 说明 |
+| --- | --- | --- |
+| 音量 | **两阶段接通**（`surface=volume`） | 以最近一次 commit 生效的方案为基线，patch protection 逐 lane 增益；commit 在块边界生效 |
+| 路由 | **两阶段接通**（`surface=routing`） | patch lane→DAC 路由与 dac_channels |
+| 内容布局 | **两阶段接通**（`surface=layout`） | patch content 的 in_channels / out_lanes / folds |
+| 格式 | **NOT_WIRED**（返回 `unsupported` + 原因） | 采样率/块长/通道变更需要重开音频设备，不能表示为方案补丁；需与设备监督器一起设计 |
+| 模式 | **NOT_WIRED**（返回 `unsupported` + 原因） | 输入模式（off/toslink/aes67/…）是采集源与设备监督层决策，不是方案字段 |
+
+`status` 的 `surfaces` / `surface_reasons` 逐项如实上报；未接通的界面不得返回假成功。

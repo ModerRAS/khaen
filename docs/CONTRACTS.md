@@ -96,12 +96,31 @@
 | commit | engine_token | 块边界生效：applied_block、version、all_ack |
 | abort | engine_token | 丢弃草稿，无副作用 |
 | coeff | — | 当前系数版本与 last-good |
+| surface | surface、data | 语义界面两阶段：准备补丁草稿（engine_token、planned_version、graph_id、admission）；生效仍走 commit |
 
 ### B.1.1 字段形状
 
 - `wired`：已实现 op 的名字数组，例如 `["status","mute"]`。
 - `not_wired`：对象数组 `{"op": "...", "reason": "..."}`，reason 不得为空。
 - `reasons`：`status` 的附加字段；凡是当前没有数据来源的字段（值为 null）必须在这里给出原因，禁止编造数值。
+
+### B.1.2 语义界面（surface）
+
+`surface` 是五个界面的两阶段入口：先准备一份“在上一次 commit 生效方案上打补丁”的草稿，返回
+`engine_token`；`commit` 仍按块边界原子生效，`abort` 丢弃。没有已生效方案时返回
+`no_base_plan`（409），不允许对着空基线打补丁（防止界面把“未见过的方案”当成当前值去改）。
+
+| surface | data 字段 | 说明 |
+| --- | --- | --- |
+| volume | `gains_db: [{lane, gain_db}]` | 逐 lane 保护增益（dB）。lane 必须已存在于方案的 protection 段；非有限值拒绝。 |
+| routing | `routes: [[lane, dac], ...]`，可选 `dac_channels` | 替换 lane→DAC 路由；dac 必须 < dac_channels（缺省沿用方案值）。 |
+| layout | `in_channels`、`out_lanes`、`folds: [[src, dst, gain], ...]` | 替换内容布局折叠表；越界/空表拒绝。 |
+| format | — | **未接通**：采样率/块长/通道变更要重开音频设备，不能表示为方案补丁；请求返回 `unsupported`。 |
+| mode | — | **未接通**：输入模式选择属于采集源/设备监督器决策，不是方案字段；请求返回 `unsupported`。 |
+
+`status` 里 `surfaces` 逐项上报 `true/false`，未接通的在 `surface_reasons` 给原因；禁止把未接通
+界面报成可用。补丁只搬运字段，ABI 字段域由 `encode_checked`、语义由 host 准入与图编译各自校验，
+不在 surface 层重复实现契约。
 
 ### B.2 语义
 
@@ -114,7 +133,7 @@
 
 ### B.3 错误码
 
-`bad_request` / `unknown_op` / `unsupported` / `not_applied` / `runtime_not_running` / `admission_rejected` / `engine_token_invalid`。
+`bad_request` / `unknown_op` / `unsupported` / `not_applied` / `runtime_not_running` / `admission_rejected` / `engine_token_invalid` / `no_base_plan`。
 
 ## C. 校准产物 manifest
 

@@ -78,6 +78,100 @@ async fn request(method: &str, url: &str, body: Option<&str>) -> (u16, Value) {
     (status, json)
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn surface_two_phase_over_http() {
+    let (server, state) = spawn().await;
+
+    // 没有已生效方案：surface 不能凭空打补丁 → 409 no_base_plan。
+    let body = json!({
+        "surface": "volume",
+        "data": { "gains_db": [ {"lane": 0, "gain_db": 0.0} ] }
+    })
+    .to_string();
+    let (status, response) =
+        request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
+    assert_eq!(status, 409);
+    assert_eq!(response["error"], Value::String("no_base_plan".into()));
+
+    // 未接通界面：501 + 原因，不返回假成功。
+    let body = json!({ "surface": "format", "data": {} }).to_string();
+    let (status, response) =
+        request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
+    assert_eq!(status, 501);
+    assert_eq!(response["error"], Value::String("unsupported".into()));
+
+    // 先准备 + 提交一份 identity 基线方案。
+    let file = TempPlan::new("surface-base", &identity_plan().encode());
+    let body = json!({
+        "plan_path": file.path(),
+        "plan_sha256": file.sha256,
+    })
+    .to_string();
+    let (status, prepared) =
+        request("POST", &format!("{}/api/prepare", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, _) = request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    let input = signal(BLOCK_FRAMES as usize * CHANNELS as usize, 0x9e7);
+    let _ = run_block(&state, &input);
+
+    // 两阶段：surface 只准备补丁；commit 才在块边界生效。
+    let body = json!({
+        "surface": "volume",
+        "data": { "gains_db": [ {"lane": 0, "gain_db": 6.0} ] }
+    })
+    .to_string();
+    let (status, prepared) =
+        request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(prepared["surface"], Value::String("volume".into()));
+    let token = prepared["engine_token"]
+        .as_str()
+        .expect("surface token")
+        .to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, _) = request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+
+    let input2 = signal(BLOCK_FRAMES as usize * CHANNELS as usize, 0x9e8);
+    let output = run_block(&state, &input2);
+    for (index, (actual, sample)) in output.iter().zip(input2.iter()).enumerate() {
+        let expected = if index % 2 == 0 {
+            sample * GAIN_6DB
+        } else {
+            *sample
+        };
+        assert!(
+            (actual - expected).abs() <= 1e-6,
+            "sample {index}: {actual} vs {expected}"
+        );
+    }
+
+    // 能力上报：接通/未接通界面逐项如实。
+    let (_, status_json) = request("GET", &format!("{}/api/status", server.base), None).await;
+    for surface in ["volume", "routing", "layout"] {
+        assert_eq!(
+            status_json["surfaces"][surface],
+            Value::Bool(true),
+            "{surface}"
+        );
+    }
+    for surface in ["format", "mode"] {
+        assert_eq!(
+            status_json["surfaces"][surface],
+            Value::Bool(false),
+            "{surface}"
+        );
+        assert!(status_json["surface_reasons"][surface]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()));
+    }
+}
 fn split_url(url: &str) -> (&str, &str) {
     let rest = url.strip_prefix("http://").expect("scheme");
     match rest.split_once('/') {

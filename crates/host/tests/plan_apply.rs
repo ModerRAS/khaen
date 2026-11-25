@@ -531,3 +531,217 @@ fn prepare_replaces_previous_draft_at_same_planned_version() {
         assert!((actual - sample * GAIN_6DB).abs() <= 1e-6);
     }
 }
+#[test]
+fn surface_volume_patches_committed_plan_two_phase() {
+    let mut state = state();
+    let identity = identity_plan();
+    let identity_file = TempPlan::new("surface-base", &identity.encode());
+    let token = token_of(&prepare(&mut state, &identity_file));
+    commit(&mut state, &token);
+    // 让 identity 先真正生效，成为 surface 的补丁基线。
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x5eed);
+    assert_bit_eq(&run_block(&mut state, &input), &input);
+
+    // 两阶段第一步：只准备补丁，不生效。
+    let prepared = request(
+        &mut state,
+        json!({
+            "op": "surface",
+            "surface": "volume",
+            "data": { "gains_db": [ {"lane": 0, "gain_db": 6.0} ] }
+        }),
+    );
+    assert_eq!(prepared["ok"], Value::Bool(true));
+    assert_eq!(prepared["surface"], Value::String("volume".into()));
+    assert_eq!(prepared["planned_version"], Value::from(2));
+    let patched_id = prepared["graph_id"].as_str().expect("graph id").to_string();
+    assert_eq!(patched_id.len(), 64);
+    assert_ne!(patched_id, identity.graph_id_hex());
+    let token = token_of(&prepared);
+
+    // commit 之前仍在跑未打补丁的 identity。
+    assert_bit_eq(&run_block(&mut state, &input), &input);
+
+    let committed = commit(&mut state, &token);
+    assert_eq!(committed["version"], Value::from(2));
+    let input2 = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x5eee);
+    let output = run_block(&mut state, &input2);
+    for (index, (actual, sample)) in output.iter().zip(input2.iter()).enumerate() {
+        let expected = if index % 2 == 0 {
+            sample * GAIN_6DB
+        } else {
+            *sample
+        };
+        assert!(
+            (actual - expected).abs() <= 1e-6,
+            "sample {index}: {actual} vs {expected}"
+        );
+    }
+    let after = status(&mut state);
+    assert_eq!(after["actual_version"], Value::from(2));
+}
+
+#[test]
+fn surface_routing_swap_is_two_phase_patch() {
+    let mut state = state();
+    let identity = identity_plan();
+    let identity_file = TempPlan::new("surface-routing", &identity.encode());
+    let token = token_of(&prepare(&mut state, &identity_file));
+    commit(&mut state, &token);
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x1a2b);
+    assert_bit_eq(&run_block(&mut state, &input), &input);
+
+    let prepared = request(
+        &mut state,
+        json!({
+            "op": "surface",
+            "surface": "routing",
+            "data": { "routes": [[0, 1], [1, 0]] }
+        }),
+    );
+    assert_eq!(prepared["ok"], Value::Bool(true));
+    let token = token_of(&prepared);
+    commit(&mut state, &token);
+
+    let input2 = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x1a2c);
+    let output = run_block(&mut state, &input2);
+    for frame in 0..(input2.len() / 2) {
+        let actual = &output[frame * 2..frame * 2 + 2];
+        let samples = &input2[frame * 2..frame * 2 + 2];
+        assert!(
+            (actual[0] - samples[1]).abs() <= 1e-6,
+            "frame {frame}: dac0 must carry input channel 1: {} vs {}",
+            actual[0],
+            samples[1]
+        );
+        assert!(
+            (actual[1] - samples[0]).abs() <= 1e-6,
+            "frame {frame}: dac1 must carry input channel 0: {} vs {}",
+            actual[1],
+            samples[0]
+        );
+    }
+}
+
+#[test]
+fn surface_layout_swap_is_two_phase_patch() {
+    let mut state = state();
+    let identity = identity_plan();
+    let identity_file = TempPlan::new("surface-layout", &identity.encode());
+    let token = token_of(&prepare(&mut state, &identity_file));
+    commit(&mut state, &token);
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x7a11);
+    assert_bit_eq(&run_block(&mut state, &input), &input);
+
+    let prepared = request(
+        &mut state,
+        json!({
+            "op": "surface",
+            "surface": "layout",
+            "data": {
+                "in_channels": 2,
+                "out_lanes": 2,
+                "folds": [[0, 1, 1.0], [1, 0, 1.0]]
+            }
+        }),
+    );
+    assert_eq!(prepared["ok"], Value::Bool(true));
+    let token = token_of(&prepared);
+    commit(&mut state, &token);
+
+    let input2 = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x7a12);
+    let output = run_block(&mut state, &input2);
+    for frame in 0..(input2.len() / 2) {
+        let actual = &output[frame * 2..frame * 2 + 2];
+        let samples = &input2[frame * 2..frame * 2 + 2];
+        assert!(
+            (actual[0] - samples[1]).abs() <= 1e-6,
+            "frame {frame}: lane0 must fold input 1: {} vs {}",
+            actual[0],
+            samples[1]
+        );
+        assert!(
+            (actual[1] - samples[0]).abs() <= 1e-6,
+            "frame {frame}: lane1 must fold input 0: {} vs {}",
+            actual[1],
+            samples[0]
+        );
+    }
+}
+
+#[test]
+fn surface_honours_two_phase_errors_and_truthful_capabilities() {
+    let mut state = state();
+    // 没有已生效方案：surface 不能凭空打补丁。
+    let missing = request(
+        &mut state,
+        json!({
+            "op": "surface",
+            "surface": "volume",
+            "data": { "gains_db": [ {"lane": 0, "gain_db": 0.0} ] }
+        }),
+    );
+    assert_eq!(missing["error"], Value::String(error::NO_BASE_PLAN.into()));
+
+    // format / mode 未接通：unsupported + 原因，不返回假成功。
+    for surface in ["format", "mode"] {
+        let response = request(
+            &mut state,
+            json!({ "op": "surface", "surface": surface, "data": {} }),
+        );
+        assert_eq!(
+            response["error"],
+            Value::String(error::UNSUPPORTED.into()),
+            "surface {surface}"
+        );
+        assert!(response["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not wired")));
+    }
+
+    // 未知界面：请求内容问题。
+    let unknown = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "gainz", "data": {} }),
+    );
+    assert_eq!(unknown["error"], Value::String(error::BAD_REQUEST.into()));
+
+    // 能力上报如实：三个界面接通、两个未接通且带原因。
+    let capabilities = status(&mut state);
+    for surface in ["volume", "routing", "layout"] {
+        assert_eq!(
+            capabilities["surfaces"][surface],
+            Value::Bool(true),
+            "surface {surface}"
+        );
+    }
+    for surface in ["format", "mode"] {
+        assert_eq!(
+            capabilities["surfaces"][surface],
+            Value::Bool(false),
+            "surface {surface}"
+        );
+        assert!(capabilities["surface_reasons"][surface]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()));
+    }
+
+    // 有基线之后，非法 payload 仍是 bad_request（空列表 / 不存在的 lane）。
+    let identity = identity_plan();
+    let identity_file = TempPlan::new("surface-errors", &identity.encode());
+    let token = token_of(&prepare(&mut state, &identity_file));
+    commit(&mut state, &token);
+    let empty = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "volume", "data": { "gains_db": [] } }),
+    );
+    assert_eq!(empty["error"], Value::String(error::BAD_REQUEST.into()));
+    let no_lane = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "volume", "data": { "gains_db": [ {"lane": 99, "gain_db": 0.0} ] } }),
+    );
+    assert_eq!(no_lane["error"], Value::String(error::BAD_REQUEST.into()));
+    assert!(no_lane["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("lane 99")));
+}

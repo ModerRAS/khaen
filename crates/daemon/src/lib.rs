@@ -95,6 +95,7 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/api/commit", post(commit))
         .route("/api/abort", post(abort))
         .route("/api/coeff", get(coeff))
+        .route("/api/surface", post(surface))
         .route("/api/device", get(device_status))
         .route("/api/device/retry", post(device_retry))
         .with_state(state)
@@ -180,6 +181,26 @@ async fn abort(
     }
 }
 
+/// 语义界面第一阶段（volume/routing/layout）：只准备补丁草稿，commit 仍走 /api/commit。
+async fn surface(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let surface = match payload.get("surface") {
+        Some(Value::String(surface)) => surface.clone(),
+        Some(_) => return bad_request("field surface must be a string"),
+        None => return bad_request("missing field: surface"),
+    };
+    let data = payload
+        .get("data")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    match state.control().prepare_surface_json(&surface, &data) {
+        Ok(body) => (StatusCode::OK, Json(body)),
+        Err(err) => error_response(err),
+    }
+}
+
 async fn coeff(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(state.control().coeff_json()))
 }
@@ -190,7 +211,9 @@ fn http_status(code: &str) -> StatusCode {
         error::BAD_REQUEST => StatusCode::BAD_REQUEST,
         error::UNKNOWN_OP => StatusCode::NOT_FOUND,
         error::UNSUPPORTED => StatusCode::NOT_IMPLEMENTED,
-        error::ADMISSION_REJECTED | error::ENGINE_TOKEN_INVALID => StatusCode::CONFLICT,
+        error::ADMISSION_REJECTED | error::ENGINE_TOKEN_INVALID | error::NO_BASE_PLAN => {
+            StatusCode::CONFLICT
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

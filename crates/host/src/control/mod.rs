@@ -18,7 +18,7 @@ pub mod serve;
 
 use std::collections::BTreeMap;
 
-use khaen_core::plan::Plan;
+use khaen_core::plan::{Fold, Plan};
 use khaen_core::sha256::{sha256, sha256_hex};
 use serde_json::{json, Map, Value};
 
@@ -34,7 +34,27 @@ pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 /// 已实现的 op。
-pub const WIRED_OPS: &[&str] = &["status", "mute", "prepare", "commit", "abort", "coeff"];
+pub const WIRED_OPS: &[&str] = &[
+    "status", "mute", "prepare", "commit", "abort", "coeff", "surface",
+];
+
+/// 已接通的语义界面（"surface" op 的 surface 字段可接受值）。
+///
+/// 两阶段语义与 prepare/commit 完全一致：surface 只**准备**一份打了补丁的方案草稿并返回
+/// engine_token，真正生效仍由 commit 在下一块边界完成；abort 丢弃。
+pub const WIRED_SURFACES: &[&str] = &["volume", "routing", "layout"];
+
+/// 尚未接通的界面及原因（如实上报；请求返回 `unsupported`，不返回假成功）。
+pub const NOT_WIRED_SURFACES: &[(&str, &str)] = &[
+    (
+        "format",
+        "format change (sample rate / block size / channels) reopens the audio device; it cannot be expressed as a plan patch while streaming",
+    ),
+    (
+        "mode",
+        "input mode selection is a capture-source / device-supervisor decision, not a plan field",
+    ),
+];
 
 /// 尚未实现的 op 及其原因（如实上报用）。
 ///
@@ -58,6 +78,8 @@ pub mod error {
     pub const ADMISSION_REJECTED: &str = "admission_rejected";
     /// engine_token 无效。
     pub const ENGINE_TOKEN_INVALID: &str = "engine_token_invalid";
+    /// 还没有已生效的方案可打补丁（surface op 前置条件）。
+    pub const NO_BASE_PLAN: &str = "no_base_plan";
 }
 
 /// 控制面错误：稳定错误码 + 给人看的说明。
@@ -123,6 +145,8 @@ struct DraftPlan {
     processor: Box<dyn Processor + Send>,
     /// prepare 响应；同一 token 重复 prepare 直接返回同一份（幂等）。
     response: Value,
+    /// 草稿对应的方案；commit 成功后成为后续 surface 补丁的基线。
+    plan: Plan,
 }
 
 impl core::fmt::Debug for DraftPlan {
@@ -183,6 +207,172 @@ fn compile_error_to_control(err: CompileError) -> ControlError {
     }
 }
 
+/// 读取非负整数字段（JSON number 且必须能放进 u64）。
+fn unsigned_field(object: &Map<String, Value>, name: &str) -> Result<u64, ControlError> {
+    object
+        .get(name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| bad_request(format!("field {name} must be a non-negative integer")))
+}
+
+/// 读取有限浮点字段（拒绝 NaN/Infinity，避免把非法增益带进方案）。
+fn finite_f64_field(object: &Map<String, Value>, name: &str) -> Result<f64, ControlError> {
+    let value = object
+        .get(name)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| bad_request(format!("field {name} must be a finite number")))?;
+    if !value.is_finite() {
+        return Err(bad_request(format!("field {name} must be finite")));
+    }
+    Ok(value)
+}
+
+/// 把一段 `data` 对象应用到基线上，产出打了补丁的方案（只做字段搬运与类型检查，
+/// 校验交给随后的 `encode_checked` / 准入 / 图编译——不在这一层重复实现契约校验）。
+fn apply_surface_patch(base: &Plan, surface: &str, data: &Value) -> Result<Plan, ControlError> {
+    let object = data
+        .as_object()
+        .ok_or_else(|| bad_request("field data must be a json object"))?;
+    let mut plan = base.clone();
+    match surface {
+        "volume" => {
+            let protection = plan.protection.as_mut().ok_or_else(|| {
+                bad_request("plan has no protection section: volume needs per-lane gains")
+            })?;
+            let gains = object
+                .get("gains_db")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    bad_request("field data.gains_db must be an array of {lane, gain_db}")
+                })?;
+            if gains.is_empty() {
+                return Err(bad_request("data.gains_db must not be empty"));
+            }
+            for item in gains {
+                let item = item
+                    .as_object()
+                    .ok_or_else(|| bad_request("data.gains_db entries must be objects"))?;
+                let lane = u16::try_from(unsigned_field(item, "lane")?)
+                    .map_err(|_| bad_request("lane does not fit in u16"))?;
+                let gain_db = finite_f64_field(item, "gain_db")?;
+                let entry = protection
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.lane == lane)
+                    .ok_or_else(|| bad_request(format!("protection has no lane {lane}")))?;
+                entry.gain_db = gain_db as f32;
+            }
+        }
+        "routing" => {
+            let routing = plan
+                .routing
+                .as_mut()
+                .ok_or_else(|| bad_request("plan has no routing section"))?;
+            let routes = object
+                .get("routes")
+                .and_then(Value::as_array)
+                .ok_or_else(|| bad_request("field data.routes must be an array of [lane, dac]"))?;
+            if routes.is_empty() {
+                return Err(bad_request("data.routes must not be empty"));
+            }
+            let mut parsed = Vec::with_capacity(routes.len());
+            for item in routes {
+                let pair = item
+                    .as_array()
+                    .ok_or_else(|| bad_request("data.routes entries must be [lane, dac] arrays"))?;
+                if pair.len() != 2 {
+                    return Err(bad_request(
+                        "data.routes entries must have exactly 2 elements",
+                    ));
+                }
+                let lane = u16::try_from(
+                    pair[0]
+                        .as_u64()
+                        .ok_or_else(|| bad_request("route lane must be a non-negative integer"))?,
+                )
+                .map_err(|_| bad_request("route lane does not fit in u16"))?;
+                let dac = u16::try_from(
+                    pair[1]
+                        .as_u64()
+                        .ok_or_else(|| bad_request("route dac must be a non-negative integer"))?,
+                )
+                .map_err(|_| bad_request("route dac does not fit in u16"))?;
+                parsed.push((lane, dac));
+            }
+            if let Some(value) = object.get("dac_channels") {
+                routing.dac_channels = u16::try_from(value.as_u64().ok_or_else(|| {
+                    bad_request("field data.dac_channels must be a non-negative integer")
+                })?)
+                .map_err(|_| bad_request("dac_channels does not fit in u16"))?;
+            }
+            for (lane, dac) in &parsed {
+                if *dac >= routing.dac_channels {
+                    return Err(bad_request(format!(
+                        "route lane {lane} -> dac {dac} is outside dac_channels {}",
+                        routing.dac_channels
+                    )));
+                }
+            }
+            routing.routes = parsed;
+        }
+        "layout" => {
+            let content = plan
+                .content
+                .as_mut()
+                .ok_or_else(|| bad_request("plan has no content section"))?;
+            content.in_channels = u16::try_from(unsigned_field(object, "in_channels")?)
+                .map_err(|_| bad_request("in_channels does not fit in u16"))?;
+            content.out_lanes = u16::try_from(unsigned_field(object, "out_lanes")?)
+                .map_err(|_| bad_request("out_lanes does not fit in u16"))?;
+            let folds = object
+                .get("folds")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    bad_request("field data.folds must be an array of [src, dst, gain]")
+                })?;
+            if folds.is_empty() {
+                return Err(bad_request("data.folds must not be empty"));
+            }
+            let mut parsed = Vec::with_capacity(folds.len());
+            for item in folds {
+                let triple = item.as_array().ok_or_else(|| {
+                    bad_request("data.folds entries must be [src, dst, gain] arrays")
+                })?;
+                if triple.len() != 3 {
+                    return Err(bad_request(
+                        "data.folds entries must have exactly 3 elements",
+                    ));
+                }
+                let src = u16::try_from(
+                    triple[0]
+                        .as_u64()
+                        .ok_or_else(|| bad_request("fold src must be a non-negative integer"))?,
+                )
+                .map_err(|_| bad_request("fold src does not fit in u16"))?;
+                let dst = u16::try_from(
+                    triple[1]
+                        .as_u64()
+                        .ok_or_else(|| bad_request("fold dst must be a non-negative integer"))?,
+                )
+                .map_err(|_| bad_request("fold dst does not fit in u16"))?;
+                let gain = triple[2]
+                    .as_f64()
+                    .ok_or_else(|| bad_request("fold gain must be a finite number"))?;
+                if !gain.is_finite() {
+                    return Err(bad_request("fold gain must be finite"));
+                }
+                parsed.push(Fold {
+                    src,
+                    dst,
+                    gain: gain as f32,
+                });
+            }
+            content.folds = parsed;
+        }
+        other => return Err(bad_request(format!("unknown surface: {other}"))),
+    }
+    Ok(plan)
+}
 /// 控制面状态：持有唯一执行器（[`SlotEngine`]）与至多一份方案草稿。
 #[derive(Debug)]
 pub struct ControlState {
@@ -192,8 +382,10 @@ pub struct ControlState {
     limits: AdmissionLimits,
     runtime_state: &'static str,
     safe_mode: bool,
-    /// 当前方案草稿（prepare 产出，commit / abort 消费，新 prepare 可替换）。
+    /// 当前方案草稿（prepare / surface 产出，commit / abort 消费，新 prepare 可替换）。
     draft: Option<DraftPlan>,
+    /// 最近一次 commit 生效的方案：语义界面（volume/routing/layout）以它为基线打补丁。
+    base_plan: Option<Plan>,
 }
 
 impl ControlState {
@@ -205,6 +397,7 @@ impl ControlState {
             runtime_state: "idle",
             safe_mode: false,
             draft: None,
+            base_plan: None,
         })
     }
 
@@ -274,6 +467,11 @@ impl ControlState {
                 self.abort_json(engine_token)
             }
             "coeff" => Ok(self.coeff_json()),
+            "surface" => {
+                let surface = string_field(object, "surface")?;
+                let data = object.get("data").cloned().unwrap_or_else(|| json!({}));
+                self.prepare_surface_json(surface, &data)
+            }
             other => {
                 if let Some((_, reason)) = NOT_WIRED_OPS.iter().find(|(name, _)| *name == other) {
                     Err(ControlError::new(
@@ -366,6 +564,7 @@ impl ControlState {
             graph_id,
             processor: Box::new(graph),
             response: response.clone(),
+            plan,
         });
         Ok(response)
     }
@@ -394,6 +593,8 @@ impl ControlState {
         let applied_block =
             self.engine
                 .stage_processor(draft.processor, draft.version, draft.graph_id.clone());
+        // 生效后成为后续语义界面（volume/routing/layout）的补丁基线。
+        self.base_plan = Some(draft.plan);
         Ok(json!({
             "ok": true,
             "applied_block": applied_block,
@@ -403,6 +604,77 @@ impl ControlState {
         }))
     }
 
+    /// 语义界面（surface）第一阶段：以最近一次生效的方案为基线打补丁 → 准入/编译 → 存草稿。
+    ///
+    /// 两阶段语义与 prepare/commit 完全相同：这里只准备，`commit` 才在下一块边界生效，
+    /// `abort` 丢弃。支持的界面见 [`WIRED_SURFACES`]；未接通的界面返回 `unsupported` 并带原因，
+    /// 不返回假成功。
+    pub fn prepare_surface_json(
+        &mut self,
+        surface: &str,
+        data: &Value,
+    ) -> Result<Value, ControlError> {
+        if let Some((_, reason)) = NOT_WIRED_SURFACES.iter().find(|(name, _)| *name == surface) {
+            return Err(ControlError::new(
+                error::UNSUPPORTED,
+                format!("surface {surface} not wired: {reason}"),
+            ));
+        }
+        if !WIRED_SURFACES.contains(&surface) {
+            return Err(bad_request(format!("unknown surface: {surface}")));
+        }
+        let base = self.base_plan.clone().ok_or_else(|| {
+            ControlError::new(
+                error::NO_BASE_PLAN,
+                "no committed plan to patch: prepare + commit a plan first",
+            )
+        })?;
+        let patched = apply_surface_patch(&base, surface, data)?;
+        let bytes = patched
+            .encode_checked()
+            .map_err(|err| bad_request(format!("patched plan cannot be encoded: {err}")))?;
+        let version = self.next_plan_version();
+        let token = engine_token(version, &sha256(&bytes));
+        if let Some(draft) = &self.draft {
+            if draft.token == token {
+                return Ok(draft.response.clone());
+            }
+        }
+        let admission = admit(&patched, &self.limits);
+        if !admission.accepted {
+            return Err(ControlError::new(
+                error::ADMISSION_REJECTED,
+                format!(
+                    "surface {surface} patch rejected by admission: {}",
+                    admission.summary()
+                ),
+            ));
+        }
+        let config = self.engine.config().clone();
+        let graph = PlanGraph::compile(&patched, &config, &self.limits)
+            .map_err(compile_error_to_control)?;
+        let graph_id = patched.graph_id_hex();
+        let response = json!({
+            "ok": true,
+            "surface": surface,
+            "engine_token": token,
+            "planned_version": version,
+            "graph_id": graph_id,
+            "admission": {
+                "accepted": true,
+                "budget": budget_json(&admission.budget),
+            },
+        });
+        self.draft = Some(DraftPlan {
+            token,
+            version,
+            graph_id,
+            processor: Box::new(graph),
+            response: response.clone(),
+            plan: patched,
+        });
+        Ok(response)
+    }
     /// 丢弃草稿（abort）：无副作用，正在跑的图不受影响。
     ///
     /// token 不符或没有草稿都返回 `engine_token_invalid`；成功返回 `{"ok":true,"aborted":true}`。
@@ -502,6 +774,16 @@ impl ControlState {
             .iter()
             .map(|(op, reason)| json!({ "op": op, "reason": reason }))
             .collect();
+        // 五个语义界面的真实能力：接通与否逐项上报，未接通的给原因，不编造。
+        let mut surfaces = Map::new();
+        for surface in WIRED_SURFACES {
+            surfaces.insert((*surface).to_string(), json!(true));
+        }
+        let mut surface_reasons = Map::new();
+        for (surface, reason) in NOT_WIRED_SURFACES {
+            surfaces.insert((*surface).to_string(), json!(false));
+            surface_reasons.insert((*surface).to_string(), json!(reason));
+        }
         json!({
             "ok": true,
             "protocol_version": PROTOCOL_VERSION,
@@ -518,6 +800,8 @@ impl ControlState {
             "actual_version": info.version,
             "wired": WIRED_OPS,
             "not_wired": not_wired,
+            "surfaces": surfaces,
+            "surface_reasons": surface_reasons,
             "reasons": reasons,
         })
     }
