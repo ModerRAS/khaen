@@ -1,11 +1,11 @@
-//! 控制协议测试（契约 B）：能力上报、块边界静音、错误码、行循环。
+//! 控制协议测试（契约 B）：能力上报、块边界静音、方案 op 的字段/错误码、行循环。
 
 use std::io::Cursor;
 
 use khaen_host::control::serve::serve_loop;
 use khaen_host::control::{error, ControlState, NOT_WIRED_OPS, WIRED_OPS};
 use khaen_host::EngineConfig;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 fn state() -> ControlState {
     ControlState::new(EngineConfig {
@@ -35,24 +35,102 @@ fn status_reports_capabilities_honestly() {
         .filter_map(Value::as_str)
         .collect();
     assert_eq!(wired, WIRED_OPS.to_vec());
+    assert!(WIRED_OPS.contains(&"prepare"));
+    assert!(WIRED_OPS.contains(&"commit"));
+    assert!(WIRED_OPS.contains(&"abort"));
+    assert!(WIRED_OPS.contains(&"coeff"));
 
+    // 全部 op 已接通：not_wired 必须为空数组，且常量里也没有条目（不留下"假未实现"）。
+    assert!(NOT_WIRED_OPS.is_empty());
     let not_wired = response["not_wired"].as_array().expect("not_wired");
-    assert_eq!(not_wired.len(), NOT_WIRED_OPS.len());
-    for entry in not_wired {
-        assert!(entry["op"].is_string());
-        assert!(
-            entry["reason"]
-                .as_str()
-                .is_some_and(|reason| !reason.is_empty()),
-            "未实现的能力必须带原因"
-        );
-    }
+    assert!(not_wired.is_empty(), "not_wired: {not_wired:?}");
 
     // 没有来源的字段必须是 null 并带原因，不允许编数。
     assert_eq!(response["graph_id"], Value::Null);
-    assert!(response["reasons"]["graph_id"].is_string());
+    assert_eq!(response["epoch"], Value::Null);
+    assert_eq!(response["actual_version"], Value::Null);
+    for field in ["graph_id", "epoch", "actual_version"] {
+        assert!(
+            response["reasons"][field]
+                .as_str()
+                .is_some_and(|reason| !reason.is_empty()),
+            "字段 {field} 为 null 时必须给原因"
+        );
+    }
     assert_eq!(response["xruns"], Value::from(0));
     assert!(response["reasons"]["xruns"].is_string());
+}
+
+#[test]
+fn coeff_before_any_plan_is_null_with_reasons() {
+    let mut state = state();
+    let response = call(&mut state, r#"{"op":"coeff"}"#);
+    assert_eq!(response["ok"], Value::Bool(true));
+    for field in ["version", "last_good_version", "graph_id", "applied_block"] {
+        assert_eq!(response[field], Value::Null, "字段 {field}");
+        assert!(
+            response["reasons"][field]
+                .as_str()
+                .is_some_and(|reason| !reason.is_empty()),
+            "字段 {field} 为 null 时必须给原因"
+        );
+    }
+}
+
+#[test]
+fn commit_and_abort_without_draft_report_engine_token_invalid() {
+    let mut state = state();
+    for op in ["commit", "abort"] {
+        let response = call(
+            &mut state,
+            &format!(r#"{{"op":"{op}","engine_token":"deadbeef"}}"#),
+        );
+        assert_eq!(response["ok"], Value::Bool(false), "op {op}");
+        assert_eq!(
+            response["error"],
+            Value::String(error::ENGINE_TOKEN_INVALID.into()),
+            "op {op}"
+        );
+        assert!(
+            response["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("no prepared plan draft")),
+            "op {op} 必须说明没有草稿"
+        );
+    }
+}
+
+#[test]
+fn prepare_requires_plan_fields_and_readable_file() {
+    let mut state = state();
+    // 缺字段 / 类型不对 → bad_request。
+    for request in [
+        r#"{"op":"prepare"}"#,
+        r#"{"op":"prepare","plan_path":"x.plan"}"#,
+        r#"{"op":"prepare","plan_path":42,"plan_sha256":"00"}"#,
+        r#"{"op":"commit"}"#,
+        r#"{"op":"commit","engine_token":42}"#,
+        r#"{"op":"abort","engine_token":null}"#,
+    ] {
+        let response = call(&mut state, request);
+        assert_eq!(
+            response["error"],
+            Value::String(error::BAD_REQUEST.into()),
+            "request: {request}"
+        );
+    }
+    // 文件读不到 → bad_request，消息点名路径。
+    let missing = std::env::temp_dir().join("khaen-t25b-definitely-missing-plan.bin");
+    let request = json!({
+        "op": "prepare",
+        "plan_path": missing.display().to_string(),
+        "plan_sha256": "00",
+    });
+    let response = call(&mut state, &request.to_string());
+    assert_eq!(response["error"], Value::String(error::BAD_REQUEST.into()));
+    assert!(response["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("cannot read plan file")));
 }
 
 #[test]
@@ -81,22 +159,6 @@ fn mute_takes_effect_at_block_boundary_and_is_idempotent() {
     let unmute = call(&mut state, r#"{"op":"mute","mute":false}"#);
     assert_eq!(unmute["idempotent"], Value::Bool(false));
     assert_eq!(unmute["applied_block"], Value::from(2));
-}
-
-#[test]
-fn not_wired_ops_return_unsupported_with_reason() {
-    let mut state = state();
-    for (op, _) in NOT_WIRED_OPS {
-        let response = call(&mut state, &format!(r#"{{"op":"{op}"}}"#));
-        assert_eq!(response["ok"], Value::Bool(false), "op {op}");
-        assert_eq!(response["error"], Value::String(error::UNSUPPORTED.into()));
-        assert!(
-            response["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("not wired")),
-            "op {op} 必须说明未实现原因"
-        );
-    }
 }
 
 #[test]

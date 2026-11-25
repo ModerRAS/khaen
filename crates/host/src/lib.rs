@@ -14,10 +14,10 @@ pub mod safety;
 
 pub use admission::{admit, Admission, AdmissionLimits, Budget, Rejection};
 pub use backend::{AudioBackend, BackendError, DeviceConfig, NullBackend};
-pub use control::{ControlState, PROTOCOL_VERSION};
+pub use control::{ControlError, ControlState, PROTOCOL_VERSION};
 pub use engine::{
-    BlockEngine, EngineConfig, EngineError, EngineStats, MuteReceipt, Passthrough, Processor,
-    Silent, DEFAULT_BLOCK_FRAMES, MAX_BLOCK_FRAMES,
+    BlockEngine, EngineConfig, EngineError, EngineStats, GraphInfo, MuteReceipt, Passthrough,
+    Processor, Silent, SlotEngine, DEFAULT_BLOCK_FRAMES, MAX_BLOCK_FRAMES,
 };
 pub use graph::{CompileError, PlanGraph};
 pub use owner::{DeviceGuard, DeviceId, OwnerError};
@@ -26,3 +26,7 @@ pub use safety::{
     FaultReason, FaultRecord, RecoveryError, RuntimeState, SafetyPolicy, SafetyStatus,
     SafetySupervisor,
 };
+// 控制面的输入是方案 ABI v3 与方案文件 sha256；这里重导出，避免上层（daemon/测试）再直接依赖
+// khaen-core，也保证"校验用的 sha256 实现"只有一份。
+pub use khaen_core::plan;
+pub use khaen_core::sha256::sha256_hex;

@@ -1,7 +1,17 @@
 //! daemon 骨架（T30/T31）：把主机控制面暴露成 REST。
 //!
-//! 只有一个后端：`ControlState`（块引擎）。没有 MemoryEngine，也没有"假装成功"的接口：
+//! 只有一个后端：`ControlState`（块引擎 + 方案草稿）。没有 MemoryEngine，也没有"假装成功"的接口：
 //! 还没实现的 op 返回 501 并带原因，`/api/status` 的 wired/not_wired 如实反映当前能力。
+//!
+//! # 错误码 → HTTP 状态码
+//!
+//! - `bad_request` → 400：请求字段缺失/类型不对、方案文件读不到、sha256 不符、方案解码失败。
+//! - `unknown_op` → 404：REST 上没有这个 op 资源，与未知路径一致（另一种合理选择是 400，
+//!   这里固定选 404，并由测试锁住）。
+//! - `unsupported` → 501：op 存在但当前未实现。
+//! - `admission_rejected` → 409：方案超预算/结构非法，或与当前运行时配置不匹配。
+//! - `engine_token_invalid` → 409：没有对应草稿或 token 不符（先 prepare / 用正确 token）。
+//! - 其余 → 500。
 
 use std::sync::{Arc, Mutex};
 
@@ -10,9 +20,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use khaen_host::control::{error, NOT_WIRED_OPS};
+use khaen_host::control::{error, ControlError};
 use khaen_host::{ControlState, EngineConfig};
 
 /// daemon 共享状态。
@@ -42,10 +52,10 @@ pub fn router(state: Arc<DaemonState>) -> Router {
     Router::new()
         .route("/api/status", get(status))
         .route("/api/mute", post(mute))
-        .route("/api/prepare", post(not_wired_prepare))
-        .route("/api/commit", post(not_wired_commit))
-        .route("/api/abort", post(not_wired_abort))
-        .route("/api/coeff", get(not_wired_coeff))
+        .route("/api/prepare", post(prepare))
+        .route("/api/commit", post(commit))
+        .route("/api/abort", post(abort))
+        .route("/api/coeff", get(coeff))
         .with_state(state)
 }
 
@@ -68,59 +78,75 @@ async fn mute(
 ) -> impl IntoResponse {
     let mute = match payload.get("mute") {
         Some(Value::Bool(mute)) => *mute,
-        Some(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "ok": false,
-                    "error": error::BAD_REQUEST,
-                    "message": "field mute must be a boolean",
-                })),
-            );
-        }
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "ok": false,
-                    "error": error::BAD_REQUEST,
-                    "message": "missing field: mute",
-                })),
-            );
-        }
+        Some(_) => return bad_request("field mute must be a boolean"),
+        None => return bad_request("missing field: mute"),
     };
     let body = state.control().mute_json(mute);
     (StatusCode::OK, Json(body))
 }
 
-fn unsupported(op: &str) -> (StatusCode, Json<Value>) {
-    let reason = NOT_WIRED_OPS
-        .iter()
-        .find(|(name, _)| *name == op)
-        .map(|(_, reason)| *reason)
-        .unwrap_or("not wired");
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "ok": false,
-            "error": error::UNSUPPORTED,
-            "message": format!("op {op} not wired: {reason}"),
-        })),
-    )
+async fn prepare(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let (plan_path, plan_sha256) = match (payload.get("plan_path"), payload.get("plan_sha256")) {
+        (Some(Value::String(path)), Some(Value::String(sha))) => (path.clone(), sha.clone()),
+        _ => return bad_request("fields plan_path and plan_sha256 must be strings"),
+    };
+    // prepare 会读文件、解码、编译图：非实时路径。这里串行化控制面（音频线程不碰这把锁）。
+    match state.control().prepare_json(&plan_path, &plan_sha256) {
+        Ok(body) => (StatusCode::OK, Json(body)),
+        Err(err) => error_response(err),
+    }
 }
 
-async fn not_wired_prepare() -> impl IntoResponse {
-    unsupported("prepare")
+async fn commit(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let engine_token = match payload.get("engine_token") {
+        Some(Value::String(token)) => token.clone(),
+        _ => return bad_request("field engine_token must be a string"),
+    };
+    match state.control().commit_json(&engine_token) {
+        Ok(body) => (StatusCode::OK, Json(body)),
+        Err(err) => error_response(err),
+    }
 }
 
-async fn not_wired_commit() -> impl IntoResponse {
-    unsupported("commit")
+async fn abort(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let engine_token = match payload.get("engine_token") {
+        Some(Value::String(token)) => token.clone(),
+        _ => return bad_request("field engine_token must be a string"),
+    };
+    match state.control().abort_json(&engine_token) {
+        Ok(body) => (StatusCode::OK, Json(body)),
+        Err(err) => error_response(err),
+    }
 }
 
-async fn not_wired_abort() -> impl IntoResponse {
-    unsupported("abort")
+async fn coeff(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
+    (StatusCode::OK, Json(state.control().coeff_json()))
 }
 
-async fn not_wired_coeff() -> impl IntoResponse {
-    unsupported("coeff")
+/// 控制面错误码 → HTTP 状态码（映射表见模块文档）。
+fn http_status(code: &str) -> StatusCode {
+    match code {
+        error::BAD_REQUEST => StatusCode::BAD_REQUEST,
+        error::UNKNOWN_OP => StatusCode::NOT_FOUND,
+        error::UNSUPPORTED => StatusCode::NOT_IMPLEMENTED,
+        error::ADMISSION_REJECTED | error::ENGINE_TOKEN_INVALID => StatusCode::CONFLICT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn error_response(err: ControlError) -> (StatusCode, Json<Value>) {
+    (http_status(err.code), Json(err.to_json()))
+}
+
+fn bad_request(message: impl Into<String>) -> (StatusCode, Json<Value>) {
+    error_response(ControlError::new(error::BAD_REQUEST, message))
 }

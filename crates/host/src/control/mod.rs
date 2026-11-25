@@ -1,19 +1,31 @@
 //! 主机控制协议（契约 B）：行 JSON 请求 / 行 JSON 响应。
 //!
-//! 这一层只做协议，不碰 socket：`serve_loop` 接任意 `BufRead` + `Write`，
+//! 这一层只做协议与方案加载，不碰 socket：`serve_loop` 接任意 `BufRead` + `Write`，
 //! 因此可以在内存管道上跑完整协议测试，Unix socket 只负责把连接塞进来。
 //!
-//! 能力上报必须真实：已经能干的 op 进 `wired`，还没实现的进 `not_wired` 并带原因；
-//! 未实现 op 的请求返回 `unsupported`，**不返回假成功**。
+//! # 实时边界
+//!
+//! `prepare` 允许 IO（读方案文件）与堆分配（解码 / 准入 / 图编译），但只在控制线程执行；
+//! 它产出的草稿由 `commit` 交给执行器，由 [`SlotEngine`] 在下一块边界原子换图。
+//! 音频线程（`run_block`）不读文件、不加锁、不分配、不打印。
+//!
+//! # 能力上报
+//!
+//! 已经能干的 op 进 `wired`，还没实现的进 `not_wired` 并带原因；未实现 op 的请求返回
+//! `unsupported`，**不返回假成功**。
 
 pub mod serve;
 
 use std::collections::BTreeMap;
 
+use khaen_core::plan::Plan;
+use khaen_core::sha256::{sha256, sha256_hex};
 use serde_json::{json, Map, Value};
 
+use crate::admission::{admit, AdmissionLimits, Budget};
 use crate::backend::NullBackend;
-use crate::engine::{BlockEngine, EngineConfig, EngineError, Passthrough};
+use crate::engine::{EngineConfig, EngineError, Passthrough, Processor, SlotEngine};
+use crate::graph::{CompileError, PlanGraph};
 
 /// 协议版本（随契约追加递增）。
 pub const PROTOCOL_VERSION: u16 = 1;
@@ -22,24 +34,13 @@ pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 /// 已实现的 op。
-pub const WIRED_OPS: &[&str] = &["status", "mute"];
+pub const WIRED_OPS: &[&str] = &["status", "mute", "prepare", "commit", "abort", "coeff"];
 
 /// 尚未实现的 op 及其原因（如实上报用）。
-pub const NOT_WIRED_OPS: &[(&str, &str)] = &[
-    (
-        "prepare",
-        "no plan admission yet: plan loading lands with the graph executor (T21)",
-    ),
-    (
-        "commit",
-        "no graph switch yet: commit cannot apply a plan before T21",
-    ),
-    ("abort", "no draft plan to abort before prepare is wired"),
-    (
-        "coeff",
-        "no coefficient versioning yet: coefficients are compiled into the graph (T22)",
-    ),
-];
+///
+/// 目前全部 op 已接通；常量与 `reasons` / `unsupported` 机制保留，后续新增 op 时先把它放在这里，
+/// 未实现前不得返回假成功。
+pub const NOT_WIRED_OPS: &[(&str, &str)] = &[];
 
 /// 协议错误码（契约 B.3）。
 pub mod error {
@@ -59,37 +60,161 @@ pub mod error {
     pub const ENGINE_TOKEN_INVALID: &str = "engine_token_invalid";
 }
 
-type DispatchResult = Result<Value, (&'static str, String)>;
-
-fn bad_request(message: impl Into<String>) -> (&'static str, String) {
-    (error::BAD_REQUEST, message.into())
+/// 控制面错误：稳定错误码 + 给人看的说明。
+///
+/// REST 层按 `code` 映射 HTTP 状态码（见 `khaen-daemon`），行协议层直接序列化成错误响应。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlError {
+    /// 稳定错误码（见 [`error`]）。
+    pub code: &'static str,
+    /// 具体说明。
+    pub message: String,
 }
 
-/// 控制面状态：目前包着块引擎（直通链），等 T21 图执行器落地再换实现。
+impl ControlError {
+    /// 新建错误。
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// 序列化为错误响应 JSON。
+    pub fn to_json(&self) -> Value {
+        json!({
+            "ok": false,
+            "error": self.code,
+            "message": self.message,
+        })
+    }
+}
+
+type DispatchResult = Result<Value, ControlError>;
+
+fn bad_request(message: impl Into<String>) -> ControlError {
+    ControlError::new(error::BAD_REQUEST, message)
+}
+
+fn token_invalid(message: impl Into<String>) -> ControlError {
+    ControlError::new(error::ENGINE_TOKEN_INVALID, message)
+}
+
+/// 从请求对象里取字符串字段；缺失或类型不对都给 `bad_request`。
+fn string_field<'a>(object: &'a Map<String, Value>, name: &str) -> Result<&'a str, ControlError> {
+    match object.get(name) {
+        Some(Value::String(value)) => Ok(value.as_str()),
+        Some(_) => Err(bad_request(format!("field {name} must be a string"))),
+        None => Err(bad_request(format!("missing field: {name}"))),
+    }
+}
+
+/// prepare 产出的草稿：已读文件、已校验 sha256、已解码、已准入、已编译成可执行图。
+///
+/// 草稿只存在于控制线程；commit 时把编译好的图交给执行器，abort / 被新 prepare 替换时直接析构。
+struct DraftPlan {
+    /// 确定性 engine_token（版本号 + 文件内容 sha256 前 8 字节）。
+    token: String,
+    /// 计划版本号；commit 生效后成为 `actual_version`。
+    version: u64,
+    /// 方案 graph_id（方案 ABI v3 的 sha256 十六进制串）。
+    graph_id: String,
+    /// 编译好的图；commit 时移交 `SlotEngine::stage_processor`。
+    processor: Box<dyn Processor + Send>,
+    /// prepare 响应；同一 token 重复 prepare 直接返回同一份（幂等）。
+    response: Value,
+}
+
+impl core::fmt::Debug for DraftPlan {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DraftPlan")
+            .field("token", &self.token)
+            .field("version", &self.version)
+            .field("graph_id", &self.graph_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// 确定性 engine_token：版本号 16 位十六进制 + 文件内容 sha256 前 16 位十六进制。
+fn engine_token(version: u64, sha: &[u8; 32]) -> String {
+    let mut prefix = [0u8; 8];
+    prefix.copy_from_slice(&sha[..8]);
+    format!("{:016x}{:016x}", version, u64::from_be_bytes(prefix))
+}
+
+/// 准入预算序列化（字段与 [`Budget`] 一一对应）。
+fn budget_json(budget: &Budget) -> Value {
+    json!({
+        "plan_bytes": budget.plan_bytes,
+        "coefficients": budget.coefficients,
+        "matrix_cells": budget.matrix_cells,
+        "matrix_taps_per_cell": budget.matrix_taps_per_cell,
+        "convolution_taps": budget.convolution_taps,
+        "latency_samples": budget.latency_samples,
+        "lanes": budget.lanes,
+        "dac_channels": budget.dac_channels,
+        "state_samples": budget.state_samples,
+        "memory_bytes": budget.memory_bytes,
+    })
+}
+
+/// `PlanGraph::compile` 的失败映射（prepare 阶段，非实时）：
+///
+/// - **admission_rejected**：方案本身不能进实时图——准入拒绝、结构非法、抽头超限、
+///   非 1 的抽取/插值（T22 才支持）、非有限系数。与 `admit` 拒绝同属"这份方案不行"。
+/// - **bad_request**：方案与本次运行的运行时配置不匹配——块大小 / 采样率 / 通道数 / lane 链
+///   不衔接。换一份匹配配置的方案即可，属于请求内容问题（`Engine` 表示运行时配置非法，
+///   构造时已校验过，正常不可达）。
+fn compile_error_to_control(err: CompileError) -> ControlError {
+    let message = format!("plan graph compile failed: {err}");
+    match err {
+        CompileError::AdmissionRejected(_)
+        | CompileError::TapsTooLong { .. }
+        | CompileError::UnsupportedRates { .. }
+        | CompileError::InvalidSection(_)
+        | CompileError::NonFiniteCoefficient(_) => {
+            ControlError::new(error::ADMISSION_REJECTED, message)
+        }
+        CompileError::Engine(_)
+        | CompileError::BlockSizeMismatch { .. }
+        | CompileError::SampleRateMismatch { .. }
+        | CompileError::ChannelMismatch { .. }
+        | CompileError::LaneMismatch { .. } => bad_request(message),
+    }
+}
+
+/// 控制面状态：持有唯一执行器（[`SlotEngine`]）与至多一份方案草稿。
 #[derive(Debug)]
 pub struct ControlState {
-    engine: BlockEngine<Passthrough>,
+    /// 块边界可换图的执行器（唯一 owner）。
+    engine: SlotEngine,
+    /// 准入预算（prepare 时使用）。
+    limits: AdmissionLimits,
     runtime_state: &'static str,
     safe_mode: bool,
+    /// 当前方案草稿（prepare 产出，commit / abort 消费，新 prepare 可替换）。
+    draft: Option<DraftPlan>,
 }
 
 impl ControlState {
-    /// 用给定配置新建（直通处理链，未接真实设备）。
+    /// 用给定配置新建（初始处理链为直通，未加载方案）。
     pub fn new(config: EngineConfig) -> Result<Self, EngineError> {
         Ok(Self {
-            engine: BlockEngine::new(config, Passthrough)?,
+            engine: SlotEngine::new(config, Box::new(Passthrough))?,
+            limits: AdmissionLimits::default(),
             runtime_state: "idle",
             safe_mode: false,
+            draft: None,
         })
     }
 
-    /// 底层引擎（非实时路径使用）。
-    pub fn engine(&self) -> &BlockEngine<Passthrough> {
+    /// 底层执行器（非实时路径使用）。
+    pub fn engine(&self) -> &SlotEngine {
         &self.engine
     }
 
-    /// 底层引擎的可变引用（测试与驱动代码块用）。
-    pub fn engine_mut(&mut self) -> &mut BlockEngine<Passthrough> {
+    /// 底层执行器的可变引用（测试与驱动代码用，例如手工跑块观察换图）。
+    pub fn engine_mut(&mut self) -> &mut SlotEngine {
         &mut self.engine
     }
 
@@ -97,12 +222,7 @@ impl ControlState {
     pub fn handle_line(&mut self, line: &str) -> String {
         match self.dispatch(line) {
             Ok(value) => value.to_string(),
-            Err((code, message)) => json!({
-                "ok": false,
-                "error": code,
-                "message": message,
-            })
-            .to_string(),
+            Err(err) => err.to_json().to_string(),
         }
     }
 
@@ -140,19 +260,31 @@ impl ControlState {
         match op.as_str() {
             "status" => Ok(self.status()),
             "mute" => self.mute(object),
+            "prepare" => {
+                let plan_path = string_field(object, "plan_path")?;
+                let plan_sha256 = string_field(object, "plan_sha256")?;
+                self.prepare_json(plan_path, plan_sha256)
+            }
+            "commit" => {
+                let engine_token = string_field(object, "engine_token")?;
+                self.commit_json(engine_token)
+            }
+            "abort" => {
+                let engine_token = string_field(object, "engine_token")?;
+                self.abort_json(engine_token)
+            }
+            "coeff" => Ok(self.coeff_json()),
             other => {
-                if NOT_WIRED_OPS.iter().any(|(name, _)| *name == other) {
-                    let reason = NOT_WIRED_OPS
-                        .iter()
-                        .find(|(name, _)| *name == other)
-                        .map(|(_, reason)| *reason)
-                        .unwrap_or("not wired");
-                    Err((
+                if let Some((_, reason)) = NOT_WIRED_OPS.iter().find(|(name, _)| *name == other) {
+                    Err(ControlError::new(
                         error::UNSUPPORTED,
                         format!("op {other} not wired: {reason}"),
                     ))
                 } else {
-                    Err((error::UNKNOWN_OP, format!("unknown op: {other}")))
+                    Err(ControlError::new(
+                        error::UNKNOWN_OP,
+                        format!("unknown op: {other}"),
+                    ))
                 }
             }
         }
@@ -174,29 +306,198 @@ impl ControlState {
         })
     }
 
+    /// 方案加载（prepare）：读文件 → 校验 sha256 → 解码 → 准入 → 编译图 → 存草稿并生成 token。
+    ///
+    /// 这是非实时路径：允许文件 IO 与堆分配。成功不改变正在跑的音频（只在 `commit` 后于块边界换图）。
+    ///
+    /// 幂等/替换语义：同一 token（同版本号 + 同文件内容）重复 prepare 直接返回上次的响应，
+    /// 不重复解码/编译，草稿保持不变；不同 token 的 prepare 覆盖旧草稿（后到的为准），
+    /// 旧草稿的图在此（控制线程）析构。
+    pub fn prepare_json(
+        &mut self,
+        plan_path: &str,
+        plan_sha256: &str,
+    ) -> Result<Value, ControlError> {
+        let bytes = std::fs::read(plan_path)
+            .map_err(|err| bad_request(format!("cannot read plan file {plan_path}: {err}")))?;
+        let actual_sha = sha256_hex(&bytes);
+        if !actual_sha.eq_ignore_ascii_case(plan_sha256.trim()) {
+            return Err(bad_request(format!(
+                "plan sha256 mismatch: request {plan_sha256}, file {plan_path} is {actual_sha}"
+            )));
+        }
+        // 版本号取"下一个生效版本"；已 stage 未生效的切换不占版本号（单 pending 槽，后 stage 覆盖先 stage）。
+        let version = self.next_plan_version();
+        let token = engine_token(version, &sha256(&bytes));
+        if let Some(draft) = &self.draft {
+            if draft.token == token {
+                return Ok(draft.response.clone());
+            }
+        }
+        let plan = Plan::decode(&bytes)
+            .map_err(|err| bad_request(format!("cannot decode plan {plan_path}: {err}")))?;
+        let admission = admit(&plan, &self.limits);
+        if !admission.accepted {
+            return Err(ControlError::new(
+                error::ADMISSION_REJECTED,
+                format!(
+                    "plan {plan_path} rejected by admission: {}",
+                    admission.summary()
+                ),
+            ));
+        }
+        let config = self.engine.config().clone();
+        let graph =
+            PlanGraph::compile(&plan, &config, &self.limits).map_err(compile_error_to_control)?;
+        let graph_id = plan.graph_id_hex();
+        let response = json!({
+            "ok": true,
+            "engine_token": token,
+            "planned_version": version,
+            "graph_id": graph_id,
+            "admission": {
+                "accepted": true,
+                "budget": budget_json(&admission.budget),
+            },
+        });
+        self.draft = Some(DraftPlan {
+            token,
+            version,
+            graph_id,
+            processor: Box::new(graph),
+            response: response.clone(),
+        });
+        Ok(response)
+    }
+
+    /// 提交草稿：把图排入执行器的下一块边界，返回它将被应用的块号。
+    ///
+    /// `applied_block` 是"下一块"的块号：commit 本身不打断正在算的块，换图发生在下一次
+    /// `run_block` 的入口（那块的编号就是 `applied_block`）。
+    ///
+    /// `all_ack` 语义：单 owner、单引擎（本控制面独占一个 [`SlotEngine`]），没有第二个引擎需要
+    /// 确认，切换在下一块边界必然完成，因此恒为 true；多引擎（主/备）冗余要等 T40 以后再扩展。
+    pub fn commit_json(&mut self, engine_token: &str) -> Result<Value, ControlError> {
+        let draft = self
+            .draft
+            .take()
+            .ok_or_else(|| token_invalid("no prepared plan draft: call prepare before commit"))?;
+        if draft.token != engine_token {
+            let message = format!(
+                "engine_token mismatch: prepared token {}, request {engine_token}",
+                draft.token
+            );
+            // 错 token 不销毁草稿：放回去，调用方可以用正确 token 重试。
+            self.draft = Some(draft);
+            return Err(token_invalid(message));
+        }
+        let applied_block =
+            self.engine
+                .stage_processor(draft.processor, draft.version, draft.graph_id.clone());
+        Ok(json!({
+            "ok": true,
+            "applied_block": applied_block,
+            "version": draft.version,
+            "all_ack": true,
+            "graph_id": draft.graph_id,
+        }))
+    }
+
+    /// 丢弃草稿（abort）：无副作用，正在跑的图不受影响。
+    ///
+    /// token 不符或没有草稿都返回 `engine_token_invalid`；成功返回 `{"ok":true,"aborted":true}`。
+    pub fn abort_json(&mut self, engine_token: &str) -> Result<Value, ControlError> {
+        let draft = self
+            .draft
+            .take()
+            .ok_or_else(|| token_invalid("no prepared plan draft: call prepare before abort"))?;
+        if draft.token != engine_token {
+            let message = format!(
+                "engine_token mismatch: prepared token {}, request {engine_token}",
+                draft.token
+            );
+            // 错 token 不销毁草稿：放回去。
+            self.draft = Some(draft);
+            return Err(token_invalid(message));
+        }
+        Ok(json!({ "ok": true, "aborted": true }))
+    }
+
+    /// 当前系数/图版本（coeff）：只报已生效的真实值，没有就 null + reasons 说明，不编数。
+    pub fn coeff_json(&self) -> Value {
+        let info = self.engine.graph_info();
+        let mut reasons = Map::new();
+        if info.version.is_some() {
+            reasons.insert(
+                "last_good_version".to_string(),
+                json!(concat!(
+                    "whole-plan switching only: the running graph is the last good version; ",
+                    "coefficient-level revisions land with T22"
+                )),
+            );
+        } else {
+            reasons.insert(
+                "version".to_string(),
+                json!("no plan applied yet: prepare + commit, then run one block; the graph switches at the next block boundary"),
+            );
+            reasons.insert(
+                "last_good_version".to_string(),
+                json!("no graph has been applied yet, so there is no last-good version"),
+            );
+            reasons.insert("graph_id".to_string(), json!("no plan applied yet"));
+            reasons.insert(
+                "applied_block".to_string(),
+                json!("no plan applied yet; applied_block is the block where the running graph took over"),
+            );
+        }
+        json!({
+            "ok": true,
+            "version": info.version,
+            "last_good_version": info.version,
+            "graph_id": info.graph_id,
+            "applied_block": info.applied_block,
+            "reasons": reasons,
+        })
+    }
+
+    /// 下一个方案版本号（未加载过方案时为 1）。
+    fn next_plan_version(&self) -> u64 {
+        match self.engine.graph_info().version {
+            Some(version) => version + 1,
+            None => 1,
+        }
+    }
+
     fn status(&self) -> Value {
         let stats = self.engine.stats();
+        let info = self.engine.graph_info();
         let mut reasons = Map::new();
-        reasons.insert(
-            "graph_id".to_string(),
-            json!("no plan loaded; plan admission lands with T21"),
-        );
-        reasons.insert(
-            "epoch".to_string(),
-            json!("no coefficient versioning yet; epoch stays 0 until T22"),
-        );
         reasons.insert(
             "xruns".to_string(),
             json!("no audio device opened; nothing can underrun or overrun yet"),
         );
         reasons.insert(
-            "actual_version".to_string(),
-            json!("no release installed; version reporting lands with T40/T41"),
-        );
-        reasons.insert(
             "underruns".to_string(),
             json!("no device pacing yet; counters stay 0 while the engine is driven by callers"),
         );
+        if info.graph_id.is_none() {
+            reasons.insert(
+                "graph_id".to_string(),
+                json!("no plan applied yet: call prepare + commit; the graph switches at the next block boundary"),
+            );
+        }
+        if info.epoch.is_none() {
+            reasons.insert(
+                "epoch".to_string(),
+                json!("no graph switch has taken effect yet; epoch counts applied plan switches"),
+            );
+        }
+        if info.version.is_none() {
+            reasons.insert(
+                "actual_version".to_string(),
+                json!("no plan applied yet; actual_version is the version of the running graph"),
+            );
+        }
         let not_wired: Vec<Value> = NOT_WIRED_OPS
             .iter()
             .map(|(op, reason)| json!({ "op": op, "reason": reason }))
@@ -205,8 +506,8 @@ impl ControlState {
             "ok": true,
             "protocol_version": PROTOCOL_VERSION,
             "runtime_state": self.runtime_state,
-            "graph_id": Value::Null,
-            "epoch": 0,
+            "graph_id": info.graph_id,
+            "epoch": info.epoch,
             "blocks": stats.blocks,
             "xruns": 0,
             "underruns": stats.underruns,
@@ -214,7 +515,7 @@ impl ControlState {
             "silent": stats.mute,
             "mute": stats.mute,
             "safe_mode": self.safe_mode,
-            "actual_version": Value::Null,
+            "actual_version": info.version,
             "wired": WIRED_OPS,
             "not_wired": not_wired,
             "reasons": reasons,
@@ -227,13 +528,7 @@ impl ControlState {
             Some(_) => return Err(bad_request("field mute must be a boolean")),
             None => return Err(bad_request("missing field: mute")),
         };
-        let receipt = self.engine.request_mute(mute);
-        Ok(json!({
-            "ok": true,
-            "mute": receipt.mute,
-            "applied_block": receipt.applied_block,
-            "idempotent": receipt.idempotent,
-        }))
+        Ok(self.mute_json(mute))
     }
 }
 
