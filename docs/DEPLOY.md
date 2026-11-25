@@ -82,6 +82,26 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 
 检查 `/api/status` / `/api/device` / `/api/coeff` 的结构与协议版本，**不做任何设备写入、不 prepare/commit、不出声**。`device.wired=false` 属合法状态（未配置监督器），只打印原因；设备 `faulted` 同样只打印，是否升级处理由人工判断。
 
+### 4.3 实时主机进程 `khaen-rt-host`（T70f）
+
+与 daemon 分属两个进程：daemon 是控制面（REST + 设备监督器），`khaen-rt-host` 是数据面（AES67 收包 → 方案图 → ALSA PCM）。前者不打开音频流，后者不做 REST。
+
+    sudo systemctl stop tspi-rt-host tspi-motu-48k-keeper 2>/dev/null || true   # 先让 v1/keeper 让出设备
+    KHAEN_ALSA_DEVICE=hw:MOTU,0 \
+    KHAEN_SAMPLE_RATE=48000 KHAEN_BLOCK_FRAMES=128 KHAEN_CHANNELS=2 \
+    KHAEN_AES67_GROUP=239.69.67.1 KHAEN_AES67_PORT=5004 KHAEN_AES67_PAYLOAD_TYPE=97 \
+    KHAEN_AES67_CHANNELS=2 KHAEN_AES67_MAP=0,1 KHAEN_JITTER_FRAMES=192 \
+    KHAEN_PLAN=/var/lib/khaen/test.plan \
+    KHAEN_RUN_SECONDS=1800 KHAEN_STATS_EVERY_BLOCKS=4000 \
+    /opt/khaen/current/bin/khaen-rt-host
+
+- **独占设备**：运行前确认没有 keeper / `prod_bridge.py` / aplay 占着 PCM；运行中不要从别的进程打开同一设备。
+- **方案**：启动时读一次 `KHAEN_PLAN`（ABI v3，`prepare` 的准入与图编译在这里复用）；运行期不换图——跨进程换图通道（T70f 后续）**未实现**，脚本里不要把 daemon 的 commit 当成已作用于 rt-host。
+- **未加载方案**时默认 `KHAEN_UNLOADED=silence`（fail-closed）；联调链路可用 `passthrough`。
+- 设备监督器默认不装配（`SupervisorOptions::enabled=false`，状态如实 `absent`）；给齐 `KHAEN_DEVICE_ID`/`KHAEN_RATE_READ`/`KHAEN_RATE_ASSERT` 才装配真实监督器。
+- 监控与 supervise 轮询目前在块线程上（每 `KHAEN_STATS_EVERY_BLOCKS` 块），**这是验证工具的让步，不是 RT 认证形态**；生产形态见 `docs/DESIGN.md` 的线程模型。
+- 本仓库不提供 MOTU 读写速率的辅助脚本；在设备侧跑之前需要部署方提供（与 daemon 的 `daemon.env.example` 同一批产物），因此真机 30 分钟/8 小时验证仍为 **NOT_RUN**。
+
 ## 5. 验证状态（如实标注）
 
 | 项 | 状态 |
@@ -90,3 +110,6 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 | CI release workflow 首次运行 | **NOT_RUN**（需要打 tag 后观察） |
 | `install.sh` / `rollback.sh` 在 N150 上演练 | **NOT_RUN**（需要部署窗口；N150 当前仍跑 v1 的 `tspi-rt-host`） |
 | 设备上原子切换 + 服务重启 | **NOT_RUN** |
+| `khaen-rt-host` Windows 上编译（stub 路径） | 实测通过（`cargo check`，Linux 专属代码不参与） |
+| `khaen-rt-host` Linux 编译 | 由 CI 覆盖（本机无 libasound/pkg-config，交叉检查跑不通） |
+| `khaen-rt-host` 真机出声（30 min / 8 h） | **NOT_RUN**（需要设备窗口 + 你的许可，且需要部署方提供 MOTU 速率辅助脚本） |

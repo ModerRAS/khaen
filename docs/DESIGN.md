@@ -164,7 +164,8 @@ v1 的 `tspi-motu-48k-keeper` 与 `tspi-motu-net.service` 在 v2 里被**监督�
 | T70a | ALSA 输出后端（真实 PCM 播放 + xrun 恢复），平台无关逻辑 + 可注入 PCM | 已提交 `9b0604d`；真实 ALSA 播放 **NOT_RUN**（Linux 上待设备窗口） |
 | T70b | AES67 输入后端（RTP/L24 收包 + jitter + SSRC 切换） | 已提交 `ae825e1`；真实 UDP 收包在 `Runtime` 里接线（T70d） |
 | T70c | 设备监督器状态机（枚举→控制通道→速率断言→流式 + 插拔自恢复） | 已提交 `291a263` |
-| T70d | 单进程运行时：AES67 收包线程 → SPSC → SlotEngine → ALSA 输出 | **在写**（task-20）；真实设备联通 **NOT_RUN** |
+| T70d | 单进程运行时：AES67 收包线程 → SPSC → SlotEngine → ALSA 输出 | 已提交 `af72fff`（13 个运行时测试，含零分配块路径）；真实 UDP/ALSA 出声 **NOT_RUN** |
+| T70f | `khaen-rt-host` 进程：把 T70d 的 `Runtime` 做成可执行文件（环境变量配置、方案文件加载、统计输出） | 已提交；Windows 只能编译（stub），Linux 真机运行 **NOT_RUN** |
 | T70e | daemon 接线：`/api/device`、`/api/device/retry`、安全锁存 fail-closed 静音、`Box<dyn>` 组件注入 | 已提交 `22cc206` |
 
 ## 进程与线程模型

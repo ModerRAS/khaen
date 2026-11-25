@@ -1,0 +1,10 @@
+[package]
+name = "khaen-rt-host"
+description = "Real-time host process: AES67 RTP input -> plan graph -> ALSA S24_3LE playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+khaen-core = { path = "../core" }
+khaen-host = { path = "../host" }
