@@ -139,7 +139,18 @@ pub fn admit(plan: &Plan, limits: &AdmissionLimits) -> Admission {
         ));
     }
 
-    let plan_bytes = plan.encode().len() as u64;
+    // 编码同样 fail-closed：手工构造的超限方案必须在这里变成一条 rejection，
+    // 而不是让 panic 版 encode 把控制面线程带崩（decode/plan-builder 产物不可达此分支）。
+    let plan_bytes = match plan.encode_checked() {
+        Ok(bytes) => bytes.len() as u64,
+        Err(err) => {
+            rejections.push(Rejection::new(
+                "plan_encoding",
+                format!("plan cannot be encoded within ABI limits: {err}"),
+            ));
+            0
+        }
+    };
     budget.plan_bytes = plan_bytes;
     if plan_bytes > limits.max_plan_bytes {
         rejections.push(Rejection::new(

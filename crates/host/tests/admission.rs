@@ -157,6 +157,31 @@ fn inconsistent_matrix_is_rejected() {
 }
 
 #[test]
+fn over_abi_limit_plan_is_rejected_not_panicked() {
+    // 手工构造 65536 个 fold（ABI 上限 65535）：准入必须给 plan_encoding rejection，
+    // 而不是触发 panic 版 encode（decode/plan-builder 产物不会到这一步）。
+    let mut plan = base_plan();
+    let folds: Vec<Fold> = (0..65_536u32)
+        .map(|index| Fold {
+            src: (index % 2) as u16,
+            dst: (index % 2) as u16,
+            gain: 1.0,
+        })
+        .collect();
+    if let Some(content) = &mut plan.content {
+        content.folds = folds;
+    }
+    let admission = admit(&plan, &AdmissionLimits::default());
+    assert!(!admission.accepted);
+    let rejection = admission
+        .rejections
+        .iter()
+        .find(|rejection| rejection.code == "plan_encoding")
+        .expect("plan_encoding rejection");
+    assert!(rejection.detail.contains("65535"), "{}", rejection.detail);
+}
+
+#[test]
 fn out_of_range_references_are_rejected() {
     let mut plan = base_plan();
     plan.content = Some(ContentSection {
