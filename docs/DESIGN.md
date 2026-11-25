@@ -156,3 +156,29 @@ MOTU UltraLite-mk5 的采样率是**设备自身保存的状态**：空闲或 US
 ### 与现有 v1 部署的关系
 
 v1 的 `tspi-motu-48k-keeper` 与 `tspi-motu-net.service` 在 v2 里被**监督器取代**，不再是独立服务；迁移期保留它们作为只读诊断（`WRITE_BACK=0`），不再靠它们保证正确性。
+
+### T70 子项进度（如实）
+
+| 子项 | 内容 | 状态 |
+| --- | --- | --- |
+| T70a | ALSA 输出后端（真实 PCM 播放 + xrun 恢复），平台无关逻辑 + 可注入 PCM | 已提交 `9b0604d`；真实 ALSA 播放 **NOT_RUN**（Linux 上待设备窗口） |
+| T70b | AES67 输入后端（RTP/L24 收包 + jitter + SSRC 切换） | 已提交 `ae825e1`；真实 UDP 收包在 `Runtime` 里接线（T70d） |
+| T70c | 设备监督器状态机（枚举→控制通道→速率断言→流式 + 插拔自恢复） | 已提交 `291a263` |
+| T70d | 单进程运行时：AES67 收包线程 → SPSC → SlotEngine → ALSA 输出 | **在写**（task-20）；真实设备联通 **NOT_RUN** |
+| T70e | daemon 接线：`/api/device`、`/api/device/retry`、安全锁存 fail-closed 静音、`Box<dyn>` 组件注入 | 已提交 `22cc206` |
+
+## 进程与线程模型
+
+当前形态（T70d 交付的最小可运行单元）：**一个 `Runtime` 对象**把三段串起来，线程布局如下。
+
+| 线程 | 职责 | 实时约束 |
+| --- | --- | --- |
+| 收包线程（非 RT） | `UdpSocket` 组播 join → `Aes67Input::feed_packet` → SPSC producer | 允许分配/IO，但不碰引擎与设备 |
+| 实时块线程（RT） | `Runtime::run_block`：SPSC consumer → SlotEngine（含方案图）→ ALSA 输出 | 零分配/零锁/无 IO/不 panic；缓冲全部构造期分配 |
+| daemon 轮询线程（非 RT） | 设备监督器 `poll`、安全锁存联动 | 不碰 RT 缓冲；锁只保护控制面 |
+
+约束与未决：
+
+1. **设备单一 owner**：设备监督器在 daemon 里（`/api/device` 是其快照）；实时侧打开 PCM 之前，必须由监督器把设备推进到 `Streaming` 且速率已回读断言——否则 fail-closed。
+2. **进程边界未定（T70f）**：当前 `Runtime` 与 daemon 在同一台机器上、进程边界待定；两进程之间的方案切换通道（共享内存 ring 或 unix socket）**尚未实现**。在它有之前，daemon 的 `prepare/commit` 只作用于 daemon 自己的 `SlotEngine` 副本，**不宣称**已影响正在出声的 `Runtime`；`/api/status` 不会把这种状态报成"已生效"。
+3. **单进程模式可行**：若短期先要一处出声，可把 `Runtime` 跑在独占设备的进程里、daemon 只做只读观测；这条路径不需要 IPC，但方案切换要重启该进程（UX 上明确标注）。
