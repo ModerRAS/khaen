@@ -90,7 +90,7 @@
 
 | op | 请求字段 | 响应要点 |
 | --- | --- | --- |
-| status | — | 快照：runtime_state、graph_id、epoch、blocks、xruns、underruns、faults、silent、mute、safe_mode、actual_version、wired[]、not_wired[] |
+| status | — | 快照：runtime_state、graph_id、epoch、blocks、xruns、underruns、faults、silent、mute、safe_mode、actual_version、format{}、surfaces{}、surface_reasons{}、wired[]、not_wired[] |
 | mute | mute(bool) | 回执：applied_block、mute（生效后 actual）、idempotent |
 | prepare | plan_path、plan_sha256 | 准入结果：engine_token、planned_version、admission{} |
 | commit | engine_token | 块边界生效：applied_block、version、all_ack |
@@ -99,6 +99,7 @@
 | inspect | plan_path、可选 plan_sha256 | 只读试运行：读文件→校验 sha→解码→准入→图编译；返回 sha256/graph_id/plan 摘要/admission（accepted+rejections+budget）/compile（compiled+latency 或 error_code）；`staged` 恒 false，不产生草稿、不改变正在跑的图 |
 | surface | surface、data | 语义界面两阶段：准备补丁草稿（engine_token、planned_version、graph_id、admission）；生效仍走 commit |
 | rollback | 可选 target(版本号) | 回滚第一阶段：把历史里的旧版本重新准备成草稿（engine_token、planned_version、**rolled_back_to**、graph_id、admission）；版本号**递增**、历史不改写；生效仍走 commit；无历史返回 no_history(409) |
+| format | 可选 sample_rate(u32)、chunksize(u16) | 格式变更第一阶段：校验目标格式（须在 `SAMPLE_RATES_HZ` / `BLOCK_SIZES` 内）→ 草稿（engine_token、planned_version、format{}、**changed**、applies_to="control-plane engine"、device_restart_required=true）；commit 重建执行器并**丢弃正在跑的图**（方案嵌格式），生效仍走 commit、abort 可丢弃 |
 
 ### B.1.1 字段形状
 
@@ -117,7 +118,7 @@
 | volume | `gains_db: [{lane, gain_db}]` | 逐 lane 保护增益（dB）。lane 必须已存在于方案的 protection 段；非有限值拒绝。 |
 | routing | `routes: [[lane, dac], ...]`，可选 `dac_channels` | 替换 lane→DAC 路由；dac 必须 < dac_channels（缺省沿用方案值）。 |
 | layout | `in_channels`、`out_lanes`、`folds: [[src, dst, gain], ...]` | 替换内容布局折叠表；越界/空表拒绝。 |
-| format | — | **未接通**：采样率/块长/通道变更要重开音频设备，不能表示为方案补丁；请求返回 `unsupported`。 |
+| format | `sample_rate`、`chunksize`（至少一项） | **已接通**（委托给 B.1.4 的执行器配置两阶段）：不要求已生效方案；`commit` 重建控制面引擎并丢弃正在跑的图，`device_restart_required=true` 如实上报（真实声卡必须重开 PCM 流）。 |
 | mode | — | **未接通**：输入模式选择属于采集源/设备监督器决策，不是方案字段；请求返回 `unsupported`。 |
 
 `status` 里 `surfaces` 逐项上报 `true/false`，未接通的在 `surface_reasons` 给原因；禁止把未接通
@@ -137,6 +138,16 @@
 - 没有任何已生效方案 → `no_history`(409)。
 - 与 prepare/surface 相同：读文件之外全部在控制线程完成，草稿只由 `commit` 在下一块边界生效，
   `abort` 丢弃；回滚方案会重新过准入与图编译，不复用旧处理器对象。
+
+### B.1.4 格式变更（format）
+
+格式（采样率 / 块长）是**执行器配置**，不是方案补丁；方案 ABI v3 里也嵌了 `block_size` / `sample_rate`，因此格式变化会让当前图不再合法。
+
+- 请求字段：`sample_rate`（必须在 `khaen_core::rt::SAMPLE_RATES_HZ` 内）、`chunksize`（必须在 `BLOCK_SIZES` 内），至少给一项；两项都可以给。通道数不能通过此 op 改变。
+- 第一阶段（`format`）：只校验并准备草稿，返回 `engine_token` / `planned_version` / `format{}` / `changed`；**不改变正在跑的引擎**。同 token 重复请求幂等。若当前已有方案草稿，会被丢弃（草稿按旧格式编译，禁止混用）。
+- 第二阶段（`commit`）：若目标格式与当前一致 → `changed=false`、`applied_block=null`，不重建；若不同 → 用新配置重建 `SlotEngine`（保留用户静音状态），**丢弃正在跑的图**（`graph_dropped=true`）、清空可回滚历史（`history_cleared`），`applied_block=1` 表示新执行器从第 1 块开始。之后必须 prepare 一份与新格式一致的方案才能恢复图。
+- `abort` 可丢弃格式草稿（回执 `aborted_surface="format"`）；错 token 不销毁草稿。
+- **设备边界**：本控制面不碰设备；响应里的 `device_restart_required=true` 是给上层的明确信号（真实播放进程需要重开 PCM 流）。不把控制面重建声称为设备已换格式。
 
 ### B.2 语义
 

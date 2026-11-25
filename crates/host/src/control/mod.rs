@@ -19,6 +19,7 @@ pub mod serve;
 use std::collections::BTreeMap;
 
 use khaen_core::plan::{Fold, Plan};
+use khaen_core::rt::{BLOCK_SIZES, SAMPLE_RATES_HZ};
 use khaen_core::sha256::{sha256, sha256_hex};
 use serde_json::{json, Map, Value};
 
@@ -36,6 +37,7 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 /// 已实现的 op。
 pub const WIRED_OPS: &[&str] = &[
     "status", "mute", "prepare", "commit", "abort", "coeff", "surface", "inspect", "rollback",
+    "format",
 ];
 
 /// 可回滚历史的长度上限：只保留最近 N 个已生效方案（完整方案对象，控制线程内存）。
@@ -45,19 +47,13 @@ const HISTORY_LIMIT: usize = 16;
 ///
 /// 两阶段语义与 prepare/commit 完全一致：surface 只**准备**一份打了补丁的方案草稿并返回
 /// engine_token，真正生效仍由 commit 在下一块边界完成；abort 丢弃。
-pub const WIRED_SURFACES: &[&str] = &["volume", "routing", "layout"];
+pub const WIRED_SURFACES: &[&str] = &["volume", "routing", "layout", "format"];
 
 /// 尚未接通的界面及原因（如实上报；请求返回 `unsupported`，不返回假成功）。
-pub const NOT_WIRED_SURFACES: &[(&str, &str)] = &[
-    (
-        "format",
-        "format change (sample rate / block size / channels) reopens the audio device; it cannot be expressed as a plan patch while streaming",
-    ),
-    (
-        "mode",
-        "input mode selection is a capture-source / device-supervisor decision, not a plan field",
-    ),
-];
+pub const NOT_WIRED_SURFACES: &[(&str, &str)] = &[(
+    "mode",
+    "input mode selection is a capture-source / device-supervisor decision, not a plan field",
+)];
 
 /// 尚未实现的 op 及其原因（如实上报用）。
 ///
@@ -378,6 +374,15 @@ fn apply_surface_patch(base: &Plan, surface: &str, data: &Value) -> Result<Plan,
     }
     Ok(plan)
 }
+/// 格式快照（status / format 响应用同一份字段名）。
+fn format_json(config: &EngineConfig) -> Value {
+    json!({
+        "sample_rate": config.sample_rate,
+        "block_size": config.block_frames,
+        "channels": config.channels,
+    })
+}
+
 /// 控制面状态：持有唯一执行器（[`SlotEngine`]）与至多一份方案草稿。
 #[derive(Debug)]
 pub struct ControlState {
@@ -389,10 +394,23 @@ pub struct ControlState {
     safe_mode: bool,
     /// 当前方案草稿（prepare / surface 产出，commit / abort 消费，新 prepare 可替换）。
     draft: Option<DraftPlan>,
+    /// 当前格式变更草稿（format 产出，commit / abort 消费；与方案草稿互斥）。
+    pending_format: Option<FormatDraft>,
     /// 最近一次 commit 生效的方案：语义界面（volume/routing/layout）以它为基线打补丁。
     base_plan: Option<Plan>,
     /// 已生效方案的有限历史（版本升序），供 rollback 回到旧版本。
     history: Vec<CommittedPlan>,
+}
+
+/// 格式变更草稿（两阶段；与方案草稿互斥）。
+#[derive(Debug, Clone)]
+struct FormatDraft {
+    token: String,
+    version: u64,
+    /// 目标引擎配置（只允许 sample_rate / block_frames 改变）。
+    target: EngineConfig,
+    /// prepare 响应；同 token 重复 prepare 返回同一份。
+    response: Value,
 }
 
 /// 一份已生效方案的历史条目（完整方案 + 版本 + graph_id）。
@@ -413,6 +431,7 @@ impl ControlState {
             runtime_state: "idle",
             safe_mode: false,
             draft: None,
+            pending_format: None,
             base_plan: None,
             history: Vec::new(),
         })
@@ -484,6 +503,7 @@ impl ControlState {
                 self.abort_json(engine_token)
             }
             "coeff" => Ok(self.coeff_json()),
+            "format" => self.prepare_format_json(object),
             "rollback" => {
                 let target = match object.get("target") {
                     Some(Value::Number(number)) => Some(number.as_u64().ok_or_else(|| {
@@ -598,6 +618,7 @@ impl ControlState {
                 "budget": budget_json(&admission.budget),
             },
         });
+        self.pending_format = None;
         self.draft = Some(DraftPlan {
             token,
             version,
@@ -684,6 +705,135 @@ impl ControlState {
             "compile": compile,
         }))
     }
+    /// 格式变更第一阶段（format op）：校验目标格式 → 存草稿；commit 才真正重建执行器。
+    ///
+    /// 语义：格式（采样率 / 块长）不是方案补丁，而是执行器配置；commit 会重建 SlotEngine
+    /// 并**丢弃正在跑的图**（方案里嵌了格式字段，旧图对新格式不再合法），响应如实说明这一点，
+    /// 并提示 device_restart_required（真实声卡必须重开 PCM 流，本控制面不碰设备）。
+    pub fn prepare_format_json(
+        &mut self,
+        object: &Map<String, Value>,
+    ) -> Result<Value, ControlError> {
+        let mut target = self.engine.config().clone();
+        let current = target.clone();
+        let mut requested = false;
+        if let Some(value) = object.get("sample_rate") {
+            let sample_rate = value
+                .as_u64()
+                .ok_or_else(|| bad_request("field sample_rate must be a non-negative integer"))?;
+            let sample_rate = u32::try_from(sample_rate)
+                .map_err(|_| bad_request("sample_rate does not fit in u32"))?;
+            if !SAMPLE_RATES_HZ.contains(&sample_rate) {
+                return Err(bad_request(format!(
+                    "sample_rate must be one of {SAMPLE_RATES_HZ:?}"
+                )));
+            }
+            target.sample_rate = sample_rate;
+            requested = true;
+        }
+        if let Some(value) = object.get("chunksize") {
+            let chunksize = value
+                .as_u64()
+                .ok_or_else(|| bad_request("field chunksize must be a non-negative integer"))?;
+            let chunksize = u16::try_from(chunksize)
+                .map_err(|_| bad_request("chunksize does not fit in u16"))?;
+            if !BLOCK_SIZES.contains(&chunksize) {
+                return Err(bad_request(format!(
+                    "chunksize must be one of {BLOCK_SIZES:?}"
+                )));
+            }
+            target.block_frames = usize::from(chunksize);
+            requested = true;
+        }
+        if !requested {
+            return Err(bad_request(
+                "at least one of sample_rate / chunksize is required",
+            ));
+        }
+        // 格式草稿与方案草稿互斥：方案草稿按旧格式编译，混用会让 commit 出歧义。
+        self.draft = None;
+        let version = self.next_plan_version();
+        let canonical = format!(
+            "format:{}:{}:{}",
+            target.sample_rate, target.block_frames, target.channels
+        );
+        let token = engine_token(version, &sha256(canonical.as_bytes()));
+        if let Some(draft) = &self.pending_format {
+            if draft.token == token {
+                return Ok(draft.response.clone());
+            }
+        }
+        let response = json!({
+            "ok": true,
+            "engine_token": token,
+            "planned_version": version,
+            "format": format_json(&target),
+            "changed": target != current,
+            "applies_to": "control-plane engine",
+            "device_restart_required": true,
+            "note": "format change rebuilds the control-plane engine and drops the running graph; a plan matching the new format must be prepared again (a real device requires reopening the PCM stream)",
+        });
+        self.pending_format = Some(FormatDraft {
+            token,
+            version,
+            target,
+            response: response.clone(),
+        });
+        Ok(response)
+    }
+
+    /// 格式变更第二阶段：重建执行器（仅格式真正变化时）。不是 RT 路径，允许分配。
+    fn commit_format(&mut self, engine_token: &str) -> Result<Value, ControlError> {
+        let draft = self
+            .pending_format
+            .take()
+            .ok_or_else(|| token_invalid("no prepared format draft: call format before commit"))?;
+        if draft.token != engine_token {
+            let message = format!(
+                "engine_token mismatch: prepared token {}, request {engine_token}",
+                draft.token
+            );
+            self.pending_format = Some(draft);
+            return Err(token_invalid(message));
+        }
+        let current = self.engine.config().clone();
+        if draft.target == current {
+            return Ok(json!({
+                "ok": true,
+                "changed": false,
+                "applied_block": Value::Null,
+                "version": draft.version,
+                "format": format_json(&draft.target),
+                "note": "format already matches the running engine; nothing rebuilt",
+            }));
+        }
+        let was_muted = self.engine.stats().mute;
+        let engine =
+            SlotEngine::new(draft.target.clone(), Box::new(Passthrough)).map_err(|err| {
+                bad_request(format!("cannot rebuild engine for the new format: {err}"))
+            })?;
+        self.engine = engine;
+        if was_muted {
+            self.engine.request_mute(true);
+        }
+        // 旧格式下的方案/历史对新格式不再合法（方案嵌了格式字段），如实清空。
+        self.base_plan = None;
+        let dropped_history = !self.history.is_empty();
+        self.history.clear();
+        Ok(json!({
+            "ok": true,
+            "changed": true,
+            "applied_block": 1,
+            "version": draft.version,
+            "format": format_json(&self.engine.config().clone()),
+            "all_ack": true,
+            "graph_dropped": true,
+            "history_cleared": dropped_history,
+            "mute_preserved": was_muted,
+            "device_restart_required": true,
+        }))
+    }
+
     /// 提交草稿：把图排入执行器的下一块边界，返回它将被应用的块号。
     ///
     /// `applied_block` 是"下一块"的块号：commit 本身不打断正在算的块，换图发生在下一次
@@ -692,6 +842,10 @@ impl ControlState {
     /// `all_ack` 语义：单 owner、单引擎（本控制面独占一个 [`SlotEngine`]），没有第二个引擎需要
     /// 确认，切换在下一块边界必然完成，因此恒为 true；多引擎（主/备）冗余要等 T40 以后再扩展。
     pub fn commit_json(&mut self, engine_token: &str) -> Result<Value, ControlError> {
+        // 格式草稿与方案草稿互斥；存在哪个就提交哪个。
+        if self.pending_format.is_some() {
+            return self.commit_format(engine_token);
+        }
         let draft = self
             .draft
             .take()
@@ -739,6 +893,13 @@ impl ControlState {
                 format!("surface {surface} not wired: {reason}"),
             ));
         }
+        if surface == "format" {
+            // 格式不是方案补丁：委托给执行器配置的两阶段入口（同一个 commit/abort）。
+            let object = data
+                .as_object()
+                .ok_or_else(|| bad_request("field data must be a json object"))?;
+            return self.prepare_format_json(object);
+        }
         if !WIRED_SURFACES.contains(&surface) {
             return Err(bad_request(format!("unknown surface: {surface}")));
         }
@@ -784,6 +945,7 @@ impl ControlState {
                 "budget": budget_json(&admission.budget),
             },
         });
+        self.pending_format = None;
         self.draft = Some(DraftPlan {
             token,
             version,
@@ -877,6 +1039,7 @@ impl ControlState {
                 "budget": budget_json(&admission.budget),
             },
         });
+        self.pending_format = None;
         self.draft = Some(DraftPlan {
             token,
             version,
@@ -891,6 +1054,18 @@ impl ControlState {
     ///
     /// token 不符或没有草稿都返回 `engine_token_invalid`；成功返回 `{"ok":true,"aborted":true}`。
     pub fn abort_json(&mut self, engine_token: &str) -> Result<Value, ControlError> {
+        // 格式草稿同样可 abort；错 token 不销毁草稿。
+        if let Some(draft) = self.pending_format.as_ref() {
+            if draft.token != engine_token {
+                let message = format!(
+                    "engine_token mismatch: prepared token {}, request {engine_token}",
+                    draft.token
+                );
+                return Err(token_invalid(message));
+            }
+            self.pending_format = None;
+            return Ok(json!({ "ok": true, "aborted": true, "aborted_surface": "format" }));
+        }
         let draft = self
             .draft
             .take()
@@ -1012,6 +1187,7 @@ impl ControlState {
             "mute": stats.mute,
             "safe_mode": self.safe_mode,
             "actual_version": info.version,
+            "format": format_json(&self.engine.config().clone()),
             "wired": WIRED_OPS,
             "not_wired": not_wired,
             "surfaces": surfaces,

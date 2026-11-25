@@ -802,21 +802,29 @@ fn surface_honours_two_phase_errors_and_truthful_capabilities() {
     );
     assert_eq!(missing["error"], Value::String(error::NO_BASE_PLAN.into()));
 
-    // format / mode 未接通：unsupported + 原因，不返回假成功。
-    for surface in ["format", "mode"] {
-        let response = request(
-            &mut state,
-            json!({ "op": "surface", "surface": surface, "data": {} }),
-        );
-        assert_eq!(
-            response["error"],
-            Value::String(error::UNSUPPORTED.into()),
-            "surface {surface}"
-        );
-        assert!(response["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("not wired")));
-    }
+    // mode 未接通：unsupported + 原因，不返回假成功。
+    let mode = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "mode", "data": {} }),
+    );
+    assert_eq!(mode["error"], Value::String(error::UNSUPPORTED.into()));
+    assert!(mode["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("not wired")));
+
+    // format 已接通：经由 surface 入口委托执行器配置的两阶段；空 data 是请求内容问题。
+    let format = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "format", "data": {} }),
+    );
+    assert_eq!(format["error"], Value::String(error::BAD_REQUEST.into()));
+    let format_draft = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "format", "data": { "chunksize": 64 } }),
+    );
+    assert_eq!(format_draft["ok"], Value::Bool(true));
+    assert_eq!(format_draft["changed"], Value::Bool(true));
+    assert_eq!(format_draft["format"]["block_size"], Value::from(64));
 
     // 未知界面：请求内容问题。
     let unknown = request(
@@ -825,25 +833,19 @@ fn surface_honours_two_phase_errors_and_truthful_capabilities() {
     );
     assert_eq!(unknown["error"], Value::String(error::BAD_REQUEST.into()));
 
-    // 能力上报如实：三个界面接通、两个未接通且带原因。
+    // 能力上报如实：四个界面接通、mode 未接通且带原因。
     let capabilities = status(&mut state);
-    for surface in ["volume", "routing", "layout"] {
+    for surface in ["volume", "routing", "layout", "format"] {
         assert_eq!(
             capabilities["surfaces"][surface],
             Value::Bool(true),
             "surface {surface}"
         );
     }
-    for surface in ["format", "mode"] {
-        assert_eq!(
-            capabilities["surfaces"][surface],
-            Value::Bool(false),
-            "surface {surface}"
-        );
-        assert!(capabilities["surface_reasons"][surface]
-            .as_str()
-            .is_some_and(|reason| !reason.is_empty()));
-    }
+    assert_eq!(capabilities["surfaces"]["mode"], Value::Bool(false));
+    assert!(capabilities["surface_reasons"]["mode"]
+        .as_str()
+        .is_some_and(|reason| !reason.is_empty()));
 
     // 有基线之后，非法 payload 仍是 bad_request（空列表 / 不存在的 lane）。
     let identity = identity_plan();
@@ -989,5 +991,170 @@ fn inspect_bad_inputs_are_bad_request() {
     assert_eq!(
         wrong_type["error"],
         Value::String(error::BAD_REQUEST.into())
+    );
+}
+
+// ===========================================================================
+// format 界面：两阶段执行器配置变更（格式不是方案补丁）
+// ===========================================================================
+
+/// identity 方案但块长指定（用于匹配新格式）。
+fn identity_plan_for_block(block: u32) -> Plan {
+    let mut plan = identity_plan();
+    plan.block_size = block;
+    plan
+}
+
+#[test]
+fn format_two_phase_rebuilds_engine_and_drops_graph() {
+    let mut state = state();
+    // 先上一份 128 块长的恒等方案。
+    let identity = identity_plan();
+    let file = TempPlan::new("format-base", &identity.encode());
+    let prepared = prepare(&mut state, &file);
+    let token = token_of(&prepared);
+    let committed = commit(&mut state, &token);
+    assert_eq!(committed["version"], Value::from(1));
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x1234);
+    let output = run_block(&mut state, &input);
+    assert_bit_eq(&output, &input);
+
+    // 第一阶段：请求把块长改成 64；commit 前引擎配置不变（不提前生效）。
+    let draft = request(&mut state, json!({ "op": "format", "chunksize": 64 }));
+    assert_eq!(draft["ok"], Value::Bool(true));
+    assert_eq!(draft["changed"], Value::Bool(true));
+    assert_eq!(draft["format"]["block_size"], Value::from(64));
+    assert_eq!(
+        draft["applies_to"],
+        Value::String("control-plane engine".into())
+    );
+    assert_eq!(draft["device_restart_required"], Value::Bool(true));
+    let format_token = token_of(&draft);
+    let before = status(&mut state);
+    assert_eq!(before["format"]["block_size"], Value::from(128));
+    // 提交前仍按旧格式跑块。
+    let old_block = run_block(&mut state, &input);
+    assert_eq!(old_block.len(), input.len());
+
+    // 第二阶段：commit 真正重建执行器；旧图被丢弃（方案嵌格式，旧图不再合法）。
+    let applied = commit(&mut state, &format_token);
+    assert_eq!(applied["changed"], Value::Bool(true));
+    assert_eq!(applied["graph_dropped"], Value::Bool(true));
+    assert_eq!(applied["applied_block"], Value::from(1));
+    assert_eq!(applied["format"]["block_size"], Value::from(64));
+    let after = status(&mut state);
+    assert_eq!(after["format"]["block_size"], Value::from(64));
+    assert_eq!(after["format"]["sample_rate"], Value::from(SAMPLE_RATE));
+    assert_eq!(after["graph_id"], Value::Null);
+    assert!(after["reasons"]["graph_id"].is_string());
+
+    // 新格式下跑块：块长 64 → 每块 64*2 样本。
+    let small_input = signal(64 * usize::from(CHANNELS), 0x5678);
+    let small_output = run_block(&mut state, &small_input);
+    assert_eq!(small_output.len(), small_input.len());
+
+    // 再 prepare 一份 64 块长的方案才能恢复图。
+    let small_plan = identity_plan_for_block(64);
+    let small_file = TempPlan::new("format-64-plan", &small_plan.encode());
+    let small_prepared = prepare(&mut state, &small_file);
+    let small_token = token_of(&small_prepared);
+    let small_committed = commit(&mut state, &small_token);
+    assert_eq!(
+        small_committed["graph_id"],
+        Value::String(small_plan.graph_id_hex())
+    );
+    let identity_output = run_block(&mut state, &small_input);
+    assert_bit_eq(&identity_output, &small_input);
+}
+
+#[test]
+fn format_same_value_is_noop_on_commit() {
+    let mut state = state();
+    let identity = identity_plan();
+    let file = TempPlan::new("format-noop", &identity.encode());
+    let token = token_of(&prepare(&mut state, &file));
+    let _ = commit(&mut state, &token);
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x9abc);
+    let _ = run_block(&mut state, &input);
+    let blocks_before = status(&mut state)["blocks"].clone();
+
+    // 请求与当前相同的格式：changed=false；commit 不重建执行器（块号不归零、图还在）。
+    let draft = request(
+        &mut state,
+        json!({ "op": "format", "sample_rate": SAMPLE_RATE }),
+    );
+    assert_eq!(draft["changed"], Value::Bool(false));
+    let format_token = token_of(&draft);
+    let applied = commit(&mut state, &format_token);
+    assert_eq!(applied["changed"], Value::Bool(false));
+    assert_eq!(applied["applied_block"], Value::Null);
+    let after = status(&mut state);
+    assert_eq!(after["blocks"], blocks_before);
+    assert_eq!(after["graph_id"], Value::String(identity.graph_id_hex()));
+}
+
+#[test]
+fn format_rejects_bad_values_and_missing_fields() {
+    let mut state = state();
+    for request_value in [
+        json!({ "op": "format" }),
+        json!({ "op": "format", "sample_rate": 44_100 }),
+        json!({ "op": "format", "chunksize": 256 }),
+        json!({ "op": "format", "chunksize": "64" }),
+        json!({ "op": "format", "sample_rate": 48_001 }),
+    ] {
+        let response = request(&mut state, request_value);
+        assert_eq!(
+            response["error"],
+            Value::String(error::BAD_REQUEST.into()),
+            "{response}"
+        );
+    }
+    // 被拒的请求不产生草稿：commit 仍然 engine_token_invalid。
+    let commit_attempt = commit(&mut state, "deadbeef");
+    assert_eq!(
+        commit_attempt["error"],
+        Value::String(error::ENGINE_TOKEN_INVALID.into())
+    );
+}
+
+#[test]
+fn format_draft_is_abortable_and_excludes_plan_draft() {
+    let mut state = state();
+    // 方案草稿存在时 prepare format：方案草稿被丢弃（互斥）。
+    let identity = identity_plan();
+    let file = TempPlan::new("format-exclusive", &identity.encode());
+    let plan_prepared = prepare(&mut state, &file);
+    let stale_plan_token = token_of(&plan_prepared);
+    let format_draft = request(&mut state, json!({ "op": "format", "chunksize": 64 }));
+    let format_token = token_of(&format_draft);
+    let stale = commit(&mut state, &stale_plan_token);
+    assert_eq!(
+        stale["error"],
+        Value::String(error::ENGINE_TOKEN_INVALID.into())
+    );
+    // format 草稿可 abort，abort 后 commit 无效、格式不变。
+    let aborted = request(
+        &mut state,
+        json!({ "op": "abort", "engine_token": format_token }),
+    );
+    assert_eq!(aborted["aborted_surface"], Value::String("format".into()));
+    let after = commit(&mut state, &format_token);
+    assert_eq!(
+        after["error"],
+        Value::String(error::ENGINE_TOKEN_INVALID.into())
+    );
+    assert_eq!(status(&mut state)["format"]["block_size"], Value::from(128));
+}
+
+#[test]
+fn status_reports_format_truthfully() {
+    let mut state = state();
+    let response = status(&mut state);
+    assert_eq!(response["format"]["sample_rate"], Value::from(SAMPLE_RATE));
+    assert_eq!(response["format"]["block_size"], Value::from(BLOCK_FRAMES));
+    assert_eq!(
+        response["format"]["channels"],
+        Value::from(u32::from(CHANNELS))
     );
 }

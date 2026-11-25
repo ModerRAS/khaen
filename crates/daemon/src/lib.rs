@@ -100,6 +100,7 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/api/plan/inspect", post(inspect))
         .route("/api/surface", post(surface))
         .route("/api/rollback", post(rollback))
+        .route("/api/format", post(format_prepare))
         .route("/api/device", get(device_status))
         .route("/api/device/retry", post(device_retry))
         .with_state(state)
@@ -111,6 +112,20 @@ pub async fn serve(
     state: Arc<DaemonState>,
 ) -> std::io::Result<()> {
     axum::serve(listener, router(state)).await
+}
+
+async fn format_prepare(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let object = match payload.as_object() {
+        Some(object) => object,
+        None => return bad_request("request body must be a json object"),
+    };
+    match state.control().prepare_format_json(object) {
+        Ok(body) => (StatusCode::OK, Json(body)),
+        Err(err) => error_response(err),
+    }
 }
 
 async fn status(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {

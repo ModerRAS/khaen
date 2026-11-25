@@ -94,11 +94,19 @@ async fn surface_two_phase_over_http() {
     assert_eq!(response["error"], Value::String("no_base_plan".into()));
 
     // 未接通界面：501 + 原因，不返回假成功。
-    let body = json!({ "surface": "format", "data": {} }).to_string();
+    let body = json!({ "surface": "mode", "data": {} }).to_string();
     let (status, response) =
         request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
     assert_eq!(status, 501);
     assert_eq!(response["error"], Value::String("unsupported".into()));
+
+    // format 已接通：surface 入口委托执行器配置的两阶段（不要求已有方案）。
+    let body = json!({ "surface": "format", "data": { "chunksize": 64 } }).to_string();
+    let (status, draft) =
+        request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(draft["changed"], Value::Bool(true));
+    assert_eq!(draft["format"]["block_size"], Value::from(64));
 
     // 先准备 + 提交一份 identity 基线方案。
     let file = TempPlan::new("surface-base", &identity_plan().encode());
@@ -154,23 +162,17 @@ async fn surface_two_phase_over_http() {
 
     // 能力上报：接通/未接通界面逐项如实。
     let (_, status_json) = request("GET", &format!("{}/api/status", server.base), None).await;
-    for surface in ["volume", "routing", "layout"] {
+    for surface in ["volume", "routing", "layout", "format"] {
         assert_eq!(
             status_json["surfaces"][surface],
             Value::Bool(true),
             "{surface}"
         );
     }
-    for surface in ["format", "mode"] {
-        assert_eq!(
-            status_json["surfaces"][surface],
-            Value::Bool(false),
-            "{surface}"
-        );
-        assert!(status_json["surface_reasons"][surface]
-            .as_str()
-            .is_some_and(|reason| !reason.is_empty()));
-    }
+    assert_eq!(status_json["surfaces"]["mode"], Value::Bool(false));
+    assert!(status_json["surface_reasons"]["mode"]
+        .as_str()
+        .is_some_and(|reason| !reason.is_empty()));
 }
 fn split_url(url: &str) -> (&str, &str) {
     let rest = url.strip_prefix("http://").expect("scheme");
@@ -711,4 +713,83 @@ async fn rollback_prepares_old_version_and_commits_over_http() {
     .await;
     assert_eq!(status, 400);
     assert_eq!(body["error"], Value::String("bad_request".into()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn format_two_phase_over_http() {
+    let (server, state) = spawn().await;
+    let (status, body) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["format"]["block_size"], Value::from(BLOCK_FRAMES));
+    assert_eq!(body["format"]["sample_rate"], Value::from(SAMPLE_RATE));
+    assert_eq!(body["format"]["channels"], Value::from(CHANNELS));
+
+    // 第一阶段：请求块长 64；commit 前不改配置。
+    let (status, draft) = request(
+        "POST",
+        &format!("{}/api/format", server.base),
+        Some(r#"{"chunksize":64}"#),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(draft["changed"], Value::Bool(true));
+    assert_eq!(draft["format"]["block_size"], Value::from(64));
+    assert_eq!(draft["device_restart_required"], Value::Bool(true));
+    let token = draft["engine_token"].as_str().expect("token").to_string();
+    let (_, before) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(before["format"]["block_size"], Value::from(BLOCK_FRAMES));
+
+    // 第二阶段：commit 重建执行器；状态如实显示新格式与“图被丢弃”。
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, committed) =
+        request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(committed["changed"], Value::Bool(true));
+    assert_eq!(committed["graph_dropped"], Value::Bool(true));
+    let (_, after) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(after["format"]["block_size"], Value::from(64));
+    assert_eq!(after["graph_id"], Value::Null);
+
+    // 非法请求：400 bad_request；空对象要有明确原因。
+    let (status, body) = request("POST", &format!("{}/api/format", server.base), Some("{}")).await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], Value::String("bad_request".into()));
+    assert!(body["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("sample_rate") || message.contains("chunksize")));
+    let (status, body) = request(
+        "POST",
+        &format!("{}/api/format", server.base),
+        Some(r#"{"sample_rate":44100}"#),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], Value::String("bad_request".into()));
+    let _ = state;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn format_draft_is_abortable_over_http() {
+    let (server, _state) = spawn().await;
+    let (_, draft) = request(
+        "POST",
+        &format!("{}/api/format", server.base),
+        Some(r#"{"chunksize":64}"#),
+    )
+    .await;
+    let token = draft["engine_token"].as_str().expect("token").to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, aborted) =
+        request("POST", &format!("{}/api/abort", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(aborted["aborted_surface"], Value::String("format".into()));
+    // abort 后 commit 无效，格式没变。
+    let (status, body) = request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 409);
+    assert_eq!(body["error"], Value::String("engine_token_invalid".into()));
+    let (_, status_body) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(
+        status_body["format"]["block_size"],
+        Value::from(BLOCK_FRAMES)
+    );
 }
