@@ -59,8 +59,8 @@ mod linux {
 
     use khaen_host::aes67_input::Aes67InputConfig;
     use khaen_host::runtime::{
-        LinuxRuntime, ReceiverConfig, RuntimeConfig, RuntimeError, RuntimeStatus,
-        SupervisorOptions, UnloadedPolicy,
+        LinuxRuntime, ReceiverConfig, RuntimeConfig, RuntimeStatus, SupervisorOptions,
+        UnloadedPolicy,
     };
     use khaen_host::{AdmissionLimits, DeviceConfig, DeviceId, EngineConfig, SafetyPolicy};
 
@@ -212,7 +212,7 @@ mod linux {
              state={} device_state={} plan_rate={} device_rate={:?} rate_asserted={} \
              graph={:?} last_error={:?}",
             status.blocks,
-            status.receiver.packets,
+            status.receiver.packets_received,
             status.input.jitter_fill,
             status.input.underruns,
             status.output.xruns,
