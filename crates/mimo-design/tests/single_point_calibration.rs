@@ -6,7 +6,9 @@
 //! 3) 安全钳位后状态为 PARTIAL 且残差正确；
 //! 4) 安全限永不越过（构造超限用例）。
 //!
-//! 另外用 FNV-1a 对 report.json 做冻结摘要，证明**默认配置（三项能力全关）逐位不变**。
+//! 另外用 FNV-1a 对 report.json 做冻结摘要，证明**默认配置（三项能力全关）不变**。
+//! 摘要针对规范化后的文本（浮点量化到 10 位有效数字，见 report::CANONICAL_SIG_DIGITS），
+//! 因此跨平台（Windows/Linux libm 末位差）稳定。
 
 use khaen_mimo_design::authority::AuthorityConfig;
 use khaen_mimo_design::limits::{
@@ -145,7 +147,7 @@ fn default_config_report_digest_is_frozen() {
 }
 
 /// 本改动前（HEAD）代码在同一场景/默认配置下 report.json 的 FNV-1a 摘要。
-const DEFAULT_REPORT_FNV1A_64: u64 = 9776064799801072177;
+const DEFAULT_REPORT_FNV1A_64: u64 = 17512025112655759668;
 
 /// ① 低 SNR 频段被排除且报 Unknown（不被当成"无能力"）。
 #[test]

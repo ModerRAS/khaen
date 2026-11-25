@@ -132,13 +132,32 @@ fn push_indent(out: &mut String, indent: usize) {
     }
 }
 
+/// 校准产物 JSON 里浮点数的**规范化有效数字位数**。
+///
+/// 跨平台 libm（glibc / ucrt）对 sin/exp/ln 等的末位结果可能差 1 ulp（相对 1e-16），
+/// 若直接输出最短表示，同一输入在 Windows 与 Linux 上产物文本不同、sha256 不同，
+/// 违反"同输入同参数必同 sha"（契约 C.3）。量化到 12 位有效数字后，这种末位差
+/// 不会改变文本；10 位远超任何有物理意义的精度要求（dB/Hz/延迟），
+/// 且落在量化边界上的概率约 1e-6/值，可忽略。
+pub const CANONICAL_SIG_DIGITS: usize = 10;
+
 fn fmt_json_num(v: f64) -> String {
     if !v.is_finite() {
         return "null".to_string();
     }
-    // Rust 的 Display 对 f64 是最短往返表示；整数型值保持 "1" 形式（合法 JSON）。
-    let s = format!("{}", v);
-    s
+    if v == 0.0 {
+        return "0".to_string();
+    }
+    // std 的浮点格式化与解析都是确定性的（不经过平台 libm）：
+    // 先按固定有效位数格式化，再解析回 f64，最后用最短往返表示输出。
+    let rounded: f64 = match format!("{:.*e}", CANONICAL_SIG_DIGITS - 1, v).parse() {
+        Ok(value) => value,
+        Err(_) => v,
+    };
+    if rounded == 0.0 {
+        return "0".to_string();
+    }
+    format!("{}", rounded)
 }
 
 fn write_json_str(s: &str, out: &mut String) {

@@ -94,3 +94,4 @@
 - 禁止写入时间戳、主机名、绝对路径、PID、随机数。
 - `verify` 重算并逐文件比对，失败点名文件与期望/实际值。
 - 三态必须出现在 report.json；PARTIAL 必须带残差，不允许以“顶满”冒充成功。
+- **浮点规范化**：canonical JSON 里的浮点数先量化到 10 位有效数字再输出（见 `khaen_mimo_design::report::CANONICAL_SIG_DIGITS`）。理由：Windows 与 Linux 的 libm 末位可差 1 ulp，直接输出最短表示会让同一输入产出不同 sha；量化后跨平台稳定，10 位远超 dB/Hz/延迟的物理精度需求。

@@ -387,10 +387,11 @@ fn existing_v2_objectives_report_digests_frozen() {
     // 摘要采集夹具与本文件 make_input 相同（仅 scene_id 与采集脚本一致）
     let mut input = make_input(); // 3 design + 2 holdout，不是单点
     input.scene_id = "synthetic-v2".to_string();
+    // 数值在 JSON 浮点规范化（10 位有效数字，跨平台稳定）之后重新采集。
     let expected: [(ObjectiveKind, u64, usize); 3] = [
-        (ObjectiveKind::SeatStd, 11031783193916605028, 68930),
-        (ObjectiveKind::NullDepth, 3960275874855008932, 68175),
-        (ObjectiveKind::Combined, 15642268375918823477, 62432),
+        (ObjectiveKind::SeatStd, 9438548629171444640, 63838),
+        (ObjectiveKind::NullDepth, 17911713529853422224, 63011),
+        (ObjectiveKind::Combined, 11619756330895966557, 57686),
     ];
     for (kind, digest, len) in expected {
         let run = run_scene(&input, &cfg_of(kind)).expect("existing objective run");
@@ -398,13 +399,13 @@ fn existing_v2_objectives_report_digests_frozen() {
         assert_eq!(
             text.len(),
             len,
-            "{} report 字节数变化（既有目标行为必须逐位不变）",
+            "{} report 字节数变化（既有目标行为必须不变）",
             kind.tag()
         );
         assert_eq!(
             fnv1a64(text.as_bytes()),
             digest,
-            "{} report 摘要变化（既有目标行为必须逐位不变）",
+            "{} report 摘要变化（既有目标行为必须不变）",
             kind.tag()
         );
         // 既有目标不带 objective_outcome 块（仅 single_point/安全钳位才出现）
