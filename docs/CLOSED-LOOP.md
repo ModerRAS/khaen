@@ -55,8 +55,9 @@
 ### 4.1 只读枚举与设备健康（状态：NOT_RUN）
 
 ```bash
-aplay -l                        # 只读枚举，确认 MOTU 的 card/device 与 PCM 名
-aplay -L | grep -i motu         # 只读：确认 PCM 别名
+aplay -l                        # 只读枚举：记录 MOTU 的 card 号、card id 与 PCM 名
+aplay -L | head -40             # 只读：确认有哪些 PCM（别名不一定含 motu）
+cat /proc/asound/cards          # 只读：card id 必须以此为准，不要凭记忆猜
 ```
 
 只允许一次只读诊断；不写 CueMix、不改 ALSA 音量、不做批量设备写。
@@ -66,7 +67,8 @@ aplay -L | grep -i motu         # 只读：确认 PCM 别名
 用恒等方案或旧方案启动实时主机，落状态文件，观察是否丢块/爆音：
 
 ```bash
-export KHAEN_ALSA_DEVICE=hw:MOTU,0
+export KHAEN_ALSA_DEVICE=hw:CARD=UltraLitemk5,DEV=0   # 以第 1 步实测 card id 为准
+# v1 审查记录里 N150 的 card id 是 UltraLitemk5（不是 MOTU）；照抄名字打不开设备。
 export KHAEN_SAMPLE_RATE=48000
 export KHAEN_RUN_SECONDS=1800
 export KHAEN_STATUS_FILE=/var/lib/khaen/rt-host-status.json

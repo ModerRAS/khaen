@@ -63,7 +63,7 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 
 | 环境变量 | 含义 | 不设置时 |
 | --- | --- | --- |
-| `KHAEN_DEVICE_ID` | 设备标识，在 `/sys/class/sound/card*/id` 里按子串匹配 | `device.wired=false` + 原因 |
+| `KHAEN_DEVICE_ID` | 设备标识，在 `/sys/class/sound/card*/id` 里按子串匹配；先只读确认（`aplay -l` / `cat /proc/asound/cards`），N150 上 v1 审查记录的 id 是 `UltraLitemk5` | `device.wired=false` + 原因 |
 | `KHAEN_RATE_READ` | 读速率命令（打印一个整数） | 同上（fail-closed，不猜速率） |
 | `KHAEN_RATE_ASSERT` | 写速率命令（`{rate}` 占位符） | 同上 |
 | `KHAEN_CONTROL_COMMAND` | 可选：拉起控制通道命令 | 走 ALSA 控制节点只读检查 |
@@ -87,7 +87,8 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 与 daemon 分属两个进程：daemon 是控制面（REST + 设备监督器），`khaen-rt-host` 是数据面（AES67 收包 → 方案图 → ALSA PCM）。前者不打开音频流，后者不做 REST。
 
     sudo systemctl stop tspi-rt-host tspi-motu-48k-keeper 2>/dev/null || true   # 先让 v1/keeper 让出设备
-    KHAEN_ALSA_DEVICE=hw:MOTU,0 \
+    # card id 必须先只读确认（aplay -l / cat /proc/asound/cards）；N150 上 v1 记录是 UltraLitemk5，不是 MOTU。
+    KHAEN_ALSA_DEVICE=hw:CARD=UltraLitemk5,DEV=0 \
     KHAEN_SAMPLE_RATE=48000 KHAEN_BLOCK_FRAMES=128 KHAEN_CHANNELS=2 \
     KHAEN_AES67_GROUP=239.69.67.1 KHAEN_AES67_PORT=5004 KHAEN_AES67_PAYLOAD_TYPE=97 \
     KHAEN_AES67_CHANNELS=2 KHAEN_AES67_MAP=0,1 KHAEN_JITTER_FRAMES=192 \
