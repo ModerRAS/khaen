@@ -6,3 +6,6 @@ license.workspace = true
 description = "Calibration math: deconvolution, parametric-EQ fitting and plan compilation"
 
 [dependencies]
+khaen-core = { path = "../core" }
+khaen-designer = { path = "../designer" }
+khaen-modal-design = { path = "../modal-design" }

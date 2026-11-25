@@ -6,3 +6,5 @@ license.workspace = true
 description = "Modal MIMO design: ingest, timebase, targets, solver and validation"
 
 [dependencies]
+khaen-core = { path = "../core" }
+khaen-designer = { path = "../designer" }

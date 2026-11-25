@@ -1,0 +1,8 @@
+//! 公共测试注册（integrator 独占；crate khaen-modal-design）。
+//!
+//! 约定（见 rt-stack/README.md §测试约定）：
+//! - leaf 测试文件放本目录的 <Txx>/ 子目录，例如 tests/T07/direct.rs；
+//! - 合入时由 integrator 在本文件加 #[path = "<Txx>/<file>.rs"] mod ...; 行，
+//!   不直接改 leaf 文件；cargo 只把本文件当 integration test 目标。
+//!
+//! T06 scaffold 阶段：尚无 leaf 测试注册（0 tests 合法，见 evidence/T06/manifest.md）。
