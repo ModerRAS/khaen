@@ -3,6 +3,7 @@ name = "khaen-aoip-aes67"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "AES67 receiver/sender: SDP, RTP, jitter buffer and media clock"
+description = "AES67 protocols: SDP parse/generate, RTP/L24, jitter buffer, media clock, SAP, RTSP, HTTP-SDP, mDNS/DNS-SD discovery"
+readme = "README.md"
 
 [dependencies]
