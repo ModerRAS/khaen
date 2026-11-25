@@ -12,6 +12,7 @@ pub mod engine;
 pub mod graph;
 pub mod owner;
 pub mod ring;
+pub mod runtime;
 pub mod safety;
 pub mod supervisor;
 
@@ -25,6 +26,11 @@ pub use engine::{
 pub use graph::{CompileError, PlanGraph};
 pub use owner::{DeviceGuard, DeviceId, OwnerError};
 pub use ring::{channel, Consumer, Producer};
+pub use runtime::{
+    Aes67Receiver, DeviceDriver, NoDeviceDriver, PacketSource, PlanDraft, ReceiverConfig,
+    ReceiverError, ReceiverStats, Runtime, RuntimeConfig, RuntimeError, RuntimeStatus,
+    SupervisorOptions, UdpPacketSource, UnloadedPolicy,
+};
 pub use safety::{
     FaultReason, FaultRecord, RecoveryError, RuntimeState, SafetyPolicy, SafetyStatus,
     SafetySupervisor,
