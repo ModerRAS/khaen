@@ -21,6 +21,13 @@ const HEADER_BYTES: usize = 32;
 const TABLE_ENTRY_BYTES: usize = 22;
 const TRAILER_BYTES: usize = 4 + 32;
 
+/// 单个区段的条目数上限：ABI v3 里 folds / filters / entries / PEQ / routes 的计数域是 u16。
+pub const MAX_SECTION_ENTRIES: usize = u16::MAX as usize;
+/// 单个分频滤波器的抽头数上限：与解码器防护一致，保证 encode 出来的文件 decode 得回去。
+pub const MAX_CROSSOVER_TAPS: u32 = 1 << 20;
+/// 矩阵系数总数上限：与解码器防护一致。
+pub const MAX_MATRIX_COEFFICIENTS: u32 = 1 << 22;
+
 /// 方案文件错误。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanError {
@@ -44,6 +51,26 @@ pub enum PlanError {
     BadPayload(&'static str),
     /// 必需区段缺失。
     MissingSection(&'static str),
+    /// 编码时折叠表条目数超过 u16 计数域。
+    TooManyFolds { count: usize, limit: usize },
+    /// 编码时分频滤波器数量超过 u16 计数域。
+    TooManyCrossoverFilters { count: usize, limit: usize },
+    /// 编码时单个分频滤波器的抽头数超过 ABI v3 解码器上限。
+    CrossoverTapsTooLong { lane: u16, taps: usize, limit: u32 },
+    /// 编码时矩阵系数个数超过 ABI v3 解码器上限。
+    MatrixCoefficientsTooMany { count: usize, limit: u32 },
+    /// 编码时保护项数量超过 u16 计数域。
+    TooManyProtectionEntries { count: usize, limit: usize },
+    /// 编码时单条保护项的 PEQ 段数超过 u16 计数域。
+    TooManyPeqSections {
+        lane: u16,
+        count: usize,
+        limit: usize,
+    },
+    /// 编码时路由表项数超过 u16 计数域。
+    TooManyRoutes { count: usize, limit: usize },
+    /// 编码后的总字节数超过头部 `total_bytes` 的 u32 域。
+    EncodedTooLarge { bytes: u64 },
 }
 
 impl core::fmt::Display for PlanError {
@@ -61,6 +88,33 @@ impl core::fmt::Display for PlanError {
             PlanError::UnknownSection(kind) => write!(f, "unknown section kind {kind}"),
             PlanError::BadPayload(msg) => write!(f, "bad payload: {msg}"),
             PlanError::MissingSection(name) => write!(f, "missing section {name}"),
+            PlanError::TooManyFolds { count, limit } => {
+                write!(f, "cannot encode {count} folds (ABI v3 limit {limit})")
+            }
+            PlanError::TooManyCrossoverFilters { count, limit } => {
+                write!(f, "cannot encode {count} crossover filters (ABI v3 limit {limit})")
+            }
+            PlanError::CrossoverTapsTooLong { lane, taps, limit } => write!(
+                f,
+                "cannot encode crossover lane {lane} with {taps} taps (ABI v3 limit {limit})"
+            ),
+            PlanError::MatrixCoefficientsTooMany { count, limit } => write!(
+                f,
+                "cannot encode {count} matrix coefficients (ABI v3 limit {limit})"
+            ),
+            PlanError::TooManyProtectionEntries { count, limit } => {
+                write!(f, "cannot encode {count} protection entries (ABI v3 limit {limit})")
+            }
+            PlanError::TooManyPeqSections { lane, count, limit } => write!(
+                f,
+                "cannot encode protection lane {lane} with {count} PEQ sections (ABI v3 limit {limit})"
+            ),
+            PlanError::TooManyRoutes { count, limit } => {
+                write!(f, "cannot encode {count} routes (ABI v3 limit {limit})")
+            }
+            PlanError::EncodedTooLarge { bytes } => {
+                write!(f, "encoded plan is {bytes} bytes (ABI v3 total_bytes is u32)")
+            }
         }
     }
 }
@@ -234,29 +288,41 @@ impl Plan {
         .count() as u16
     }
 
-    /// 编码为字节。
-    pub fn encode(&self) -> Vec<u8> {
+    /// 编码为字节；任何 ABI v3 字段域放不下的计数 / 长度都返回错误（fail-closed）。
+    ///
+    /// 只做**字段域**检查：各区段条目计数是 u16、单个分频滤波器抽头数与矩阵系数总数有
+    /// 解码器上限、文件总长是 u32；超限一律返回 PlanError，绝不静默截断成
+    /// "encode 得出来、decode 不回去"的文件。
+    ///
+    /// 不做区段语义校验：矩阵系数个数与 rows * cols * taps 是否一致、lane / DAC 引用
+    /// 是否越界等属于 khaen_host::admission 与 khaen_plan_builder 的职责，因此语义不
+    /// 自洽但字段可表示的方案在这里仍然编码成功（保持既有调用方的容忍度）。
+    pub fn encode_checked(&self) -> Result<Vec<u8>, PlanError> {
         let mut sections: Vec<(SectionKind, Vec<u8>)> = Vec::new();
         if let Some(section) = &self.content {
-            sections.push((SectionKind::Content, encode_content(section)));
+            sections.push((SectionKind::Content, encode_content(section)?));
         }
         if let Some(section) = &self.crossover {
-            sections.push((SectionKind::Crossover, encode_crossover(section)));
+            sections.push((SectionKind::Crossover, encode_crossover(section)?));
         }
         if let Some(section) = &self.matrix {
-            sections.push((SectionKind::Matrix, encode_matrix(section)));
+            sections.push((SectionKind::Matrix, encode_matrix(section)?));
         }
         if let Some(section) = &self.protection {
-            sections.push((SectionKind::Protection, encode_protection(section)));
+            sections.push((SectionKind::Protection, encode_protection(section)?));
         }
         if let Some(section) = &self.routing {
-            sections.push((SectionKind::Routing, encode_routing(section)));
+            sections.push((SectionKind::Routing, encode_routing(section)?));
         }
         sections.sort_by_key(|(kind, _)| *kind);
 
+        // stage_count 由五个固定 Optional 区段计数得到，最小上界是 5，u16 域必然放得下。
+        let stage_count = self.stage_count();
+        debug_assert_eq!(sections.len(), usize::from(stage_count));
+
         let mut body = vec![0u8; HEADER_BYTES];
         let mut table = Vec::with_capacity(2 + sections.len() * TABLE_ENTRY_BYTES);
-        put_u16(&mut table, sections.len() as u16);
+        put_u16(&mut table, stage_count);
         for (kind, payload) in &sections {
             let offset = body.len() as u64;
             body.extend_from_slice(payload);
@@ -267,11 +333,12 @@ impl Plan {
         }
         let table_offset = body.len() as u64;
         body.extend_from_slice(&table);
-        let total = (body.len() + TRAILER_BYTES) as u32;
+        // 总长超 u32 时 fail-closed（不截断成看似合法的小文件）。
+        let total = check_total_bytes(body.len() + TRAILER_BYTES)?;
 
         body[0..8].copy_from_slice(&MAGIC);
         body[8..10].copy_from_slice(&ABI_VERSION.to_le_bytes());
-        body[10..12].copy_from_slice(&self.stage_count().to_le_bytes());
+        body[10..12].copy_from_slice(&stage_count.to_le_bytes());
         body[12..16].copy_from_slice(&self.block_size.to_le_bytes());
         body[16..20].copy_from_slice(&self.sample_rate.to_le_bytes());
         body[20..28].copy_from_slice(&table_offset.to_le_bytes());
@@ -285,7 +352,24 @@ impl Plan {
         let crc = crc32c(&body);
         body.extend_from_slice(&crc.to_le_bytes());
         body.extend_from_slice(&graph_id);
-        body
+        Ok(body)
+    }
+
+    /// 编码为字节；方案超出 ABI v3 字段域时 **panic**（fail-closed）。
+    ///
+    /// 便捷包装，等价于 encode_checked().unwrap_or_else(|error| panic!(...))；
+    /// 需要错误返回值时用 Plan::encode_checked。保持不可失败签名是为了不破坏既有
+    /// 调用方：host 准入只取长度（admit），plan-builder 的 build_bytes 返回已校验
+    /// 方案的字节，两者都在本 crate 的写范围之外。
+    ///
+    /// # Panics
+    ///
+    /// 方案的折叠 / 滤波器 / 保护 / 路由计数超过 u16 域、分频抽头或矩阵系数超过解码器
+    /// 上限、编码后总长超过 u32 时 panic。能由 Plan::decode 得到或经
+    /// khaen_plan_builder 校验的方案不会触发。
+    pub fn encode(&self) -> Vec<u8> {
+        self.encode_checked()
+            .unwrap_or_else(|error| panic!("plan exceeds ABI v3 encoding limits: {error}"))
     }
 
     /// 从字节解码并做全部校验。
@@ -477,17 +561,21 @@ impl<'a> Reader<'a> {
     }
 }
 
-fn encode_content(section: &ContentSection) -> Vec<u8> {
+fn encode_content(section: &ContentSection) -> Result<Vec<u8>, PlanError> {
+    let fold_count = u16::try_from(section.folds.len()).map_err(|_| PlanError::TooManyFolds {
+        count: section.folds.len(),
+        limit: MAX_SECTION_ENTRIES,
+    })?;
     let mut out = Vec::with_capacity(6 + section.folds.len() * 8);
     put_u16(&mut out, section.in_channels);
     put_u16(&mut out, section.out_lanes);
-    put_u16(&mut out, section.folds.len() as u16);
+    put_u16(&mut out, fold_count);
     for fold in &section.folds {
         put_u16(&mut out, fold.src);
         put_u16(&mut out, fold.dst);
         put_f32(&mut out, fold.gain);
     }
-    out
+    Ok(out)
 }
 
 fn decode_content(data: &[u8]) -> Result<ContentSection, PlanError> {
@@ -511,18 +599,36 @@ fn decode_content(data: &[u8]) -> Result<ContentSection, PlanError> {
     })
 }
 
-fn encode_crossover(section: &CrossoverSection) -> Vec<u8> {
+fn encode_crossover(section: &CrossoverSection) -> Result<Vec<u8>, PlanError> {
+    let filter_count =
+        u16::try_from(section.filters.len()).map_err(|_| PlanError::TooManyCrossoverFilters {
+            count: section.filters.len(),
+            limit: MAX_SECTION_ENTRIES,
+        })?;
     let mut out = Vec::new();
     put_u16(&mut out, section.lanes);
-    put_u16(&mut out, section.filters.len() as u16);
+    put_u16(&mut out, filter_count);
     for filter in &section.filters {
+        let taps =
+            u32::try_from(filter.coeffs.len()).map_err(|_| PlanError::CrossoverTapsTooLong {
+                lane: filter.lane,
+                taps: filter.coeffs.len(),
+                limit: MAX_CROSSOVER_TAPS,
+            })?;
+        if taps > MAX_CROSSOVER_TAPS {
+            return Err(PlanError::CrossoverTapsTooLong {
+                lane: filter.lane,
+                taps: filter.coeffs.len(),
+                limit: MAX_CROSSOVER_TAPS,
+            });
+        }
         put_u16(&mut out, filter.lane);
-        put_u32(&mut out, filter.coeffs.len() as u32);
+        put_u32(&mut out, taps);
         for coeff in &filter.coeffs {
             put_f32(&mut out, *coeff);
         }
     }
-    out
+    Ok(out)
 }
 
 fn decode_crossover(data: &[u8]) -> Result<CrossoverSection, PlanError> {
@@ -546,18 +652,29 @@ fn decode_crossover(data: &[u8]) -> Result<CrossoverSection, PlanError> {
     Ok(CrossoverSection { lanes, filters })
 }
 
-fn encode_matrix(section: &MatrixSection) -> Vec<u8> {
+fn encode_matrix(section: &MatrixSection) -> Result<Vec<u8>, PlanError> {
+    let coefficient_count =
+        u32::try_from(section.coeffs.len()).map_err(|_| PlanError::MatrixCoefficientsTooMany {
+            count: section.coeffs.len(),
+            limit: MAX_MATRIX_COEFFICIENTS,
+        })?;
+    if coefficient_count > MAX_MATRIX_COEFFICIENTS {
+        return Err(PlanError::MatrixCoefficientsTooMany {
+            count: section.coeffs.len(),
+            limit: MAX_MATRIX_COEFFICIENTS,
+        });
+    }
     let mut out = Vec::with_capacity(10 + section.coeffs.len() * 4);
     put_u16(&mut out, section.rows);
     put_u16(&mut out, section.cols);
     out.push(section.decimation);
     out.push(section.interpolation);
     put_u32(&mut out, section.taps);
-    put_u32(&mut out, section.coeffs.len() as u32);
+    put_u32(&mut out, coefficient_count);
     for coeff in &section.coeffs {
         put_f32(&mut out, *coeff);
     }
-    out
+    Ok(out)
 }
 
 fn decode_matrix(data: &[u8]) -> Result<MatrixSection, PlanError> {
@@ -587,23 +704,34 @@ fn decode_matrix(data: &[u8]) -> Result<MatrixSection, PlanError> {
     })
 }
 
-fn encode_protection(section: &ProtectionSection) -> Vec<u8> {
+fn encode_protection(section: &ProtectionSection) -> Result<Vec<u8>, PlanError> {
+    let entry_count =
+        u16::try_from(section.entries.len()).map_err(|_| PlanError::TooManyProtectionEntries {
+            count: section.entries.len(),
+            limit: MAX_SECTION_ENTRIES,
+        })?;
     let mut out = Vec::new();
     put_u16(&mut out, section.lanes);
-    put_u16(&mut out, section.entries.len() as u16);
+    put_u16(&mut out, entry_count);
     for entry in &section.entries {
+        let peq_count =
+            u16::try_from(entry.peq.len()).map_err(|_| PlanError::TooManyPeqSections {
+                lane: entry.lane,
+                count: entry.peq.len(),
+                limit: MAX_SECTION_ENTRIES,
+            })?;
         put_u16(&mut out, entry.lane);
         put_u32(&mut out, entry.delay);
         out.push(entry.polarity as u8);
         put_f32(&mut out, entry.gain_db);
-        put_u16(&mut out, entry.peq.len() as u16);
+        put_u16(&mut out, peq_count);
         for section in &entry.peq {
             for value in [section.b0, section.b1, section.b2, section.a1, section.a2] {
                 put_f32(&mut out, value);
             }
         }
     }
-    out
+    Ok(out)
 }
 
 fn decode_protection(data: &[u8]) -> Result<ProtectionSection, PlanError> {
@@ -641,15 +769,20 @@ fn decode_protection(data: &[u8]) -> Result<ProtectionSection, PlanError> {
     Ok(ProtectionSection { lanes, entries })
 }
 
-fn encode_routing(section: &RoutingSection) -> Vec<u8> {
+fn encode_routing(section: &RoutingSection) -> Result<Vec<u8>, PlanError> {
+    let route_count =
+        u16::try_from(section.routes.len()).map_err(|_| PlanError::TooManyRoutes {
+            count: section.routes.len(),
+            limit: MAX_SECTION_ENTRIES,
+        })?;
     let mut out = Vec::new();
     put_u16(&mut out, section.dac_channels);
-    put_u16(&mut out, section.routes.len() as u16);
+    put_u16(&mut out, route_count);
     for (lane, dac) in &section.routes {
         put_u16(&mut out, *lane);
         put_u16(&mut out, *dac);
     }
-    out
+    Ok(out)
 }
 
 fn decode_routing(data: &[u8]) -> Result<RoutingSection, PlanError> {
@@ -665,4 +798,44 @@ fn decode_routing(data: &[u8]) -> Result<RoutingSection, PlanError> {
         dac_channels,
         routes,
     })
+}
+
+/// 把编码后的总字节数换算成头部 total_bytes 字段（u32）；超限 fail-closed。
+///
+/// 单独抽出来是为了能被单元测试直接覆盖：真实构造 > 4 GiB 的方案在测试里不现实，
+/// 因此这条守卫在守卫函数上验证（合法值 + 恰好溢出），而不是造假方案。
+fn check_total_bytes(total: usize) -> Result<u32, PlanError> {
+    u32::try_from(total).map_err(|_| PlanError::EncodedTooLarge {
+        bytes: u64::try_from(total).unwrap_or(u64::MAX),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{check_total_bytes, PlanError};
+
+    #[test]
+    fn total_bytes_guard_is_exact_and_fail_closed() {
+        assert_eq!(check_total_bytes(0), Ok(0));
+        assert_eq!(check_total_bytes(u32::MAX as usize), Ok(u32::MAX));
+
+        let error = PlanError::EncodedTooLarge {
+            bytes: u64::from(u32::MAX) + 1,
+        };
+        let text = error.to_string();
+        assert!(text.contains("4294967296"), "{text}");
+        assert!(text.contains("u32"), "{text}");
+
+        // 32 位平台上 usize 放不下 u32::MAX + 1；该守卫只在 64 位平台可被触发。
+        #[cfg(target_pointer_width = "64")]
+        {
+            let too_large = u32::MAX as usize + 1;
+            assert_eq!(
+                check_total_bytes(too_large),
+                Err(PlanError::EncodedTooLarge {
+                    bytes: u64::try_from(too_large).unwrap_or(u64::MAX),
+                })
+            );
+        }
+    }
 }

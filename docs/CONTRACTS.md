@@ -31,6 +31,37 @@
 - `graph_id = sha256(domain="khaen-plan/v3" || 规范化序列化)`，同内容必同 id。
 - 未知 kind：拒绝加载，不做跳过。
 - 系数一律 f32 小端；延迟一律整数样本。
+- **编码同样 fail-closed**：`Plan::encode_checked()` 对 ABI 字段域放不下的方案返回 `PlanError`
+  （folds / filters / entries / PEQ / routes 计数超 u16、分频抽头或矩阵系数超解码器上限、
+  编码后总长超 u32 `total_bytes`），绝不静默截断成"encode 得出来、decode 不回去"的文件；
+  `Plan::encode()` 是它的 panic 包装（已由 `Plan::decode` 或 plan-builder 校验过的方案不会触发）。
+  字段域之外的区段语义（矩阵系数个数、lane/DAC 引用）仍归准入与组装器校验，本层不重复。
+
+### A.4 采样率：plan ABI 接受集合与运行时能力
+
+- **容器层不限制速率**：`sample_rate` 是 u32 字段。`Plan::decode` / `Plan::encode_checked` 只校验
+  格式（magic / 版本 / CRC / 总长 / 字段域），不按采样率拒绝——`crates/core/tests/plan_v3.rs` 的
+  `empty_plan_roundtrips` 用 44100 Hz 做往返，证明 ABI 容器能表达任意 u32 速率。
+- **运行时接受集合（唯一可执行集合）**：`khaen_core::rt::SAMPLE_RATES_HZ = [48_000, 96_000]`。
+  "plan ABI v3 接受的采样率集合"指的就是这个可执行集合：host 引擎、ALSA 输出后端、AES67 流，
+  以及校准的 sweep / positions / phase-fit 共用该常量。
+- **host 的 fail-closed 行为**：`PlanGraph::compile` 要求 `plan.sample_rate ==
+  EngineConfig.sample_rate`，不一致返回 `CompileError::SampleRateMismatch`（不静默重采样）；
+  注意 `CompileError::UnsupportedRates` 指的是 **matrix 抽取/插值因子**（变比 ASRC 或超过因子上限），
+  **不是**采样率拒绝码。`EngineConfig::validate` 与 host 准入只要求 `sample_rate > 0`。
+- **组装器与校准入口的 fail-closed**：`khaen-plan-builder` 的 `PlanConfig::validate` 用
+  `SAMPLE_RATES_HZ` 校验，44.1 kHz 返回 `UnsupportedSampleRate`；校准 sweep / positions /
+  phase-fit 也用该常量拒绝非 48k/96k。
+- **设计域候选 ≠ 可执行集合**：`khaen-modal-design::target::SAMPLE_RATES_HZ =
+  [44100, 48000, 88200, 96000]` 与 `khaen-designer::modal_peq::contract_sample_rates()`（同 4 个
+  速率）是**设计目标候选集合**（设计域口径），不是 plan 可执行集合；这些速率上的设计产物进入
+  本运行时前必须转换或拒绝。`khaen-calibration::job` 的 `44100 | 48000 | 88200 | 96000` 同样
+  是设计/校准域口径，不是运行时集合。
+- **已知缺口（如实声明，未修）**：host 的准入与 `PlanGraph::compile` 目前没有直接引用
+  `SAMPLE_RATES_HZ` 做成员校验（只校验非零 + 方案与运行配置一致）。把 `EngineConfig.sample_rate`
+  配成 44.1 kHz 时，host 层不会以"速率不在运行时集合"为由拒绝；当前兜底在 plan-builder 与校准
+  入口。后续二选一：host 编译期补成员校验，或设备实测确认后把 `rt::SAMPLE_RATES_HZ` 扩到 4 个
+  速率；两者长期并存就是口径漂移。
 
 ## B. 主机控制协议
 
