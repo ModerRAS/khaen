@@ -101,6 +101,9 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 - 设备监督器默认不装配（`SupervisorOptions::enabled=false`，状态如实 `absent`）；给齐 `KHAEN_DEVICE_ID`/`KHAEN_RATE_READ`/`KHAEN_RATE_ASSERT` 才装配真实监督器。
 - 监控与 supervise 轮询目前在块线程上（每 `KHAEN_STATS_EVERY_BLOCKS` 块），**这是验证工具的让步，不是 RT 认证形态**；生产形态见 `docs/DESIGN.md` 的线程模型。
 - 本仓库不提供 MOTU 读写速率的辅助脚本；在设备侧跑之前需要部署方提供（与 daemon 的 `daemon.env.example` 同一批产物），因此真机 30 分钟/8 小时验证仍为 **NOT_RUN**。
+- **systemd 形态**：发布包内含 `deploy/khaen-rt-host.service` 与 `deploy/rt-host.env.example`；`install.sh` 只安装 unit、**不 enable、不启动**（数据面独占 ALSA 设备，出声需要窗口与许可），配置文件复制到 `/etc/khaen/rt-host.env` 且不覆盖已有文件。
+- unit 里用 `Conflicts=tspi-rt-host.service tspi-motu-48k-keeper.service` 保证与 v1/keeper 互斥：设备被占时宁可起不来，也不和旧链路抢设备。
+- **实时调度尚未认证**：unit 目前只给 `Nice=-10`，没有 `SCHED_FIFO`/RLIMIT_RTPRIO；真机 RT 调度与 xrun 长稳属于后续实测项，标记 **NOT_RUN**。
 
 ## 5. 验证状态（如实标注）
 
@@ -113,3 +116,4 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 | `khaen-rt-host` Windows 上编译（stub 路径） | 实测通过（`cargo check`，Linux 专属代码不参与） |
 | `khaen-rt-host` Linux 编译 | 由 CI 覆盖（本机无 libasound/pkg-config，交叉检查跑不通） |
 | `khaen-rt-host` 真机出声（30 min / 8 h） | **NOT_RUN**（需要设备窗口 + 你的许可，且需要部署方提供 MOTU 速率辅助脚本） |
+| release 打包 `khaen-rt-host` + 两个 unit + 环境变量模板 | 本次已改 `release.yml`/打包清单；**NOT_RUN**（需下次打 tag 实测） |

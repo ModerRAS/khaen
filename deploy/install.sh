@@ -10,6 +10,8 @@ ROOT="/opt/khaen"
 RELEASES="${ROOT}/releases"
 CURRENT="${ROOT}/current"
 UNIT="khaen-daemon.service"
+UNIT_RT="khaen-rt-host.service"
+CONF_DIR="/etc/khaen"
 
 ARCHIVE="${1:-}"
 RESTART=1
@@ -73,17 +75,38 @@ echo "==> switch current atomically"
 ln -sfn "${TARGET_DIR}" "${CURRENT}.tmp"
 mv -Tf "${CURRENT}.tmp" "${CURRENT}"
 
-echo "==> install systemd unit"
+echo "==> install systemd units"
 if [[ -f "${TARGET_DIR}/deploy/${UNIT}" ]]; then
   install -m 0644 "${TARGET_DIR}/deploy/${UNIT}" "/etc/systemd/system/${UNIT}"
   systemctl daemon-reload
 fi
+# 数据面 unit 只安装、不启用、不启动：出声需要窗口与明确许可（部署规则见工作区 AGENTS.md）。
+if [[ -f "${TARGET_DIR}/deploy/${UNIT_RT}" ]]; then
+  install -m 0644 "${TARGET_DIR}/deploy/${UNIT_RT}" "/etc/systemd/system/${UNIT_RT}"
+  systemctl daemon-reload
+fi
+
+echo "==> install env examples (never overwrite existing)"
+install -d -m 0755 "${CONF_DIR}"
+for pair in "daemon.env.example:daemon.env" "rt-host.env.example:rt-host.env"; do
+  example="${pair%%:*}"
+  target="${pair##*:}"
+  if [[ -f "${TARGET_DIR}/deploy/${example}" && ! -e "${CONF_DIR}/${target}" ]]; then
+    install -m 0640 "${TARGET_DIR}/deploy/${example}" "${CONF_DIR}/${target}"
+    echo "    installed ${CONF_DIR}/${target} from example; edit before starting"
+  fi
+done
 
 if [[ "${RESTART}" -eq 1 ]]; then
   echo "==> restart ${UNIT}"
   systemctl enable --now "${UNIT}"
   systemctl restart "${UNIT}"
   systemctl --no-pager --lines=5 status "${UNIT}" || true
+fi
+
+if systemctl cat "${UNIT_RT}" >/dev/null 2>&1; then
+  echo "note: ${UNIT_RT} installed but NOT enabled/started; it takes the ALSA device exclusively."
+  echo "      start it only in an approved sound window: sudo systemctl start ${UNIT_RT}"
 fi
 
 echo "installed ${VERSION} -> ${CURRENT}"

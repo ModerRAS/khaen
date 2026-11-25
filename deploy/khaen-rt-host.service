@@ -1,0 +1,25 @@
+[Unit]
+Description=khaen real-time audio host (AES67 -> plan graph -> ALSA)
+Documentation=https://github.com/ModerRAS/khaen
+# 数据面进程：独占 ALSA 设备。安装时不自动启用/启动（出声需要窗口与明确许可）。
+After=network-online.target sound.target
+Wants=network-online.target
+# 与 v1 / keeper 互斥：它们占着同一设备时本服务起不来，宁可直接失败。
+Conflicts=tspi-rt-host.service tspi-motu-48k-keeper.service
+
+[Service]
+Type=simple
+ExecStart=/opt/khaen/current/bin/khaen-rt-host
+EnvironmentFile=-/etc/khaen/rt-host.env
+Restart=on-failure
+RestartSec=2
+# 实时优先级：暂不在这里声明（未做 RLIMIT_RTPRIO 与 SCHED_FIFO 的实测）。
+# 真机 RT 调度认证属于 T70f 后续；当前验证工具以普通优先级运行，如实记录这个缺口。
+Nice=-10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
