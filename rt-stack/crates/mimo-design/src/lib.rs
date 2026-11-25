@@ -12,11 +12,15 @@
 //! - constraints：增益帽 / headroom 缩放 / E_effort / 峰值界报告；
 //! - evaluate：契约 §5 指标（R_k / E_modal / 空间统计 / holdout 一致性/严重恶化）；
 //! - report：最小 JSON writer、%.17g、FIR CSV；
+//! - quality：4.1 测量质量门（逐 1/3 oct SNR → Known/Unknown，Unknown 排除拟合、不等于能力不足）；
+//! - authority：4.4 权威加权（正则项 Γ_s(f) = Γ0/|H_s(f)|²，默认关闭）；
+//! - limits：4.4 安全钳位（单段 +3 dB / 正向和 6 dB / 预测峰值 −1 dBFS）+ FULL/PARTIAL/NONE；
 //! - pipeline：场景级编排（B0/B1/B2/B3 + 3 折 design-only CV 选 λ + report.json）。
 //!
 //! 所有产物必须标注 SIMULATED / UNPROVEN；predicted 不得写成 PASS。指标口径以
 //! rt-stack/spec/mimo-objective-v1.md 为准（与 CONTRACT 冲突时以 spec 为准并在此说明）。
 
+pub mod authority;
 pub mod baseline;
 pub mod constraints;
 pub mod decay;
@@ -24,17 +28,30 @@ pub mod emperor;
 pub mod evaluate;
 pub mod fill;
 pub mod fir;
+pub mod limits;
 pub mod objective;
 pub mod pipeline;
+pub mod quality;
 pub mod report;
 pub mod solve;
 pub mod target;
 
+pub use authority::{authority_weights, AuthorityConfig, AuthorityWeights};
 pub use decay::{candidate_b_target, evaluate_decay, fit_path_firs, t20_from_ir, Grid, MatrixMode};
 pub use evaluate::{BandPlan, EModal, HoldoutEvaluation, SpatialStats};
 pub use fill::{
     donor_criterion, evaluate_bands, taps_requirements, FillConfig, FillDesign, FillSolver,
     SinglePointH,
 };
+pub use limits::{
+    clamp_solution, predicted_peak_dbfs, ClampHit, ClampInput, LimitKind, OutcomeState, Residual,
+    SafetyConfig, SafetyReport, MAX_BAND_BOOST_DB, MAX_POSITIVE_SUM_DB, MAX_PREDICTED_PEAK_DBFS,
+    REFERENCE_PEAK_DBFS,
+};
 pub use pipeline::{run_scene, RunConfig, SceneInput, SceneRun};
-pub use solve::Cx;
+pub use quality::{
+    band_snr_curve, band_snr_db, band_snr_estimate, gate_from_band_snr, gate_from_evidence,
+    gate_from_ir, BandQuality, BandState, QualityConfig, QualityGate, DEFAULT_MIN_SNR_DB,
+    THIRD_OCTAVE_CENTERS_HZ_20_20K,
+};
+pub use solve::{Cx, DesignOptions};

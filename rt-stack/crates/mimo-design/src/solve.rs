@@ -160,6 +160,243 @@ pub fn weighted_ridge_ls_complex(
     weights: &[f64],
     lambda: f64,
 ) -> Result<Vec<Cx>, String> {
+    weighted_ridge_ls_complex_with_ridge(h, target, weights, lambda, None)
+}
+
+/// 每源每频点复响应幅值帽（+6 dB，契约 §6.6 的带内增益帽在频域解里前馈执行）。
+pub const F_MAG_CAP_DB: f64 = 6.0;
+
+/// 单频点加权岭最小二乘（每 mic 独立复数目标 target_m）。
+pub fn weighted_ridge_ls_targets(
+    h: &[Vec<Cx>],
+    targets: &[Cx],
+    weights: &[f64],
+    lambda: f64,
+) -> Result<Vec<Cx>, String> {
+    weighted_ridge_ls_targets_with_ridge(h, targets, weights, lambda, None)
+}
+
+/// 单频点求解并投影到每源幅值帽 |F_n| <= cap（保留相位）。
+///
+/// 实现（确定性 active-set）：先解无约束岭 LS；对越界源投影到 cap 并固定；用
+/// "每 mic 目标 A − 固定源在该 mic 的贡献" 对剩余源重解；重复至多 3 次。
+/// 目的：禁止深 null 处 F 爆到极大（throat：会让 FIR 系数爆炸 → headroom 缩放 → 静音式假改善）。
+pub fn weighted_ridge_ls_capped(
+    h: &[Vec<Cx>],
+    target: f64,
+    weights: &[f64],
+    lambda: f64,
+    cap: f64,
+) -> Result<Vec<Cx>, String> {
+    weighted_ridge_ls_capped_with_ridge(h, target, weights, lambda, cap, None)
+}
+
+/// 由目标幅度 A(f) 设计一轮 MIMO FIR（per-(mic,bin) 权重版，供 OBJECTIVES-V2 的 IRLS 使用）。
+#[allow(clippy::too_many_arguments)]
+pub fn design_mimo_once_w(
+    freqs_hz: &[f64],
+    fs: f64,
+    h_design: &[Vec<Vec<Cx>>],
+    a_target: &[f64],
+    weights: &[Vec<f64>],
+    lambda: f64,
+    taps: usize,
+    delay_samples: usize,
+    diag_load_rel: f64,
+    nfft: usize,
+) -> Result<FirDesign, String> {
+    design_mimo_once_w_with(
+        freqs_hz,
+        fs,
+        h_design,
+        a_target,
+        weights,
+        lambda,
+        taps,
+        delay_samples,
+        diag_load_rel,
+        nfft,
+        DesignOptions::default(),
+    )
+}
+
+/// 单频点求解并投影到每源幅值帽（每 mic 独立复数目标，OBJECTIVES-V2 的 phase-fixed 幅度目标）。
+pub fn weighted_ridge_ls_capped_targets(
+    h: &[Vec<Cx>],
+    targets: &[Cx],
+    weights: &[f64],
+    lambda: f64,
+    cap: f64,
+) -> Result<Vec<Cx>, String> {
+    weighted_ridge_ls_capped_targets_with_ridge(h, targets, weights, lambda, cap, None)
+}
+
+/// 每频点目标不同（targets[mic][bin]）的 MIMO FIR 一轮设计（OBJECTIVES-V2）。
+#[allow(clippy::too_many_arguments)]
+pub fn design_mimo_once_multi_targets(
+    freqs_hz: &[f64],
+    fs: f64,
+    h_design: &[Vec<Vec<Cx>>],
+    targets: &[Vec<Cx>],
+    weights: &[Vec<f64>],
+    lambda: f64,
+    taps: usize,
+    delay_samples: usize,
+    diag_load_rel: f64,
+    nfft: usize,
+) -> Result<FirDesign, String> {
+    design_mimo_once_multi_targets_with(
+        freqs_hz,
+        fs,
+        h_design,
+        targets,
+        weights,
+        lambda,
+        taps,
+        delay_samples,
+        diag_load_rel,
+        nfft,
+        DesignOptions::default(),
+    )
+}
+
+/// 一轮 MIMO FIR 设计结果（B2/B3 内部）。
+#[derive(Clone, Debug)]
+pub struct FirDesign {
+    pub taps: usize,
+    /// h[source][tap]（实系数，因果，支撑 [0, taps-1]）
+    pub h: Vec<Vec<f64>>,
+    /// 用精确频点求得的实际复响应 G_n(f_k)（不是理想 F）
+    pub g_actual: Vec<Vec<Cx>>,
+    /// 该轮最终使用的 design 点权重 w_m（长度 = design 点数）
+    pub weights: Vec<f64>,
+}
+
+/// 由目标幅度 A(f) 与 λ 设计一轮 MIMO FIR（不含 IRLS 外迭代）。
+#[allow(clippy::too_many_arguments)]
+pub fn design_mimo_once(
+    freqs_hz: &[f64],
+    fs: f64,
+    h_design: &[Vec<Vec<Cx>>],
+    a_target: &[f64],
+    weights: &[f64],
+    lambda: f64,
+    taps: usize,
+    delay_samples: usize,
+    diag_load_rel: f64,
+    nfft: usize,
+) -> Result<FirDesign, String> {
+    design_mimo_once_with(
+        freqs_hz,
+        fs,
+        h_design,
+        a_target,
+        weights,
+        lambda,
+        taps,
+        delay_samples,
+        diag_load_rel,
+        nfft,
+        DesignOptions::default(),
+    )
+}
+
+/// IRLS 加权 MIMO FIR 设计（契约 §6.3：2 次外迭代）。
+///
+/// - 权重初值全 1；
+/// - 每轮：按当前权重解 F→FIR→实际 G，计算 design 点残差
+///   r_m = sqrt(mean_k |sum_n H_mn(f_k)·G_n(f_k)·e^{+jω_k D} - A(f_k)|²)；
+/// - 权重更新 w_m ∝ clamp((r_m/mean r)^0.5, 0.25, 4)；
+/// - 共 irls_iterations 次外迭代，最后一轮用更新后的权重再设计一次并返回。
+#[allow(clippy::too_many_arguments)]
+pub fn design_mimo_irls(
+    freqs_hz: &[f64],
+    fs: f64,
+    h_design: &[Vec<Vec<Cx>>],
+    a_target: &[f64],
+    lambda: f64,
+    taps: usize,
+    delay_samples: usize,
+    diag_load_rel: f64,
+    irls_iterations: usize,
+    nfft: usize,
+) -> Result<FirDesign, String> {
+    design_mimo_irls_with(
+        freqs_hz,
+        fs,
+        h_design,
+        a_target,
+        lambda,
+        taps,
+        delay_samples,
+        diag_load_rel,
+        irls_iterations,
+        nfft,
+        DesignOptions::default(),
+    )
+}
+
+/// 用给定 G（[source][bin]）计算压力：P_m(f_k) = sum_n H[m][n][f_k]·G_n(f_k)。
+/// h: h[mic][bin][source]；返回 [mic][bin]。
+pub fn pressure(h: &[Vec<Vec<Cx>>], g: &[Vec<Cx>]) -> Vec<Vec<Cx>> {
+    let mut out = Vec::with_capacity(h.len());
+    for mic in h {
+        let mut row = Vec::with_capacity(mic.len());
+        for (ki, hk) in mic.iter().enumerate() {
+            let mut acc = Cx::zero();
+            for (ni, hv) in hk.iter().enumerate() {
+                acc = acc.add(hv.mul(g[ni][ki]));
+            }
+            row.push(acc);
+        }
+        out.push(row);
+    }
+    out
+}
+
+/// 基线 design 空间 RMS 功率（每频点）→ 目标构建用（A² 的空间均值）。
+pub fn design_rms_sq(p_design: &[Vec<Cx>]) -> Vec<f64> {
+    target::spatial_mean_power(p_design)
+}
+
+// ===========================================================================
+// 4.1/4.4 设计选项：拟合掩码（质量门 Unknown 频段排除拟合）+ 正则项权重（权威加权）
+// ===========================================================================
+
+/// 设计选项（默认 None/None = 旧路径**逐位一致**）。
+///
+/// - `fit_mask`：per-bin 拟合掩码，false 的频点不参与拟合、且该频点修正量强制为
+///   恒等 F=1（质量门把 SNR 不足/无证据的 1/3 oct 带判 Unknown 后就用它排除）；
+/// - `ridge`：per-bin per-source 正则项权重 Γ_s(f)，正则项变成
+///   `λ Σ_s Γ_s(f)|f_s|²`（权威加权：弱频点 Γ 大 → 该源少被派活）。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DesignOptions<'a> {
+    pub fit_mask: Option<&'a [bool]>,
+    pub ridge: Option<&'a [Vec<f64>]>,
+}
+
+impl<'a> DesignOptions<'a> {
+    /// 该频点是否参与拟合（无掩码 → true）。
+    pub fn fits(&self, ki: usize) -> bool {
+        self.fit_mask.map(|m| m[ki]).unwrap_or(true)
+    }
+
+    /// 该频点的正则项权重（无权重 → None，走标量 λ）。
+    pub fn ridge_at(&self, ki: usize) -> Option<&'a [f64]> {
+        self.ridge.map(|r| r[ki].as_slice())
+    }
+}
+
+/// 单频点加权岭最小二乘（复数目标 + 幂等正则项权重 Γ_s）。
+///
+/// ridge = None → 与 [weighted_ridge_ls_complex] 逐位一致（同一个加法）。
+pub fn weighted_ridge_ls_complex_with_ridge(
+    h: &[Vec<Cx>],
+    target: Cx,
+    weights: &[f64],
+    lambda: f64,
+    ridge: Option<&[f64]>,
+) -> Result<Vec<Cx>, String> {
     let m = h.len();
     if m == 0 {
         return Err("weighted_ridge_ls: 空 H".to_string());
@@ -178,6 +415,11 @@ pub fn weighted_ridge_ls_complex(
     if !lambda.is_finite() || lambda < 0.0 {
         return Err(format!("weighted_ridge_ls: λ={} 非法", lambda));
     }
+    if let Some(g) = ridge {
+        if g.len() != n || g.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err("weighted_ridge_ls: ridge 权重长度非法或非正/非有限".to_string());
+        }
+    }
     let k = n;
     let mut normal = vec![vec![Cx::zero(); k]; k];
     let mut rhs = vec![Cx::zero(); k];
@@ -192,26 +434,32 @@ pub fn weighted_ridge_ls_complex(
         }
     }
     for i in 0..k {
-        normal[i][i].re += lambda;
+        match ridge {
+            Some(g) => normal[i][i].re += lambda * g[i],
+            None => normal[i][i].re += lambda,
+        }
     }
     solve_linear(normal, rhs)
 }
 
-/// 每源每频点复响应幅值帽（+6 dB，契约 §6.6 的带内增益帽在频域解里前馈执行）。
-pub const F_MAG_CAP_DB: f64 = 6.0;
-
-/// 单频点加权岭最小二乘（每 mic 独立复数目标 target_m）。
-pub fn weighted_ridge_ls_targets(
+/// 单频点加权岭最小二乘（每 mic 独立复数目标 + 正则项权重 Γ_s）。
+pub fn weighted_ridge_ls_targets_with_ridge(
     h: &[Vec<Cx>],
     targets: &[Cx],
     weights: &[f64],
     lambda: f64,
+    ridge: Option<&[f64]>,
 ) -> Result<Vec<Cx>, String> {
     let m = h.len();
     if m == 0 || targets.len() != m {
         return Err("weighted_ridge_ls_targets: H 行数与目标数不匹配".to_string());
     }
     let n = h[0].len();
+    if let Some(g) = ridge {
+        if g.len() != n || g.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err("weighted_ridge_ls_targets: ridge 权重长度非法或非正/非有限".to_string());
+        }
+    }
     let mut normal = vec![vec![Cx::zero(); n]; n];
     let mut rhs = vec![Cx::zero(); n];
     for mi in 0..m {
@@ -225,29 +473,29 @@ pub fn weighted_ridge_ls_targets(
         }
     }
     for i in 0..n {
-        normal[i][i].re += lambda;
+        match ridge {
+            Some(g) => normal[i][i].re += lambda * g[i],
+            None => normal[i][i].re += lambda,
+        }
     }
     solve_linear(normal, rhs)
 }
 
-/// 单频点求解并投影到每源幅值帽 |F_n| <= cap（保留相位）。
-///
-/// 实现（确定性 active-set）：先解无约束岭 LS；对越界源投影到 cap 并固定；用
-/// "每 mic 目标 A − 固定源在该 mic 的贡献" 对剩余源重解；重复至多 3 次。
-/// 目的：禁止深 null 处 F 爆到极大（throat：会让 FIR 系数爆炸 → headroom 缩放 → 静音式假改善）。
-pub fn weighted_ridge_ls_capped(
+/// 单频点求解并投影到每源幅值帽（实数目标 + 正则项权重 Γ_s）。
+pub fn weighted_ridge_ls_capped_with_ridge(
     h: &[Vec<Cx>],
     target: f64,
     weights: &[f64],
     lambda: f64,
     cap: f64,
+    ridge: Option<&[f64]>,
 ) -> Result<Vec<Cx>, String> {
     let n = h.first().map(|r| r.len()).unwrap_or(0);
     if n == 0 {
         return Err("weighted_ridge_ls_capped: 空 H".to_string());
     }
     let base = Cx::new(target, 0.0);
-    let mut f = weighted_ridge_ls(h, target, weights, lambda)?;
+    let mut f = weighted_ridge_ls_complex_with_ridge(h, base, weights, lambda, ridge)?;
     let mut fixed = vec![false; n];
     for _pass in 0..3 {
         let mut any_fixed = false;
@@ -269,7 +517,6 @@ pub fn weighted_ridge_ls_capped(
         if free.is_empty() {
             break;
         }
-        // 每 mic 的调整目标
         let targets: Vec<Cx> = h
             .iter()
             .map(|row| {
@@ -286,12 +533,19 @@ pub fn weighted_ridge_ls_capped(
             .iter()
             .map(|row| free.iter().map(|i| row[*i]).collect())
             .collect();
-        let f_red = weighted_ridge_ls_targets(&h_red, &targets, weights, lambda)?;
+        let ridge_free: Option<Vec<f64>> =
+            ridge.map(|g| free.iter().map(|i| g[*i]).collect::<Vec<f64>>());
+        let f_red = weighted_ridge_ls_targets_with_ridge(
+            &h_red,
+            &targets,
+            weights,
+            lambda,
+            ridge_free.as_deref(),
+        )?;
         for (j, i) in free.iter().enumerate() {
             f[*i] = f_red[j];
         }
     }
-    // 最终安全投影（不再重解，防止最后一轮残值超帽）
     for i in 0..n {
         let a = f[i].abs();
         if cap > 0.0 && a > cap {
@@ -301,78 +555,20 @@ pub fn weighted_ridge_ls_capped(
     Ok(f)
 }
 
-/// 由目标幅度 A(f) 设计一轮 MIMO FIR（per-(mic,bin) 权重版，供 OBJECTIVES-V2 的 IRLS 使用）。
-#[allow(clippy::too_many_arguments)]
-pub fn design_mimo_once_w(
-    freqs_hz: &[f64],
-    fs: f64,
-    h_design: &[Vec<Vec<Cx>>],
-    a_target: &[f64],
-    weights: &[Vec<f64>],
-    lambda: f64,
-    taps: usize,
-    delay_samples: usize,
-    diag_load_rel: f64,
-    nfft: usize,
-) -> Result<FirDesign, String> {
-    let k = freqs_hz.len();
-    if h_design.is_empty() {
-        return Err("design_mimo_once_w: 空 H".to_string());
-    }
-    if weights.len() != h_design.len() {
-        return Err("design_mimo_once_w: weights 行数 != design 点数".to_string());
-    }
-    if weights.iter().any(|row| row.len() != k) {
-        return Err("design_mimo_once_w: weights 列数 != 频点数".to_string());
-    }
-    let n_src = h_design[0].first().map(|hk| hk.len()).unwrap_or(0);
-    let cap = 10.0f64.powf(F_MAG_CAP_DB / 20.0);
-    let mut f_resp: Vec<Vec<Cx>> = vec![Vec::with_capacity(n_src); k];
-    for ki in 0..k {
-        let hk: Vec<Vec<Cx>> = h_design.iter().map(|mic| mic[ki].clone()).collect();
-        let wbin: Vec<f64> = (0..hk.len()).map(|mi| weights[mi][ki]).collect();
-        let fk = weighted_ridge_ls_capped(&hk, a_target[ki], &wbin, lambda, cap)?;
-        f_resp[ki] = fk;
-    }
-    let mut c: Vec<Vec<Cx>> = vec![Vec::with_capacity(k); n_src];
-    for ki in 0..k {
-        let w = std::f64::consts::TAU * freqs_hz[ki] / fs;
-        let rot = Cx::exp_neg_j(w * delay_samples as f64);
-        for ni in 0..n_src {
-            c[ni].push(f_resp[ki][ni].mul(rot));
-        }
-    }
-    let mut hs: Vec<Vec<f64>> = Vec::with_capacity(n_src);
-    let mut gs: Vec<Vec<Cx>> = Vec::with_capacity(n_src);
-    for ni in 0..n_src {
-        let h =
-            fir::design_fir_by_frequency_sampling(freqs_hz, fs, &c[ni], taps, delay_samples, nfft)?;
-        let g = fir::fir_response(&h, freqs_hz, fs);
-        hs.push(h);
-        gs.push(g);
-    }
-    let _ = diag_load_rel;
-    Ok(FirDesign {
-        taps,
-        h: hs,
-        g_actual: gs,
-        weights: vec![],
-    })
-}
-
-/// 单频点求解并投影到每源幅值帽（每 mic 独立复数目标，OBJECTIVES-V2 的 phase-fixed 幅度目标）。
-pub fn weighted_ridge_ls_capped_targets(
+/// 单频点求解并投影到每源幅值帽（每 mic 独立复数目标 + 正则项权重 Γ_s）。
+pub fn weighted_ridge_ls_capped_targets_with_ridge(
     h: &[Vec<Cx>],
     targets: &[Cx],
     weights: &[f64],
     lambda: f64,
     cap: f64,
+    ridge: Option<&[f64]>,
 ) -> Result<Vec<Cx>, String> {
     let n = h.first().map(|r| r.len()).unwrap_or(0);
     if n == 0 || targets.len() != h.len() {
         return Err("weighted_ridge_ls_capped_targets: 维度不匹配".to_string());
     }
-    let mut f = weighted_ridge_ls_targets(h, targets, weights, lambda)?;
+    let mut f = weighted_ridge_ls_targets_with_ridge(h, targets, weights, lambda, ridge)?;
     let mut fixed = vec![false; n];
     for _pass in 0..3 {
         let mut any_fixed = false;
@@ -411,8 +607,15 @@ pub fn weighted_ridge_ls_capped_targets(
             .iter()
             .map(|row| free.iter().map(|i| row[*i]).collect())
             .collect();
-        let t_red: Vec<Cx> = adjusted;
-        let f_red = weighted_ridge_ls_targets(&h_red, &t_red, weights, lambda)?;
+        let ridge_free: Option<Vec<f64>> =
+            ridge.map(|g| free.iter().map(|i| g[*i]).collect::<Vec<f64>>());
+        let f_red = weighted_ridge_ls_targets_with_ridge(
+            &h_red,
+            &adjusted,
+            weights,
+            lambda,
+            ridge_free.as_deref(),
+        )?;
         for (j, i) in free.iter().enumerate() {
             f[*i] = f_red[j];
         }
@@ -426,40 +629,60 @@ pub fn weighted_ridge_ls_capped_targets(
     Ok(f)
 }
 
-/// 每频点目标不同（targets[mic][bin]）的 MIMO FIR 一轮设计（OBJECTIVES-V2）。
+/// 由目标幅度 A(f) 设计一轮 MIMO FIR（per-(mic,bin) 权重版 + 设计选项）。
 #[allow(clippy::too_many_arguments)]
-pub fn design_mimo_once_multi_targets(
+pub fn design_mimo_once_w_with(
     freqs_hz: &[f64],
     fs: f64,
     h_design: &[Vec<Vec<Cx>>],
-    targets: &[Vec<Cx>],
+    a_target: &[f64],
     weights: &[Vec<f64>],
     lambda: f64,
     taps: usize,
     delay_samples: usize,
     diag_load_rel: f64,
     nfft: usize,
+    opts: DesignOptions<'_>,
 ) -> Result<FirDesign, String> {
     let k = freqs_hz.len();
     if h_design.is_empty() {
-        return Err("design_mimo_once_multi_targets: 空 H".to_string());
+        return Err("design_mimo_once_w: 空 H".to_string());
     }
-    if targets.len() != h_design.len() || weights.len() != h_design.len() {
-        return Err(
-            "design_mimo_once_multi_targets: targets/weights 行数 != design 点数".to_string(),
-        );
+    if weights.len() != h_design.len() {
+        return Err("design_mimo_once_w: weights 行数 != design 点数".to_string());
     }
-    if targets.iter().any(|r| r.len() != k) || weights.iter().any(|r| r.len() != k) {
-        return Err("design_mimo_once_multi_targets: 列数 != 频点数".to_string());
+    if weights.iter().any(|row| row.len() != k) {
+        return Err("design_mimo_once_w: weights 列数 != 频点数".to_string());
+    }
+    if let Some(mask) = opts.fit_mask {
+        if mask.len() != k {
+            return Err("design_mimo_once_w: fit_mask 长度 != 频点数".to_string());
+        }
+    }
+    if let Some(ridge) = opts.ridge {
+        if ridge.len() != k || ridge.iter().any(|row| row.len() != h_design[0][0].len()) {
+            return Err("design_mimo_once_w: ridge 维度不符".to_string());
+        }
     }
     let n_src = h_design[0].first().map(|hk| hk.len()).unwrap_or(0);
     let cap = 10.0f64.powf(F_MAG_CAP_DB / 20.0);
     let mut f_resp: Vec<Vec<Cx>> = vec![Vec::with_capacity(n_src); k];
     for ki in 0..k {
+        if !opts.fits(ki) {
+            // 质量门排除：该频点不做任何修正（恒等 F=1），压力保持 B0
+            f_resp[ki] = vec![Cx::one(); n_src];
+            continue;
+        }
         let hk: Vec<Vec<Cx>> = h_design.iter().map(|mic| mic[ki].clone()).collect();
-        let tk: Vec<Cx> = targets.iter().map(|row| row[ki]).collect();
-        let wk: Vec<f64> = weights.iter().map(|row| row[ki]).collect();
-        let fk = weighted_ridge_ls_capped_targets(&hk, &tk, &wk, lambda, cap)?;
+        let wbin: Vec<f64> = (0..hk.len()).map(|mi| weights[mi][ki]).collect();
+        let fk = weighted_ridge_ls_capped_with_ridge(
+            &hk,
+            a_target[ki],
+            &wbin,
+            lambda,
+            cap,
+            opts.ridge_at(ki),
+        )?;
         f_resp[ki] = fk;
     }
     let mut c: Vec<Vec<Cx>> = vec![Vec::with_capacity(k); n_src];
@@ -488,21 +711,93 @@ pub fn design_mimo_once_multi_targets(
     })
 }
 
-/// 一轮 MIMO FIR 设计结果（B2/B3 内部）。
-#[derive(Clone, Debug)]
-pub struct FirDesign {
-    pub taps: usize,
-    /// h[source][tap]（实系数，因果，支撑 [0, taps-1]）
-    pub h: Vec<Vec<f64>>,
-    /// 用精确频点求得的实际复响应 G_n(f_k)（不是理想 F）
-    pub g_actual: Vec<Vec<Cx>>,
-    /// 该轮最终使用的 design 点权重 w_m（长度 = design 点数）
-    pub weights: Vec<f64>,
+/// 每频点目标不同（targets[mic][bin]）+ 设计选项的 MIMO FIR 一轮设计。
+#[allow(clippy::too_many_arguments)]
+pub fn design_mimo_once_multi_targets_with(
+    freqs_hz: &[f64],
+    fs: f64,
+    h_design: &[Vec<Vec<Cx>>],
+    targets: &[Vec<Cx>],
+    weights: &[Vec<f64>],
+    lambda: f64,
+    taps: usize,
+    delay_samples: usize,
+    diag_load_rel: f64,
+    nfft: usize,
+    opts: DesignOptions<'_>,
+) -> Result<FirDesign, String> {
+    let k = freqs_hz.len();
+    if h_design.is_empty() {
+        return Err("design_mimo_once_multi_targets: 空 H".to_string());
+    }
+    if targets.len() != h_design.len() || weights.len() != h_design.len() {
+        return Err(
+            "design_mimo_once_multi_targets: targets/weights 行数 != design 点数".to_string(),
+        );
+    }
+    if targets.iter().any(|r| r.len() != k) || weights.iter().any(|r| r.len() != k) {
+        return Err("design_mimo_once_multi_targets: 列数 != 频点数".to_string());
+    }
+    if let Some(mask) = opts.fit_mask {
+        if mask.len() != k {
+            return Err("design_mimo_once_multi_targets: fit_mask 长度 != 频点数".to_string());
+        }
+    }
+    if let Some(ridge) = opts.ridge {
+        if ridge.len() != k || ridge.iter().any(|row| row.len() != h_design[0][0].len()) {
+            return Err("design_mimo_once_multi_targets: ridge 维度不符".to_string());
+        }
+    }
+    let n_src = h_design[0].first().map(|hk| hk.len()).unwrap_or(0);
+    let cap = 10.0f64.powf(F_MAG_CAP_DB / 20.0);
+    let mut f_resp: Vec<Vec<Cx>> = vec![Vec::with_capacity(n_src); k];
+    for ki in 0..k {
+        if !opts.fits(ki) {
+            f_resp[ki] = vec![Cx::one(); n_src];
+            continue;
+        }
+        let hk: Vec<Vec<Cx>> = h_design.iter().map(|mic| mic[ki].clone()).collect();
+        let tk: Vec<Cx> = targets.iter().map(|row| row[ki]).collect();
+        let wk: Vec<f64> = weights.iter().map(|row| row[ki]).collect();
+        let fk = weighted_ridge_ls_capped_targets_with_ridge(
+            &hk,
+            &tk,
+            &wk,
+            lambda,
+            cap,
+            opts.ridge_at(ki),
+        )?;
+        f_resp[ki] = fk;
+    }
+    let mut c: Vec<Vec<Cx>> = vec![Vec::with_capacity(k); n_src];
+    for ki in 0..k {
+        let w = std::f64::consts::TAU * freqs_hz[ki] / fs;
+        let rot = Cx::exp_neg_j(w * delay_samples as f64);
+        for ni in 0..n_src {
+            c[ni].push(f_resp[ki][ni].mul(rot));
+        }
+    }
+    let mut hs: Vec<Vec<f64>> = Vec::with_capacity(n_src);
+    let mut gs: Vec<Vec<Cx>> = Vec::with_capacity(n_src);
+    for ni in 0..n_src {
+        let h =
+            fir::design_fir_by_frequency_sampling(freqs_hz, fs, &c[ni], taps, delay_samples, nfft)?;
+        let g = fir::fir_response(&h, freqs_hz, fs);
+        hs.push(h);
+        gs.push(g);
+    }
+    let _ = diag_load_rel;
+    Ok(FirDesign {
+        taps,
+        h: hs,
+        g_actual: gs,
+        weights: vec![],
+    })
 }
 
-/// 由目标幅度 A(f) 与 λ 设计一轮 MIMO FIR（不含 IRLS 外迭代）。
+/// 由目标幅度 A(f) 与 λ 设计一轮 MIMO FIR（不含 IRLS 外迭代）+ 设计选项。
 #[allow(clippy::too_many_arguments)]
-pub fn design_mimo_once(
+pub fn design_mimo_once_with(
     freqs_hz: &[f64],
     fs: f64,
     h_design: &[Vec<Vec<Cx>>],
@@ -513,6 +808,7 @@ pub fn design_mimo_once(
     delay_samples: usize,
     diag_load_rel: f64,
     nfft: usize,
+    opts: DesignOptions<'_>,
 ) -> Result<FirDesign, String> {
     let k = freqs_hz.len();
     if h_design.is_empty() {
@@ -529,15 +825,34 @@ pub fn design_mimo_once(
     if a_target.len() != k {
         return Err("design_mimo_once: A(f) 长度与频点不一致".to_string());
     }
-    // 逐频点 F（N<=4 复高斯消元），并投影到每源 +6 dB 幅值帽（防止深 null 处 F 爆炸）
+    if let Some(mask) = opts.fit_mask {
+        if mask.len() != k {
+            return Err("design_mimo_once: fit_mask 长度 != 频点数".to_string());
+        }
+    }
+    if let Some(ridge) = opts.ridge {
+        if ridge.len() != k || ridge.iter().any(|row| row.len() != n_src) {
+            return Err("design_mimo_once: ridge 维度不符".to_string());
+        }
+    }
     let cap = 10.0f64.powf(F_MAG_CAP_DB / 20.0);
     let mut f_resp: Vec<Vec<Cx>> = vec![Vec::with_capacity(n_src); k];
     for ki in 0..k {
+        if !opts.fits(ki) {
+            f_resp[ki] = vec![Cx::one(); n_src];
+            continue;
+        }
         let hk: Vec<Vec<Cx>> = h_design.iter().map(|mic| mic[ki].clone()).collect();
-        let fk = weighted_ridge_ls_capped(&hk, a_target[ki], weights, lambda, cap)?;
+        let fk = weighted_ridge_ls_capped_with_ridge(
+            &hk,
+            a_target[ki],
+            weights,
+            lambda,
+            cap,
+            opts.ridge_at(ki),
+        )?;
         f_resp[ki] = fk;
     }
-    // C_n(f_k) = F_n(f_k) e^{-jω_k D}
     let mut c: Vec<Vec<Cx>> = vec![Vec::with_capacity(k); n_src];
     for ki in 0..k {
         let w = std::f64::consts::TAU * freqs_hz[ki] / fs;
@@ -546,7 +861,6 @@ pub fn design_mimo_once(
             c[ni].push(f_resp[ki][ni].mul(rot));
         }
     }
-    // 每源独立设计 FIR：频域采样 IFFT（稳定、band-limited，见 fir::design_fir_by_frequency_sampling）
     let mut hs: Vec<Vec<f64>> = Vec::with_capacity(n_src);
     let mut gs: Vec<Vec<Cx>> = Vec::with_capacity(n_src);
     for ni in 0..n_src {
@@ -565,15 +879,9 @@ pub fn design_mimo_once(
     })
 }
 
-/// IRLS 加权 MIMO FIR 设计（契约 §6.3：2 次外迭代）。
-///
-/// - 权重初值全 1；
-/// - 每轮：按当前权重解 F→FIR→实际 G，计算 design 点残差
-///   r_m = sqrt(mean_k |sum_n H_mn(f_k)·G_n(f_k)·e^{+jω_k D} - A(f_k)|²)；
-/// - 权重更新 w_m ∝ clamp((r_m/mean r)^0.5, 0.25, 4)；
-/// - 共 irls_iterations 次外迭代，最后一轮用更新后的权重再设计一次并返回。
+/// IRLS 加权 MIMO FIR 设计（契约 §6.3：2 次外迭代）+ 设计选项。
 #[allow(clippy::too_many_arguments)]
-pub fn design_mimo_irls(
+pub fn design_mimo_irls_with(
     freqs_hz: &[f64],
     fs: f64,
     h_design: &[Vec<Vec<Cx>>],
@@ -584,13 +892,14 @@ pub fn design_mimo_irls(
     diag_load_rel: f64,
     irls_iterations: usize,
     nfft: usize,
+    opts: DesignOptions<'_>,
 ) -> Result<FirDesign, String> {
     let k = freqs_hz.len();
     let m = h_design.len();
     let mut weights = vec![1.0f64; m];
     let mut current: Option<FirDesign> = None;
     for _ in 0..irls_iterations {
-        let design = design_mimo_once(
+        let design = design_mimo_once_with(
             freqs_hz,
             fs,
             h_design,
@@ -601,12 +910,16 @@ pub fn design_mimo_irls(
             delay_samples,
             diag_load_rel,
             nfft,
+            opts,
         )?;
         // 实际 G 去公共延迟 D 后与零相位目标 A 比较，得到每 mic 残差
         let mut r = vec![0.0f64; m];
         for (mi, hi) in h_design.iter().enumerate() {
             let mut acc = 0.0;
             for ki in 0..k {
+                if !opts.fits(ki) {
+                    continue;
+                }
                 let w = std::f64::consts::TAU * freqs_hz[ki] / fs;
                 let un_rot = crate::solve::Cx::exp_pos_j(w * delay_samples as f64);
                 let mut p = Cx::zero();
@@ -630,7 +943,7 @@ pub fn design_mimo_irls(
         current = Some(design);
     }
     let _ = current;
-    design_mimo_once(
+    design_mimo_once_with(
         freqs_hz,
         fs,
         h_design,
@@ -641,30 +954,8 @@ pub fn design_mimo_irls(
         delay_samples,
         diag_load_rel,
         nfft,
+        opts,
     )
-}
-
-/// 用给定 G（[source][bin]）计算压力：P_m(f_k) = sum_n H[m][n][f_k]·G_n(f_k)。
-/// h: h[mic][bin][source]；返回 [mic][bin]。
-pub fn pressure(h: &[Vec<Vec<Cx>>], g: &[Vec<Cx>]) -> Vec<Vec<Cx>> {
-    let mut out = Vec::with_capacity(h.len());
-    for mic in h {
-        let mut row = Vec::with_capacity(mic.len());
-        for (ki, hk) in mic.iter().enumerate() {
-            let mut acc = Cx::zero();
-            for (ni, hv) in hk.iter().enumerate() {
-                acc = acc.add(hv.mul(g[ni][ki]));
-            }
-            row.push(acc);
-        }
-        out.push(row);
-    }
-    out
-}
-
-/// 基线 design 空间 RMS 功率（每频点）→ 目标构建用（A² 的空间均值）。
-pub fn design_rms_sq(p_design: &[Vec<Cx>]) -> Vec<f64> {
-    target::spatial_mean_power(p_design)
 }
 
 #[cfg(test)]
@@ -728,6 +1019,92 @@ mod tests {
         // bin0: 1 + i*1 → (1, 1)；bin1: 2 + (-i)*1 → (2, -1)
         assert!((p[0][0].re - 1.0).abs() < 1e-15 && (p[0][0].im - 1.0).abs() < 1e-15);
         assert!((p[0][1].re - 2.0).abs() < 1e-15 && (p[0][1].im + 1.0).abs() < 1e-15);
+    }
+
+    /// 权威加权的默认路径：ridge = None 必须与原函数**逐位一致**。
+    #[test]
+    fn ridge_none_is_bit_identical_to_legacy() {
+        let h = vec![
+            vec![Cx::new(1.0, 0.2), Cx::new(0.3, -0.1)],
+            vec![Cx::new(0.5, 0.0), Cx::new(1.2, 0.4)],
+        ];
+        let weights = [1.0, 0.7];
+        let a = weighted_ridge_ls_complex(&h, Cx::new(1.0, 0.0), &weights, 1e-3).expect("legacy");
+        let b = weighted_ridge_ls_complex_with_ridge(&h, Cx::new(1.0, 0.0), &weights, 1e-3, None)
+            .expect("with");
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert_eq!(x.re.to_bits(), y.re.to_bits(), "实部不是逐位一致");
+            assert_eq!(x.im.to_bits(), y.im.to_bits(), "虚部不是逐位一致");
+        }
+        // Γ 全 1 也应与标量 λ 逐位一致（lambda*1.0 == lambda）
+        let ones = [1.0f64, 1.0];
+        let c = weighted_ridge_ls_complex_with_ridge(
+            &h,
+            Cx::new(1.0, 0.0),
+            &weights,
+            1e-3,
+            Some(&ones),
+        )
+        .expect("ones");
+        for (x, y) in a.iter().zip(c.iter()) {
+            assert_eq!(x.re.to_bits(), y.re.to_bits());
+            assert_eq!(x.im.to_bits(), y.im.to_bits());
+        }
+    }
+
+    /// 质量门掩码：被排除频点的目标不参与拟合（改它不影响输出）。
+    #[test]
+    fn fit_mask_excludes_bin_from_fitting() {
+        let freqs: Vec<f64> = (0..4)
+            .map(|i| (i as f64 + 2.0) * 48000.0 / 8192.0)
+            .collect();
+        let h: Vec<Vec<Vec<Cx>>> = (0..2)
+            .map(|m| {
+                (0..4)
+                    .map(|ki| {
+                        vec![
+                            Cx::new(1.0 + 0.1 * m as f64, 0.05 * ki as f64),
+                            Cx::new(0.3, -0.1 * m as f64),
+                        ]
+                    })
+                    .collect()
+            })
+            .collect();
+        let weights = vec![vec![1.0f64; 4]; 2];
+        let a1 = vec![1.0f64; 4];
+        let mut a2 = a1.clone();
+        a2[2] = 3.0; // 被掩码频点的目标差异
+        let mask = [true, true, false, true];
+        let opts = DesignOptions {
+            fit_mask: Some(&mask),
+            ridge: None,
+        };
+        let d1 = design_mimo_once_w_with(
+            &freqs, 48000.0, &h, &a1, &weights, 1e-6, 32, 16, 1e-9, 8192, opts,
+        )
+        .expect("d1");
+        let d2 = design_mimo_once_w_with(
+            &freqs, 48000.0, &h, &a2, &weights, 1e-6, 32, 16, 1e-9, 8192, opts,
+        )
+        .expect("d2");
+        assert_eq!(d1.h, d2.h, "掩码频点的目标变化不应影响拟合");
+        // 对照：不掩码时目标变化必须改变 FIR
+        let d3 = design_mimo_once_w_with(
+            &freqs,
+            48000.0,
+            &h,
+            &a2,
+            &weights,
+            1e-6,
+            32,
+            16,
+            1e-9,
+            8192,
+            DesignOptions::default(),
+        )
+        .expect("d3");
+        assert_ne!(d1.h, d3.h, "未掩码时目标变化应改变 FIR");
     }
 
     #[test]

@@ -7,12 +7,15 @@
 //! - B2 固定 λ_rel = 1e-6 · mean|H|²；B3 λ 由 3 折 design-only CV 选择；
 //! - FIR 约束（增益帽 + headroom 全局缩放）只作用于 B2/B3；B0/B1 如实报告标量参数。
 
+use crate::authority::{self, AuthorityConfig, AuthorityWeights};
 use crate::baseline;
 use crate::constraints::{self, FirConstraintReport, ScalarConstraintReport};
 use crate::evaluate::{self, BandPlan, SpatialStats};
+use crate::limits::{self, SafetyConfig, SafetyReport};
 use crate::objective::{self, ObjectiveConfig, ObjectiveKind};
+use crate::quality::{QualityConfig, QualityGate};
 use crate::report::{self, Json};
-use crate::solve::{self, Cx};
+use crate::solve::{self, Cx, DesignOptions};
 use crate::target;
 
 pub const REPORT_FORMAT: &str = "khaen-mimo-sim-report/v1";
@@ -35,6 +38,12 @@ pub struct RunConfig {
     pub nfft: usize,
     /// OBJECTIVES-V2 目标配置（默认 emodal / beta=0.70 = v1 回归路径）
     pub objective: ObjectiveConfig,
+    /// 4.1 测量质量门（默认关闭 → 旧行为逐位一致）
+    pub quality: QualityConfig,
+    /// 4.4 权威加权（默认关闭 → 旧行为逐位一致）
+    pub authority: AuthorityConfig,
+    /// 4.4 安全钳位 + 三态输出（默认关闭 → 旧行为逐位一致）
+    pub safety: SafetyConfig,
 }
 
 impl Default for RunConfig {
@@ -51,6 +60,9 @@ impl Default for RunConfig {
             gain_cap_db: constraints::GAIN_CAP_DB,
             nfft: 65536,
             objective: ObjectiveConfig::default(),
+            quality: QualityConfig::default(),
+            authority: AuthorityConfig::default(),
+            safety: SafetyConfig::default(),
         }
     }
 }
@@ -287,6 +299,7 @@ fn cv_select_lambda(
     alpha: &[f64],
     cfg: &RunConfig,
     mean_h_sq: f64,
+    opts: DesignOptions<'_>,
 ) -> Result<(Vec<FoldScore>, f64), String> {
     let n = h_design.len();
     let folds = cfg.cv_folds.max(2).min(n);
@@ -306,7 +319,7 @@ fn cv_select_lambda(
             let h_train = select_rows(h_design, &train);
             let p0_train = select_rows(p_b0_design, &train);
             let a_train = target::build_target(freqs_hz, &p0_train, cfg.target_beta);
-            let design = solve::design_mimo_irls(
+            let design = solve::design_mimo_irls_with(
                 freqs_hz,
                 fs,
                 &h_train,
@@ -317,6 +330,7 @@ fn cv_select_lambda(
                 cfg.diag_load_rel,
                 cfg.irls_iterations,
                 cfg.nfft,
+                opts,
             )?;
             let h_val = select_rows(h_design, &val);
             let p_val_after = solve::pressure(&h_val, &design.g_actual);
@@ -727,9 +741,49 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
     );
     let b0_constraints = constraints::report_identity(n_src, 0.0);
 
+    // ---- 4.1 测量质量门：Unknown 频段不参与拟合（默认关闭 = 旧行为逐位一致）----
+    let quality_gate: Option<QualityGate> = if cfg.quality.enabled {
+        let gate = cfg.quality.gate()?;
+        let mask = gate.bin_fit_mask(&input.freqs_hz);
+        if !mask.iter().any(|fits| *fits) {
+            return Err(format!(
+                "run_scene: 质量门把全部 {} 个频点判为 Unknown（无可用拟合频段；min_snr_db={}）",
+                input.freqs_hz.len(),
+                gate.min_snr_db
+            ));
+        }
+        let excluded = gate.excluded_for_plan(&plan);
+        if excluded.iter().all(|e| *e) {
+            return Err(
+                "run_scene: 质量门的 Unknown 频段覆盖了全部 evaluated 1/3 oct 带".to_string(),
+            );
+        }
+        Some(gate)
+    } else {
+        None
+    };
+    let fit_mask: Option<Vec<bool>> = quality_gate
+        .as_ref()
+        .map(|gate| gate.bin_fit_mask(&input.freqs_hz));
+
     // ---- B1 ----
     let h_design = select_rows(&input.h, design);
     let p_b0_design = select_rows(&p_b0, design);
+
+    // ---- 4.4 权威加权：正则项 Γ_s(f) = Γ0/|H_s(f)|²（默认关闭）----
+    let authority_weights: Option<AuthorityWeights> = if cfg.authority.enabled {
+        Some(authority::authority_weights(
+            &h_design,
+            &input.freqs_hz,
+            &cfg.authority,
+        )?)
+    } else {
+        None
+    };
+    let design_opts = DesignOptions {
+        fit_mask: fit_mask.as_deref(),
+        ridge: authority_weights.as_ref().map(|w| w.gamma.as_slice()),
+    };
     let b1 = baseline::run_b1(&h_design, &input.freqs_hz, fs, &plan, &p_b0_design);
     let g_b1 = baseline::gains_from_params(&b1.params, &input.freqs_hz, fs);
     let p_b1 = solve::pressure(&input.h, &g_b1);
@@ -747,7 +801,7 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
         constraints::report_b1(&b1.params, b1.level_ratio_db, baseline::LEVEL_TOLERANCE_DB)?;
 
     // ---- B2/B3：按 objective 分派（emodal 保持 v1 冻结路径；其余 v2 目标 + 可行化）----
-    let outcome = if cfg.objective.kind == ObjectiveKind::EModal {
+    let mut outcome = if cfg.objective.kind == ObjectiveKind::EModal {
         compute_emodal_variants(
             &input,
             &h_design,
@@ -758,6 +812,7 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
             &plan,
             &e_k0,
             &alpha,
+            design_opts,
         )?
     } else {
         compute_v2_variants(
@@ -770,8 +825,32 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
             &plan,
             &e_k0,
             &alpha,
+            design_opts,
         )?
     };
+    // ---- 4.4 安全钳位 + FULL/PARTIAL/NONE（默认关闭 = 旧行为逐位一致）----
+    if cfg.safety.enabled {
+        apply_safety_limits(
+            &mut outcome.b2,
+            &input,
+            cfg,
+            fs,
+            &plan,
+            &p_b0,
+            &e_k0,
+            &alpha,
+        )?;
+        apply_safety_limits(
+            &mut outcome.b3,
+            &input,
+            cfg,
+            fs,
+            &plan,
+            &p_b0,
+            &e_k0,
+            &alpha,
+        )?;
+    }
     let p_b2 = &outcome.b2.p_after;
     let p_b3 = &outcome.b3.p_after;
     let (b2_design, b2_holdout) = eval_variant(
@@ -854,7 +933,7 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
                 .collect(),
         ),
     )]);
-    let variants = Json::Obj(vec![
+    let mut variants = Json::Obj(vec![
         (
             "B0".to_string(),
             Json::Obj(vec![
@@ -1013,6 +1092,25 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
             ]),
         ),
     ]);
+    // 4.4 三态：B2/B3 各自的 FULL/PARTIAL/NONE + 逐项残差（仅在安全钳位启用时出现）
+    if cfg.safety.enabled {
+        for (key, variant) in [("B2", &outcome.b2), ("B3", &outcome.b3)] {
+            if let Some(safety) = &variant.safety {
+                add_variant_field(
+                    &mut variants,
+                    key,
+                    "outcome",
+                    Json::str(safety.state.as_str()),
+                );
+                add_variant_field(
+                    &mut variants,
+                    key,
+                    "safety",
+                    safety.json(&input.source_ids, &plan),
+                );
+            }
+        }
+    }
 
     // ---- 判据/诚实状态（独立输出，互不掩盖）----
     let delta_b2 = b1_design.e_modal_db - b2_design.e_modal_db;
@@ -1148,8 +1246,39 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
         "predicted_status priority (frozen): severe > INFEASIBLE(feasibility) > PREDICTED_PASS > PREDICTED_PARTIAL > INCOMPLETE; B0 = BASELINE; B1 by metric rules only. gain_cap scaling does NOT auto-FAIL (kept in constraints for audit). All values SIMULATED / UNPROVEN (predicted only)."
             .to_string(),
     );
+    if let Some(gate) = &quality_gate {
+        all_notes.push(format!(
+            "4.1 quality gate: min_snr_db = {:.2}; {} of {} 1/3-oct bands Unknown (excluded from fitting, identity F=1 there); Unknown != insufficient authority (see authority block). Excluded: {:?}.",
+            gate.min_snr_db,
+            gate.excluded_bands().len(),
+            gate.len(),
+            gate.excluded_bands()
+                .iter()
+                .map(|b| b.center_hz)
+                .collect::<Vec<f64>>()
+        ));
+    }
+    if let Some(w) = &authority_weights {
+        all_notes.push(format!(
+            "4.4 authority weighting: ON (ridge term lambda*sum_s Gamma_s(f)|f_s|^2, Gamma_s(f) = passband_mean|H_s|^2 / |H_s(f)|^2); gamma range {:.3e}..{:.3e}; default OFF is bit-identical.",
+            w.gamma.iter().flatten().cloned().fold(f64::INFINITY, f64::min),
+            w.gamma.iter().flatten().cloned().fold(0.0f64, f64::max)
+        ));
+    }
+    if cfg.safety.enabled {
+        let st = outcome
+            .b3
+            .safety
+            .as_ref()
+            .map(|s| s.state.as_str())
+            .unwrap_or("NONE");
+        all_notes.push(format!(
+            "4.4 safety clamp: hard limits band boost <= +{:.1} dB, positive gain sum <= +{:.1} dB, predicted peak <= {:.1} dBFS; B3 outcome = {}. FULL = no clamp and target met; PARTIAL = clamped or target residuals (listed per item); NONE = no feasible solution inside the safety limits. Safety limits are never crossed.",
+            cfg.safety.max_band_boost_db, cfg.safety.max_positive_sum_db, cfg.safety.max_predicted_peak_dbfs, st
+        ));
+    }
 
-    let report = Json::Obj(vec![
+    let mut report_fields = vec![
         ("format".to_string(), Json::str(REPORT_FORMAT)),
         ("tool".to_string(), Json::str(TOOL_NAME)),
         ("scene_id".to_string(), Json::str(input.scene_id.clone())),
@@ -1276,7 +1405,28 @@ pub fn run_scene(input: &SceneInput, cfg: &RunConfig) -> Result<SceneRun, String
             "notes".to_string(),
             Json::Arr(all_notes.iter().map(|s| Json::str(s.clone())).collect()),
         ),
-    ]);
+    ];
+    // 4.1 / 4.4 报告块（默认关闭时不出现 → 旧报告逐位一致）
+    if let Some(gate) = &quality_gate {
+        report_fields.push(("quality".to_string(), gate.json()));
+    }
+    if let Some(w) = &authority_weights {
+        report_fields.push((
+            "authority".to_string(),
+            w.json(&cfg.authority, &input.source_ids),
+        ));
+    }
+    if cfg.safety.enabled {
+        let state = outcome
+            .b3
+            .safety
+            .as_ref()
+            .map(|s| s.state.as_str())
+            .unwrap_or("NONE");
+        report_fields.push(("outcome".to_string(), Json::str(state)));
+        report_fields.push(("outcome_variant".to_string(), Json::str("B3")));
+    }
+    let report = Json::Obj(report_fields);
 
     // ---- metrics.csv：每 variant × 点 × 带一行 ----
     let mut metrics_csv = String::new();
@@ -1408,12 +1558,20 @@ struct FeasibilityResult {
 #[derive(Clone, Debug)]
 struct FirVariantResult {
     p_after: Vec<Vec<Cx>>,
+    /// 设计出的 FIR（[source][tap]；安全钳位输入/输出）
+    h: Vec<Vec<f64>>,
+    /// 逐频点目标幅度 A(f)（安全残差用）
+    target_a: Vec<f64>,
+    /// FIR 文件名前缀（"B2" / ""）
+    fir_prefix: String,
     constraints: FirConstraintReport,
     fir_files: Vec<(String, String)>,
     target_level: Option<f64>,
     lambda_rel: f64,
     objective_value: f64,
     feasibility: FeasibilityResult,
+    /// 4.4 安全钳位 + 三态报告（默认关闭时 None）
+    safety: Option<SafetyReport>,
 }
 
 struct VariantOutcome {
@@ -1537,6 +1695,84 @@ fn make_fir_files(
     files
 }
 
+/// 4.4 安全钳位 + 三态：对 variant 的最终解做投影，并用投影后的解重算
+/// 压力 / 约束 / FIR 文件 / 可行性（安全限永不越过；不达标只报 PARTIAL/NONE）。
+#[allow(clippy::too_many_arguments)]
+fn apply_safety_limits(
+    variant: &mut FirVariantResult,
+    input: &SceneInput,
+    cfg: &RunConfig,
+    fs: f64,
+    plan: &BandPlan,
+    p_b0: &[Vec<Cx>],
+    e_k0: &[f64],
+    alpha: &[f64],
+) -> Result<(), String> {
+    let mut eval_mics: Vec<usize> = input.design_mics.clone();
+    eval_mics.extend_from_slice(&input.holdout_mics);
+    let clamp_input = limits::ClampInput {
+        h: &variant.h,
+        h_matrix: &input.h,
+        p_b0,
+        target_a: &variant.target_a,
+        freqs_hz: &input.freqs_hz,
+        fs,
+        taps: cfg.taps,
+        delay_samples: cfg.delay_samples,
+        nfft: cfg.nfft,
+        plan,
+        design_mics: &input.design_mics,
+        eval_mics: &eval_mics,
+    };
+    let (h_safe, _g_clamped, report) = limits::clamp_solution(&clamp_input, &cfg.safety)?;
+    let (h_final, g_final, cons) = constraints::enforce_fir_constraints(
+        &h_safe,
+        &input.freqs_hz,
+        fs,
+        cfg.gain_cap_db,
+        cfg.delay_samples,
+        true,
+    )?;
+    variant.fir_files = make_fir_files(input, cfg, &h_final, &variant.fir_prefix);
+    variant.h = h_final;
+    variant.p_after = solve::pressure(&input.h, &g_final);
+    variant.constraints = cons;
+    variant.objective_value = design_obj_value(
+        &variant.p_after,
+        p_b0,
+        &input.design_mics,
+        plan,
+        e_k0,
+        alpha,
+        &cfg.objective,
+    );
+    let check = objective::rise_check(
+        &variant.p_after,
+        p_b0,
+        &input.design_mics,
+        plan,
+        cfg.objective.max_db_rise_db,
+    );
+    variant.feasibility.feasible = check.violations.is_empty()
+        && variant
+            .feasibility
+            .cv_fold_max_rise_db
+            .iter()
+            .all(|r| *r <= cfg.objective.max_db_rise_db + 1e-9);
+    variant.feasibility.design_check = check;
+    variant.safety = Some(report);
+    Ok(())
+}
+
+/// 给已构造的 variant JSON 追加字段（安全/三态块用）。
+fn add_variant_field(variants: &mut Json, variant: &str, key: &str, value: Json) {
+    if let Json::Obj(items) = variants {
+        if let Some((_, Json::Obj(fields))) = items.iter_mut().find(|(k, _)| k == variant) {
+            fields.push((key.to_string(), value));
+        }
+    }
+}
+
 /// v2：给定 per-bin 幅度目标与 objective IRLS 的 FIR 设计。
 ///
 /// 幅度目标（seat-std/null-depth/combined）：首轮用相位 0 目标，随后用 phase-fixed 目标
@@ -1551,6 +1787,7 @@ fn design_objective_with_target(
     obj_cfg: &ObjectiveConfig,
     lambda_abs: f64,
     cfg: &RunConfig,
+    opts: DesignOptions<'_>,
 ) -> Result<solve::FirDesign, String> {
     let n = h_design.len();
     let k = freqs_hz.len();
@@ -1561,7 +1798,7 @@ fn design_objective_with_target(
     let iters = obj_cfg.irls_iterations.max(1);
     for iter in 0..iters {
         let d = if iter == 0 {
-            solve::design_mimo_once_w(
+            solve::design_mimo_once_w_with(
                 freqs_hz,
                 fs,
                 h_design,
@@ -1572,9 +1809,10 @@ fn design_objective_with_target(
                 cfg.delay_samples,
                 cfg.diag_load_rel,
                 cfg.nfft,
+                opts,
             )?
         } else {
-            solve::design_mimo_once_multi_targets(
+            solve::design_mimo_once_multi_targets_with(
                 freqs_hz,
                 fs,
                 h_design,
@@ -1585,13 +1823,14 @@ fn design_objective_with_target(
                 cfg.delay_samples,
                 cfg.diag_load_rel,
                 cfg.nfft,
+                opts,
             )?
         };
         let p_after = solve::pressure(h_design, &d.g_actual);
         weights = objective::irls_weights(obj_cfg.kind, obj_cfg, &p_after, a_bin, plan);
         targets = objective::phase_fixed_targets(a_bin, &p_after);
     }
-    solve::design_mimo_once_multi_targets(
+    solve::design_mimo_once_multi_targets_with(
         freqs_hz,
         fs,
         h_design,
@@ -1602,6 +1841,7 @@ fn design_objective_with_target(
         cfg.delay_samples,
         cfg.diag_load_rel,
         cfg.nfft,
+        opts,
     )
 }
 
@@ -1617,11 +1857,12 @@ fn design_objective(
     target_level: f64,
     lambda_abs: f64,
     cfg: &RunConfig,
+    opts: DesignOptions<'_>,
 ) -> Result<solve::FirDesign, String> {
     let a_band = objective::band_targets(p_b0_design, plan, target_level);
     let a_bin = objective::target_per_bin(freqs_hz, plan, &a_band);
     design_objective_with_target(
-        h_design, &a_bin, freqs_hz, fs, plan, obj_cfg, lambda_abs, cfg,
+        h_design, &a_bin, freqs_hz, fs, plan, obj_cfg, lambda_abs, cfg, opts,
     )
 }
 
@@ -1636,6 +1877,7 @@ fn emodal_fold_rises(
     cfg: &RunConfig,
     lambda_rel: f64,
     h_scale: f64,
+    opts: DesignOptions<'_>,
 ) -> Result<(Vec<f64>, Vec<(usize, objective::RiseViolation)>), String> {
     let n = h_design.len();
     let folds = cfg.cv_folds.max(2).min(n);
@@ -1651,7 +1893,7 @@ fn emodal_fold_rises(
         let h_train = select_rows(h_design, &train);
         let p0_train = select_rows(p_b0_design, &train);
         let a_train = target::build_target(freqs_hz, &p0_train, cfg.target_beta);
-        let d = solve::design_mimo_irls(
+        let d = solve::design_mimo_irls_with(
             freqs_hz,
             fs,
             &h_train,
@@ -1662,6 +1904,7 @@ fn emodal_fold_rises(
             cfg.diag_load_rel,
             cfg.irls_iterations,
             cfg.nfft,
+            opts,
         )?;
         let h_val = select_rows(h_design, &val);
         let p_val_before = select_rows(p_b0_design, &val);
@@ -1733,6 +1976,7 @@ fn compute_emodal_variants(
     plan: &BandPlan,
     e_k0: &[f64],
     alpha: &[f64],
+    opts: DesignOptions<'_>,
 ) -> Result<VariantOutcome, String> {
     let design = &input.design_mics;
     let a_target = target::build_target(&input.freqs_hz, p_b0_design, cfg.target_beta);
@@ -1743,7 +1987,7 @@ fn compute_emodal_variants(
     let max_rise = cfg.objective.max_db_rise_db;
     // ---- B2：固定 λ_rel ----
     let lambda_b2_abs = cfg.lambda_b2_rel * h_scale;
-    let d2 = solve::design_mimo_irls(
+    let d2 = solve::design_mimo_irls_with(
         &input.freqs_hz,
         fs,
         h_design,
@@ -1754,6 +1998,7 @@ fn compute_emodal_variants(
         cfg.diag_load_rel,
         cfg.irls_iterations,
         cfg.nfft,
+        opts,
     )?;
     let (h2, g2, c2) = constraints::enforce_fir_constraints(
         &d2.h,
@@ -1784,9 +2029,10 @@ fn compute_emodal_variants(
         alpha,
         cfg,
         h_scale,
+        opts,
     )?;
     let lambda_b3_abs = lambda_b3_rel * h_scale;
-    let d3 = solve::design_mimo_irls(
+    let d3 = solve::design_mimo_irls_with(
         &input.freqs_hz,
         fs,
         h_design,
@@ -1797,6 +2043,7 @@ fn compute_emodal_variants(
         cfg.diag_load_rel,
         cfg.irls_iterations,
         cfg.nfft,
+        opts,
     )?;
     let (h3, g3, c3) = constraints::enforce_fir_constraints(
         &d3.h,
@@ -1817,6 +2064,7 @@ fn compute_emodal_variants(
         cfg,
         lambda_b3_rel,
         h_scale,
+        opts,
     )?;
     let check3 = objective::rise_check(&p_b3, p_b0, design, plan, max_rise);
     let mut feas3 = FeasibilityResult {
@@ -1835,21 +2083,29 @@ fn compute_emodal_variants(
     Ok(VariantOutcome {
         b2: FirVariantResult {
             p_after: p_b2,
+            h: h2,
+            target_a: a_target.clone(),
+            fir_prefix: "B2".to_string(),
             constraints: c2,
             fir_files: files2,
             target_level: None,
             lambda_rel: cfg.lambda_b2_rel,
             objective_value: objv2,
             feasibility: feas2,
+            safety: None,
         },
         b3: FirVariantResult {
             p_after: p_b3,
+            h: h3,
+            target_a: a_target,
+            fir_prefix: String::new(),
             constraints: c3,
             fir_files: files3,
             target_level: None,
             lambda_rel: lambda_b3_rel,
             objective_value: objv3,
             feasibility: feas3,
+            safety: None,
         },
         cv,
     })
@@ -1877,6 +2133,7 @@ fn compute_v2_variants(
     plan: &BandPlan,
     e_k0: &[f64],
     alpha: &[f64],
+    opts: DesignOptions<'_>,
 ) -> Result<VariantOutcome, String> {
     let design = &input.design_mics;
     let obj_cfg = &cfg.objective;
@@ -1887,6 +2144,8 @@ fn compute_v2_variants(
     let max_rise = obj_cfg.max_db_rise_db;
     // ---- B2：固定 λ≈0、名义 target_level、不做 CV ----
     let level_b2 = obj_cfg.beta;
+    let a_band_b2 = objective::band_targets(p_b0_design, plan, level_b2);
+    let a_bin_b2 = objective::target_per_bin(&input.freqs_hz, plan, &a_band_b2);
     let d2 = design_objective(
         h_design,
         p_b0_design,
@@ -1897,6 +2156,7 @@ fn compute_v2_variants(
         level_b2,
         cfg.lambda_b2_rel * h_scale,
         cfg,
+        opts,
     )?;
     let (h2, g2, c2) = constraints::enforce_fir_constraints(
         &d2.h,
@@ -1946,6 +2206,7 @@ fn compute_v2_variants(
                     obj_cfg,
                     lambda_abs,
                     cfg,
+                    opts,
                 )?;
                 let h_val = select_rows(h_design, &val);
                 let p_val_before = select_rows(p_b0_design, &val);
@@ -2021,6 +2282,8 @@ fn compute_v2_variants(
     struct Chosen {
         idx: usize,
         p_after: Vec<Vec<Cx>>,
+        h: Vec<Vec<f64>>,
+        target_a: Vec<f64>,
         constraints: FirConstraintReport,
         fir_files: Vec<(String, String)>,
         feasibility: FeasibilityResult,
@@ -2040,6 +2303,7 @@ fn compute_v2_variants(
             c.level,
             c.lambda_rel * h_scale,
             cfg,
+            opts,
         )?;
         let (h, g, cons) = constraints::enforce_fir_constraints(
             &d.h,
@@ -2060,9 +2324,13 @@ fn compute_v2_variants(
         feas.feasible = feas.design_check.violations.is_empty() && c.cv_feasible;
         let objv = design_obj_value(&p_after, p_b0, design, plan, e_k0, alpha, obj_cfg);
         let files = make_fir_files(input, cfg, &h, "");
+        let a_band_chosen = objective::band_targets(p_b0_design, plan, c.level);
+        let a_bin_chosen = objective::target_per_bin(&input.freqs_hz, plan, &a_band_chosen);
         let entry = Chosen {
             idx,
             p_after,
+            h,
+            target_a: a_bin_chosen,
             constraints: cons,
             fir_files: files,
             feasibility: feas.clone(),
@@ -2127,21 +2395,29 @@ fn compute_v2_variants(
     Ok(VariantOutcome {
         b2: FirVariantResult {
             p_after: p_b2,
+            h: h2,
+            target_a: a_bin_b2,
+            fir_prefix: "B2".to_string(),
             constraints: c2,
             fir_files: files2,
             target_level: Some(level_b2),
             lambda_rel: cfg.lambda_b2_rel,
             objective_value: objv2,
             feasibility: feas2,
+            safety: None,
         },
         b3: FirVariantResult {
             p_after: chosen.p_after,
+            h: chosen.h,
+            target_a: chosen.target_a,
+            fir_prefix: String::new(),
             constraints: chosen.constraints,
             fir_files: chosen.fir_files,
             target_level: level_selected,
             lambda_rel: lambda_selected,
             objective_value: chosen.objective_value,
             feasibility: chosen.feasibility,
+            safety: None,
         },
         cv,
     })
