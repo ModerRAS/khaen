@@ -17,9 +17,11 @@
 //!   T66 crates/calibration/src/compile_apply.rs（apply/retest/rollback 回执语义）。
 //!
 //! ## 逐条落点
-//! - R51/K01：GET /、/index.html、/style.css、/app.js、/favicon.* 公开静态；未知非 /api 路径 404
-//!   纯文本；/api/* 全量转 RestService（含统一 envelope / 404 / 405 / API 版本头）；/ws 为
-//!   WS 升级入口（不是 REST 路由）。
+//! - R51/K01：GET /、/index.html、/favicon.*、/theme-init.js、/assets/* 公开静态（Vue 控制台
+//!   构建产物，见 E-7）；未命中静态表且不是 /api 的路径回退 `index.html`（SPA history 路由）；
+//!   /api/* 全量转 RestService（含统一 envelope / 404 / 405 / API 版本头）；/ws 为
+//!   WS 升级入口（不是 REST 路由）。旧内嵌页的 /style.css、/app.js 与 /calibration*
+//!   （手写校准向导）仍在，只是不再是首页。
 //! - K02/K05/K14/K15/K53/K57 + DEC §6：页面实际驱动 GET/PUT /api/runtime/{status,config,volume,
 //!   mute,target,coeff,mode}、POST /api/runtime/{prepare,commit}、GET/PUT /api/mode、
 //!   GET/PUT /api/audio/format、GET /api/auth/*、GET/POST /api/calibration/jobs 与
@@ -61,6 +63,16 @@
 //!   0 空闲唤醒、CPU≈0；有连接立即被唤醒）。停止契约 = 置位 stop 后调用 `WebServer::wake()`
 //!   自连接打断阻塞 accept（main 的 SIGTERM/--exit-after-ms 与 T70 TestServer 均按此接线）。
 //!   修复前监听 socket 非阻塞 + 紧循环轮询，空闲时烧掉约 1 个核（板端实测 93% 单核）。
+//! - E-7（控制台换 Vue）：daemon 直接托管仓库 `webui/` 里的 Vue 3 + Element Plus 控制台。
+//!   构建产物 `webui/dist`（index.html、favicon.svg、theme-init.js、assets/*.js|*.css）提交在
+//!   仓库里，由 `crates/control/build.rs` 在编译期扫描并生成 `crate::webui_assets` 静态表
+//!   （`include_bytes!` 编进二进制，运行期不读磁盘、不引入 axum/tokio）。路由：静态表命中即直出，
+//!   未命中且非 `/api` 回退 index.html。`/assets/*`（文件名带内容 hash）长缓存
+//!   `public, max-age=31536000, immutable`，index.html/favicon/theme-init 一律 `no-store`。
+//!   静态资源仍**不需要**登录（与 K01 一致），`/api/*` 仍需会话。CSP 因 Element Plus 需要内联
+//!   `style` 属性而单独用 `SPA_CONTENT_SECURITY_POLICY`（`style-src 'self' 'unsafe-inline'`；
+//!   脚本仍只允许同源外置文件，无内联 script / 无 eval）；旧内嵌页与校准向导仍用严格版
+//!   `UI_CONTENT_SECURITY_POLICY`。
 //!
 //! ## 测试（include! 自注册，integrator 不要再写 public_registration.rs）
 //! 私有测试在 crates/control/tests/T70/web_contract.rs，经文件末
@@ -79,6 +91,7 @@ use std::time::Duration;
 use khaen_compat::ws;
 
 use crate::rest::{JsonValue, Method, RestRequest, RestResponse, RestService, MAX_BODY_BYTES};
+use crate::webui_assets;
 
 // ---------------------------------------------------------------------------
 // 常量（R51/K01/K02 + DEC §6 + T24 W01-W22）
@@ -90,32 +103,38 @@ pub const WEB_PAGE_SCHEMA: &str = "khaen-web/v1";
 pub const WEB_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// WebSocket 入口路径（T24 传输；浏览器 new WebSocket(location.origin.replace('http','ws') + /ws)）。
 pub const WS_PATH: &str = "/ws";
-/// 首页路径（R51）。
+/// 首页路径（R51；Vue 控制台 index.html，见 E-7）。
 pub const INDEX_PATH: &str = "/";
-/// 首页别名（R51）。
+/// 首页别名（R51；Vue 控制台 index.html）。
 pub const INDEX_HTML_PATH: &str = "/index.html";
 /// 样式表路径（R51）。
 pub const STYLE_CSS_PATH: &str = "/style.css";
 /// 页面脚本路径（R51）。
 pub const APP_JS_PATH: &str = "/app.js";
-/// favicon（R51 /favicon.*）。
+/// favicon（R51 /favicon.*；Vue 控制台的 favicon.svg，见 E-7）。
 pub const FAVICON_SVG_PATH: &str = "/favicon.svg";
-/// favicon 兼容别名（R51 /favicon.*）。
+/// favicon 兼容别名（R51 /favicon.*；浏览器默认请求 /favicon.ico 时给内嵌 SVG）。
 pub const FAVICON_ICO_PATH: &str = "/favicon.ico";
-/// 校准向导页面路径（正式入口；源文件 web/demo/dirac-style-flow，构建到 control/assets）。
+/// 校准向导页面路径（正式入口；源文件 crates/control/ui-src/calibration，构建到 control/assets）。
 pub const CALIBRATION_PAGE_PATH: &str = "/calibration";
 /// 校准向导样式路径。
 pub const CALIBRATION_CSS_PATH: &str = "/calibration/style.css";
 /// 校准向导脚本路径。
 pub const CALIBRATION_JS_PATH: &str = "/calibration/app.js";
-/// 校准向导 HTML（构建产物：node web/demo/dirac-style-flow/src/build.js）。
+/// 校准向导 HTML（构建产物：node ui-src/calibration/src/build.js）。
 pub const CALIBRATION_HTML: &str = include_str!("../assets/calibration/index.html");
 /// 校准向导样式表（构建产物）。
 pub const CALIBRATION_CSS: &str = include_str!("../assets/calibration/style.css");
 /// 校准向导脚本（构建产物；含 pilot 数据与 level/delay/bass 步骤）。
 pub const CALIBRATION_JS: &str = include_str!("../assets/calibration/app.js");
 /// 页面 CSP（同源脚本/样式/图片 + same-origin connect；无 inline/无外部资源）。
+///
+/// 用于手写内嵌页与 /calibration 校准向导（两者都没有内联 style/script）。
 pub const UI_CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/// Vue 控制台 CSP（E-7）：Element Plus 用 `style` 属性驱动进度条/抽屉/表格，故 `style-src`
+/// 必须允许内联样式；脚本仍**只**允许同源外置文件（无 'unsafe-inline'、无 'unsafe-eval'，
+/// 本包唯一脚本是外置的 /theme-init.js 与带 hash 的 /assets/*.js）。
+pub const SPA_CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 /// 默认监听地址（S1 Web 默认 0.0.0.0:80，task-18；板端由 T26/T74 实际启动）。
 pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:80";
 /// 请求头上限（含请求行）。
@@ -154,6 +173,14 @@ pub const CODE_INTERNAL_ERROR: &str = "internal_error";
 /// 静态资源响应头（UI 版：CSP 允许同源脚本/样式；其余与 T42 SECURITY_HEADERS 同口径）。
 pub const UI_SECURITY_HEADERS: [(&str, &str); 4] = [
     ("Content-Security-Policy", UI_CONTENT_SECURITY_POLICY),
+    ("X-Frame-Options", "DENY"),
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "no-referrer"),
+];
+
+/// Vue 控制台静态资源响应头（E-7；与 `UI_SECURITY_HEADERS` 同口径，CSP 换 SPA 版）。
+pub const SPA_SECURITY_HEADERS: [(&str, &str); 4] = [
+    ("Content-Security-Policy", SPA_CONTENT_SECURITY_POLICY),
     ("X-Frame-Options", "DENY"),
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "no-referrer"),
@@ -1922,10 +1949,26 @@ pub fn is_rest_path(path: &str) -> bool {
     path == "/healthz" || path == "/api" || path.starts_with("/api/")
 }
 
-/// 静态资源响应（R51 KEEP：/、/index.html、/style.css、/app.js、/favicon.*）。
+/// 内嵌 Vue 控制台静态资源响应（E-7）：静态表命中与 SPA 回退共用同一套安全头/缓存策略。
+fn webui_static_response(asset: webui_assets::StaticAsset) -> HttpResponse {
+    let mut response = HttpResponse::bytes(200, asset.content_type, asset.bytes.to_vec());
+    for (name, value) in SPA_SECURITY_HEADERS {
+        response = response.with_header(name, value);
+    }
+    // 文件名带内容 hash 的 /assets/* 长缓存；index.html（含回退）与无 hash 资源不缓存。
+    response.with_header("Cache-Control", webui_assets::cache_control(asset.path))
+}
+
+/// 静态资源响应（R51 KEEP + E-7）。
+///
+/// 顺序：内嵌 Vue 控制台静态表 → 旧内嵌页/校准向导的精确路径 → SPA 回退 `index.html`。
+/// 未命中的非 `/api` GET 一律回 index.html（Vue Router history 模式由前端接管未知路径）；
+/// `/api/*` 与 `/ws` 在 `WebServer::handle` 里已先行分流，不会走到这里。
 fn static_asset(path: &str) -> HttpResponse {
+    if let Some(asset) = webui_assets::lookup(path) {
+        return webui_static_response(asset);
+    }
     match path {
-        INDEX_PATH | INDEX_HTML_PATH => static_response("text/html; charset=utf-8", INDEX_HTML),
         STYLE_CSS_PATH => static_response("text/css; charset=utf-8", STYLE_CSS),
         APP_JS_PATH => static_response("text/javascript; charset=utf-8", APP_JS),
         FAVICON_SVG_PATH | FAVICON_ICO_PATH => {
@@ -1934,13 +1977,7 @@ fn static_asset(path: &str) -> HttpResponse {
         CALIBRATION_PAGE_PATH => static_response("text/html; charset=utf-8", CALIBRATION_HTML),
         CALIBRATION_CSS_PATH => static_response("text/css; charset=utf-8", CALIBRATION_CSS),
         CALIBRATION_JS_PATH => static_response("text/javascript; charset=utf-8", CALIBRATION_JS),
-        _ => {
-            let mut response = HttpResponse::text(404, "not found");
-            for (name, value) in UI_SECURITY_HEADERS {
-                response = response.with_header(name, value);
-            }
-            response.with_header("Cache-Control", "no-store")
-        }
+        _ => webui_static_response(webui_assets::index()),
     }
 }
 

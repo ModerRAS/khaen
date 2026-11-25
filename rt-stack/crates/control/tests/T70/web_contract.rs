@@ -989,13 +989,15 @@ fn hex_sha1(bytes: &[u8]) -> String {
 #[test]
 fn t70_web_static_routes_have_ui_security_headers() {
     let server = TestServer::start(service());
-    for (path, content_type) in [
-        ("/", "text/html"),
-        ("/index.html", "text/html"),
-        ("/style.css", "text/css"),
-        ("/app.js", "text/javascript"),
-        ("/favicon.svg", "image/svg+xml"),
-        ("/favicon.ico", "image/svg+xml"),
+    // E-7：Vue 控制台资源用 SPA CSP（style-src 允许内联 style，Element Plus 需要）；
+    // 旧内嵌页（/style.css、/app.js）与 /favicon.ico 兜底仍用严格版 UI CSP。
+    for (path, content_type, csp) in [
+        ("/", "text/html", SPA_CONTENT_SECURITY_POLICY),
+        ("/index.html", "text/html", SPA_CONTENT_SECURITY_POLICY),
+        ("/style.css", "text/css", UI_CONTENT_SECURITY_POLICY),
+        ("/app.js", "text/javascript", UI_CONTENT_SECURITY_POLICY),
+        ("/favicon.svg", "image/svg+xml", SPA_CONTENT_SECURITY_POLICY),
+        ("/favicon.ico", "image/svg+xml", UI_CONTENT_SECURITY_POLICY),
     ] {
         let response = http_request(server.addr, "GET", path, &[], None);
         assert_status(&response, 200);
@@ -1006,7 +1008,8 @@ fn t70_web_static_routes_have_ui_security_headers() {
         );
         assert_eq!(
             response.header("Content-Security-Policy"),
-            Some(UI_CONTENT_SECURITY_POLICY)
+            Some(csp),
+            "{path} csp"
         );
         assert_eq!(response.header("X-Frame-Options"), Some("DENY"));
         assert_eq!(response.header("X-Content-Type-Options"), Some("nosniff"));
@@ -1014,16 +1017,132 @@ fn t70_web_static_routes_have_ui_security_headers() {
     }
     let html = http_request(server.addr, "GET", "/", &[], None).text();
     assert!(html.contains("KHAEN"));
-    assert!(html.contains("/app.js"));
+    // Vue 控制台入口：外置主题引导 + 带内容 hash 的模块脚本/样式（不再是旧页的 /app.js）。
+    assert!(html.contains("/assets/"), "index 未引用 assets：{html}");
+    assert!(html.contains("/theme-init.js"), "index 未引用 theme-init.js");
     println!(
         "SAMPLE_STATIC index bytes={} head={:?}",
         html.len(),
         html.chars().take(120).collect::<String>()
     );
+    // 未知非 /api 路径 → SPA 回退 index.html（Vue Router history 模式），不再是 404 纯文本。
     let missing = http_request(server.addr, "GET", "/nope.txt", &[], None);
-    assert_status(&missing, 404);
-    assert_eq!(missing.content_type(), "text/plain; charset=utf-8");
-    assert_eq!(missing.text(), "not found");
+    assert_status(&missing, 200);
+    assert_eq!(missing.content_type(), "text/html; charset=utf-8");
+    assert_eq!(missing.text(), html);
+}
+
+/// E-7：Vue 控制台构建产物（webui/dist）在编译期内嵌成静态表，daemon 直接托管。
+///
+/// 断言三件事：① 静态资源表非空且 `webui/dist/index.html` 能被取到；② 表里每个文件都能
+/// 按 URL 取到（200 + 正确 Content-Type + 正确 Cache-Control，且**不需要 token**）；
+/// ③ 未命中的非 `/api` 路径回退 index.html（SPA 回退，Vue Router history 模式）。
+#[test]
+fn t70_webui_console_is_embedded_and_spa_fallback_serves_index() {
+    let table = webui_assets::table();
+    assert!(
+        !table.is_empty(),
+        "静态资源表为空：webui/dist 没有被内嵌（build.rs 应已显式失败）"
+    );
+    assert_eq!(table.len(), webui_assets::count());
+    assert!(
+        table.len() >= 7,
+        "静态资源表条目过少（{}），webui/dist 疑似不完整",
+        table.len()
+    );
+
+    let index = webui_assets::index();
+    assert_eq!(index.path, "/index.html");
+    assert_eq!(index.content_type, "text/html; charset=utf-8");
+    assert!(
+        index.bytes.len() > 256,
+        "index.html 太小：{}",
+        index.bytes.len()
+    );
+    let index_text = String::from_utf8_lossy(index.bytes).to_string();
+    assert!(
+        index_text.contains("<div id=\"app\">"),
+        "index 不是 Vue 入口"
+    );
+    assert!(
+        index_text.contains("/assets/"),
+        "index 未引用带 hash 的 assets"
+    );
+    assert!(
+        index_text.contains("/theme-init.js"),
+        "index 未引用外置主题引导脚本"
+    );
+    assert!(
+        index_text.contains("KHAEN"),
+        "index 缺少 KHAEN 品牌（旧 TSPI 命名残留？）"
+    );
+
+    let total_bytes: usize = table.iter().map(|(_, _, bytes)| bytes.len()).sum();
+    assert!(
+        total_bytes > 1_000_000,
+        "内嵌资源总共只有 {total_bytes} B，webui/dist 疑似被截断"
+    );
+    println!(
+        "SAMPLE_WEBUI table entries={} total_bytes={total_bytes}",
+        table.len()
+    );
+
+    let server = TestServer::start(service());
+    // ① 每个内嵌文件都能按 URL 取到，且静态资源不需要登录（不带 token 头）。
+    for (path, content_type, bytes) in table {
+        let response = http_request(server.addr, "GET", path, &[], None);
+        assert_status(&response, 200);
+        assert_eq!(response.content_type(), *content_type, "{path} content-type");
+        assert_eq!(response.body.len(), bytes.len(), "{path} bytes");
+        let expected_cache = if path.starts_with("/assets/") {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-store"
+        };
+        assert_eq!(
+            response.header("Cache-Control"),
+            Some(expected_cache),
+            "{path} cache-control"
+        );
+        assert_eq!(
+            response.header("Content-Security-Policy"),
+            Some(SPA_CONTENT_SECURITY_POLICY),
+            "{path} csp"
+        );
+    }
+
+    // ② `/` 与 `/index.html` 都是 SPA 入口（同一份字节）。
+    for path in ["/", "/index.html"] {
+        let response = http_request(server.addr, "GET", path, &[], None);
+        assert_status(&response, 200);
+        assert_eq!(response.body, index.bytes, "{path} 必须返回 index.html");
+    }
+
+    // ③ SPA 回退：未命中的非 /api GET 一律回 index.html（含前端路由与未知资源路径）。
+    for path in [
+        "/volume",
+        "/routing",
+        "/format",
+        "/system",
+        "/login",
+        "/some/unknown/deep/path",
+        "/assets/does-not-exist-0000.js",
+    ] {
+        let response = http_request(server.addr, "GET", path, &[], None);
+        assert_status(&response, 200);
+        assert_eq!(
+            response.content_type(),
+            "text/html; charset=utf-8",
+            "{path} 回退必须是 index.html"
+        );
+        assert_eq!(response.body, index.bytes, "{path} 回退必须返回 index.html");
+        assert_eq!(response.header("Cache-Control"), Some("no-store"));
+    }
+
+    // /api 与 /ws 不受 SPA 回退影响（未知 /api 仍是 JSON 404，已有专门测试覆盖）。
+    let api_missing = http_authed(server.addr, "GET", "/api/webui-not-a-route", None);
+    assert_status(&api_missing, 404);
+    assert!(api_missing.content_type().starts_with("application/json"));
 }
 
 #[test]
@@ -2396,9 +2515,22 @@ fn t70_web_ws_in_memory_transport_drives_same_rest_core() {
 #[test]
 fn t70_web_csp_is_split_between_ui_and_api() {
     let server = TestServer::start(service());
+    // 首页 = Vue 控制台（E-7）：Element Plus 需要内联 style，故 style-src 放宽；
+    // 脚本仍然只允许同源外置文件（无内联 script、无 eval）。
     let page = http_request(server.addr, "GET", "/", &[], None);
     assert_eq!(
         page.header("Content-Security-Policy"),
+        Some(SPA_CONTENT_SECURITY_POLICY)
+    );
+    assert!(SPA_CONTENT_SECURITY_POLICY.contains("script-src 'self'"));
+    assert!(SPA_CONTENT_SECURITY_POLICY.contains("connect-src 'self'"));
+    assert!(SPA_CONTENT_SECURITY_POLICY.contains("style-src 'self' 'unsafe-inline'"));
+    assert!(!SPA_CONTENT_SECURITY_POLICY.contains("unsafe-eval"));
+    assert!(!SPA_CONTENT_SECURITY_POLICY.contains("script-src 'self' 'unsafe-inline'"));
+    // 旧手写页与 /calibration 校准向导仍是严格版（完全没有 inline）。
+    let legacy = http_request(server.addr, "GET", "/app.js", &[], None);
+    assert_eq!(
+        legacy.header("Content-Security-Policy"),
         Some(UI_CONTENT_SECURITY_POLICY)
     );
     assert!(UI_CONTENT_SECURITY_POLICY.contains("script-src 'self'"));

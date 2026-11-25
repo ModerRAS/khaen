@@ -109,7 +109,6 @@ reset_board() {
   printf '100 khaen-audio-web --config /etc/khaen-audio-web/config.toml\n' >> "$MOCK_PROCS"
   cp "$PROJECT"/audio/overlay/etc/systemd/system/*.service "$MOCK_STATE/units/" 2>/dev/null || true
   cp "$PROJECT"/audio/overlay/etc/systemd/system/*.target "$MOCK_STATE/units/" 2>/dev/null || true
-  cp "$PROJECT/web/deploy/khaen-audio-web.service" "$MOCK_STATE/units/" 2>/dev/null || true
   cp "$RS"/service/*.service "$RS"/service/*.target "$MOCK_STATE/units/" 2>/dev/null || true
 }
 make_window() {

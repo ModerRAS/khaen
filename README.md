@@ -17,7 +17,7 @@ Most room-correction stacks recompile a graph at runtime and hope the swap is sm
 | Calibration | `khaen-calibration`, `khaen-modal-design`, `khaen-mimo-design` | Sweep → microphone capture → Farina deconvolution → level/delay/crossover/FIR/modal designs |
 | Filter design | `khaen-designer` | Linear-phase, minimum-phase, brickwall, apodizing, corrected designs |
 | Network audio | `khaen-aoip-aes67` | AES67 receiver/sender, SDP generation and parsing, SAP, RTSP/HTTP SDP, mDNS discovery (RFC subsets) |
-| Control plane | `khaen-control`, `khaen-audio-web` | REST/WebSocket daemon, session auth, calibration jobs, web console |
+| Control plane | `khaen-control` | REST/WebSocket daemon, session auth, calibration jobs; serves the Vue console from `webui/dist` embedded at build time |
 | Verification | `khaen-rt-check`, `khaen-compat`, `khaen-bench` | ABI layout checks, forbidden-call and drop audits, real-time checks, benchmarks |
 | Room simulation | `khaen-room-sim`, `khaen-file-runner` | Offline simulation and file-driven runs |
 
@@ -53,6 +53,8 @@ Linux needs `pkg-config` and `libasound2-dev` for the real ALSA backend; Windows
 - AES67 support is a deliberate subset (SDP/SAP/RTSP/HTTP/mDNS basics), not full AES67 conformance.
 - Clock drift is currently handled by a small write-side rate servo; an asynchronous sample rate converter is planned (we intend to use [rubato](https://github.com/HEnquist/rubato)).
 - The web console and some design documents are still written in Chinese.
+- `webui/dist` is a committed build artifact (the daemon embeds it at compile time); rebuild it
+  with `pnpm build` and commit it together with any `webui/src` change (see `webui/README.md`).
 - Measured audio results are not included in this repository.
 
 ## License

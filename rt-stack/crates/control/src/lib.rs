@@ -9,3 +9,4 @@ pub mod host_socket;
 pub mod modes;
 pub mod rest;
 pub mod web;
+pub mod webui_assets;

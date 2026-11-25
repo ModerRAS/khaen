@@ -14,7 +14,6 @@
 .playwright-cli/
 
 # ---- 发布载荷 / 生成包（二进制与镜像走发布产物 / OEM 交付）----
-web/dist/
 audio/release/
 firmware/logs/
 rt-stack/evidence/baseline/payload-copy/
@@ -58,7 +57,6 @@ scratch/
 *.flac
 *.mp3
 # 例外：Web 前端内嵌测试音是源码资产，继续跟踪
-!web/assets/test-tone.wav
 rt-stack/evidence/zidoo-toslink/*.png
 
 # ---- 敏感信息（密钥 / token / 本地配置；模板与公钥除外）----
@@ -73,3 +71,6 @@ auth.json
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 校准向导 UI 单文件演示页（由 ui-src/calibration/src/build.js 生成，不入库）
+rt-stack/crates/control/ui-src/calibration/index.html

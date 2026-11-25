@@ -8,6 +8,7 @@
 > 权威链（自上而下，冲突按此裁决，DEC §0）：用户最新要求 → `DSP-HOST-DECISION.md`（下称 DEC）→ `KHAEN-RT-STACK-WBS.md`（下称 WBS）→ 既有契约稳定字段语义（校准/通道图/模式状态）→ 现有实现（只读参考）。
 > 证据标记：**【验】**= 已逐行读源码/文档确认（静态，不等于运行验证）；**【推】**= 由已读材料推导、需实现或 Lead 裁决；**【未测】**= 无运行证据（板端/服务/WS/HTTP 均未实跑）。
 > 引用策略（task-38 起）：DEC/WBS/API.md 一律用「文件路径 + §章节 / WBS 任务 ID」引用，不再写死行号与 hash；代码/契约仍用 file:line。输入快照 hash 仅见 §13.1（快照时间 2026-11-17 00:15）。
+> **2026-11-25 注记**：本文件中以 `web/...` 开头的 file:line 引用指向**已删除**的旧独立网页 crate `khaen-audio-web`（与 `web/assets/app.js` 旧 UI）。它们记录的是"当时逐行核对到的旧实现"，作为历史证据保留；现在对应的运行时实现是 `crates/control/src/web.rs` + 内嵌 Vue 控制台（见 `webui/README.md`）。
 
 ---
 

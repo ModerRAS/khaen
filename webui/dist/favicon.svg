@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#0b1220"/>
+  <path d="M14 40 L24 24 L34 40 L44 24 L50 34" fill="none" stroke="#41d1a7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="32" y="56" font-family="monospace" font-size="10" fill="#8b9bb4" text-anchor="middle">KHAEN</text>
+</svg>

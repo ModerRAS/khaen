@@ -14,7 +14,7 @@
 //!
 //! Cargo 自动把 tests/T57/main.rs 发现为集成测试 target；DoD 命令：
 //! cargo test -p khaen-compat fullrange_height（测试名含 fullrange_height）。
-//! 只读输入：overlay/web layout-presets.yml 与 calibration-spec 示例经 include_str! 绑定；
+//! 只读输入：overlay layout-presets.yml、旧 Web 副本冻结快照与 calibration-spec 示例经 include_str! 绑定；
 //! 不写任何临时文件（本机 %TEMP% 在内存盘 R:，写盘可能 PermissionDenied）。
 
 use khaen_compat::calibration::{merge_calibration, parse_calibration_yaml_with_layout, Polarity};
@@ -22,7 +22,12 @@ use khaen_compat::roles::*;
 
 const OVERLAY_PRESETS: &str =
     include_str!("../../../../../audio/overlay/etc/khaen-audio/layout-presets.yml");
-const WEB_PRESETS: &str = include_str!("../../../../../web/assets/layout-presets.yml");
+/// 旧 Web 控制台内嵌副本的**冻结快照**（drift 比对夹具）。
+///
+/// 原文件是仓库 `web/assets/layout-presets.yml`（与 overlay 逐字节一致的第三个副本）；
+/// 2026-11-25 删除废弃的 `web/` crate（`khaen-audio-web`）时，按"只读夹具"最小保留到这里，
+/// 用于证明"生产绑定只读 overlay、旧 Web 副本（若有 SUB4）会被 drift 检出"这一性质不变。
+const WEB_PRESETS: &str = include_str!("web-template-layout-presets.yml");
 const CALIBRATION_412_EXAMPLE: &str =
     include_str!("../../../../../calibration-spec/examples/calibration-4.1.2.example.yml");
 
