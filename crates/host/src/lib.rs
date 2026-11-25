@@ -9,6 +9,7 @@ pub mod control;
 pub mod engine;
 pub mod owner;
 pub mod ring;
+pub mod safety;
 
 pub use admission::{admit, Admission, AdmissionLimits, Budget, Rejection};
 pub use backend::{AudioBackend, BackendError, DeviceConfig, NullBackend};
@@ -19,3 +20,7 @@ pub use engine::{
 };
 pub use owner::{DeviceGuard, DeviceId, OwnerError};
 pub use ring::{channel, Consumer, Producer};
+pub use safety::{
+    FaultReason, FaultRecord, RecoveryError, RuntimeState, SafetyPolicy, SafetyStatus,
+    SafetySupervisor,
+};
