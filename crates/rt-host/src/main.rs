@@ -281,7 +281,7 @@ mod linux {
         let target_blocks = if run_seconds == 0 {
             0
         } else {
-            (run_seconds * sample_rate + block_frames - 1) / block_frames
+            (run_seconds * sample_rate).div_ceil(block_frames)
         };
         let mut blocks: u64 = 0;
         loop {
@@ -296,7 +296,7 @@ mod linux {
                 return ExitCode::from(1);
             }
             blocks += 1;
-            if stats_every != 0 && blocks % stats_every == 0 {
+            if stats_every != 0 && blocks.is_multiple_of(stats_every) {
                 // 验证工具的让步点：状态打印与 supervise 轮询都在块线程上（见模块文档）。
                 runtime.poll_device();
                 let status = runtime.status();
