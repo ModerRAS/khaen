@@ -219,3 +219,24 @@ JSON，可直接喂给 `khaen-closed-loop --predicted`。
 - 退出码：0 成功 / 2 输入或配置错误（E_USAGE / E_IO / E_INPUT / E_FIR_PLAN_*） / 1 写失败。
 - ⚠ 诚实边界：FIR 只按**幅度**参与预测；因果 FIR 的群延迟不改变幅度，但真机对齐/相时需要
   另行处理。FIR 的来源（合成场景或真机测量）与真机下发仍是 T42 设备侧流程（NOT_RUN）。
+
+---
+
+# khaen-scene-plan（mimo 报告 → 方案文件，离线；推荐路径）
+
+mimo 一次运行会同时写出 B2/B3 两套 FIR；手动把全部 `fir/*.csv` 按文件名排序塞给
+`khaen-fir-plan`，会把同一源的变体当成两条 lane。本工具按**报告里选定的变体**取 FIR：
+
+    khaen-scene-plan --report out/single-point/scene-report.json \
+        --fir-dir out/single-point/fir --out plan.bin --sample-rate 48000 \
+        [--variant B3] [--block-size 128] [--channels N]
+
+- 读 report.json（schema `khaen-mimo-sim-report/v1`），取 `outcome_variant`（`--variant` 可覆盖），
+  只编译该变体 `fir_files` 列出的文件；文件按报告的 source 顺序映射成 lane 0..N-1，
+  stdout 会打印 `variant` / `lanes` / `sources` / `sha256` / `graph_id`。
+- `--fir-dir` 指向 `out/single-point/fir`；报告里 `path` 取文件名后在 `--fir-dir` 下查找。
+- `--channels` 默认等于 lane 数；调大可在尾部保留恒等 lane。
+- 退出码：0 成功 / 2 输入或配置错误（E_USAGE / E_IO / E_INPUT / E_FIR_PLAN_*） / 1 写失败。
+- 与 `khaen-fir-plan` 的关系：本工具是推荐路径（变体与 lane 语义正确）；`khaen-fir-plan`
+  是逐文件手动指定 lane 的兜底。
+- ⚠ 诚实边界同 `khaen-fir-plan`：只按幅度参与预测，不含群延迟；真机测量/下发仍 NOT_RUN。

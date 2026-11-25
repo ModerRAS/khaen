@@ -31,12 +31,13 @@
 
 清单 schema：`khaen-closed-loop-run-manifest/v1`；报告 schema：`khaen-closed-loop-report/v1`；电平集合 schema：`khaen-closed-loop-levels/v1`。字段细节见 `docs/CONTRACTS.md` 的 D 节。
 
-## 3. 六个离线命令行工具
+## 3. 七个离线命令行工具
 
 | 工具 | 作用 | 退出码 |
 | --- | --- | --- |
 | `khaen-single-point` | 合成场景 → 求解 → 报告/指标/FIR CSV/清单 | 0 成功 / 3 PARTIAL / 4 NONE / 2 输入 / 1 运行 |
-| `khaen-fir-plan` | mimo FIR CSV → 方案文件（crossover 承载 FIR） | 0 / 2 输入 / 1 写失败 |
+| `khaen-fir-plan` | 手动指定 FIR CSV → 方案文件（crossover 承载 FIR） | 0 / 2 输入 / 1 写失败 |
+| `khaen-scene-plan` | mimo 报告 + FIR 目录 → 方案文件（按报告选定变体，source 顺序即 lane 顺序） | 0 / 2 输入 / 1 写失败 |
 | `khaen-plan-levels` | 方案文件 → 预测电平（predicted 侧） | 0 / 2 输入 / 1 写失败 |
 | `khaen-band-levels` | 两段 WAV → 实测相对电平（observed 侧） | 0 / 2 输入 / 1 写失败 |
 | `khaen-closed-loop` | 两份电平集合 → 三态报告 | 0 PASS / 3 FAIL / 4 INCOMPLETE / 2 输入 / 1 写失败 |
@@ -50,7 +51,7 @@
 
 - 用户明确许可出声窗口；当前时段在 08:30–12:00 或 14:30–18:00 内；
 - 已知 MOTU 的 ALSA PCM 设备名（只读 `aplay -l` 获取）；
-- 已安装发布包：`/opt/khaen/current/bin/` 下有 `khaen-daemon`、`khaen-rt-host` 与六个校准命令行工具；
+- 已安装发布包：`/opt/khaen/current/bin/` 下有 `khaen-daemon`、`khaen-rt-host` 与七个校准命令行工具；
 - 状态目录 `/var/lib/khaen/` 可写。
 
 ### 4.1 只读枚举与设备健康（状态：NOT_RUN）
@@ -103,8 +104,17 @@ sha256sum baseline.wav > baseline.wav.sha256
 方案文件有两个合法来源，都可在**不碰设备**的情况下提前产出并核对 sha256：
 
 1. **mimo 单点 FIR（推荐，目标①的产物）**：`khaen-single-point --scene ... --out out/` 产出
-   `out/single-point/fir/*.csv`，再用 `khaen-fir-plan --fir ... --out calibrated.bin
-   --sample-rate 48000` 编译成方案；方案里 crossover 承载每 lane 的 FIR，其余段恒等。
+   `out/single-point/scene-report.json` 与 `out/single-point/fir/*.csv`，再执行：
+
+   ```bash
+   khaen-scene-plan --report out/single-point/scene-report.json \
+       --fir-dir out/single-point/fir --out calibrated.bin --sample-rate 48000
+   ```
+
+   它按报告里的 `outcome_variant`（可用 `--variant` 覆盖）只取该变体的 FIR，按报告的 source
+   顺序映射成 lane 0..N-1——不要手动把所有 `fir/*.csv` 按其排序塞进 `khaen-fir-plan`，那会把
+   同一源的 B2/B3 两套变体当成两条 lane。手动版 `khaen-fir-plan --fir ...` 仅作为逐文件
+   指定 lane 的兜底。
 2. **既有 PEQ 设计编译产物**：由 `khaen_calibration::plan_compile` 编译出的方案（保护段
    PEQ + lane 增益），本次改造前的老路径，仍然有效。
 
@@ -187,7 +197,10 @@ sha256sum baseline.wav > baseline.wav.sha256
 ## 8. 命令速查
 
 ```bash
-# mimo FIR CSV -> 方案文件（第 i 个 --fir 是 lane i）
+# mimo 报告 + FIR 目录 -> 方案文件（按报告选定变体，source 顺序即 lane 顺序）
+khaen-scene-plan --report out/single-point/scene-report.json --fir-dir out/single-point/fir \
+    --out plan.bin --sample-rate 48000
+# 兜底：手动指定 FIR CSV（第 i 个 --fir 是 lane i）
 khaen-fir-plan --fir fir/SUB1.csv --out plan.bin --sample-rate 48000
 # 方案 -> 预测电平
 khaen-plan-levels --plan plan.bin --out predicted.json

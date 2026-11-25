@@ -29,6 +29,10 @@ path = "src/bin/closed_loop_run.rs"
 name = "khaen-fir-plan"
 path = "src/bin/fir_plan.rs"
 
+[[bin]]
+name = "khaen-scene-plan"
+path = "src/bin/scene_plan.rs"
+
 [dependencies]
 khaen-calibration = { path = "../calibration" }
 khaen-core = { path = "../core" }

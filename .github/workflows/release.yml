@@ -30,6 +30,7 @@ jobs:
           mkdir -p "dist/${STAGE}/bin" "dist/${STAGE}/deploy" "dist/${STAGE}/docs"
           cp target/release/khaen-daemon target/release/khaen-rt-host "dist/${STAGE}/bin/"
           cp target/release/khaen-single-point target/release/khaen-fir-plan \
+             target/release/khaen-scene-plan \
              target/release/khaen-plan-levels target/release/khaen-band-levels \
              target/release/khaen-closed-loop target/release/khaen-closed-loop-run \
              "dist/${STAGE}/bin/"

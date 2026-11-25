@@ -1,6 +1,6 @@
 //! 离线验收链路：mimo 场景 -> FIR CSV -> 方案 -> 预测电平 -> 两段 WAV -> 证据包。
 //!
-//! 这是一条**合成数据**的端到端演练（SIMULATED）：证明六个命令行工具能按现场顺序串起来、
+//! 这是一条**合成数据**的端到端演练（SIMULATED）：证明七个命令行工具能按现场顺序串起来、
 //! 中间产物可复现、证据包清单自洽。它不证明真机测量/下发/复测（那一步 NOT_RUN）。
 
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde_json::{json, Value};
 
 const SINGLE_POINT: &str = env!("CARGO_BIN_EXE_khaen-single-point");
-const FIR_PLAN: &str = env!("CARGO_BIN_EXE_khaen-fir-plan");
+const SCENE_PLAN: &str = env!("CARGO_BIN_EXE_khaen-scene-plan");
 const PLAN_LEVELS: &str = env!("CARGO_BIN_EXE_khaen-plan-levels");
 const BAND_LEVELS: &str = env!("CARGO_BIN_EXE_khaen-band-levels");
 const CLOSED_LOOP_RUN: &str = env!("CARGO_BIN_EXE_khaen-closed-loop-run");
@@ -96,20 +96,6 @@ fn run(bin: &str, args: &[&str]) -> Run {
     }
 }
 
-fn collect_csv(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries {
-        let path = entry.expect("dir entry").path();
-        if path.is_dir() {
-            collect_csv(&path, out);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("csv") {
-            out.push(path);
-        }
-    }
-}
-
 fn write_wav(path: &Path, samples: &[f64]) {
     let data_len = samples.len() * 2;
     let mut bytes = Vec::with_capacity(44 + data_len);
@@ -172,36 +158,38 @@ fn synthetic_chain_runs_end_to_end_and_is_reproducible() {
         single.stdout
     );
 
-    // 2) FIR CSV -> 方案文件。
-    let mut firs = Vec::new();
-    collect_csv(&stage.join("single-point").join("fir"), &mut firs);
-    firs.sort();
-    assert!(!firs.is_empty(), "scene produced no FIR CSVs");
+    // 2) mimo 报告 + FIR CSV -> 方案文件（按报告选定的变体取 FIR，source 顺序即 lane 顺序）。
+    let report = stage.join("single-point").join("scene-report.json");
+    let fir_dir = stage.join("single-point").join("fir");
     let plan = root.join("plan.bin");
-    let mut fir_args: Vec<String> = Vec::new();
-    for path in &firs {
-        fir_args.push("--fir".to_string());
-        fir_args.push(path.to_str().unwrap().to_string());
-    }
-    fir_args.push("--out".to_string());
-    fir_args.push(plan.to_str().unwrap().to_string());
-    fir_args.push("--sample-rate".to_string());
-    fir_args.push(FS.to_string());
-    fir_args.push("--channels".to_string());
-    fir_args.push(firs.len().to_string());
-    let fir_plan = run(
-        FIR_PLAN,
-        &fir_args.iter().map(String::as_str).collect::<Vec<_>>(),
+    let scene_plan = run(
+        SCENE_PLAN,
+        &[
+            "--report",
+            report.to_str().unwrap(),
+            "--fir-dir",
+            fir_dir.to_str().unwrap(),
+            "--out",
+            plan.to_str().unwrap(),
+            "--sample-rate",
+            &FS.to_string(),
+        ],
     );
-    assert_eq!(fir_plan.code, 0, "fir-plan: {}", fir_plan.stderr);
+    assert_eq!(scene_plan.code, 0, "scene-plan: {}", scene_plan.stderr);
     assert!(
-        fir_plan.stdout.contains("\"sha256\":\""),
+        scene_plan.stdout.contains("\"lanes\":2"),
         "{}",
-        fir_plan.stdout
+        scene_plan.stdout
+    );
+    assert!(
+        scene_plan
+            .stdout
+            .contains("\"sources\":[\"SUB1\",\"SUB2\"]"),
+        "{}",
+        scene_plan.stdout
     );
     let plan_bytes = std::fs::read(&plan).expect("plan bytes");
     assert!(plan_bytes.starts_with(b"KHAENPLN"));
-
     // 3) 方案 -> 预测电平（六个四分之一工具之一）。
     let predicted = root.join("predicted.json");
     let levels = run(
@@ -219,7 +207,7 @@ fn synthetic_chain_runs_end_to_end_and_is_reproducible() {
     assert_eq!(predicted_json["schema"], "khaen-closed-loop-levels/v1");
     assert_eq!(
         predicted_json["points"].as_array().expect("points").len(),
-        firs.len()
+        2
     );
     assert_eq!(
         predicted_json["points"][0]["bands"]
@@ -329,23 +317,25 @@ fn synthetic_chain_runs_end_to_end_and_is_reproducible() {
         );
     }
 
-    // 6) 方案编译本身可复现：同 FIR 再编译一次字节/摘要相同。
+    // 6) 方案编译本身可复现：同报告/FIR 再编译一次字节相同。
     let plan2 = root.join("plan2.bin");
-    let mut fir_args2 = fir_args.clone();
-    let out_index = fir_args2
-        .iter()
-        .position(|arg| arg == "--out")
-        .expect("--out");
-    fir_args2[out_index + 1] = plan2.to_str().unwrap().to_string();
     let rebuilt = run(
-        FIR_PLAN,
-        &fir_args2.iter().map(String::as_str).collect::<Vec<_>>(),
+        SCENE_PLAN,
+        &[
+            "--report",
+            report.to_str().unwrap(),
+            "--fir-dir",
+            fir_dir.to_str().unwrap(),
+            "--out",
+            plan2.to_str().unwrap(),
+            "--sample-rate",
+            &FS.to_string(),
+        ],
     );
     assert_eq!(rebuilt.code, 0, "{}", rebuilt.stderr);
     assert_eq!(
         std::fs::read(&plan).expect("plan"),
         std::fs::read(&plan2).expect("plan2")
     );
-
     let _ = std::fs::remove_dir_all(&root);
 }

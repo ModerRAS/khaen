@@ -104,46 +104,15 @@ fn run() -> Result<(), CliError> {
 }
 
 fn read_fir_csv(path: &std::path::Path) -> Result<Vec<f64>, CliError> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|err| CliError::new("E_IO", format!("read {}: {err}", path.display())))?;
-    let mut taps = Vec::new();
-    for (line_index, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.contains(',') {
-            return Err(CliError::new(
-                "E_INPUT",
-                format!(
-                    "{}:{}: expected one tap per line, got a comma-separated row",
-                    path.display(),
-                    line_index + 1
-                ),
-            ));
-        }
-        let tap = line.parse::<f64>().map_err(|_| {
-            CliError::new(
-                "E_INPUT",
-                format!(
-                    "{}:{}: {:?} is not a number",
-                    path.display(),
-                    line_index + 1,
-                    line
-                ),
-            )
-        })?;
-        taps.push(tap);
-    }
-    if taps.is_empty() {
-        return Err(CliError::new(
-            "E_INPUT",
-            format!("{}: CSV has no taps", path.display()),
-        ));
-    }
-    Ok(taps)
+    khaen_cal_tools::fir_csv::read_fir_csv(path).map_err(|err| {
+        let code = if err.code() == khaen_cal_tools::fir_csv::IO {
+            "E_IO"
+        } else {
+            "E_INPUT"
+        };
+        CliError::new(code, err.message().to_string())
+    })
 }
-
 fn parse_args() -> Result<Options, CliError> {
     let mut firs = Vec::new();
     let mut out = None;
