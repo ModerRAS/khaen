@@ -42,6 +42,7 @@
 
 pub mod band_levels;
 pub mod closed_loop;
+pub mod closed_loop_run;
 pub mod deconvolve;
 pub mod ir_distance;
 pub mod ir_extract;
@@ -58,6 +59,7 @@ pub mod single_point_bundle;
 pub mod single_point_job;
 pub mod single_point_scene;
 pub mod sweep;
+pub mod wav;
 
 #[path = "capture_consts.rs"]
 pub mod capture;
@@ -72,6 +74,10 @@ pub use closed_loop::{
     ClosedLoopConfig, ClosedLoopError, ClosedLoopReport, LevelSet, PointComparison, PointLevels,
     Verdict, DEFAULT_MIN_COMPARED_BANDS, DEFAULT_TOLERANCE_DB,
     LEVELS_SCHEMA as CLOSED_LOOP_LEVELS_SCHEMA, REPORT_SCHEMA as CLOSED_LOOP_REPORT_SCHEMA,
+};
+pub use closed_loop_run::{
+    build_run_bundle, ClosedLoopRunError, RunBundle, RunConfig, RunInputs,
+    MANIFEST_SCHEMA as CLOSED_LOOP_RUN_MANIFEST_SCHEMA, TOOL_NAME as CLOSED_LOOP_RUN_TOOL_NAME,
 };
 pub use deconvolve::deconvolve;
 pub use plan_compile::{
@@ -89,3 +95,4 @@ pub use single_point_scene::{
     fir_artifact_path, run_single_point_scene, write_scene_artifacts, SceneArtifacts,
     SceneBridgeError, SceneSummary, FIR_ARTIFACT_DIR, METRICS_ARTIFACT_PATH, REPORT_ARTIFACT_PATH,
 };
+pub use wav::{parse_wav, read_wav_file, Wav, WavError};

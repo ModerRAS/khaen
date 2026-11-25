@@ -172,3 +172,29 @@ JSON，可直接喂给 `khaen-closed-loop --predicted`。
 - ⚠ 诚实边界：只做**相对**电平（消除麦克风灵敏度/声压级校准问题），不做绝对声压级；
   录音质量（信噪比、削波、时长）由采集环节保证，本工具只如实报缺数据。
 - 输出 JSON 与闭环工具同一规范：固定键序、10 位有效数字、末尾换行，同输入两次逐字节相同。
+
+---
+
+# khaen-closed-loop-run（闭环复测运行包，离线）
+
+一条命令把「方案 + 基线录音 + 施加方案后的录音」做成可审计的证据目录，供真机复测与交接：
+
+    khaen-closed-loop-run --plan plan.bin --baseline baseline.wav --applied applied.wav \
+        --out dir/ [--point P01] [--lane 0] [--centers 25,31.5,40,...] \
+        [--window 4096] [--tolerance 2.0] [--min-bands 3]
+
+产物（`out/` 内，全部确定性、键序固定、末尾换行）：
+
+| 文件 | 内容 |
+| --- | --- |
+| `predicted.json` | 方案推出的预测带域电平（该 lane 的相对频响） |
+| `observed.json` | 两段录音相除得到的实测相对电平 |
+| `report.json` | 三态判定报告（PASS / FAIL / INCOMPLETE） |
+| `manifest.json` | 方案与两段录音的 sha256、三份输出的 sha256、判定与配置 |
+
+- `--lane` 指定这次测量对应方案里的哪条 lane（默认 0）；预测侧取该 lane，与录音按点对账。
+- 退出码与 `khaen-closed-loop` 一致：0 PASS / 3 FAIL / 4 INCOMPLETE / 2 输入错误 / 1 写失败；
+  输出目录必须为空或不存在。
+- 清单与三份文件的 sha256 让真机结果可复现、可回滚核对：同输入两次运行四份文件逐字节相同。
+- ⚠ 诚实边界：本工具只做离线判定与证据打包；真机采集、方案下发、回滚执行仍是 T42 设备侧
+  流程（NOT_RUN，需要出声窗口与设备许可）。
