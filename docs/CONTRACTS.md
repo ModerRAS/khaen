@@ -94,4 +94,5 @@
 - 禁止写入时间戳、主机名、绝对路径、PID、随机数。
 - `verify` 重算并逐文件比对，失败点名文件与期望/实际值。
 - 三态必须出现在 report.json；PARTIAL 必须带残差，不允许以“顶满”冒充成功。
-- **浮点规范化**：canonical JSON 里的浮点数先量化到 10 位有效数字再输出（见 `khaen_mimo_design::report::CANONICAL_SIG_DIGITS`）。理由：Windows 与 Linux 的 libm 末位可差 1 ulp，直接输出最短表示会让同一输入产出不同 sha；量化后跨平台稳定，10 位远超 dB/Hz/延迟的物理精度需求。
+- **浮点规范化**：canonical JSON 里的浮点数先量化到 10 位有效数字再输出（见 `khaen_mimo_design::report::CANONICAL_SIG_DIGITS`）。理由：Windows 与 Linux 的 libm 末位可差 1 ulp，直接输出最短表示会让同一输入产出不同 sha；量化后中文文本与普通数值跨平台稳定，10 位远超 dB/Hz/延迟的物理精度需求。
+- **跨平台边界（如实声明）**：迭代求解器（MIMO/模态拟合）的收敛步数依赖平台 libm 的末位比较，Windows 与 Linux 的解可能在第 7~10 位有效数字上不同。因此"同输入同参数必同 sha"**在同一平台内成立**；跨平台比较不承诺 byte-identical。交付/CI 平台是 Linux，冻结摘要按平台记录（测试里 `LINUX_REFERENCE` / `WINDOWS_REFERENCE` 两张表）。
