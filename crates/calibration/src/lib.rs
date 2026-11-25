@@ -51,6 +51,7 @@ pub mod phase_fit;
 pub mod plan_compile;
 pub mod positions;
 pub mod rt60;
+pub mod single_point_bundle;
 pub mod sweep;
 
 #[path = "capture_consts.rs"]
@@ -59,4 +60,8 @@ pub mod capture;
 pub use deconvolve::deconvolve;
 pub use plan_compile::{
     compile_peq_design, CompiledPlan, PlanCompileError, PlanCompileOptions, PLAN_ARTIFACT_PATH,
+};
+pub use single_point_bundle::{
+    build_bundle, design_digest, verify_bundle, write_bundle, BundleError, BundleFile, PlanBundle,
+    Provenance, BUNDLE_SCHEMA, MANIFEST_SCHEMA, REPORT_SCHEMA,
 };

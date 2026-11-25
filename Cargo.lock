@@ -258,6 +258,7 @@ dependencies = [
  "khaen-host",
  "khaen-modal-design",
  "khaen-plan-builder",
+ "serde_json",
 ]
 
 [[package]]
