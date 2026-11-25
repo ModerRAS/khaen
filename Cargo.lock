@@ -256,6 +256,7 @@ dependencies = [
  "khaen-core",
  "khaen-designer",
  "khaen-host",
+ "khaen-mimo-design",
  "khaen-modal-design",
  "khaen-plan-builder",
  "serde_json",

@@ -53,6 +53,7 @@ pub mod positions;
 pub mod rt60;
 pub mod single_point_bundle;
 pub mod single_point_job;
+pub mod single_point_scene;
 pub mod sweep;
 
 #[path = "capture_consts.rs"]
@@ -65,4 +66,8 @@ pub use plan_compile::{
 pub use single_point_bundle::{
     build_bundle, design_digest, verify_bundle, write_bundle, BundleError, BundleFile, PlanBundle,
     Provenance, BUNDLE_SCHEMA, MANIFEST_SCHEMA, REPORT_SCHEMA,
+};
+pub use single_point_scene::{
+    fir_artifact_path, run_single_point_scene, write_scene_artifacts, SceneArtifacts,
+    SceneBridgeError, SceneSummary, FIR_ARTIFACT_DIR, METRICS_ARTIFACT_PATH, REPORT_ARTIFACT_PATH,
 };
