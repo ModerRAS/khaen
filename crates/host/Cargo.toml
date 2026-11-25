@@ -1,8 +1,6 @@
 [package]
 name = "khaen-host"
+description = "Block engine: single device owner, SPSC transport, block-boundary commit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Real-time audio host: single device owner, block engine and compiled-plan execution"
-
-[dependencies]
