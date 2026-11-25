@@ -13,6 +13,7 @@ members = [
   "crates/daemon",
   "crates/plan-builder",
   "crates/rt-host",
+  "crates/cal-tools",
 ]
 
 [workspace.package]

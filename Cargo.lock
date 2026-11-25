@@ -250,6 +250,15 @@ name = "khaen-aoip-aes67"
 version = "0.1.0"
 
 [[package]]
+name = "khaen-cal-tools"
+version = "0.1.0"
+dependencies = [
+ "khaen-calibration",
+ "khaen-mimo-design",
+ "serde_json",
+]
+
+[[package]]
 name = "khaen-calibration"
 version = "0.1.0"
 dependencies = [

@@ -94,6 +94,7 @@
 | T66v3 | 单点可复现 artifact 包（`single_point_bundle`）：params/report/plan/manifest + 整包 sha256，不可变写入与磁盘校验 | T66（v2） | 同输入同字节/同摘要；删改可检测；包内方案被 host 接受 |
 | T66v4 | artifact 包进校准 job 证据链（`single_point_job`）：类别映射、幂等、不可变、Prepared 阶段磁盘复核 | T66v3 | job 终态 manifest 含四类 artifact；篡改在 Prepared 被稳定码抓住 |
 | T66v5 | 单点场景作业桥（`single_point_scene`）：`khaen-mimo-design` 场景级单点求解（质量门 4.1 / 权威加权 4.4 / 安全钳位三态 4.4）→ report/metrics/FIR artifact 登记进 job | T66v4 | 三态与 `measured/applied=false` 原样透传；同输入逐字节复现；job 证据链可复核 |
+| T66v5a | CLI 入口 `khaen-cal-tools::khaen-single-point`：场景 JSON → `report/metrics/fir + manifest + summary`，三态映射退出码（0/3/4），输入/运行错误稳定码 | T66v5 | 同输入逐字节相同；manifest 可独立复核；坏输入 2、运行错误 1 |
 | T33 | webui 适配 + 单点向导 | T31 | 向导可点完；无 not_wired 假徽标 |
 | T34 | 认证与会话（沿用 v1 契约） | T30 | 登录/重启持久/错密码拒绝 |
 

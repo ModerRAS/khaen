@@ -1,0 +1,15 @@
+[package]
+name = "khaen-cal-tools"
+description = "Offline single-point calibration CLI: scene JSON -> reproducible artifacts + tri-state summary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "khaen-single-point"
+path = "src/main.rs"
+
+[dependencies]
+khaen-calibration = { path = "../calibration" }
+khaen-mimo-design = { path = "../mimo-design" }
+serde_json = "1"
