@@ -50,9 +50,24 @@
 前置条件（未满足就停）：
 
 - 用户明确许可出声窗口；当前时段在 08:30–12:00 或 14:30–18:00 内；
-- 已知 MOTU 的 ALSA PCM 设备名（只读 `aplay -l` 获取）；
-- 已安装发布包：`/opt/khaen/current/bin/` 下有 `khaen-daemon`、`khaen-rt-host` 与七个校准命令行工具；
+- 已知 MOTU 的 ALSA PCM 设备名（只读 `aplay -l` 获取；2026-11-26 只读确认 card id 为 `UltraLitemk5`）；
+- 已安装发布包：`/opt/khaen/current/bin/` 下有 `khaen-daemon`、`khaen-rt-host` 与七个校准命令行工具（**2026-11-26 只读检查：设备上尚未部署 khaen，只有 v1 `/opt/tspi-rt-stack`**，需先安装 khaen release）；
+- 没有旧进程占用 MOTU PCM（**2026-11-26 07:18 只读检查：v1 `prod_bridge.py` + `aplay -D motulow16` 正占用 `hw:CARD=UltraLitemk5`**，停止它们需要用户明确许可）；
 - 状态目录 `/var/lib/khaen/` 可写。
+
+### 4.0 设备现状快照（2026-11-26 07:18，只读）
+
+| 项 | 实测值 |
+| --- | --- |
+| 主机 | AoipDSP / 192.168.63.222 / Linux 6.12.117+deb13-rt-amd64 |
+| 声卡 | card0 `UltraLitemk5`（MOTU UltraLite-mk5，USB 高速）；card1 `U18dB`（miniDSP Umik-1，测量麦）；card2 `HID`；card3 `PCH`；card4 `RAVENNA`（Merging） |
+| MOTU PCM | `hw:CARD=UltraLitemk5,DEV=0`，S24_3LE / 22 声道 / 48000 Hz / period 6000 / buffer 24000；采样时刻 **RUNNING** |
+| 当前占用 | v1 `prod_bridge.py`（PID 932650）+ `aplay -D motulow16 -f S24_3LE -c 16 -r 48000`（PID 932654）+ `arecord -D plughw:RAVENNA`（PID 932657）；已连续运行约 7.5 小时 |
+| 旧栈 | `/opt/tspi-rt-stack/current -> releases/x86-rt-20261120`，含 v1 `tspi-rt-daemon`/`tspi-rt-host`/`tspi-calibrate`/`tspi-audio-web`；`tspi-rt-daemon.service` active |
+| khaen 部署 | `/opt/khaen`、`/var/lib/khaen` **均不存在**（尚未部署） |
+| 工具 | `/usr/bin/aplay`、`/usr/bin/arecord`、`python3` 3.13.5 可用 |
+
+这张表只证明只读事实；它不证明 khaen 能出声，也不证明 MOTU 在 khaen 下的时序。设备窗口第一步仍要重新跑 4.1 并记录当次结果。
 
 ### 4.1 只读枚举与设备健康（状态：NOT_RUN）
 
@@ -60,6 +75,7 @@
 aplay -l                        # 只读枚举：记录 MOTU 的 card 号、card id 与 PCM 名
 aplay -L | head -40             # 只读：确认有哪些 PCM（别名不一定含 motu）
 cat /proc/asound/cards          # 只读：card id 必须以此为准，不要凭记忆猜
+cat /proc/asound/card0/pcm0p/sub0/status   # 只读：确认是否被占用（RUNNING 时先问用户能否停）
 ```
 
 只允许一次只读诊断；不写 CueMix、不改 ALSA 音量、不做批量设备写。
