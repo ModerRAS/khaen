@@ -382,7 +382,11 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 }
 
 /// Linux（交付平台 / CI）参考值，采集自 GitHub Actions。
-const LINUX_REFERENCE: [(u64, usize); 3] = [(0, 63825), (0, 0), (0, 0)];
+const LINUX_REFERENCE: [(u64, usize); 3] = [
+    (995094248796349378, 63825),
+    (7011038975251436606, 63013),
+    (436522828036799515, 57671),
+];
 
 /// Windows（开发机）参考值。
 const WINDOWS_REFERENCE: [(u64, usize); 3] = [
