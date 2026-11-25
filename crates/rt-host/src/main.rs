@@ -6,6 +6,10 @@
 //!   `SupervisorOptions::enabled = false`（状态如实为 absent，不假装断言过速率）；
 //! - 方案切换：启动时读一次方案文件（`KHAEN_PLAN`）；运行期不换图。
 //!   运行期换图需要跨进程控制通道（T70f 未实现），本进程不宣称支持。
+//! - 采样率回读：启动时先打印设备当前速率，打开 PCM 后再回读 `/proc/asound/.../hw_params` 的
+//!   `rate:`；若与方案速率不一致（例如 MOTU 被外部改到 192 kHz），直接退出 1 并报
+//!   `device_rate_mismatch`，不带着错速播放。回读依赖 `hw:` 直连设备名；`default`/`plughw:`
+//!   读不到时只打印 unknown，不假装断言成功。
 //!
 //! # 环境变量
 //!
@@ -147,6 +151,108 @@ mod app {
         pub status_file: Option<PathBuf>,
         pub run_seconds: u64,
         pub stats_every: u64,
+    }
+
+    /// 设备实际速率与方案速率不一致（退出码 1：运行期拒绝，不带着错速播放）。
+    pub const DEVICE_RATE_MISMATCH: &str = "device_rate_mismatch";
+
+    /// ALSA 设备名解析结果：卡序号或卡 id。
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum AlsaCard {
+        /// `hw:0` / `hw:0,1` 里的卡序号。
+        Index(u32),
+        /// `hw:CARD=UltraLitemk5,...` 里的卡 id。
+        Id(String),
+    }
+
+    /// 解析 `KHAEN_ALSA_DEVICE`：只认 `hw:` 直连写法；`default`/`plughw:` 等不做速率回读。
+    pub fn parse_alsa_device(device: &str) -> Option<AlsaCard> {
+        let rest = device.strip_prefix("hw:")?;
+        let first = rest.split(',').next()?.trim();
+        if let Some(id) = first.strip_prefix("CARD=") {
+            if id.is_empty() {
+                return None;
+            }
+            return Some(AlsaCard::Id(id.to_string()));
+        }
+        first.parse::<u32>().ok().map(AlsaCard::Index)
+    }
+
+    /// 从 `/proc/asound/cards` 文本里按卡 id 找卡序号（行格式：` 0 [UltraLitemk5 ]: ...`）。
+    pub fn card_index_for_id(cards_text: &str, card_id: &str) -> Option<u32> {
+        for line in cards_text.lines() {
+            let line = line.trim_start();
+            let Some(open) = line.find('[') else {
+                continue;
+            };
+            let Some(close) = line[open..].find(']') else {
+                continue;
+            };
+            let id = line[open + 1..open + close].trim();
+            if id == card_id {
+                let index_text = line[..open].trim();
+                return index_text.parse::<u32>().ok();
+            }
+        }
+        None
+    }
+
+    /// 解析 hw_params 文本里的 `rate:` 行（`closed` 或没有该行返回 None）。
+    pub fn parse_hw_params_rate(text: &str) -> Option<u32> {
+        for line in text.lines() {
+            let Some(rest) = line.trim().strip_prefix("rate:") else {
+                continue;
+            };
+            return rest.split_whitespace().next()?.parse::<u32>().ok();
+        }
+        None
+    }
+
+    /// 读 `/proc/asound/card<N>/pcm<D>p/sub0/hw_params` 里的实际速率。
+    pub fn read_hw_rate(proc_asound: &Path, card: u32, pcm_index: u32) -> Option<u32> {
+        let path = proc_asound
+            .join(format!("card{card}"))
+            .join(format!("pcm{pcm_index}p"))
+            .join("sub0")
+            .join("hw_params");
+        let text = std::fs::read_to_string(path).ok()?;
+        parse_hw_params_rate(&text)
+    }
+
+    /// 打开设备时按方案速率协商，打开后做一次回读校验；不一致就 fail-closed。
+    pub fn check_device_rate(plan_rate: u32, rate_after: Option<u32>) -> Result<(), &'static str> {
+        match rate_after {
+            Some(rate) if rate != plan_rate => Err(DEVICE_RATE_MISMATCH),
+            _ => Ok(()),
+        }
+    }
+
+    /// 解析设备名到卡序号（id 写法需要 `/proc/asound/cards` 文本）。
+    pub fn resolve_card_index(device: &str, cards_text: &str) -> Option<u32> {
+        match parse_alsa_device(device)? {
+            AlsaCard::Index(index) => Some(index),
+            AlsaCard::Id(id) => card_index_for_id(cards_text, &id),
+        }
+    }
+
+    /// 设备名里的 PCM 序号（`hw:0,1` 的 1；缺省 0）。
+    pub fn device_pcm_index(device: &str) -> u32 {
+        let Some(raw) = device
+            .strip_prefix("hw:")
+            .and_then(|rest| rest.split(',').nth(1))
+        else {
+            return 0;
+        };
+        let raw = raw.trim();
+        raw.strip_prefix("DEV=")
+            .unwrap_or(raw)
+            .parse::<u32>()
+            .unwrap_or(0)
+    }
+
+    /// 读当前卡在 `/proc/asound/cards` 的文本（没有该文件返回空串）。
+    pub fn read_cards_text(proc_asound: &Path) -> String {
+        std::fs::read_to_string(proc_asound.join("cards")).unwrap_or_default()
     }
 
     /// 启动方案读取/解码失败（退出码 2：输入或配置问题）。
@@ -428,6 +534,16 @@ mod app {
             settings.plan_path
         );
 
+        let proc_asound = Path::new("/proc/asound");
+        let plan_rate = settings.config.engine.sample_rate;
+        let card_index = resolve_card_index(&settings.alsa_device, &read_cards_text(proc_asound));
+        let pcm_index = device_pcm_index(&settings.alsa_device);
+        let rate_before = card_index.and_then(|card| read_hw_rate(proc_asound, card, pcm_index));
+        println!(
+            "khaen-rt-host: device rate before open: {} (plan {plan_rate} Hz)",
+            rate_before.map_or_else(|| "unknown".to_string(), |rate| format!("{rate} Hz"))
+        );
+
         let mut runtime: Runtime<P> = match Runtime::new(settings.config.clone()) {
             Ok(runtime) => runtime,
             Err(err) => {
@@ -438,6 +554,25 @@ mod app {
                 return ExitCode::from(1);
             }
         };
+
+        // 打开 PCM 时 ALSA 会按方案速率协商；打开后回读一次，设备若卡在 192 kHz 这类
+        // 非方案速率上就 fail-closed（不带着错速播放），提示先让设备回到方案速率。
+        let rate_after = card_index.and_then(|card| read_hw_rate(proc_asound, card, pcm_index));
+        if let Err(code) = check_device_rate(plan_rate, rate_after) {
+            eprintln!(
+                "khaen-rt-host: device rate after open {} Hz != plan {plan_rate} Hz [{code}]; ",
+                rate_after.unwrap_or(0)
+            );
+            eprintln!("khaen-rt-host: MOTU may be stuck at a non-plan rate (e.g. 192 kHz); ",);
+            eprintln!(
+                "khaen-rt-host: bring it back to {plan_rate} Hz (48k keeper or replug), then retry",
+            );
+            return ExitCode::from(1);
+        }
+        println!(
+            "khaen-rt-host: device rate after open: {}",
+            rate_after.map_or_else(|| "unknown".to_string(), |rate| format!("{rate} Hz"))
+        );
 
         if let Some(path) = settings.plan_path.as_deref() {
             let startup = match load_startup_plan(path) {
@@ -671,6 +806,79 @@ mod tests {
             }),
         };
         plan.encode_checked().expect("encode fir plan")
+    }
+
+    #[test]
+    fn parses_alsa_device_names() {
+        assert_eq!(
+            app::parse_alsa_device("hw:0"),
+            Some(app::AlsaCard::Index(0))
+        );
+        assert_eq!(
+            app::parse_alsa_device("hw:2,1"),
+            Some(app::AlsaCard::Index(2))
+        );
+        assert_eq!(
+            app::parse_alsa_device("hw:CARD=UltraLitemk5,DEV=0"),
+            Some(app::AlsaCard::Id("UltraLitemk5".to_string()))
+        );
+        assert_eq!(app::parse_alsa_device("default"), None);
+        assert_eq!(app::parse_alsa_device("plughw:CARD=MOTU"), None);
+        assert_eq!(app::device_pcm_index("hw:0"), 0);
+        assert_eq!(app::device_pcm_index("hw:2,1"), 1);
+        assert_eq!(app::device_pcm_index("hw:CARD=UltraLitemk5,DEV=0"), 0);
+        assert_eq!(app::device_pcm_index("hw:CARD=UltraLitemk5,DEV=3"), 3);
+    }
+
+    #[test]
+    fn resolves_card_index_from_cards_text() {
+        let cards = " 0 [UltraLitemk5   ]: USB-Audio - UltraLite-mk5\n                      MOTU UltraLite-mk5 at usb-0000:00:14.0-2.1, high speed\n 1 [U18dB          ]: USB-Audio - Umik-1  Gain: 18dB\n";
+        assert_eq!(app::card_index_for_id(cards, "UltraLitemk5"), Some(0));
+        assert_eq!(app::card_index_for_id(cards, "U18dB"), Some(1));
+        assert_eq!(app::card_index_for_id(cards, "MOTU"), None);
+        assert_eq!(
+            app::resolve_card_index("hw:CARD=UltraLitemk5,DEV=0", cards),
+            Some(0)
+        );
+        assert_eq!(app::resolve_card_index("hw:4,0", cards), Some(4));
+        assert_eq!(app::resolve_card_index("default", cards), None);
+    }
+
+    #[test]
+    fn parses_hw_params_rate_and_reads_proc_tree() {
+        assert_eq!(app::parse_hw_params_rate("closed\n"), None);
+        assert_eq!(
+            app::parse_hw_params_rate(
+                "access: RW_INTERLEAVED\nformat: S24_3LE\nrate: 192000 (192000/1)\nchannels: 22\n"
+            ),
+            Some(192_000)
+        );
+        assert_eq!(
+            app::parse_hw_params_rate("rate: 48000 (48000/1)\n"),
+            Some(48_000)
+        );
+
+        let root = std::env::temp_dir().join(format!(
+            "khaen-rt-host-proc-{}-{}",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let sub = root.join("card0").join("pcm0p").join("sub0");
+        std::fs::create_dir_all(&sub).expect("proc tree");
+        std::fs::write(sub.join("hw_params"), "rate: 192000 (192000/1)\n").expect("hw_params");
+        assert_eq!(app::read_hw_rate(&root, 0, 0), Some(192_000));
+        assert_eq!(app::read_hw_rate(&root, 1, 0), None);
+        std::fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn device_rate_mismatch_fails_closed() {
+        assert_eq!(app::check_device_rate(48_000, Some(48_000)), Ok(()));
+        assert_eq!(app::check_device_rate(48_000, None), Ok(()));
+        assert_eq!(
+            app::check_device_rate(48_000, Some(192_000)),
+            Err(app::DEVICE_RATE_MISMATCH)
+        );
     }
 
     #[test]

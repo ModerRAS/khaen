@@ -94,6 +94,11 @@ export KHAEN_STATS_EVERY_BLOCKS=4000
 /opt/khaen/current/bin/khaen-rt-host > /var/lib/khaen/rt-host-30min.log 2>&1
 ```
 
+启动时注意采样率：`khaen-rt-host` 会打印 `device rate before open`，打开 PCM 后再回读
+`/proc/asound/.../hw_params` 并打印 `device rate after open`；若回读速率与方案速率不一致
+（典型：MOTU 被外部设备改到 192 kHz），进程以退出码 1 结束并报 `device_rate_mismatch`。
+处理：先让设备回到方案速率（v1 的 48 kHz keeper 或重新插拔 USB），再重启 rt-host。
+
 判据：日志无 `run_block failed`、状态文件里 `output_errors` 为 0、无 xrun 告警。
 
 ### 4.3 8 小时浸泡（状态：NOT_RUN）
