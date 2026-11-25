@@ -40,6 +40,7 @@
     clippy::unnecessary_map_or
 )]
 
+pub mod closed_loop;
 pub mod deconvolve;
 pub mod ir_distance;
 pub mod ir_extract;
@@ -59,6 +60,12 @@ pub mod sweep;
 #[path = "capture_consts.rs"]
 pub mod capture;
 
+pub use closed_loop::{
+    compare, report_bytes, report_sha256, BandComparison, BandLevel, ClosedLoopConfig,
+    ClosedLoopError, ClosedLoopReport, LevelSet, PointComparison, PointLevels, Verdict,
+    DEFAULT_MIN_COMPARED_BANDS, DEFAULT_TOLERANCE_DB, LEVELS_SCHEMA as CLOSED_LOOP_LEVELS_SCHEMA,
+    REPORT_SCHEMA as CLOSED_LOOP_REPORT_SCHEMA,
+};
 pub use deconvolve::deconvolve;
 pub use plan_compile::{
     compile_peq_design, CompiledPlan, PlanCompileError, PlanCompileOptions, PLAN_ARTIFACT_PATH,

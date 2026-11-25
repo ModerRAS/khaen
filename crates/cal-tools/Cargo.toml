@@ -1,6 +1,6 @@
 [package]
 name = "khaen-cal-tools"
-description = "Offline single-point calibration CLI: scene JSON -> reproducible artifacts + tri-state summary"
+description = "Offline calibration CLIs: single-point scene job and closed-loop verdict"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,10 @@ license.workspace = true
 [[bin]]
 name = "khaen-single-point"
 path = "src/main.rs"
+
+[[bin]]
+name = "khaen-closed-loop"
+path = "src/bin/closed_loop.rs"
 
 [dependencies]
 khaen-calibration = { path = "../calibration" }
