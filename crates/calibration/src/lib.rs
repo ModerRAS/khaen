@@ -52,6 +52,7 @@ pub mod plan_compile;
 pub mod positions;
 pub mod rt60;
 pub mod single_point_bundle;
+pub mod single_point_job;
 pub mod sweep;
 
 #[path = "capture_consts.rs"]
