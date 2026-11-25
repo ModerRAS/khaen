@@ -48,6 +48,7 @@ pub mod microfft;
 pub mod noise_est;
 pub mod peq_fit;
 pub mod phase_fit;
+pub mod plan_compile;
 pub mod positions;
 pub mod rt60;
 pub mod sweep;
@@ -56,3 +57,6 @@ pub mod sweep;
 pub mod capture;
 
 pub use deconvolve::deconvolve;
+pub use plan_compile::{
+    compile_peq_design, CompiledPlan, PlanCompileError, PlanCompileOptions, PLAN_ARTIFACT_PATH,
+};

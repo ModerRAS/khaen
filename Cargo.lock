@@ -255,7 +255,9 @@ version = "0.1.0"
 dependencies = [
  "khaen-core",
  "khaen-designer",
+ "khaen-host",
  "khaen-modal-design",
+ "khaen-plan-builder",
 ]
 
 [[package]]

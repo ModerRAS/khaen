@@ -9,3 +9,8 @@ description = "Calibration math: deconvolution, parametric-EQ fitting and plan c
 khaen-core = { path = "../core" }
 khaen-designer = { path = "../designer" }
 khaen-modal-design = { path = "../modal-design" }
+khaen-plan-builder = { path = "../plan-builder" }
+
+[dev-dependencies]
+# 测试用：证明编译出的方案能被 host 的准入与图编译接受（生产代码不依赖 host）。
+khaen-host = { path = "../host" }

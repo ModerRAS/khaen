@@ -90,6 +90,7 @@
 | T30 | daemon 骨架 + HostEngine（唯一后端） | T25 | 无 MemoryEngine；能力上报真实 |
 | T31 | REST 契约实现（null + 原因规则） | T30 | 每个字段有来源；假值零容忍 |
 | T32 | 单点校准作业编排（测量→设计→编译→apply） | T13,T31 | 端到端跑通；产物带 manifest |
+| T66（v2 部分） | 设计产物 → plan ABI v3 编译：`khaen_calibration::plan_compile` 把 `PeqDesign` 的模态 PEQ 链编译成保护段 + 身份 lane 链，输出**确定性** bytes/sha256/graph_id，测试证明往返、可复现、host 准入与图编译接受 | T32 | 测量→设计→编译一段已接通；capture/apply/remeasure 仍是 v1 遗留，标 NOT_RUN |
 | T33 | webui 适配 + 单点向导 | T31 | 向导可点完；无 not_wired 假徽标 |
 | T34 | 认证与会话（沿用 v1 契约） | T30 | 登录/重启持久/错密码拒绝 |
 
