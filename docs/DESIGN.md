@@ -199,6 +199,6 @@ v1 的 `tspi-motu-48k-keeper` 与 `tspi-motu-net.service` 在 v2 里被**监督�
 | 路由 | **两阶段接通**（`surface=routing`） | patch lane→DAC 路由与 dac_channels |
 | 内容布局 | **两阶段接通**（`surface=layout`） | patch content 的 in_channels / out_lanes / folds |
 | 格式 | **两阶段接通**（`format` op，`surface=format` 委托同一实现） | 校验 sample_rate/chunksize ∈ 运行时集合 → 草稿；commit 重建控制面执行器、丢弃旧图并清空回滚历史；`device_restart_required=true` 如实上报（真实声卡需重开 PCM 流；本控制面不碰设备） |
-| 模式 | **NOT_WIRED**（返回 `unsupported` + 原因） | 输入模式（off/toslink/aes67/…）是采集源与设备监督层决策，不是方案字段 |
+| 模式 | **两阶段接通**（`surface=mode`） | `off` = 块边界静音整链；`on`/`aes67` = 解除静音（当前唯一实现的输入源是 aes67）。`toslink`/`dante` 等采集源未实现，显式拒绝；真实采集源切换属数据面/设备监督层（T70g 未实现） |
 
 `status` 的 `surfaces` / `surface_reasons` 逐项如实上报；未接通的界面不得返回假成功。

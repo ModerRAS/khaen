@@ -119,7 +119,7 @@
 | routing | `routes: [[lane, dac], ...]`，可选 `dac_channels` | 替换 lane→DAC 路由；dac 必须 < dac_channels（缺省沿用方案值）。 |
 | layout | `in_channels`、`out_lanes`、`folds: [[src, dst, gain], ...]` | 替换内容布局折叠表；越界/空表拒绝。 |
 | format | `sample_rate`、`chunksize`（至少一项） | **已接通**（委托给 B.1.4 的执行器配置两阶段）：不要求已生效方案；`commit` 重建控制面引擎并丢弃正在跑的图，`device_restart_required=true` 如实上报（真实声卡必须重开 PCM 流）。 |
-| mode | — | **未接通**：输入模式选择属于采集源/设备监督器决策，不是方案字段；请求返回 `unsupported`。 |
+| mode | `mode: "off" \| "on" \| "aes67"` | **已接通**（见 B.1.5）：两阶段输入使能；`off` = 块边界静音整链，`on`/`aes67` = 解除静音（当前唯一实现的输入源是 aes67）；`toslink`/`dante` 等未实现的源显式 `bad_request`，不假装可选。 |
 
 `status` 里 `surfaces` 逐项上报 `true/false`，未接通的在 `surface_reasons` 给原因；禁止把未接通
 界面报成可用。补丁只搬运字段，ABI 字段域由 `encode_checked`、语义由 host 准入与图编译各自校验，
@@ -148,6 +148,15 @@
 - 第二阶段（`commit`）：若目标格式与当前一致 → `changed=false`、`applied_block=null`，不重建；若不同 → 用新配置重建 `SlotEngine`（保留用户静音状态），**丢弃正在跑的图**（`graph_dropped=true`）、清空可回滚历史（`history_cleared`），`applied_block=1` 表示新执行器从第 1 块开始。之后必须 prepare 一份与新格式一致的方案才能恢复图。
 - `abort` 可丢弃格式草稿（回执 `aborted_surface="format"`）；错 token 不销毁草稿。
 - **设备边界**：本控制面不碰设备；响应里的 `device_restart_required=true` 是给上层的明确信号（真实播放进程需要重开 PCM 流）。不把控制面重建声称为设备已换格式。
+
+### B.1.5 模式（mode）
+
+模式是**输入使能**，不是方案补丁；真实采集源切换属于数据面/设备监督层（跨进程控制通道未实现，T70g）。
+
+- 支持值：`off`（整链静音）、`on` / `aes67`（解除静音；当前唯一实现的输入源固定为 aes67）。其它值 `bad_request`，消息里写明 "not wired"，不返回假成功。
+- 两阶段与其它界面一致：`surface=mode` 只准备草稿（`engine_token` / `planned_version` / `mode` / `changed` / `applies_to="control-plane engine (output enable)"`）；`commit` 才在下一块边界调用引擎静音（`off`）或解除静音（`aes67`），响应带 `applied_block`。同值请求 `changed=false`，commit 为空操作。
+- `abort` 可丢弃模式草稿（`aborted_surface="mode"`）；错 token 不销毁草稿；与方案/格式草稿互斥。
+- `status.mode` 是当前模式（`off` / `aes67`），`status.surfaces.mode=true` 表示该入口可用，不代表采集源切换已实现。
 
 ### B.2 语义
 

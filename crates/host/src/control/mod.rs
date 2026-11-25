@@ -47,13 +47,12 @@ const HISTORY_LIMIT: usize = 16;
 ///
 /// 两阶段语义与 prepare/commit 完全一致：surface 只**准备**一份打了补丁的方案草稿并返回
 /// engine_token，真正生效仍由 commit 在下一块边界完成；abort 丢弃。
-pub const WIRED_SURFACES: &[&str] = &["volume", "routing", "layout", "format"];
+pub const WIRED_SURFACES: &[&str] = &["volume", "routing", "layout", "format", "mode"];
 
 /// 尚未接通的界面及原因（如实上报；请求返回 `unsupported`，不返回假成功）。
-pub const NOT_WIRED_SURFACES: &[(&str, &str)] = &[(
-    "mode",
-    "input mode selection is a capture-source / device-supervisor decision, not a plan field",
-)];
+///
+/// 五个界面都已接通；这里保留机制，后续新增界面时先登记为未接通。
+pub const NOT_WIRED_SURFACES: &[(&str, &str)] = &[];
 
 /// 尚未实现的 op 及其原因（如实上报用）。
 ///
@@ -396,10 +395,47 @@ pub struct ControlState {
     draft: Option<DraftPlan>,
     /// 当前格式变更草稿（format 产出，commit / abort 消费；与方案草稿互斥）。
     pending_format: Option<FormatDraft>,
+    /// 当前模式变更草稿（surface=mode 产出，commit / abort 消费；与其它草稿互斥）。
+    pending_mode: Option<ModeDraft>,
+    /// 当前运行模式（控制面层；见 [`RuntimeMode`] 的边界说明）。
+    mode: RuntimeMode,
     /// 最近一次 commit 生效的方案：语义界面（volume/routing/layout）以它为基线打补丁。
     base_plan: Option<Plan>,
     /// 已生效方案的有限历史（版本升序），供 rollback 回到旧版本。
     history: Vec<CommittedPlan>,
+}
+
+/// 运行模式（控制面层：输出使能 + 输入源声明）。
+///
+/// 真实采集源切换属于 rt-host/设备监督层（T70g 未实现）；控制面能诚实做到的是
+/// `off`（整链静音）与 `aes67`（当前唯一已实现的输入源，等价于“使能输出”）。
+/// `toslink` / `dante` 等其它输入源没有实现，显式拒绝，不假装可选。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMode {
+    /// 关闭：整链静音（与 mute 同一个块边界静音机制，仅语义入口不同）。
+    Off,
+    /// 使能：输入源固定为 aes67（当前唯一实现的源）。
+    Aes67,
+}
+
+impl RuntimeMode {
+    /// 稳定字符串（status/响应/日志共用）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RuntimeMode::Off => "off",
+            RuntimeMode::Aes67 => "aes67",
+        }
+    }
+}
+
+/// 模式变更草稿（两阶段；与方案/格式草稿互斥）。
+#[derive(Debug, Clone)]
+struct ModeDraft {
+    token: String,
+    version: u64,
+    target: RuntimeMode,
+    changed: bool,
+    response: Value,
 }
 
 /// 格式变更草稿（两阶段；与方案草稿互斥）。
@@ -432,6 +468,8 @@ impl ControlState {
             safe_mode: false,
             draft: None,
             pending_format: None,
+            pending_mode: None,
+            mode: RuntimeMode::Aes67,
             base_plan: None,
             history: Vec::new(),
         })
@@ -619,6 +657,7 @@ impl ControlState {
             },
         });
         self.pending_format = None;
+        self.pending_mode = None;
         self.draft = Some(DraftPlan {
             token,
             version,
@@ -705,6 +744,90 @@ impl ControlState {
             "compile": compile,
         }))
     }
+    /// 模式界面第一阶段（surface=mode）：校验目标模式 → 存草稿；commit 才在块边界生效。
+    pub fn prepare_mode_json(&mut self, data: &Value) -> Result<Value, ControlError> {
+        let object = data
+            .as_object()
+            .ok_or_else(|| bad_request("field data must be a json object"))?;
+        let field = object
+            .get("mode")
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad_request("field data.mode must be a string"))?;
+        let target = match field {
+            "off" => RuntimeMode::Off,
+            "on" | "aes67" => RuntimeMode::Aes67,
+            other => {
+                return Err(bad_request(format!(
+                    "mode {other:?} is not wired: supported are off/on/aes67 (toslink/dante input sources are not implemented)"
+                )))
+            }
+        };
+        // 与方案/格式草稿互斥：模式提交不依赖方案，但混用会让 commit 出歧义。
+        self.draft = None;
+        self.pending_format = None;
+        let version = self.next_plan_version();
+        let canonical = format!("mode:{}", target.as_str());
+        let token = engine_token(version, &sha256(canonical.as_bytes()));
+        let changed = target != self.mode;
+        if let Some(draft) = &self.pending_mode {
+            if draft.token == token {
+                return Ok(draft.response.clone());
+            }
+        }
+        let response = json!({
+            "ok": true,
+            "surface": "mode",
+            "engine_token": token,
+            "planned_version": version,
+            "mode": target.as_str(),
+            "changed": changed,
+            "applies_to": "control-plane engine (output enable)",
+            "note": "real capture-source switching belongs to rt-host/device supervisor; toslink/dante are not implemented",
+        });
+        self.pending_mode = Some(ModeDraft {
+            token,
+            version,
+            target,
+            changed,
+            response: response.clone(),
+        });
+        Ok(response)
+    }
+
+    /// 模式界面第二阶段：off = 块边界静音整链；aes67/on = 解除静音。不是 RT 路径。
+    fn commit_mode(&mut self, engine_token: &str) -> Result<Value, ControlError> {
+        let draft = self.pending_mode.take().ok_or_else(|| {
+            token_invalid("no prepared mode draft: call surface mode before commit")
+        })?;
+        if draft.token != engine_token {
+            let message = format!(
+                "engine_token mismatch: prepared token {}, request {engine_token}",
+                draft.token
+            );
+            self.pending_mode = Some(draft);
+            return Err(token_invalid(message));
+        }
+        if !draft.changed {
+            return Ok(json!({
+                "ok": true,
+                "changed": false,
+                "applied_block": Value::Null,
+                "version": draft.version,
+                "mode": draft.target.as_str(),
+                "note": "mode already matches; nothing applied",
+            }));
+        }
+        let receipt = self.engine.request_mute(draft.target == RuntimeMode::Off);
+        self.mode = draft.target;
+        Ok(json!({
+            "ok": true,
+            "changed": true,
+            "applied_block": receipt.applied_block,
+            "version": draft.version,
+            "mode": self.mode.as_str(),
+        }))
+    }
+
     /// 格式变更第一阶段（format op）：校验目标格式 → 存草稿；commit 才真正重建执行器。
     ///
     /// 语义：格式（采样率 / 块长）不是方案补丁，而是执行器配置；commit 会重建 SlotEngine
@@ -750,8 +873,9 @@ impl ControlState {
                 "at least one of sample_rate / chunksize is required",
             ));
         }
-        // 格式草稿与方案草稿互斥：方案草稿按旧格式编译，混用会让 commit 出歧义。
+        // 格式草稿与方案/模式草稿互斥：方案草稿按旧格式编译，混用会让 commit 出歧义。
         self.draft = None;
+        self.pending_mode = None;
         let version = self.next_plan_version();
         let canonical = format!(
             "format:{}:{}:{}",
@@ -842,7 +966,10 @@ impl ControlState {
     /// `all_ack` 语义：单 owner、单引擎（本控制面独占一个 [`SlotEngine`]），没有第二个引擎需要
     /// 确认，切换在下一块边界必然完成，因此恒为 true；多引擎（主/备）冗余要等 T40 以后再扩展。
     pub fn commit_json(&mut self, engine_token: &str) -> Result<Value, ControlError> {
-        // 格式草稿与方案草稿互斥；存在哪个就提交哪个。
+        // 三类草稿互斥；存在哪个就提交哪个。
+        if self.pending_mode.is_some() {
+            return self.commit_mode(engine_token);
+        }
         if self.pending_format.is_some() {
             return self.commit_format(engine_token);
         }
@@ -900,6 +1027,10 @@ impl ControlState {
                 .ok_or_else(|| bad_request("field data must be a json object"))?;
             return self.prepare_format_json(object);
         }
+        if surface == "mode" {
+            // 模式不是方案补丁：委托给运行模式的两阶段入口（同一个 commit/abort）。
+            return self.prepare_mode_json(data);
+        }
         if !WIRED_SURFACES.contains(&surface) {
             return Err(bad_request(format!("unknown surface: {surface}")));
         }
@@ -946,6 +1077,7 @@ impl ControlState {
             },
         });
         self.pending_format = None;
+        self.pending_mode = None;
         self.draft = Some(DraftPlan {
             token,
             version,
@@ -1040,6 +1172,7 @@ impl ControlState {
             },
         });
         self.pending_format = None;
+        self.pending_mode = None;
         self.draft = Some(DraftPlan {
             token,
             version,
@@ -1054,6 +1187,18 @@ impl ControlState {
     ///
     /// token 不符或没有草稿都返回 `engine_token_invalid`；成功返回 `{"ok":true,"aborted":true}`。
     pub fn abort_json(&mut self, engine_token: &str) -> Result<Value, ControlError> {
+        // 模式草稿同样可 abort；错 token 不销毁草稿。
+        if let Some(draft) = self.pending_mode.as_ref() {
+            if draft.token != engine_token {
+                let message = format!(
+                    "engine_token mismatch: prepared token {}, request {engine_token}",
+                    draft.token
+                );
+                return Err(token_invalid(message));
+            }
+            self.pending_mode = None;
+            return Ok(json!({ "ok": true, "aborted": true, "aborted_surface": "mode" }));
+        }
         // 格式草稿同样可 abort；错 token 不销毁草稿。
         if let Some(draft) = self.pending_format.as_ref() {
             if draft.token != engine_token {
@@ -1188,6 +1333,7 @@ impl ControlState {
             "safe_mode": self.safe_mode,
             "actual_version": info.version,
             "format": format_json(&self.engine.config().clone()),
+            "mode": self.mode.as_str(),
             "wired": WIRED_OPS,
             "not_wired": not_wired,
             "surfaces": surfaces,

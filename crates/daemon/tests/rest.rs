@@ -93,12 +93,15 @@ async fn surface_two_phase_over_http() {
     assert_eq!(status, 409);
     assert_eq!(response["error"], Value::String("no_base_plan".into()));
 
-    // 未接通界面：501 + 原因，不返回假成功。
-    let body = json!({ "surface": "mode", "data": {} }).to_string();
+    // mode 已接通：非法输入源显式拒绝（400，不假装可选）。
+    let body = json!({ "surface": "mode", "data": { "mode": "toslink" } }).to_string();
     let (status, response) =
         request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
-    assert_eq!(status, 501);
-    assert_eq!(response["error"], Value::String("unsupported".into()));
+    assert_eq!(status, 400);
+    assert_eq!(response["error"], Value::String("bad_request".into()));
+    assert!(response["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("not wired")));
 
     // format 已接通：surface 入口委托执行器配置的两阶段（不要求已有方案）。
     let body = json!({ "surface": "format", "data": { "chunksize": 64 } }).to_string();
@@ -162,17 +165,16 @@ async fn surface_two_phase_over_http() {
 
     // 能力上报：接通/未接通界面逐项如实。
     let (_, status_json) = request("GET", &format!("{}/api/status", server.base), None).await;
-    for surface in ["volume", "routing", "layout", "format"] {
+    for surface in ["volume", "routing", "layout", "format", "mode"] {
         assert_eq!(
             status_json["surfaces"][surface],
             Value::Bool(true),
             "{surface}"
         );
     }
-    assert_eq!(status_json["surfaces"]["mode"], Value::Bool(false));
-    assert!(status_json["surface_reasons"]["mode"]
-        .as_str()
-        .is_some_and(|reason| !reason.is_empty()));
+    assert!(status_json["surface_reasons"]
+        .as_object()
+        .is_some_and(|reasons| reasons.is_empty()));
 }
 fn split_url(url: &str) -> (&str, &str) {
     let rest = url.strip_prefix("http://").expect("scheme");
@@ -792,4 +794,48 @@ async fn format_draft_is_abortable_over_http() {
         status_body["format"]["block_size"],
         Value::from(BLOCK_FRAMES)
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mode_off_and_on_over_http() {
+    let (server, state) = spawn().await;
+    let (_, status_json) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(status_json["mode"], Value::String("aes67".into()));
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x31);
+    let passthrough = run_block(&state, &input);
+    assert_eq!(passthrough, input);
+
+    // 两阶段：off 只准备；commit 后块边界静音。
+    let body = json!({ "surface": "mode", "data": { "mode": "off" } }).to_string();
+    let (status, draft) =
+        request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(draft["changed"], Value::Bool(true));
+    assert_eq!(draft["mode"], Value::String("off".into()));
+    let token = draft["engine_token"].as_str().expect("token").to_string();
+    let (_, before) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(before["mode"], Value::String("aes67".into()));
+
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, committed) =
+        request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    assert_eq!(committed["mode"], Value::String("off".into()));
+    let muted = run_block(&state, &input);
+    assert!(muted.iter().all(|sample| sample.to_bits() == 0));
+    let (_, after) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(after["mode"], Value::String("off".into()));
+    assert_eq!(after["mute"], Value::Bool(true));
+
+    // 切回 aes67：解除静音。
+    let body = json!({ "surface": "mode", "data": { "mode": "aes67" } }).to_string();
+    let (_, draft) = request("POST", &format!("{}/api/surface", server.base), Some(&body)).await;
+    let token = draft["engine_token"].as_str().expect("token").to_string();
+    let body = json!({ "engine_token": token }).to_string();
+    let (status, _) = request("POST", &format!("{}/api/commit", server.base), Some(&body)).await;
+    assert_eq!(status, 200);
+    let unmuted = run_block(&state, &input);
+    assert_eq!(unmuted, input);
+    let (_, restored) = request("GET", &format!("{}/api/status", server.base), None).await;
+    assert_eq!(restored["mode"], Value::String("aes67".into()));
 }

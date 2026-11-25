@@ -802,15 +802,30 @@ fn surface_honours_two_phase_errors_and_truthful_capabilities() {
     );
     assert_eq!(missing["error"], Value::String(error::NO_BASE_PLAN.into()));
 
-    // mode 未接通：unsupported + 原因，不返回假成功。
-    let mode = request(
+    // mode 已接通：支持 off/on/aes67；其它输入源显式拒绝（不假装可选）。
+    let mode_empty = request(
         &mut state,
         json!({ "op": "surface", "surface": "mode", "data": {} }),
     );
-    assert_eq!(mode["error"], Value::String(error::UNSUPPORTED.into()));
-    assert!(mode["message"]
+    assert_eq!(
+        mode_empty["error"],
+        Value::String(error::BAD_REQUEST.into())
+    );
+    let toslink = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "mode", "data": { "mode": "toslink" } }),
+    );
+    assert_eq!(toslink["error"], Value::String(error::BAD_REQUEST.into()));
+    assert!(toslink["message"]
         .as_str()
         .is_some_and(|message| message.contains("not wired")));
+    let mode_draft = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "mode", "data": { "mode": "off" } }),
+    );
+    assert_eq!(mode_draft["ok"], Value::Bool(true));
+    assert_eq!(mode_draft["changed"], Value::Bool(true));
+    assert_eq!(mode_draft["mode"], Value::String("off".into()));
 
     // format 已接通：经由 surface 入口委托执行器配置的两阶段；空 data 是请求内容问题。
     let format = request(
@@ -833,19 +848,18 @@ fn surface_honours_two_phase_errors_and_truthful_capabilities() {
     );
     assert_eq!(unknown["error"], Value::String(error::BAD_REQUEST.into()));
 
-    // 能力上报如实：四个界面接通、mode 未接通且带原因。
+    // 能力上报如实：五个界面全部接通，未接通列表为空。
     let capabilities = status(&mut state);
-    for surface in ["volume", "routing", "layout", "format"] {
+    for surface in ["volume", "routing", "layout", "format", "mode"] {
         assert_eq!(
             capabilities["surfaces"][surface],
             Value::Bool(true),
             "surface {surface}"
         );
     }
-    assert_eq!(capabilities["surfaces"]["mode"], Value::Bool(false));
-    assert!(capabilities["surface_reasons"]["mode"]
-        .as_str()
-        .is_some_and(|reason| !reason.is_empty()));
+    assert!(capabilities["surface_reasons"]
+        .as_object()
+        .is_some_and(|reasons| reasons.is_empty()));
 
     // 有基线之后，非法 payload 仍是 bad_request（空列表 / 不存在的 lane）。
     let identity = identity_plan();
@@ -1157,4 +1171,116 @@ fn status_reports_format_truthfully() {
         response["format"]["channels"],
         Value::from(u32::from(CHANNELS))
     );
+}
+
+#[test]
+fn mode_off_silences_at_block_boundary_and_switches_back() {
+    let mut state = state();
+    let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x11);
+    // 未加载方案时引擎是直通：先确认有声（非静音）。
+    let passthrough = run_block(&mut state, &input);
+    assert_bit_eq(&passthrough, &input);
+    assert_eq!(status(&mut state)["mode"], Value::String("aes67".into()));
+
+    // 第一阶段：off 只准备草稿；commit 前仍直通。
+    let draft = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "mode", "data": { "mode": "off" } }),
+    );
+    assert_eq!(draft["changed"], Value::Bool(true));
+    let token = token_of(&draft);
+    let before = run_block(&mut state, &input);
+    assert_bit_eq(&before, &input);
+
+    // 第二阶段：commit 在下一块边界静音整链。
+    let applied = commit(&mut state, &token);
+    assert_eq!(applied["changed"], Value::Bool(true));
+    assert_eq!(applied["mode"], Value::String("off".into()));
+    assert!(applied["applied_block"].is_u64());
+    let muted = run_block(&mut state, &input);
+    assert!(
+        muted.iter().all(|sample| sample.to_bits() == 0),
+        "mode off must silence the whole chain"
+    );
+    let after = status(&mut state);
+    assert_eq!(after["mode"], Value::String("off".into()));
+    assert_eq!(after["mute"], Value::Bool(true));
+
+    // 切回 aes67：解除静音，直通恢复。
+    let draft = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "mode", "data": { "mode": "aes67" } }),
+    );
+    assert_eq!(draft["changed"], Value::Bool(true));
+    let token = token_of(&draft);
+    let applied = commit(&mut state, &token);
+    assert_eq!(applied["mode"], Value::String("aes67".into()));
+    let unmuted = run_block(&mut state, &input);
+    assert_bit_eq(&unmuted, &input);
+    assert_eq!(status(&mut state)["mode"], Value::String("aes67".into()));
+}
+
+#[test]
+fn mode_same_value_is_noop_and_bad_values_are_rejected() {
+    let mut state = state();
+    // 当前模式 aes67：请求 on 是等价模式 → changed=false，不产生静音动作。
+    let draft = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "mode", "data": { "mode": "on" } }),
+    );
+    assert_eq!(draft["changed"], Value::Bool(false));
+    let token = token_of(&draft);
+    let applied = commit(&mut state, &token);
+    assert_eq!(applied["changed"], Value::Bool(false));
+    assert_eq!(applied["applied_block"], Value::Null);
+
+    for data in [
+        json!({}),
+        json!({ "mode": 42 }),
+        json!({ "mode": "dante" }),
+        json!({ "mode": "TOSLINK" }),
+    ] {
+        let response = request(
+            &mut state,
+            json!({ "op": "surface", "surface": "mode", "data": data }),
+        );
+        assert_eq!(
+            response["error"],
+            Value::String(error::BAD_REQUEST.into()),
+            "{response}"
+        );
+    }
+}
+
+#[test]
+fn mode_draft_is_abortable_and_excludes_plan_draft() {
+    let mut state = state();
+    // 方案草稿存在时 prepare mode：方案草稿被丢弃（互斥）。
+    let identity = identity_plan();
+    let file = TempPlan::new("mode-exclusive", &identity.encode());
+    let plan_prepared = prepare(&mut state, &file);
+    let stale_plan_token = token_of(&plan_prepared);
+    let mode_draft = request(
+        &mut state,
+        json!({ "op": "surface", "surface": "mode", "data": { "mode": "off" } }),
+    );
+    let mode_token = token_of(&mode_draft);
+    let stale = commit(&mut state, &stale_plan_token);
+    assert_eq!(
+        stale["error"],
+        Value::String(error::ENGINE_TOKEN_INVALID.into())
+    );
+
+    // abort 可丢弃模式草稿；abort 后 commit 无效、模式不变。
+    let aborted = request(
+        &mut state,
+        json!({ "op": "abort", "engine_token": mode_token }),
+    );
+    assert_eq!(aborted["aborted_surface"], Value::String("mode".into()));
+    let after = commit(&mut state, &mode_token);
+    assert_eq!(
+        after["error"],
+        Value::String(error::ENGINE_TOKEN_INVALID.into())
+    );
+    assert_eq!(status(&mut state)["mode"], Value::String("aes67".into()));
 }
