@@ -451,6 +451,10 @@ mod app {
                     return ExitCode::from(err.exit_code());
                 }
             };
+            println!(
+                "khaen-rt-host: plan preflight ok (graph_id {}, est. latency {} samples)",
+                startup.graph_id, startup.latency_samples
+            );
             match runtime.apply_plan(&startup.bytes, &AdmissionLimits::default()) {
                 Ok(version) => println!(
                     "khaen-rt-host: plan applied at version {version} (graph_id {})",
