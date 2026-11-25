@@ -4,7 +4,7 @@
 - 权威输入：rt-stack/spec/compat-matrix.md R01-R51/§2.4/§3.7/X01-X22、core-v1 §5.3/§9.2/§6.1、rt-stack/README.md §3；
   DSP-HOST-DECISION §2/§5/§6；WBS T42 行与 §1/§7。
 - 测试文件：rest_contract.rs（T42 REST 契约）+ matrix_routes.rs（F-21 矩阵↔路由一致性，7 tests：1 正向 + 6 负向）。
-- 运行：cargo test -p tspi-control rest matrix_routes -- --nocapture（F-21 覆盖表）；全量 cargo test -p tspi-control rest
+- 运行：cargo test -p khaen-control rest matrix_routes -- --nocapture（F-21 覆盖表）；全量 cargo test -p khaen-control rest
   （或 --offline；全部离线，不打开设备/不启服务/不跑真实 host）
 
 ## 注册方式（不要改 public_registration.rs）
@@ -23,7 +23,7 @@ crates/control/src/rest.rs 文件末的 #[cfg(test)] 子模块通过 include! �
 
 ## 与 T24 的关系（rest 复用 ws 实际 ack 口径）
 
-rest.rs 的 prepare/commit actual ack 复用 tspi_dsp_compat::ws 的 PreparedConfig / CommitAck /
+rest.rs 的 prepare/commit actual ack 复用 khaen_compat::ws 的 PreparedConfig / CommitAck /
 validate_commit_ack / WsOpError::from_rt_status / rest_equivalent（T24 唯一口径，不另起第二套
 错误码/ack 判据）；commit 只有在 ws::validate_commit_ack 通过（blocks_committed>=1、ack_mask=
 ACK_MASK(expected)、plan_version/graph/config_sha256/expected_workers 一致、未 rolled_back）后

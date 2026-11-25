@@ -17,10 +17,10 @@
 //!
 //! Cargo 自动把 tests/T25/main.rs 发现为集成测试 target（与 T13/T24/T57 同机制），
 //! 不需要 integrator 注册 public_registration.rs。测试名统一 content_ 前缀。
-//! DoD：cargo test -p tspi-dsp-compat content
+//! DoD：cargo test -p khaen-compat content
 
-use tspi_dsp_compat::content::*;
-use tspi_dsp_compat::ws::{
+use khaen_compat::content::*;
+use khaen_compat::ws::{
     json_encode, json_parse, JsonValue, RMS_FLOOR_DB, VOLUME_MAX_DB, VOLUME_MIN_DB,
 };
 
@@ -294,12 +294,12 @@ fn content_uses_t24_contract_constants_and_commands() {
     assert_eq!(RMS_FLOOR_DB, -240.0);
     assert_eq!(VOLUME_MIN_DB, -150.0);
     assert_eq!(VOLUME_MAX_DB, 50.0);
-    assert!(tspi_dsp_compat::ws::SUPPORTED_COMMANDS.contains(&CMD_GET_CAPTURE_SIGNAL_RMS));
-    assert!(tspi_dsp_compat::ws::SUPPORTED_COMMANDS.contains(&CMD_SET_FADER_VOLUME));
-    assert!(tspi_dsp_compat::ws::is_supported_command(
+    assert!(khaen_compat::ws::SUPPORTED_COMMANDS.contains(&CMD_GET_CAPTURE_SIGNAL_RMS));
+    assert!(khaen_compat::ws::SUPPORTED_COMMANDS.contains(&CMD_SET_FADER_VOLUME));
+    assert!(khaen_compat::ws::is_supported_command(
         "GetCaptureSignalRms"
     ));
-    assert!(tspi_dsp_compat::ws::is_supported_command("SetFaderVolume"));
+    assert!(khaen_compat::ws::is_supported_command("SetFaderVolume"));
 }
 
 #[test]

@@ -26,12 +26,12 @@ echo "==> cargo test --workspace"
 cargo test $CARGO_OFFLINE_FLAG --workspace
 
 echo "==> rt-check abi-layout"
-cargo run $CARGO_OFFLINE_FLAG --quiet -p tspi-rt-check --bin rt-check -- abi-layout
+cargo run $CARGO_OFFLINE_FLAG --quiet -p khaen-rt-check --bin rt-check -- abi-layout
 
 echo "==> rt-check forbid"
-cargo run $CARGO_OFFLINE_FLAG --quiet -p tspi-rt-check --bin rt-check -- forbid --root crates
+cargo run $CARGO_OFFLINE_FLAG --quiet -p khaen-rt-check --bin rt-check -- forbid --root crates
 
 echo "==> rt-check drop-audit"
-cargo run $CARGO_OFFLINE_FLAG --quiet -p tspi-rt-check --bin rt-check -- drop-audit --root crates
+cargo run $CARGO_OFFLINE_FLAG --quiet -p khaen-rt-check --bin rt-check -- drop-audit --root crates
 
 echo "ALL CHECKS PASS"

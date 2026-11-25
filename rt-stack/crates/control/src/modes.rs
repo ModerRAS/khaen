@@ -41,21 +41,21 @@
 //! begin_calibration 先切 off 再置 Calibration；end_calibration 回 Idle。
 //!
 //! 本模块**不打开设备/不启服务/不跑 RT**：服务、时钟均以模型替身驱动，所有“已验证”仅指
-//! 本地 cargo test -p tspi-control modes 真实执行（见 evidence/T44/）。
+//! 本地 cargo test -p khaen-control modes 真实执行（见 evidence/T44/）。
 
-use tspi_dsp_core::rt::{RtStatus, BLOCK_SIZES, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
-use tspi_rt_host::aoip::{
+use khaen_core::rt::{RtStatus, BLOCK_SIZES, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
+use khaen_rt_host::aoip::{
     inferno_device_id_valid, validate_aes67_capture, validate_aes67_service, Aes67CapturePlan,
     Aes67Encoding, Aes67FlowSdp, Aes67FlowSet, Aes67ServiceState, AoipError, AoipProtocol,
     H16Container, H16FlowConfig, InfernoEnv, PtpRefClock, PtpSource, AES67_RTP_PORT_DEFAULT,
     H16_CONTAINER_CHANNELS, INFERNO_CLOCK_PATH_DEFAULT,
 };
-use tspi_rt_host::clock::{
+use khaen_rt_host::clock::{
     ClockError, ClockServo, DiscontinuityReason, EpochClock, LockState, ServoConfig, ServoGrant,
     ServoOwner,
 };
 
-use tspi_dsp_compat::ws;
+use khaen_compat::ws;
 
 use crate::rest::{
     CoeffRef, CommitOutcome, ControlMode, EngineInfo, EngineSnapshot, JsonValue, ModeAck,

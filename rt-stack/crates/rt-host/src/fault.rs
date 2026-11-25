@@ -41,28 +41,28 @@
 //!
 //! cargo 只自动发现 tests/*.rs；tests/T21/ 子目录经本文件末尾 #[cfg(test)] mod fault_tests {
 //! include!(...) } 进入单测构建。integrator **不要**再把 tests/T21 写进 public_registration.rs（会重复注册）。
-//! 运行：cargo test -p tspi-rt-host fault（executed test_count > 0）。
+//! 运行：cargo test -p khaen-rt-host fault（executed test_count > 0）。
 //!
 //! 状态：leaf 实现 + Windows 本地真实 cargo test；真实 watchdog 线程/独立核亲和/板端 RT 实测 NOT_RUN（evidence/T21）。
 
 use core::fmt;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-pub use tspi_dsp_core::abi::TspiEventV1;
-pub use tspi_dsp_core::events::{
+pub use khaen_core::abi::TspiEventV1;
+pub use khaen_core::events::{
     EV_ACK_SLOT_EXHAUSTED, EV_FALLBACK_ENTER, EV_FALLBACK_EXIT, EV_FAULT, EV_QUARANTINE_ENTER,
     EV_QUARANTINE_EXHAUSTED, EV_QUARANTINE_RELEASE, EV_SAFETY_MUTE_ENTER, EV_SAFETY_MUTE_EXIT,
     EV_WATCHDOG_MUTE, EV_WORKER_LOST, LANE_CAPTURE, LANE_CONTROL, LANE_PLAYBACK, LANE_WATCHDOG,
     LANE_WORKER0, LANE_WORKER1, LANE_WORKER2, LANE_WORKER3, SEVERITY_ERROR, SEVERITY_FATAL,
     SEVERITY_INFO, SEVERITY_WARNING,
 };
-pub use tspi_dsp_core::rt::{
+pub use khaen_core::rt::{
     gate_ns_floor, t_block_ns_ceil, PlanVersion, RtControl, RtStatus, ACK_MASK_ALL, BLOCK_SIZES,
     EVENT_LANES, EVENT_LANE_SLOTS, GRAPH_ID_BYTES, HIST_BUCKETS, IO_TAIL_ALLOWANCE_NS_DEFAULT,
     MAX_OUTPUT_CHANNELS, QUARANTINE_SLOTS, RT_WORKERS, RT_WORKERS_FALLBACK, SAMPLE_RATES_HZ,
     WATCHDOG_PERIOD_MS, WATCHDOG_STALE_BLOCKS,
 };
-use tspi_dsp_core::workers::{ack_mask, TspiRtControlV1, RT_E_ACK_SLOT_EXHAUSTED};
+use khaen_core::workers::{ack_mask, TspiRtControlV1, RT_E_ACK_SLOT_EXHAUSTED};
 
 use crate::admission::{AdmissionEnv, AdmissionReport, MemoryPlan, PLAN_HEADER_BYTES};
 

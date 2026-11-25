@@ -13,14 +13,14 @@
 //! - YAML 子集解析（flow/引号/注释/块映射序列项）与不支持特性拒收、错误码目录/Display。
 //!
 //! Cargo 自动把 tests/T57/main.rs 发现为集成测试 target；DoD 命令：
-//! cargo test -p tspi-dsp-compat fullrange_height（测试名含 fullrange_height）。
+//! cargo test -p khaen-compat fullrange_height（测试名含 fullrange_height）。
 //! 只读输入：overlay/web layout-presets.yml 与 calibration-spec 示例经 include_str! 绑定；
 //! 不写任何临时文件（本机 %TEMP% 在内存盘 R:，写盘可能 PermissionDenied）。
 
-use tspi_dsp_compat::calibration::{
+use khaen_compat::calibration::{
     merge_calibration, parse_calibration_yaml_with_layout, Polarity,
 };
-use tspi_dsp_compat::roles::*;
+use khaen_compat::roles::*;
 
 const OVERLAY_PRESETS: &str =
     include_str!("../../../../../audio/overlay/etc/tspi-audio/layout-presets.yml");

@@ -2,7 +2,7 @@
 //
 // 覆盖：A01-A22 / K39-K44（互斥、唯一 servo/epoch、schema/hash 原子切换、失败 off 回退、
 // 模拟服务状态、禁调用 C、CueMix 不变、A03 退出码、T42/T43/T19 接口对齐）。
-// 运行：cargo test -p tspi-control modes
+// 运行：cargo test -p khaen-control modes
 
 // ---------------------------------------------------------------------------
 // 测试助手
@@ -1226,7 +1226,7 @@ fn modes_error_rt_status_uses_frozen_core_codes() {
         RtStatus::ERR_HASH
     );
     // F-30：回滚不复用 119（119 只表示 plan stale），用 control 层扩展码 124。
-    use tspi_dsp_compat::ws;
+    use khaen_compat::ws;
     assert_eq!(
         ModeErrorKind::RolledBack.rt_status().code(),
         ws::RT_STATUS_MODE_ROLLED_BACK

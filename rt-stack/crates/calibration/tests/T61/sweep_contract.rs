@@ -2,15 +2,15 @@
 //!
 //! 注册纪律（rt-stack/README.md §5）：leaf 测试放 tests/<Txx>/，由 integrator 在
 //! tests/public_registration.rs 加 #[path = "T61/sweep_contract.rs"] mod sweep_contract; 后由 cargo 执行。
-//! 本文件只用 tspi_calibration::sweep 的公开 API（模拟 T62/T66 的最小消费方式），因此也可用
+//! 本文件只用 khaen_calibration::sweep 的公开 API（模拟 T62/T66 的最小消费方式），因此也可用
 //! rustc --test 直接对 build 出的 rlib 做独立编译/执行验证（见 evidence/T61/MANIFEST.md）。
 //!
 //! 覆盖：WBS T61 DoD 的公共契约面 —— 逐输出扫频、公共 render frame/slot、T1 −12 dBFS/kMainTrim=0、
 //! 声学 −30 dBFS 与 ≥0.5 s 通道静音、trim 补偿不得破 −1 dBFS 峰值门、cancel、clip 保护停止、
 //! fake backend 逐段样本验证、确定性、block 描述连续/标记。
 
-use tspi_calibration::job::CancelToken;
-use tspi_calibration::sweep::{
+use khaen_calibration::job::CancelToken;
+use khaen_calibration::sweep::{
     compile_timeline, FakeSweepSink, SweepBlockInfo, SweepConfig, SweepError, SweepOutput,
     SweepPlaybackSink, SweepPlayer, SweepSegmentKind, SweepSinkAck, SweepStimulus, SweepStopReason,
     SweepTimeline, TrimPolicy, ACOUSTIC_LEVEL_DBFS, MEASUREMENT_PEAK_CEILING_DBFS,
@@ -41,7 +41,7 @@ fn long_config() -> SweepConfig {
 fn run_complete(
     config: SweepConfig,
 ) -> (
-    tspi_calibration::sweep::SweepRunReport,
+    khaen_calibration::sweep::SweepRunReport,
     FakeSweepSink,
     SweepTimeline,
 ) {

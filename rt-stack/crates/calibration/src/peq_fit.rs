@@ -20,16 +20,16 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use tspi_fir_designer::modal_peq::{
+use khaen_designer::modal_peq::{
     compare_design_to_original, detect_modal_modes, freq_upper_hz, interpolate_curve_db,
     log_frequency_grid, octave_distance, validate_curve, validate_sample_rate, BandType, Biquad,
     ChannelPeq, CurvePoint, DesignMode, DetectedMode, ModalBand, ModalDetectConfig, PeqDesign,
     PeqError, PeqSource, DEFAULT_MODAL_BAND_HZ, MAX_MODAL_PEAKINGS,
 };
-use tspi_fir_designer::targets::{
+use khaen_designer::targets::{
     builtin_target, BuiltinOptions, BuiltinTarget, NonModalTargetSource, TargetCurve, TargetError,
 };
-use tspi_modal_design::timebase::{CommonD0, PhaseBasis};
+use khaen_modal_design::timebase::{CommonD0, PhaseBasis};
 
 use crate::job::{sha256_hex, ArtifactKind, ArtifactRecord, StageCtx, StageFailure};
 use crate::microfft::{next_pow2_at_least, rfft};

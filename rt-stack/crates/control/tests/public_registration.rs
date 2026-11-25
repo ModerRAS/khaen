@@ -1,4 +1,4 @@
-//! 公共测试注册（integrator 独占；crate tspi-control）。
+//! 公共测试注册（integrator 独占；crate khaen-control）。
 //!
 //! 约定（见 rt-stack/README.md §测试约定）：
 //! - leaf 测试文件放本目录的 <Txx>/ 子目录，例如 tests/T07/direct.rs；

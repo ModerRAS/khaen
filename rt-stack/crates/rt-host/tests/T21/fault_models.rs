@@ -4,15 +4,15 @@
 // 本文件经 src/fault.rs 末尾的 cfg(test) mod fault_tests { include!(...) } 进入单测构建
 // （cargo 不自动发现 tests/<子目录>；公共注册属 integrator，勿写入
 // tests/public_registration.rs）。运行：
-//   cargo test -p tspi-rt-host fault
+//   cargo test -p khaen-rt-host fault
 // 全部测试名 t21_ 前缀；离线：不碰设备/不启线程/不做板端动作。
 
 use super::*;
 use core::mem::needs_drop;
 
 use crate::admission::{AdmissionEnv, AdmissionReport, MemoryPlan};
-use tspi_dsp_core::rt::MAX_OUTPUT_CHANNELS;
-use tspi_dsp_core::workers::{ack_mask, TspiRtControlV1};
+use khaen_core::rt::MAX_OUTPUT_CHANNELS;
+use khaen_core::workers::{ack_mask, TspiRtControlV1};
 
 // ---------------------------------------------------------------------------
 // 夹具

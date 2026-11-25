@@ -11,26 +11,26 @@
 //! - 预分配 plan/state/build_scratch 容量契约与布局公式。
 //!
 //! Cargo 自动把 tests/T08/main.rs 发现为集成测试 target（不需要 public_registration 注册）。
-//! 运行：cargo test -p tspi-dsp-core partitioned -- --nocapture
+//! 运行：cargo test -p khaen-core partitioned -- --nocapture
 
 #![allow(dead_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use tspi_dsp_core::direct::{
+use khaen_core::direct::{
     direct_block_f32, direct_block_f64, direct_state_zero_f32, direct_state_zero_f64,
     DirectCoeffsF32, DirectCoeffsF64, DirectLayout, DirectTopology, DIRECT_MAX_PARTICIPANTS,
     DIRECT_MAX_ROLES, DIRECT_NO_SOURCE,
 };
-use tspi_dsp_core::partitioned::{
+use khaen_core::partitioned::{
     partitioned_block_f32, partitioned_block_f64, partitioned_state_zero_f32,
     partitioned_state_zero_f64, PartitionedLayout, PartitionedPlan, PARTITIONED_MAX_BLOCK,
     PARTITIONED_MAX_FFT, PARTITIONED_MAX_PARTICIPANTS, PARTITIONED_MAX_PARTITIONS,
     PARTITIONED_MAX_ROLES, PARTITIONED_MAX_ROUTES, PARTITIONED_MAX_TAPS,
     PARTITIONED_MAX_TAPS_EXTENDED,
 };
-use tspi_dsp_core::rt::RtStatus;
+use khaen_core::rt::RtStatus;
 
 // ---------------------------------------------------------------------------
 // T08 冻结精度门（FFT 引入舍入；T03 SPEC §3.5 逐位论证只适用于精确 MAC）
@@ -2801,18 +2801,18 @@ fn partitioned_rt_visible_types_and_capacity_consts() {
     assert_eq!(PARTITIONED_MAX_FFT, 256);
     assert_eq!(PARTITIONED_MAX_ROLES, DIRECT_MAX_ROLES);
     assert_eq!(PARTITIONED_MAX_PARTICIPANTS, DIRECT_MAX_PARTICIPANTS);
-    assert_eq!(PARTITIONED_MAX_ROUTES, tspi_dsp_core::rt::MAX_MATRIX_PATHS);
+    assert_eq!(PARTITIONED_MAX_ROUTES, khaen_core::rt::MAX_MATRIX_PATHS);
     assert_eq!(
         PARTITIONED_MAX_PARTITIONS,
-        tspi_dsp_core::rt::MAX_PARTITIONS as usize
+        khaen_core::rt::MAX_PARTITIONS as usize
     );
     assert_eq!(
         PARTITIONED_MAX_TAPS,
-        tspi_dsp_core::rt::TAPS_NORMAL_MAX as usize
+        khaen_core::rt::TAPS_NORMAL_MAX as usize
     );
     assert_eq!(
         PARTITIONED_MAX_TAPS_EXTENDED,
-        tspi_dsp_core::rt::TAPS_EXTENDED_MAX as usize
+        khaen_core::rt::TAPS_EXTENDED_MAX as usize
     );
     assert_eq!(PARTITIONED_MAX_TAPS_EXTENDED, 16_384);
     // 布局 = 8 个 u16（含 window_samples）+ 8 个 u32 = 48 B；POD、无 Drop、无引用。

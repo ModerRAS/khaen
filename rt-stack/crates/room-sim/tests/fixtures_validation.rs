@@ -3,7 +3,7 @@
 //! 运行：
 //!   $env:TSPI_ROOM_SIM_FIXTURES='...\fixtures'                              # 夹具根目录（含 scene-*/）
 //!   $env:TSPI_ROOM_SIM_VALIDATION='...\validation\room-sim-render-check.json'  # 输出 JSON 文件路径（不是目录！）
-//!   cargo test -p tspi-room-sim --test fixtures_validation --offline -- --ignored --nocapture
+//!   cargo test -p khaen-room-sim --test fixtures_validation --offline -- --ignored --nocapture
 //!
 //! 注意：TSPI_ROOM_SIM_VALIDATION 必须是**文件路径**；误传目录会 os error 5（本测试对目录形式
 //! 会补默认文件名，但脚本调用请直接给文件路径）。
@@ -12,8 +12,8 @@
 
 use std::path::{Path, PathBuf};
 
-use tspi_room_sim::fixture::SceneFixture;
-use tspi_room_sim::sha256::file_hex;
+use khaen_room_sim::fixture::SceneFixture;
+use khaen_room_sim::sha256::file_hex;
 
 fn json_string(value: &str) -> String {
     format!("{value:?}")
@@ -165,7 +165,7 @@ fn generated_fixtures_render_check() {
         );
         assert_eq!(
             fixture.image_source.placement,
-            tspi_room_sim::ism::ArrivalPlacement::LinearInterpolated,
+            khaen_room_sim::ism::ArrivalPlacement::LinearInterpolated,
             "{}: expected linear_interpolated placement",
             fixture.scene_id
         );
@@ -293,10 +293,10 @@ fn generated_fixtures_render_check() {
 
     let document = format!(
         r#"{{
-  "tool": "tspi-room-sim",
+  "tool": "khaen-room-sim",
   "kind": "SIMULATED / UNPROVEN",
   "contract": "rt-stack/evidence/calib-chain-20261121/mimo-opt-20261122/CONTRACT.md",
-  "command": "cargo test -p tspi-room-sim --test fixtures_validation --offline -- --ignored generated_fixtures_render_check",
+  "command": "cargo test -p khaen-room-sim --test fixtures_validation --offline -- --ignored generated_fixtures_render_check",
   "fixtures_dir": {fixtures_dir},
   "tolerance": {tolerance:?},
   "scenes": [
@@ -320,7 +320,7 @@ fn generated_fixtures_render_check() {
 }}
 "#,
         fixtures_dir = json_string(&fixtures_dir.display().to_string()),
-        tolerance = tspi_room_sim::fixture::RERENDER_TOLERANCE,
+        tolerance = khaen_room_sim::fixture::RERENDER_TOLERANCE,
         scenes = scene_json.join(",\n"),
         scene_count = scene_count,
         max_abs_delta = overall_max_abs_delta,

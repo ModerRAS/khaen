@@ -29,9 +29,9 @@
     "status": "not_run"
   },
   "sample_rate": 48000,
-  "schema": "tspi-calibration-report/v1",
+  "schema": "khaen-calibration-report/v1",
   "tool": {
-    "name": "tspi-calibrate",
+    "name": "khaen-calibrate",
     "version": "0.1.0"
   }
 }

@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/designer/src/corrected.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （不改 integrator 独占的 public_registration.rs；见 tests/T37/README.md）。
-// 运行：cargo test -p tspi-fir-designer corrected
+// 运行：cargo test -p khaen-designer corrected
 //
 // 独立 oracle 说明：
 // - 目标构造用 T11 import_json_bytes 真实导入（不是 mock 目标结构）；

@@ -2,7 +2,7 @@
 //
 // 本文件经 src/format.rs 末尾的 cfg(test) mod format_tests { include!(...) } 进入
 // lib 单测构建（cargo 不自动发现 tests/<子目录>；公共注册属 integrator，WBS T06 纪律）。
-// 运行：cargo test -p tspi-rt-host format（或 format_tests 精确过滤）
+// 运行：cargo test -p khaen-rt-host format（或 format_tests 精确过滤）
 // 全部测试名 t22_ 前缀；离线、不打开设备、不依赖货架第三方 crate。
 //
 // 覆盖：格式/字节映射/符号扩展/端序、归一化、round-ties-even、饱和/clip 统计、
@@ -12,8 +12,8 @@
 
 use super::*;
 use crate::alsa::{sample_bytes, DeviceSelector, DuplexRequest, DuplexSession, FakeBackend};
-use tspi_dsp_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
-use tspi_dsp_core::rt::RtStatus;
+use khaen_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
+use khaen_core::rt::RtStatus;
 
 const FMT_S24: u16 = sample_format::S24_3LE_INTERLEAVED;
 const FMT_S32: u16 = sample_format::S32_LE_INTERLEAVED;

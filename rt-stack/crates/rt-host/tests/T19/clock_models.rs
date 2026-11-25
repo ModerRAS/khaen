@@ -2,13 +2,13 @@
 //
 // 本文件经 src/clock.rs 末尾的 cfg(test) mod clock_tests { include!(...) } 进入单测构建
 // （cargo 不自动发现 tests/<子目录>；公共注册属 integrator）。运行：
-//   cargo test -p tspi-rt-host clock
+//   cargo test -p khaen-rt-host clock
 // 全部测试名 t19_ 前缀；模块路径 clock::clock_tests 含 clock，可按 clock 过滤。
 // 离线：不打开任何声卡/PTP/AoIP 设备；只用合成时间戳模型。
 
 use super::*;
-use tspi_dsp_core::rt::RtStatus;
-use tspi_dsp_core::workers::TspiRtControlV1;
+use khaen_core::rt::RtStatus;
+use khaen_core::workers::TspiRtControlV1;
 
 const FS: u32 = 48_000;
 const M0: u64 = 1_000_000_000;

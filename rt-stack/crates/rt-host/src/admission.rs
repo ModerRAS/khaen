@@ -85,10 +85,10 @@
 //! #[cfg(test)] mod admission_tests { include!(...) } 进入 lib 单测构建。
 //! integrator 不要再把 tests/T18 写进 public_registration.rs（会重复注册）。
 //!
-//! 运行：cargo test -p tspi-rt-host admission（executed > 0）。
+//! 运行：cargo test -p khaen-rt-host admission（executed > 0）。
 
-use tspi_dsp_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
-use tspi_dsp_core::rt::{
+use khaen_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
+use khaen_core::rt::{
     fft_size, max_partitions, PlanVersion, PlanView, RtStatus, BLOCK_SIZES, EVENT_RING_SLOTS,
     HIST_BUCKETS, MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_MATRIX_PATHS, MAX_OUTPUT_CHANNELS,
     MAX_OUTPUT_ROLES, MAX_WORKER_STACK_BYTES, QUARANTINE_SLOTS, RT_WORKERS, RT_WORKERS_FALLBACK,

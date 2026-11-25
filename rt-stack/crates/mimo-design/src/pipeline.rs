@@ -16,7 +16,7 @@ use crate::solve::{self, Cx};
 use crate::target;
 
 pub const REPORT_FORMAT: &str = "tspi-mimo-sim-report/v1";
-pub const TOOL_NAME: &str = "tspi-mimo-opt";
+pub const TOOL_NAME: &str = "khaen-mimo-opt";
 pub const CLAIM: &str = "synthetic offline study only; no real room, no measurement";
 
 /// 算法参数（默认值 = 契约 §6/§8 冻结默认）。

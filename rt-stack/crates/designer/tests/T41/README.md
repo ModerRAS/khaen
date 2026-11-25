@@ -6,7 +6,7 @@
 
 \`\`\`
 cd rt-stack
-cargo test -p tspi-fir-designer modal_peq
+cargo test -p khaen-designer modal_peq
 \`\`\`
 
 ## 为什么用 include! 而不是 public_registration.rs
@@ -24,7 +24,7 @@ mod modal_peq_tests {
 }
 \`\`\`
 
-本文件因此参与 \`src/lib.rs\` 的单测构建，真实被 \`cargo test -p tspi-fir-designer modal_peq\`
+本文件因此参与 \`src/lib.rs\` 的单测构建，真实被 \`cargo test -p khaen-designer modal_peq\`
 执行（executed = 32），测试名过滤路径含 \`modal_peq\`；**不需要 integrator 注册，也不要再把它加到
 public_registration.rs**（会重复注册/编译失败，因为文件按模块内联语义编写，依赖 \`super::*\` 作用域）。
 

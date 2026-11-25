@@ -1,6 +1,6 @@
 //! T48 private integration tests — solver ingest（raw/source/diag/position）.
 //!
-//! 运行（在 rt-stack/ 下）：cargo test -p tspi-modal-design ingest
+//! 运行（在 rt-stack/ 下）：cargo test -p khaen-modal-design ingest
 //! 文件位置约定：crates/modal-design/tests/T48/main.rs（leaf 私有测试；由 integrator 决定公共注册）。
 //!
 //! 覆盖：合法 session 全链路、reference 可选通道、以及 session/position/diag/analysis/raw/hash
@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tspi_modal_design::ingest::{
+use khaen_modal_design::ingest::{
     read_bundle, sha256_hex, IngestBundle, IngestError, IngestErrorKind, PositionRole,
     CAPTURE_FILE, POSITION_FILE, REFERENCE_FILE, SESSION_FILE, SHA256SUMS_FILE,
 };
@@ -597,7 +597,7 @@ fn fr_json() -> J {
 
 fn meta_json() -> J {
     J::obj(vec![
-        ("schema", J::s("tspi-calibration-meta/v1")),
+        ("schema", J::s("khaen-calibration-meta/v1")),
         ("sample_rate", J::n(SAMPLE_RATE as f64)),
         ("channels", J::n(22.0)),
         ("sweep_start_hz", J::n(15.0)),

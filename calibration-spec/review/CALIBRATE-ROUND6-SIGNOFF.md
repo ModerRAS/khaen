@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | 1/3 oct 频率窗纹波 | ✅ | @main.rs:585-596@ 按每点 ±1/6 oct 频率窗平滑后取 max-min；示例 pair FL:FR@2k ripple=**0.49dB**（与声明一致） |
 | measure-multi 诊断 JSON | ✅ | @main.rs:690-701@ 每通道 @<name>-chNN.diag.json@：nominal_start/actual_start/lag_samples/period_size/buffer_size/playback_offset_seconds/capture_file；T1/T5 可追溯 |
-| merge report/v1 | ✅ | @main.rs:427-446@ 输出 @<out>.report.json@：schema/tspi-calibration-report/v1、tool、created_unix、calibration_file.path+sha256、layout、sample_rate、environment、global_validation、pairs、overall_pass；实测 report 的 cal sha256 与实际文件一致 |
+| merge report/v1 | ✅ | @main.rs:427-446@ 输出 @<out>.report.json@：schema/khaen-calibration-report/v1、tool、created_unix、calibration_file.path+sha256、layout、sample_rate、environment、global_validation、pairs、overall_pass；实测 report 的 cal sha256 与实际文件一致 |
 | 未给 --pairs WARN | ✅ | @main.rs:325-327@ 未提供时 stderr WARN，提示 T4 应显式指定交叉对 |
 | 示例/回归 | ✅ | offline/offline-invert 过 validator（0 error/0 warning）；hand→FAIL/hand180→PASS；cargo test 11/11 |
 

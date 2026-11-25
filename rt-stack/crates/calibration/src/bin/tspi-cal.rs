@@ -25,34 +25,34 @@ use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 
-use tspi_calibration::fit_wiring::{
+use khaen_calibration::fit_wiring::{
     apply_measured_target_fir_experiment, enable_target_fir_p_post, synthetic_design, FitWiring,
     FitWiringDesign, WithheldAck,
 };
-use tspi_calibration::host_apply::HostApplyConfig;
-use tspi_calibration::job::{
+use khaen_calibration::host_apply::HostApplyConfig;
+use khaen_calibration::job::{
     ExitDisposition, JobManager, JobManagerConfig, JobRequest, JobSnapshot, SafeOutputController,
     SafetyError,
 };
-use tspi_calibration::compile_apply::ExperimentMode;
-use tspi_calibration::measured_design::{
+use khaen_calibration::compile_apply::ExperimentMode;
+use khaen_calibration::measured_design::{
     build_measured_design_opts, load_g_paths_file, load_measured_spec, MeasuredBuildOptions,
 };
-use tspi_calibration::rt60::{
+use khaen_calibration::rt60::{
     analyze_wav_path, csd_json, unix_now, warning_json, Rt60AnalyzedIr, Rt60Config, Rt60Report,
     Rt60Source,
 };
-use tspi_calibration::stage_backend::{
+use khaen_calibration::stage_backend::{
     EngineKind, RemeasureHostConfig, RemeasurePlayback, Rt60ExternalIr, Rt60StageConfig,
     StageBackend, StageBackendConfig, StageDeviceConfig, StageLevelConfig, StageMeasurementMode,
     StageSweepConfig,
 };
-use tspi_calibration::sweep::SweepOutput;
-use tspi_calibration::phase_fit::{DePhasedResponse, PhaseFitPoint};
-use tspi_fir_designer::modal_peq::log_frequency_grid;
-use tspi_fir_designer::targets::{builtin_target, BuiltinOptions, BuiltinTarget};
-use tspi_modal_design::timebase::CommonD0;
-use tspi_dsp_compat::ws::{json_encode, json_object, json_parse, JsonValue};
+use khaen_calibration::sweep::SweepOutput;
+use khaen_calibration::phase_fit::{DePhasedResponse, PhaseFitPoint};
+use khaen_designer::modal_peq::log_frequency_grid;
+use khaen_designer::targets::{builtin_target, BuiltinOptions, BuiltinTarget};
+use khaen_modal_design::timebase::CommonD0;
+use khaen_compat::ws::{json_encode, json_object, json_parse, JsonValue};
 
 const USAGE: &str = "\
 tspi-cal status|enter|measure|solve|remeasure|leave [--audible-authorized] [--sock PATH] [--f-hi HZ] [--target flat|tilt10]
@@ -125,7 +125,7 @@ tspi-cal run --engine tools --audible-authorized --out DIR --apply [--apply-host
   --settle-ms N          采集先起后等待（默认 1200）
   --apply-settle-ms N    apply-host 退出 → remeasure 采集之间的 settle（默认 1000；0=关闭，<500 拒绝）
   --remeasure-playback M 二次测量（remeasure/holdout）播放路径：aplay（默认，既有行为）|
-                         host-plan（T61 timeline → 2ch WAV → tspi-rt-host plan-arena，测得“校正量”）
+                         host-plan（T61 timeline → 2ch WAV → khaen-rt-host plan-arena，测得“校正量”）
                          仅 stereo-2.0 单点（2ch plan；7ch/4.1.2 = NOT_IMPLEMENTED）；sweep 恒 aplay
   --remeasure-plan PATH  显式 plan.bin（缺省从 --apply-host 的 host-apply/plan.bin 或 job
                          artifacts 的 compile/plan.bin 解析；找不到 fail-closed，不回退 aplay）
@@ -149,8 +149,8 @@ RT60/CSD 后处理（goal-6；默认开启，观察量，不阻断主流程；�
   --out DIR              证据输出目录（jobs/ artifact 树 + job.json + summary.json；必填）
   --apply                走到 T66 apply（默认停在 prepared 后 CLI 主动 rollback 收尾）
   --fault NAME           负向路径注入：fit-gate | bad-artifact | withhold-ack
-  --apply-host           Apply 段改用真实 tspi-rt-host plan-arena（默认离线合成 ack 模型）
-  --host-bin PATH        tspi-rt-host 可执行文件（默认 env TSPI_RT_HOST_BIN 或 PATH 中 tspi-rt-host）
+  --apply-host           Apply 段改用真实 khaen-rt-host plan-arena（默认离线合成 ack 模型）
+  --host-bin PATH        khaen-rt-host 可执行文件（默认 env TSPI_RT_HOST_BIN 或 PATH 中 khaen-rt-host）
   --host-backend NAME    host ALSA backend：fake（离线，默认）| alsa（板端窗口）
   --host-max-blocks N    host 运行 block 数上限（默认 8；板端可放大）
   --host-workers N       host worker 数 2|4（默认 4；dsp-host 4 核需与 plan 一致）
@@ -254,7 +254,7 @@ impl Args {
 }
 
 fn fixture_hash(label: &str) -> String {
-    tspi_calibration::job::sha256_hex(format!("tspi-cal-cli/v1\n{label}\n").as_bytes())
+    khaen_calibration::job::sha256_hex(format!("tspi-cal-cli/v1\n{label}\n").as_bytes())
 }
 
 fn fake_stage_config(label: &str) -> StageBackendConfig {
@@ -271,7 +271,7 @@ fn fake_stage_config(label: &str) -> StageBackendConfig {
         block_frames: 128,
         buffer_frames: 512,
         settle_ms: 10,
-        sample_format: tspi_dsp_core::abi::sample_format::S24_3LE_INTERLEAVED,
+        sample_format: khaen_core::abi::sample_format::S24_3LE_INTERLEAVED,
     };
     config.mic = Some(StageBackendConfig::umik1_declaration(
         "hw:1,0",
@@ -338,7 +338,7 @@ fn tools_stage_config(args: &Args, label: &str) -> Result<StageBackendConfig, (S
     let apply_settle_ms = arg_u64(
         args,
         "apply-settle-ms",
-        tspi_calibration::stage_backend::DEFAULT_APPLY_SETTLE_MS,
+        khaen_calibration::stage_backend::DEFAULT_APPLY_SETTLE_MS,
     )?;
     let mut config = StageBackendConfig::default();
     config.apply_settle_ms = apply_settle_ms;
@@ -354,7 +354,7 @@ fn tools_stage_config(args: &Args, label: &str) -> Result<StageBackendConfig, (S
         block_frames,
         buffer_frames,
         settle_ms,
-        sample_format: tspi_dsp_core::abi::sample_format::S24_3LE_INTERLEAVED,
+        sample_format: khaen_core::abi::sample_format::S24_3LE_INTERLEAVED,
     };
     // UMIK 声明：本机无 miniDSP 官方序列号校准文件 → cal_file/sha256 为**声明占位**，
     // 证据里如实写明；FR 只做 1 kHz 相对化（不声称绝对 SPL 校准）。
@@ -373,7 +373,7 @@ fn tools_stage_config(args: &Args, label: &str) -> Result<StageBackendConfig, (S
             }
             value.to_ascii_lowercase()
         }
-        None => tspi_calibration::job::sha256_hex(
+        None => khaen_calibration::job::sha256_hex(
             format!("tspi-umik1-cal-placeholder/v1\nserial={mic_serial}\ncal_file={mic_cal_file}\n")
                 .as_bytes(),
         ),
@@ -543,7 +543,7 @@ fn job_request(
         true
     };
     Ok(JobRequest {
-        kind: tspi_calibration::job::JobKind::Full,
+        kind: khaen_calibration::job::JobKind::Full,
         label: label.to_string(),
         layout,
         sample_rate,
@@ -716,7 +716,7 @@ fn host_apply_json(config: Option<&HostApplyConfig>, snapshot: &JobSnapshot) -> 
     let report_bytes = std::fs::read(&report_path).ok();
     let report_sha = report_bytes
         .as_ref()
-        .map(|bytes| tspi_calibration::job::sha256_hex(bytes));
+        .map(|bytes| khaen_calibration::job::sha256_hex(bytes));
     let evidence_rel = "apply/host-apply.json";
     let evidence = snapshot
         .artifacts
@@ -750,7 +750,7 @@ fn host_apply_json(config: Option<&HostApplyConfig>, snapshot: &JobSnapshot) -> 
         (
             "note",
             text(
-                "block all-ack 来自真实 tspi-rt-host plan-arena 运行；backend=fake 时无真实声卡/声音（离线接线验证），backend=alsa 属板端窗口。"
+                "block all-ack 来自真实 khaen-rt-host plan-arena 运行；backend=fake 时无真实声卡/声音（离线接线验证），backend=alsa 属板端窗口。"
                     .to_string(),
             ),
         ),
@@ -804,7 +804,7 @@ fn remeasure_playback_json(config: &StageBackendConfig, snapshot: &JobSnapshot) 
         (
             "note",
             text(if config.remeasure_playback == RemeasurePlayback::HostPlan {
-                "remeasure/holdout 播放走 tspi-rt-host plan-arena（[capture] source=file + [paths] plan=apply/compile plan）；plan 在测量播放路径里，identity/plan 两次实测差即校正量。声学实测仍须出声窗口（本机离线运行不得声称声学效果）。"
+                "remeasure/holdout 播放走 khaen-rt-host plan-arena（[capture] source=file + [paths] plan=apply/compile plan）；plan 在测量播放路径里，identity/plan 两次实测差即校正量。声学实测仍须出声窗口（本机离线运行不得声称声学效果）。"
                     .to_string()
             } else {
                 "remeasure/holdout 播放仍走 aplay 直放（默认）：测量路径不含 plan，不能从该路径读“校正量”；需要 --remeasure-playback host-plan。"
@@ -1221,7 +1221,7 @@ fn run(args: &Args) -> Result<u8, (String, u8)> {
             ));
         }
         design_input.compile.options.force_form =
-            Some(tspi_dsp_core::compile::FusionForm::Factorized);
+            Some(khaen_core::compile::FusionForm::Factorized);
         eprintln!(
             "EXPERIMENT: compile force_form=Factorized（host plan-arena 当前只接受 factorized；fused NOT_WIRED）"
         );
@@ -1490,7 +1490,7 @@ fn run(args: &Args) -> Result<u8, (String, u8)> {
         (
             "t3_note",
             text(if backend_config.remeasure_playback == RemeasurePlayback::HostPlan {
-                "remeasure/holdout 播放已走 tspi-rt-host plan-arena（T61 timeline → 2ch WAV → [capture] source=file），测量路径真的经过 apply/compile 的 plan；identity 与 plan 两次实测之差即“校正量”。生产 systemd host 是否消费该 plan 是另一条链（不改生产路径）；声学实测须在出声窗口执行，本机离线运行不得声称已测到。"
+                "remeasure/holdout 播放已走 khaen-rt-host plan-arena（T61 timeline → 2ch WAV → [capture] source=file），测量路径真的经过 apply/compile 的 plan；identity 与 plan 两次实测之差即“校正量”。生产 systemd host 是否消费该 plan 是另一条链（不改生产路径）；声学实测须在出声窗口执行，本机离线运行不得声称已测到。"
                     .to_string()
             } else {
                 "remeasure 是再测一次真实音频（measured）；但默认播放仍走 aplay 直放（路径不含 plan），故不能从该路径读“校正量”：需要 --remeasure-playback host-plan。T3 结论 NOT_CONFIRMED，不得写成校正生效。"
@@ -1534,9 +1534,9 @@ fn run(args: &Args) -> Result<u8, (String, u8)> {
     } else {
         matches!(
             snapshot.state,
-            tspi_calibration::job::JobState::Failed
-                | tspi_calibration::job::JobState::RolledBack
-                | tspi_calibration::job::JobState::Cancelled
+            khaen_calibration::job::JobState::Failed
+                | khaen_calibration::job::JobState::RolledBack
+                | khaen_calibration::job::JobState::Cancelled
         )
     };
     if failed {
@@ -1723,7 +1723,7 @@ fn rt60_run(args: &Args) -> Result<u8, (String, u8)> {
             Ok((analysis, bytes)) => entries.push(Rt60AnalyzedIr {
                 analysis,
                 source_path: Some(path.display().to_string()),
-                ir_sha256: Some(tspi_calibration::job::sha256_hex(&bytes)),
+                ir_sha256: Some(khaen_calibration::job::sha256_hex(&bytes)),
                 ir_wav_path: None,
                 repeats_averaged: 1,
             }),
@@ -1766,7 +1766,7 @@ fn rt60_run(args: &Args) -> Result<u8, (String, u8)> {
     std::fs::write(out_dir.join("rt60.csv"), report.rt60_csv())
         .map_err(|error| (format!("write rt60.csv: {error}"), 2u8))?;
     for entry in &report.irs {
-        let name = tspi_calibration::rt60::safe_artifact_label(&entry.analysis.label);
+        let name = khaen_calibration::rt60::safe_artifact_label(&entry.analysis.label);
         std::fs::write(
             csd_dir.join(format!("{name}.json")),
             csd_json(entry, report.config.csd_window_ms),
@@ -1841,7 +1841,7 @@ fn main_entry() -> Result<u8, (String, u8)> {
 
 fn host_client(command: &str, args: &[String]) -> ExitCode {
     let audible = args.iter().any(|item| item == "--audible-authorized");
-    let mut sock = tspi_rt_host::cal_control::socket_path();
+    let mut sock = khaen_rt_host::cal_control::socket_path();
     let mut f_hi = String::new();
     let mut target = String::new();
     let mut index = 0usize;
@@ -1871,7 +1871,7 @@ fn host_client(command: &str, args: &[String]) -> ExitCode {
         request.push_str(&format!(r#","target":"{target}""#));
     }
     request.push('}');
-    match tspi_rt_host::cal_control::exchange(&sock, &request) {
+    match khaen_rt_host::cal_control::exchange(&sock, &request) {
         Ok(line) => {
             println!("{line}");
             if line.contains("\"ok\":true") {

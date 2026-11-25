@@ -1,4 +1,4 @@
-//! TSPI DSP core（crate tspi-dsp-core）——WBS T06 scaffold。
+//! TSPI DSP core（crate khaen-core）——WBS T06 scaffold。
 //!
 //! 本 crate 是 RT-first DSP 栈的 core 层：ABI v1 字节契约、RT 类型/错误码、常量、
 //! plan 构建/校验（NONRT）与 kernel 模块注册。**本 crate 目前只有 stub**：

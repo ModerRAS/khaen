@@ -14,13 +14,13 @@ crates/designer/src/corrected.rs 末尾有：
     }
 
 include! 相对 src/corrected.rs 解析到本目录的 corrected_cases.rs，于是这些测试是
-tspi-fir-designer lib 的单元测试（模块路径 corrected::corrected_tests::*），
+khaen-designer lib 的单元测试（模块路径 corrected::corrected_tests::*），
 可以按名字过滤执行：
 
     cd rt-stack
-    cargo test -p tspi-fir-designer corrected
-    cargo test -p tspi-fir-designer --lib corrected -- --list
-    cargo test -p tspi-fir-designer --lib corrected -- --nocapture
+    cargo test -p khaen-designer corrected
+    cargo test -p khaen-designer --lib corrected -- --list
+    cargo test -p khaen-designer --lib corrected -- --nocapture
 
 **integrator 不要再把本文件注册进 public_registration.rs**（会与 include! 重复编译）。
 

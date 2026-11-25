@@ -214,7 +214,7 @@ mod tests {
     /// R:\Temp 在本机不可写；先探测 current_dir（cargo test 的包根），失败再退回 temp_dir。
     fn temp_path(name: &str) -> PathBuf {
         let file_name = format!(
-            "tspi-room-sim-wav-{}-{}-{name}.wav",
+            "khaen-room-sim-wav-{}-{}-{name}.wav",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

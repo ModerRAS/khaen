@@ -4,7 +4,7 @@
 // 注册方式：crates/rt-host/src/scheduler.rs 末尾 #[cfg(test)] mod scheduler_fake_tests
 // { include!("../tests/T45/scheduler_fake.rs"); }（cargo 不自动发现 tests/<子目录>；
 // 公共注册属 integrator，勿写入 tests/public_registration.rs）。
-// 运行：cargo test -p tspi-rt-host scheduler_fake
+// 运行：cargo test -p khaen-rt-host scheduler_fake
 //
 // 夹具说明：SYNTHETIC(合成) 板卡快照，与 WBS §7 / S0-02/S0-03/S0-05 被动命令输出同构：
 // 8 CPU = DSP_CPUS 0..3（isolcpus=0-3 只作为“计划”记录，未执行）+ 控制/网络/PTP/IRQ 在 4..7。
@@ -497,11 +497,11 @@ fn scheduler_fake_request_defaults_and_t09_alignment() {
     // T09 默认值对齐（2 worker 独立 profile 也用同一 bounded spin/cutoff 族）。
     assert_eq!(
         req.spin_max_iters,
-        tspi_dsp_core::workers::WORKER_DEFAULT_SPIN_MAX_ITERS
+        khaen_core::workers::WORKER_DEFAULT_SPIN_MAX_ITERS
     );
     assert_eq!(
         req.cutoff_drain_iters,
-        tspi_dsp_core::workers::WORKER_DEFAULT_CUTOFF_DRAIN_ITERS
+        khaen_core::workers::WORKER_DEFAULT_CUTOFF_DRAIN_ITERS
     );
     assert_eq!(SchedRequest::default(), req);
 }
@@ -1199,7 +1199,7 @@ fn scheduler_fake_source_has_no_kernel_write_or_ffi_calls() {
 
 #[test]
 fn scheduler_fake_t09_ack_mask_and_profile_alignment() {
-    use tspi_dsp_core::workers::ack_mask as t09_ack_mask;
+    use khaen_core::workers::ack_mask as t09_ack_mask;
     let four = plan_4worker();
     let two = plan_2worker();
     assert_eq!(four.ack_mask(), t09_ack_mask(four.expected_workers()));
@@ -1211,15 +1211,15 @@ fn scheduler_fake_t09_ack_mask_and_profile_alignment() {
     assert!(two.is_two_worker_profile() == (two.workers == RT_WORKERS_FALLBACK));
     assert!(four.is_two_worker_profile() == (four.workers == RT_WORKERS_FALLBACK));
     // §3.4：affinity 表条目 <= WORKER_AFFINITY_COUNT。
-    assert!(four.affinity_count() as usize <= tspi_dsp_core::rt::WORKER_BITS as usize + 3);
+    assert!(four.affinity_count() as usize <= khaen_core::rt::WORKER_BITS as usize + 3);
     assert!(two.affinity_count() as usize <= WORKER_AFFINITY_COUNT);
 }
 
 #[test]
 fn scheduler_fake_t18_cpu_set_gate_wiring() {
     use crate::admission::{validate as admission_validate, AdmissionEnv};
-    use tspi_dsp_core::abi::{TspiPlanHeaderV1, ABI_VERSION, TSPI_PLAN_MAGIC};
-    use tspi_dsp_core::rt::PlanView;
+    use khaen_core::abi::{TspiPlanHeaderV1, ABI_VERSION, TSPI_PLAN_MAGIC};
+    use khaen_core::rt::PlanView;
 
     let topo = topology_8();
     let planned = plan_4worker();

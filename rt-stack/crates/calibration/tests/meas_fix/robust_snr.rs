@@ -2,7 +2,7 @@
 //
 // 注册方式：crates/calibration/src/capture.rs 末尾
 //   #[cfg(test)] mod meas_fix_tests { include!("tests/meas_fix/robust_snr.rs"); }
-// 运行：cargo test -p tspi-calibration meas_fix
+// 运行：cargo test -p khaen-calibration meas_fix
 //
 // **合成数据，不是真实板端证据**：按 g0-g1 snr-cliff.json 的实测参数构造
 //   - 采集长度 731008 帧（48 kHz, 15.229 s）

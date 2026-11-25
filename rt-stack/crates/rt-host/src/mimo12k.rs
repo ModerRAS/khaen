@@ -19,7 +19,7 @@
 
 use std::path::Path;
 
-use tspi_dsp_core::mimo12k::{
+use khaen_core::mimo12k::{
     Mimo12kLayout, Mimo12kRuntime, MIMO12K_GROUP, MIMO12K_LOWRATE_HZ, MIMO12K_MAX_BLOCK48,
     MIMO12K_MAX_PARTICIPANTS,
 };

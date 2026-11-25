@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import run_acceptance as ra  # noqa: E402
 
-BIN = "/tmp/tspi-calibrate"
+BIN = "/tmp/khaen-calibrate"
 PAIRS = ra.RUNBOOK_EXAMPLE_PAIRS
 ISO = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$"
 T1_MEASURE = [
@@ -430,7 +430,7 @@ class AcceptanceTests(unittest.TestCase):
                     ["all", "--out", str(out), "--key", str(_key(root)), "--pairs", "FL:SUB1"]
                 )
                 bin_code, _stdout, bin_err = self.run_main(
-                    ["t1", "--out", str(out), "--key", str(_key(root)), "--calibrate-bin", "/tmp/tspi-calibrate;id"]
+                    ["t1", "--out", str(out), "--key", str(_key(root)), "--calibrate-bin", "/tmp/khaen-calibrate;id"]
                 )
             out_was_created = out.exists()
         self.assertEqual(missing_code, 2)
@@ -572,7 +572,7 @@ class AcceptanceTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             out = root / "out"
-            report = json.dumps({"environment": {"chunksize": 64}, "schema": "tspi-calibration-report/v1"}).encode()
+            report = json.dumps({"environment": {"chunksize": 64}, "schema": "khaen-calibration-report/v1"}).encode()
             fake = FakeTransport(out, files={"/var/lib/tspi-calib/t4/calibration.yml.report.json": report})
             code, _stdout, stderr = self.run_main(
                 ["t4", "--out", str(out), "--key", str(_key(root)), "--pairs", PAIRS],
@@ -674,10 +674,10 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_source_has_no_partial_run_acceptance_elsewhere(self) -> None:
         self.assertEqual(ra.DEFAULT_HOST, "192.0.2.215")
-        self.assertEqual(ra.DEFAULT_CALIBRATE_BIN, "/tmp/tspi-calibrate")
-        self.assertEqual(ra.validate_calibrate_bin("/tmp/tspi-calibrate"), None)
-        self.assertIsNotNone(ra.validate_calibrate_bin("tspi-calibrate"))
-        self.assertIsNotNone(ra.validate_calibrate_bin("/tmp/../tmp/tspi-calibrate"))
+        self.assertEqual(ra.DEFAULT_CALIBRATE_BIN, "/tmp/khaen-calibrate")
+        self.assertEqual(ra.validate_calibrate_bin("/tmp/khaen-calibrate"), None)
+        self.assertIsNotNone(ra.validate_calibrate_bin("khaen-calibrate"))
+        self.assertIsNotNone(ra.validate_calibrate_bin("/tmp/../tmp/khaen-calibrate"))
 
 
 if __name__ == "__main__":

@@ -137,7 +137,7 @@ mod tests {
     async fn real_runner_reports_missing_program() {
         let runner = RealCommandRunner::new(Duration::from_secs(2));
         let err = runner
-            .run("tspi-audio-web-definitely-not-exist", &["--version"])
+            .run("khaen-audio-web-definitely-not-exist", &["--version"])
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Spawn(_)));

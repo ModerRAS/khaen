@@ -3,7 +3,7 @@
 // 归属：WBS T39 / task-75，owner rt-fir-crossover；写域 leaf + tests/T39 + evidence/T39。
 // 本文件通过 src/crossover.rs 末尾的 include! 进入 #[cfg(test)] 子模块执行：
 //
-//     cargo test -p tspi-fir-designer crossover
+//     cargo test -p khaen-designer crossover
 //
 // 覆盖（spec fir-toolbox.md v1.2-draft §4.1 + §3.1/§1.2-1.5 口径）：
 // - 类型解析/未知 type 拒收；解析 LR/BW 模型手算向量（fc = −6.0206/−3.0103 dB、和全通性、

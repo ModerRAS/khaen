@@ -1,7 +1,7 @@
 //! [NONRT] 自研用户态 AES67 接收端 → host capture 输入的**最小接线适配**（task-235）。
 //!
 //! 与 T43 \`aoip.rs\`（AES67/Inferno 端点接入，复用外部 daemon/ALSA 卡）不同：本模块接入
-//! **自研用户态接收端** \`tspi-aoip-aes67\`（SDP/RTP L24/抖动缓冲/capture 固定块），把
+//! **自研用户态接收端** \`khaen-aoip-aes67\`（SDP/RTP L24/抖动缓冲/capture 固定块），把
 //! 固定 128 帧块转成 host 图的 **planar f32** 输入，并复用 T43 的 H16 容器/角色映射语义
 //! （\`H16FlowConfig\`/\`H16Container\`/\`plan_role_selection\`，禁止静默丢弃/静默零填）。
 //!
@@ -18,17 +18,17 @@
 //!   \`capture.source=aes67\` 的第二传输接进 \`run\` 需要新增配置项并归 T26/T74 串行接线，
 //!   本任务不修改 host bin **NOT_WIRED**；
 //! - 真实网卡/组播/IGMP/PTP/电平/听音 **NOT_RUN**；离线 loopback 由
-//!   \`tspi-aoip-aes67\` 的集成测试覆盖，本模块测试用确定性 jitter reader 覆盖映射。
+//!   \`khaen-aoip-aes67\` 的集成测试覆盖，本模块测试用确定性 jitter reader 覆盖映射。
 //!
 //! 失流语义（T43 对齐）：任一 flow 首个样本未到/欠载 → **整块静音** 并计数（禁止半块
 //! 输出、禁止拿另一条 flow 数据顶替）；持续失流/端点错误的上层 fail-closed 状态机归
 //! T43/T26（本模块只返回 \`BlockStatus\`）。
 
-use tspi_aoip_aes67::capture::CaptureBlockSource;
-use tspi_aoip_aes67::clock::{frames_to_ns_ceil, MediaClock, UsrvClock};
-use tspi_aoip_aes67::jitter::{BlockStatus, JitterReader, JitterStats};
-use tspi_aoip_aes67::receiver::{Aes67Receiver, ReceiverConfig, ReceiverStats};
-use tspi_aoip_aes67::rtp;
+use khaen_aoip_aes67::capture::CaptureBlockSource;
+use khaen_aoip_aes67::clock::{frames_to_ns_ceil, MediaClock, UsrvClock};
+use khaen_aoip_aes67::jitter::{BlockStatus, JitterReader, JitterStats};
+use khaen_aoip_aes67::receiver::{Aes67Receiver, ReceiverConfig, ReceiverStats};
+use khaen_aoip_aes67::rtp;
 
 use crate::aoip::{self, H16Container, H16FlowConfig, H16Role, NonLogicalPolicy, RoleSelection};
 
@@ -649,10 +649,10 @@ impl Aes67RxCapture {
             channel_sumsq: [0.0; AES67_RX_MAX_GRAPH_CHANNELS],
             channel_peak: [0.0; AES67_RX_MAX_GRAPH_CHANNELS],
             meter_frames: 0,
-            clock: UsrvClock::new(tspi_aoip_aes67::AES67_RATE_HZ),
+            clock: UsrvClock::new(khaen_aoip_aes67::AES67_RATE_HZ),
             flow_info: Vec::new(),
             local_addrs: Vec::new(),
-            dump: Aes67RxDump::from_env(graph_channels, tspi_aoip_aes67::AES67_RATE_HZ),
+            dump: Aes67RxDump::from_env(graph_channels, khaen_aoip_aes67::AES67_RATE_HZ),
         })
     }
 
@@ -905,7 +905,7 @@ impl Aes67RxCapture {
                 flow_clock
                     .latency_frames
                     .saturating_add(flow_clock.delivered_frames),
-                tspi_aoip_aes67::AES67_RATE_HZ,
+                khaen_aoip_aes67::AES67_RATE_HZ,
             ));
         }
         if clock_reset {
@@ -1079,10 +1079,10 @@ impl Aes67RxCapture {
         use std::fmt::Write as _;
         let _ = write!(
             json,
-            "{{\"proto\":\"tspi-rt-host/aes67-rx\",\"version\":\"{}\",\
+            "{{\"proto\":\"khaen-rt-host/aes67-rx\",\"version\":\"{}\",\
 \"layout\":\"{}\",\"graph_channels\":{},\"container_channels\":{},\
 \"flow_count\":{},\"flow_lens\":[",
-            tspi_aoip_aes67::PROTO_VERSION,
+            khaen_aoip_aes67::PROTO_VERSION,
             self.layout,
             self.graph_channels,
             self.container.capture_channels(),

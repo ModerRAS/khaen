@@ -31,7 +31,7 @@ fn abi_layout_exit_0() {
     // core-v1 §11.2 v1.1.2：abi-layout 检查项数必须等于 spec 期望（旧 109 → 120）。
     let want = format!(
         "scanned={}",
-        tspi_rt_check::abi_layout::RT_CHECK_ABI_LAYOUT_SCANNED
+        khaen_rt_check::abi_layout::RT_CHECK_ABI_LAYOUT_SCANNED
     );
     assert!(
         stdout.contains(&want),

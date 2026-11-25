@@ -115,7 +115,7 @@ H16 角色表不适合做这次重排：
 
 ## 7. 测试与证据
 
-`TEMP` / `TMP` 指向 `C:/WorkSpace/Claw/scratch/lead/testtmp` 后运行 `cargo test -p tspi-rt-host`。至少覆盖：
+`TEMP` / `TMP` 指向 `C:/WorkSpace/Claw/scratch/lead/testtmp` 后运行 `cargo test -p khaen-rt-host`。至少覆盖：
 
 - `nsp-5.1.2` 对 `4.1.2` 得到 `Applied`，C 在 2，折叠后 FL/FR 为 `原值 + 0.7079458·C`，C 为 0，LFE 与 SL/SR/TFL/TFR 逐位不变，默认峰值下没有 D7 trim。
 - 新 plan 的七条 path 与第 4 节一致；identity 模式的 sha256 仍是 `52f2f3adaeb4058180cea88a63232cd4ba02321d7521f60331f62afff5cb1c0d`。

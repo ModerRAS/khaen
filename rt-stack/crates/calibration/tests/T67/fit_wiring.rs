@@ -2,7 +2,7 @@
 // lib 单测构建；cargo 不自动发现 tests/<Txx>/ 子目录；公共注册属 integrator，勿写入
 // public_registration.rs）。全部测试名 t67_wiring_ 前缀。
 //
-// 运行：cargo test -p tspi-calibration t67_wiring_
+// 运行：cargo test -p khaen-calibration t67_wiring_
 // 覆盖（任务卡要求）：合法链路 / 门失败 / 坏 plan / 回滚路径，全部 fake 数据（离线合成引擎 +
 // synthetic_offline 设计输入）。无板端/无声卡/无真实 apply；NOT_RUN 见 evidence/cursor-fix-fitwiring/。
 
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 
-use tspi_dsp_compat::ws::json_parse;
+use khaen_compat::ws::json_parse;
 
 use crate::compile_apply::{compile_plan, CompileApplyRequest, CompiledPlan};
 use crate::job::{
@@ -72,7 +72,7 @@ fn fake_stage_config() -> StageBackendConfig {
         block_frames: 128,
         buffer_frames: 512,
         settle_ms: 10,
-        sample_format: tspi_dsp_core::abi::sample_format::S24_3LE_INTERLEAVED,
+        sample_format: khaen_core::abi::sample_format::S24_3LE_INTERLEAVED,
     };
     config.mic = Some(StageBackendConfig::umik1_declaration(
         "hw:1,0",
@@ -175,9 +175,9 @@ fn artifact_text(snapshot: &JobSnapshot, relative_path: &str) -> String {
 }
 
 fn json_field<'a>(
-    document: &'a tspi_dsp_compat::ws::JsonValue,
+    document: &'a khaen_compat::ws::JsonValue,
     field: &str,
-) -> &'a tspi_dsp_compat::ws::JsonValue {
+) -> &'a khaen_compat::ws::JsonValue {
     document
         .get(field)
         .unwrap_or_else(|| panic!("missing json field {field}"))
@@ -383,7 +383,7 @@ fn t67_wiring_full_job_reaches_apply_with_artifacts() {
     assert!(plan.len() > 128, "plan.bin too small: {} bytes", plan.len());
     assert_eq!(
         u32::from_le_bytes([plan[0], plan[1], plan[2], plan[3]]),
-        tspi_dsp_core::abi::TSPI_PLAN_MAGIC,
+        khaen_core::abi::TSPI_PLAN_MAGIC,
         "plan.bin 必须以 TSPI_PLAN_MAGIC 开头"
     );
     // snapshot 的 applied version 来自接线 set_applied_version（ack 后）。
@@ -719,11 +719,11 @@ fn t67_wiring_measured_target_fir_experiment_requires_single_point() {
     assert!(outcome.zero_phase_delay);
     assert_eq!(
         outcome.force_form,
-        tspi_dsp_core::compile::FusionForm::Factorized
+        khaen_core::compile::FusionForm::Factorized
     );
     assert_eq!(
         design.compile.options.force_form,
-        Some(tspi_dsp_core::compile::FusionForm::Factorized),
+        Some(khaen_core::compile::FusionForm::Factorized),
         "host plan-arena 只接受 factorized，实验必须显式强制"
     );
     assert!(

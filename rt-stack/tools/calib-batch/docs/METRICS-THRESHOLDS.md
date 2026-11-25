@@ -7,7 +7,7 @@
 ## 1. 信号链与预处理
 
 1. 激励：指数扫频（Farina），冻结参数（start/end Hz、秒数、fade、电平、重复间隔）。
-2. 采集：`tspi-calibrate measure-multi` 单次连续 arecord+playback（S24_3LE 裸流）；
+2. 采集：`khaen-calibrate measure-multi` 单次连续 arecord+playback（S24_3LE 裸流）；
    每点位一个 capture.raw，内含全部通道 × repeats 的 slot 时间线（pre + n*slot + post + 2 s）。
 3. 起点：互相关在冻结 lead-in ±0.25 s 内定位实际起点（不接受相邻 repeat 的同等峰）。
 4. IR：Farina 反卷积；每通道 repeats 取**中位数 IR**；IR 窗必须短于 repeat 间隔（防止

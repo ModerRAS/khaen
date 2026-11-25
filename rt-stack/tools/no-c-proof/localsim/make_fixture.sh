@@ -29,15 +29,15 @@ mkdir -p "$B"/proc/asound/card4/pcm0p/sub0 "$B"/proc/sys/kernel/random \
          "$M"/units "$M"/active "$M"/enabled
 
 # ---- mock systemd 单元仓库 ---------------------------------------------------
-cp "$RS"/service/tspi-rt-host.service "$RS"/service/tspi-rt-daemon.service "$RS"/service/tspi-rt-stack.target "$M"/units/ 2>/dev/null || true
+cp "$RS"/service/khaen-rt-host.service "$RS"/service/tspi-rt-daemon.service "$RS"/service/tspi-rt-stack.target "$M"/units/ 2>/dev/null || true
 grep -v '^Before=' "$RS"/deploy/config/tspi-motu-48k-keeper.service > "$M"/units/tspi-motu-48k-keeper.service 2>/dev/null || true
-for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-audio.target tspi-boot-mode.service tspi-audio-web.service; do
+for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-audio.target tspi-boot-mode.service khaen-audio-web.service; do
   printf '[Unit]\nDescription=old C/old entry stub (%s) - masked+inactive fixture\n' "$u" > "$M"/units/"$u"
   printf 'masked\n' > "$M"/enabled/"$u"
 done
 printf 'enabled\n' > "$M"/enabled/tspi-rt-stack.target
 printf 'enabled\n' > "$M"/enabled/tspi-motu-48k-keeper.service
-touch "$M"/active/tspi-rt-host.service "$M"/active/tspi-rt-daemon.service "$M"/active/tspi-rt-stack.target
+touch "$M"/active/khaen-rt-host.service "$M"/active/tspi-rt-daemon.service "$M"/active/tspi-rt-stack.target
 : > "$M"/ss.txt
 : > "$M"/procs
 
@@ -47,9 +47,9 @@ printf 'state: RUNNING\nowner_pid   : 4321\n' > "$B"/proc/asound/card4/pcm0p/sub
 printf '1234567.89 2345678.90\n' > "$B"/proc/uptime
 printf 'fixture-boot-id-0001\n' > "$B"/proc/sys/kernel/random/boot_id
 : > "$B"/dev/snd/pcmC4D0p; : > "$B"/dev/snd/pcmC4D0c; : > "$B"/dev/snd/controlC4; : > "$B"/dev/snd/pcmC3D0c
-printf '#!/bin/sh\necho tspi-rt-host-fixture\n' > "$B"/opt/tspi-rt-stack/current/bin/tspi-rt-host
+printf '#!/bin/sh\necho khaen-rt-host-fixture\n' > "$B"/opt/tspi-rt-stack/current/bin/khaen-rt-host
 printf '#!/bin/sh\necho tspi-rt-daemon-fixture\n' > "$B"/opt/tspi-rt-stack/current/bin/tspi-rt-daemon
-chmod +x "$B"/opt/tspi-rt-stack/current/bin/tspi-rt-host "$B"/opt/tspi-rt-stack/current/bin/tspi-rt-daemon 2>/dev/null || true
+chmod +x "$B"/opt/tspi-rt-stack/current/bin/khaen-rt-host "$B"/opt/tspi-rt-stack/current/bin/tspi-rt-daemon 2>/dev/null || true
 printf 'block_size = 128\n' > "$B"/etc/tspi-rt-stack/rt-host.toml
 printf 'bind = "127.0.0.1:8090"\n' > "$B"/etc/tspi-rt-stack/rt-daemon.toml
 ln -s /etc/systemd/system/tspi-rt-stack.target "$B"/etc/systemd/system/multi-user.target.wants/tspi-rt-stack.target 2>/dev/null || true
@@ -65,10 +65,10 @@ mkproc() { # pid comm cmdline cgroup
   ln -s /dev/null "$d/fd/1" 2>/dev/null || true
 }
 mkproc 1 systemd "/sbin/init" "/init.scope"
-mkproc 4321 tspi-rt-host "tspi-rt-host run --config /etc/tspi-rt-stack/rt-host.toml" "/system.slice/tspi-rt-host.service"
+mkproc 4321 khaen-rt-host "khaen-rt-host run --config /etc/tspi-rt-stack/rt-host.toml" "/system.slice/khaen-rt-host.service"
 mkproc 4322 tspi-rt-daemon "tspi-rt-daemon serve --config /etc/tspi-rt-stack/rt-daemon.toml" "/system.slice/tspi-rt-daemon.service"
 mkproc 4323 systemd-journal "systemd-journald" "/system.slice/systemd-journald.service"
-ln -s "$B/opt/tspi-rt-stack/current/bin/tspi-rt-host" "$B/proc/4321/exe" 2>/dev/null || true
+ln -s "$B/opt/tspi-rt-stack/current/bin/khaen-rt-host" "$B/proc/4321/exe" 2>/dev/null || true
 ln -s "$B/opt/tspi-rt-stack/current/bin/tspi-rt-daemon" "$B/proc/4322/exe" 2>/dev/null || true
 ln -s "$B/dev/snd/pcmC4D0p" "$B/proc/4321/fd/5" 2>/dev/null || true
 ln -s "$B/dev/snd/pcmC3D0c" "$B/proc/4323/fd/6" 2>/dev/null || true
@@ -108,8 +108,8 @@ case "$VARIANT" in
   fail-wants)
     ln -sfn /dev/null "$B"/etc/systemd/system/multi-user.target.wants/tspi-camilladsp.service 2>/dev/null || true ;;
   fail-duplicate-host)
-    mkproc 4402 tspi-rt-host "tspi-rt-host run --config /etc/tspi-rt-stack/rt-host.toml" "/system.slice/tspi-rt-host.service"
-    ln -s "$B/opt/tspi-rt-stack/current/bin/tspi-rt-host" "$B/proc/4402/exe" 2>/dev/null || true ;;
+    mkproc 4402 khaen-rt-host "khaen-rt-host run --config /etc/tspi-rt-stack/rt-host.toml" "/system.slice/khaen-rt-host.service"
+    ln -s "$B/opt/tspi-rt-stack/current/bin/khaen-rt-host" "$B/proc/4402/exe" 2>/dev/null || true ;;
   *) echo "unknown variant: $VARIANT" >&2; exit 2 ;;
 esac
 printf 'fixture variant=%s built at %s\n' "$VARIANT" "$OUT"

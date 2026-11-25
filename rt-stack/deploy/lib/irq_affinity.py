@@ -10,7 +10,7 @@
 本脚本做什么：读取 /proc/irq/<irq>/{smp_affinity_list,effective_affinity_list} 与
 /sys/devices/system/cpu/online，按配置的 pins 校验每个 IRQ 的 effective 亲和是目标单核，并检查
 T45 依赖角色（usb/ptp/eth）不落在 DSP_CPUS。
-本脚本不做什么（如实限制）：它不是运行 tspi_rt_host::scheduler::plan() 本体——只覆盖 plan 的
+本脚本不做什么（如实限制）：它不是运行 khaen_rt_host::scheduler::plan() 本体——只覆盖 plan 的
 IRQ 放置维度；真实 plan() accepted 证据见 evidence/board-irq-affinity/t45-probe-*.json。
 真实板端 /sys 的 allowed/isolated 语义比本检查更全；本检查缺文件时记 SKIPPED 而不是假装通过。
 
@@ -210,7 +210,7 @@ def main(argv):
             'roles': roles,
             'irq_precondition_ok': t45_ok,
             'plan_equivalent': 'PASS' if t45_ok else 'FAIL',
-            'engine': 'deploy 侧最小检查：只校验 plan 的 IRQ 放置维度，未调用 tspi_rt_host::scheduler::plan()',
+            'engine': 'deploy 侧最小检查：只校验 plan 的 IRQ 放置维度，未调用 khaen_rt_host::scheduler::plan()',
         },
         'overall_ok': overall,
         'limitations': [

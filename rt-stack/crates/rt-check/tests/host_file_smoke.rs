@@ -1,7 +1,7 @@
 //! T26 `rt-check host-file` 端到端 smoke（executed，非 RT）：真实 WAV -> T14 session/plan
 //! -> 4-worker T09 DAG -> 真实 WAV，逐项断言输出帧/worker/block/报告 schema。
 
-use tspi_rt_check::host_file::{make_sample, run_session};
+use khaen_rt_check::host_file::{make_sample, run_session};
 
 #[test]
 fn t26_host_file_e2e_wav_to_wav() {
@@ -18,7 +18,7 @@ fn t26_host_file_e2e_wav_to_wav() {
     assert_eq!(outcome.blocks, 2);
     assert_eq!(outcome.status, "ok");
     assert!(outcome.output_bytes > 0);
-    assert!(outcome.runner_report.contains("tspi-file-runner-report/v1"));
+    assert!(outcome.runner_report.contains("khaen-file-runner-report/v1"));
     assert!(base.join("output.wav").is_file());
     let _ = std::fs::remove_dir_all(&base);
 }

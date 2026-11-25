@@ -72,9 +72,9 @@ plan 把适配后的源送进 4.1.2 的 8 槽容器。容器顺序与现有 4.1.
 
 #### 验收标准
 
-1. When 读取 layout-presets 时，tspi-rt-host shall 接受新增输入布局 `nsp-5.1.2`：`streams` 为 `[8]`，角色依次为 `FL, FR, C, LFE, SL, SR, TFL, TFR`，通道依次为 0..7。
-2. When 读取既有 `h16-5.1.2` 时，tspi-rt-host shall 仍得到 `streams: [6, 2]`，以及原来的角色到流/通道映射。
-3. When `nsp-5.1.2` 对 `4.1.2` 构建 `CenterDownmixPlan` 且 center 为 `auto` 时，tspi-rt-host shall 得到 `Applied`，源通道数为 8，C 的通道为 2，FL 为 0，FR 为 1。
+1. When 读取 layout-presets 时，khaen-rt-host shall 接受新增输入布局 `nsp-5.1.2`：`streams` 为 `[8]`，角色依次为 `FL, FR, C, LFE, SL, SR, TFL, TFR`，通道依次为 0..7。
+2. When 读取既有 `h16-5.1.2` 时，khaen-rt-host shall 仍得到 `streams: [6, 2]`，以及原来的角色到流/通道映射。
+3. When `nsp-5.1.2` 对 `4.1.2` 构建 `CenterDownmixPlan` 且 center 为 `auto` 时，khaen-rt-host shall 得到 `Applied`，源通道数为 8，C 的通道为 2，FL 为 0，FR 为 1。
 
 ### 需求 2 - 中置折叠与直通
 
@@ -82,12 +82,12 @@ plan 把适配后的源送进 4.1.2 的 8 槽容器。容器顺序与现有 4.1.
 
 #### 验收标准
 
-1. While 输出布局是 `4.1.2`、`program_peak_dbfs` 为 −18，when 对 `nsp-5.1.2` 的平面缓冲调用已构建的 `CenterDownmixPlan` 时，tspi-rt-host shall 使 `FL' = FL + 0.7079458·C`、`FR' = FR + 0.7079458·C`，并将 C 置 0。浮点比较容差与现有 content_map 用例相同（1e-6）。
-2. While 同上，when 折叠执行后，tspi-rt-host shall 使 LFE、SL、SR、TFL、TFR 与输入逐位相同。
-3. While `program_peak_dbfs` 为 −18，when 折叠执行后，tspi-rt-host shall 不应用 D7 整体 trim。
-4. When 同一块已折叠的缓冲被再次送入同一个 Applied 计划时，tspi-rt-host shall 不再把中置加进 FL/FR。
-5. When 输出布局含 C 角色时，tspi-rt-host shall 保持现有 passthrough：状态为 `disabled_center_present`，缓冲逐位不变。
-6. The tspi-rt-host shall 继续只在这个内容适配里做中置扇出，shall 不在 plan 的 A_map 里把同一个源送给两个角色。
+1. While 输出布局是 `4.1.2`、`program_peak_dbfs` 为 −18，when 对 `nsp-5.1.2` 的平面缓冲调用已构建的 `CenterDownmixPlan` 时，khaen-rt-host shall 使 `FL' = FL + 0.7079458·C`、`FR' = FR + 0.7079458·C`，并将 C 置 0。浮点比较容差与现有 content_map 用例相同（1e-6）。
+2. While 同上，when 折叠执行后，khaen-rt-host shall 使 LFE、SL、SR、TFL、TFR 与输入逐位相同。
+3. While `program_peak_dbfs` 为 −18，when 折叠执行后，khaen-rt-host shall 不应用 D7 整体 trim。
+4. When 同一块已折叠的缓冲被再次送入同一个 Applied 计划时，khaen-rt-host shall 不再把中置加进 FL/FR。
+5. When 输出布局含 C 角色时，khaen-rt-host shall 保持现有 passthrough：状态为 `disabled_center_present`，缓冲逐位不变。
+6. The khaen-rt-host shall 继续只在这个内容适配里做中置扇出，shall 不在 plan 的 A_map 里把同一个源送给两个角色。
 
 ### 需求 3 - 8 入 7 角色播放 plan
 
@@ -95,10 +95,10 @@ plan 把适配后的源送进 4.1.2 的 8 槽容器。容器顺序与现有 4.1.
 
 #### 验收标准
 
-1. When 为 `nsp-5.1.2` → `4.1.2` 装载 plan 时，tspi-rt-host shall 使用 `n_in = 8`、容器宽度 `n_out = 8`、7 个角色，且 `capture_index = [0, 1, 4, 5, 6, 7, null, 3]`。
-2. When 该 plan 与 `[content] input_layout = nsp-5.1.2`、`output_layout = 4.1.2` 一起启动时，tspi-rt-host shall 通过现有的源通道数和输出容器宽度校验。
-3. When 该 plan 路由一帧时，tspi-rt-host shall 把容器槽 0..5 和 7 分别接到物理输出 0, 1, 2, 3, 4, 5, 7，槽 6 保持无源。
-4. When 使用现有 4.1.2 的 7 声道 identity plan 时，tspi-rt-host shall 保持其 `capture_index = [0, 1, 2, 3, 4, 5, null, 6]`。本需求不改那张 plan 的语义。
+1. When 为 `nsp-5.1.2` → `4.1.2` 装载 plan 时，khaen-rt-host shall 使用 `n_in = 8`、容器宽度 `n_out = 8`、7 个角色，且 `capture_index = [0, 1, 4, 5, 6, 7, null, 3]`。
+2. When 该 plan 与 `[content] input_layout = nsp-5.1.2`、`output_layout = 4.1.2` 一起启动时，khaen-rt-host shall 通过现有的源通道数和输出容器宽度校验。
+3. When 该 plan 路由一帧时，khaen-rt-host shall 把容器槽 0..5 和 7 分别接到物理输出 0, 1, 2, 3, 4, 5, 7，槽 6 保持无源。
+4. When 使用现有 4.1.2 的 7 声道 identity plan 时，khaen-rt-host shall 保持其 `capture_index = [0, 1, 2, 3, 4, 5, null, 6]`。本需求不改那张 plan 的语义。
 
 ### 需求 4 - 显式选择 5.1.2 捕获
 
@@ -106,11 +106,11 @@ plan 把适配后的源送进 4.1.2 的 8 槽容器。容器顺序与现有 4.1.
 
 #### 验收标准
 
-1. When 捕获配置声明本路径的 flow 布局时，tspi-rt-host shall 把这一路 8 声道解释为 `nsp-5.1.2` 的通道顺序，并在报告里使用独立的 flow 布局名。该名字不得是 `4.1.2-8ch` 或 `4.1.2-7ch-sMPTE2110(41,2)`。
-2. When 8 声道捕获没有声明本路径时，tspi-rt-host shall 继续使用 `4.1.2-strict` 的角色表（`FL FR SL SR TFL TFR 空 LFE`）。
-3. When `[content]` 未配置时，tspi-rt-host shall 不启用中置折叠。
-4. When `[content]` 只填写 `input_layout` 或只填写 `output_layout` 时，tspi-rt-host shall 拒绝启动。
-5. When 本路径的 `[content]` 为 `input_layout = nsp-5.1.2`、`output_layout = 4.1.2`、`center = auto`、`program_peak_dbfs = -18` 时，tspi-rt-host shall 在进图前完成需求 2 的折叠，再按需求 3 的 plan 取通道。
+1. When 捕获配置声明本路径的 flow 布局时，khaen-rt-host shall 把这一路 8 声道解释为 `nsp-5.1.2` 的通道顺序，并在报告里使用独立的 flow 布局名。该名字不得是 `4.1.2-8ch` 或 `4.1.2-7ch-sMPTE2110(41,2)`。
+2. When 8 声道捕获没有声明本路径时，khaen-rt-host shall 继续使用 `4.1.2-strict` 的角色表（`FL FR SL SR TFL TFR 空 LFE`）。
+3. When `[content]` 未配置时，khaen-rt-host shall 不启用中置折叠。
+4. When `[content]` 只填写 `input_layout` 或只填写 `output_layout` 时，khaen-rt-host shall 拒绝启动。
+5. When 本路径的 `[content]` 为 `input_layout = nsp-5.1.2`、`output_layout = 4.1.2`、`center = auto`、`program_peak_dbfs = -18` 时，khaen-rt-host shall 在进图前完成需求 2 的折叠，再按需求 3 的 plan 取通道。
 
 ### 需求 5 - 离线验证与交付边界
 
@@ -121,7 +121,7 @@ plan 把适配后的源送进 4.1.2 的 8 槽容器。容器顺序与现有 4.1.
 1. When 运行与本改动相关的 `cargo test` 时，执行环境 shall 使用 `TEMP`/`TMP` = `C:/WorkSpace/Claw/scratch/lead/testtmp`。相关套件 shall 全绿。新增用例至少覆盖需求 1 的布局、需求 2 的折叠与直通、需求 3 的 `capture_index`。
 2. When 写证据时，交付物 shall 放在 `rt-stack/evidence/2026-11-22-centerdownmix-512/`，其中包含通道映射表、系数说明（含与 `0.70710678` 的 0.01 dB 差异）和测试日志。未运行的项 shall 写成 NOT_RUN。
 3. When 完成本需求的代码改动时，仓库 shall 只做本地 commit，不 push。实现放在新分支上，不改写其他分支的历史。
-4. The tspi-rt-host 本次改动 shall 不修改 NSP 仓库，不部署，不连接 sender-host、N150、MOTU 或其他远端主机，不把采样率设为 192 kHz。
+4. The khaen-rt-host 本次改动 shall 不修改 NSP 仓库，不部署，不连接 sender-host、N150、MOTU 或其他远端主机，不把采样率设为 192 kHz。
 5. When 写出任务总结时，总结 shall 写明接口落点、task-200 为复用而非新算法，以及离「NSP 改为 `outputLayout: 5.1.2`」仍缺的步骤。NSP 侧动作不在本需求的实现范围内。
 
 ### 需求 6 - 输出通道设置

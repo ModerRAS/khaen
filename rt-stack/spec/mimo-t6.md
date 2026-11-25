@@ -47,7 +47,7 @@ T6-M 是 P1 门 G-cal/G-real 中"MIMO 实测"部分的可判规格（WBS §5、�
 | 项 | 处理 |
 |---|---|
 | `calibration-spec/CONTRACT.md`、`ACCEPTANCE.md` | **T73 未写入**（写域只有本文件 + `evidence/T73/`）。只读引用其 T0–T4/T1partial 证据口径（§1.2）。T73 读取时 hash 在 `evidence/T73/READONLY-BEFORE.sha256`；**执行期间并发 B2 任务（task-33 spec-checker）修订了这两个文件**，T73 不依赖其当前内容，before/after 与归属记录见 `evidence/T73/CONCURRENT-CHANGES.md`。 |
-| 旧 `tspi-calibration-report/v1` schema | **不复用**。T6 使用独立 `tspi-mimo-t6-report/v1`（§9），字段与语义由本文件定义。 |
+| 旧 `khaen-calibration-report/v1` schema | **不复用**。T6 使用独立 `tspi-mimo-t6-report/v1`（§9），字段与语义由本文件定义。 |
 | 旧 T5（64/128 帧 0 xrun） | **T6-M 测量窗口内必须 0 xrun/deadline miss/clip**，否则该窗口无效；正式 64/128 长窗口/1h soak 属 P2，不作 T6-M 门。 |
 | 旧 T1 partial | 引用其报告字段与"partial 不等于 PASS"精神（`ACCEPTANCE.md` §3.1）；T6 另有声学输出身份门，partial 不豁免（§1.3）。 |
 | 旧 T3（应用后逐通道复测） | 每轮 T6-M 必须附 T3-equivalent 复测证据；旧阈值只作参考，T6-M 声学 I/T20 为**预声明工程观察项（不参与 PASS/FAIL，§8.2.1）**。 |
@@ -733,7 +733,7 @@ session manifest、冻结清单 hash、design raw hash、design artifact（coeff
 | T6-C02 | 旧契约未被 T73 修改 | T73 写域 = 本 spec + `evidence/T73/`；旧契约无 T73 写入记录。若并发任务修改，`evidence/T73/CONCURRENT-CHANGES.md` 记录 before/after + 归属；T6 引用以 T73 快照为准 | 机/D | §0.4 |
 | T6-C03 | 范围与非目标明确 | 4.1.2 主范围、5.3.2/AoIP 未测声明、无上混/下混、无性能门混入；**T6-cal 仍独立必须、T6-M 不替代** | 人/D | §0.2/§0.4 |
 | T6-C04 | T0–T4/T6-cal/T1partial 引用可回溯 | 每个前置证据有来源路径/章节/报告 hash；**同轮 T6-cal 报告（n_points/positions/design/residual/passed）存在**；缺任一 → I-01 | 机/I | §1.2/§1.5 |
-| T6-C05 | T6 独立 schema | 报告使用 `tspi-mimo-t6-report/v1`，无旧 `tspi-calibration-report/v1` 字段冒充 | 机/I | §0.4/§9.1 |
+| T6-C05 | T6 独立 schema | 报告使用 `tspi-mimo-t6-report/v1`，无旧 `khaen-calibration-report/v1` 字段冒充 | 机/I | §0.4/§9.1 |
 | T6-C06 | T1 partial 字段齐全 | loopback_map/covered/uncovered/cuemix_routing/final_insert/mitigation/claim 全存在（若 partial） | 机/I | §1.3 |
 | T6-C07 | T1 partial 不豁免声学覆盖 | 每个参与输出有 T4 FR 或 **§3.8 T6-AID 声学身份检查**（逐输出激励+UMIK 能量/onset+slot→role→DAC 反查）证据；缺 → I-08，错配 → F-10 | 机/R | §1.3/§3.8 |
 | T6-C08 | 预测/实测分离 | predicted 文件 hash 绑定；报告 I 为实测 checker 值；预测冒充实测 → FAIL-08 | 机/I | §1.4/§9.6 |

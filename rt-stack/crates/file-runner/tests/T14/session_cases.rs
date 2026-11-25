@@ -1,12 +1,12 @@
-//! `tspi-file-runner/v1` session manifest 解析/校验 + blob 源（MapSource/FsSource）。
+//! `khaen-file-runner/v1` session manifest 解析/校验 + blob 源（MapSource/FsSource）。
 
-use tspi_file_runner::ir::StaleReason;
-use tspi_file_runner::json::Json;
-use tspi_file_runner::session::{
+use khaen_file_runner::ir::StaleReason;
+use khaen_file_runner::json::Json;
+use khaen_file_runner::session::{
     parse_session, parse_session_json, FsSource, MapSource, SourceProvider, MAX_CONTAINER_CHANNELS,
     MAX_INPUT_CHANNELS, MAX_PARTICIPANTS, MAX_ROLES, RUNTIME_BLOCK_SIZES, RUNTIME_SAMPLE_RATES,
 };
-use tspi_file_runner::{
+use khaen_file_runner::{
     E_FILE_BLOB, E_FILE_CHANNELS, E_FILE_FIELD, E_FILE_GRAPH, E_FILE_IR, E_FILE_PATH_TABLE,
     E_FILE_PRECISION, E_FILE_PROFILE, E_FILE_RATE, E_FILE_ROLES, E_FILE_SCHEMA, E_FILE_VERSION,
 };
@@ -35,7 +35,7 @@ fn err(fixture: &Fixture, mutate: impl FnOnce(&mut Json)) -> &'static str {
 fn session_parse_valid_minimal() {
     let fixture = Fixture::identity(64);
     let session = parse_session(&fixture.session_text()).expect("valid session");
-    assert_eq!(session.schema, "tspi-file-runner/v1");
+    assert_eq!(session.schema, "khaen-file-runner/v1");
     assert_eq!(session.precision, "f32-strict");
     assert_eq!(session.audio.sample_rate_hz, 48_000);
     assert_eq!(session.audio.container_channels, 8);
@@ -565,7 +565,7 @@ fn blob_sources_map_and_fs_contracts() {
     });
     let session = parse_session_json(&json).expect("session");
     let source = MapSource::new();
-    let error = tspi_file_runner::graph::prepare(session, &source).expect_err("missing blob");
+    let error = khaen_file_runner::graph::prepare(session, &source).expect_err("missing blob");
     assert_eq!(error.code(), E_FILE_BLOB);
 }
 

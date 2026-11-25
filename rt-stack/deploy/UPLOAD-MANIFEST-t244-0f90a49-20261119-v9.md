@@ -17,14 +17,14 @@
 | --- | --- | --- |
 | deploy/ | bin/00..08 + make-release-bundle.sh + make-deploy-package.sh、lib/、config/、tools/、tests/、README、本 UPLOAD-MANIFEST | /var/tmp/tspi-rt-stack-deploy/（root 执行） |
 | service/ | host/daemon/target/irq-affinity units + host.service.d/90-safe-mute.{conf,env}.example + README | /etc/systemd/system/（04 安装；target Wants/After host+daemon） |
-| release-bundle/ | bin/tspi-rt-host（v9，planrt+sink/tee+AES67）、bin/tspi-rt-daemon（v9，T226）、units/（6）、etc/（5 个 *.example）、manifest.json、README.deploy.md、SHA256SUMS | /opt/tspi-rt-stack/releases/@RELEASE_ID@/{bin,units,manifest.json,README.deploy.md} + current（symlink） |
+| release-bundle/ | bin/khaen-rt-host（v9，planrt+sink/tee+AES67）、bin/tspi-rt-daemon（v9，T226）、units/（6）、etc/（5 个 *.example）、manifest.json、README.deploy.md、SHA256SUMS | /opt/tspi-rt-stack/releases/@RELEASE_ID@/{bin,units,manifest.json,README.deploy.md} + current（symlink） |
 | README-UPLOAD.md、SHA256SUMS | 上传说明 + 包级逐文件校验和 | /var/tmp/ 保留（校验用） |
 
 ## 2. 关键文件 sha256（完整清单见包内 SHA256SUMS；bundle 14 项见 release-v9/ARTIFACTS.md）
 
 | 文件 | 大小(B) | sha256 | 说明 |
 | --- | ---: | --- | --- |
-| bin/tspi-rt-host（bundle，v9 重编译） | @HOST_SIZE@ | @HOST_SHA@ | **新增 planrt RT 修复 + [sink] 离线渲染 + [capture] tee；dsp_cpus 默认 4-7** + v8 全部功能 |
+| bin/khaen-rt-host（bundle，v9 重编译） | @HOST_SIZE@ | @HOST_SHA@ | **新增 planrt RT 修复 + [sink] 离线渲染 + [capture] tee；dsp_cpus 默认 4-7** + v8 全部功能 |
 | bin/tspi-rt-daemon（bundle，v9 重编译） | @DAEMON_SIZE@ | @DAEMON_SHA@ | 含 T226 CalibrationPort（control 源码未变，链接图随 rt-host lib 变化） |
 | bundle tgz（可单独上传） | @BUNDLE_TGZ_SIZE@ | @BUNDLE_TGZ_SHA@ | 14 files；manifest verify ok；bin 0755 |
 | web dist（独立服务，不在本包） | @WEB_SIZE@ | @WEB_SHA@ | 源码自 v5 未变，重打预期字节相同 |
@@ -39,11 +39,11 @@
     cd /var/tmp/tspi-deploy-v9 && sha256sum -c SHA256SUMS
     test -x deploy/bin/05-atomic-switch.sh && test -x deploy/bin/03-retire-c.sh && echo SCRIPT_EXEC_OK
     python3 deploy/lib/release_manifest.py verify release-bundle --require-arch aarch64   # files_checked=14, ok
-    python3 deploy/lib/check_elf.py release-bundle/bin/tspi-rt-host --require-arch aarch64
+    python3 deploy/lib/check_elf.py release-bundle/bin/khaen-rt-host --require-arch aarch64
     python3 deploy/tests/check_unit_syntax.py deploy/config service       # 7/7 PASS
     grep -a -q 't60-jobmanager-synthetic' release-bundle/bin/tspi-rt-daemon && echo DAEMON_T226_MARKER_OK
-    grep -a -q '[sink] out' release-bundle/bin/tspi-rt-host && grep -a -q '[capture] tee' release-bundle/bin/tspi-rt-host && echo HOST_PLANRT_MARKER_OK
-    release-bundle/bin/tspi-rt-host run --help | grep -q 'aes67_transport=userspace' && echo HOST_AES67_HELP_OK
+    grep -a -q '[sink] out' release-bundle/bin/khaen-rt-host && grep -a -q '[capture] tee' release-bundle/bin/khaen-rt-host && echo HOST_PLANRT_MARKER_OK
+    release-bundle/bin/khaen-rt-host run --help | grep -q 'aes67_transport=userspace' && echo HOST_AES67_HELP_OK
 
 ## 4. 安装/切换（授权窗口内，root；唯一入口 05）
 

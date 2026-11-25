@@ -4,7 +4,7 @@
 Steps
   1. (optional) generate deterministic fixtures with the RoomForge C# generator;
   2. verify every fixture file against its SHA256 manifest;
-  3. run the Rust optimizer CLI (tspi-mimo-opt) over every scene;
+  3. run the Rust optimizer CLI (khaen-mimo-opt) over every scene;
   4. run the independent Python reference metrics and cross-check Rust vs Python;
   5. aggregate evidence: summary.json / SUMMARY.csv / MANIFEST.sha256.
 
@@ -156,7 +156,7 @@ def verify_fixtures(fixtures: str, validation: str) -> dict:
 # ---------------------------------------------------------------- rust / python steps
 def run_rust(fixtures: str, runs: str, validation: str) -> int:
     os.makedirs(runs, exist_ok=True)
-    cmd = ["cargo", "run", "--release", "-p", "tspi-mimo-opt", "--",
+    cmd = ["cargo", "run", "--release", "-p", "khaen-mimo-opt", "--",
            "--fixtures", fixtures, "--out", runs, "--verify-fixtures"]
     rc = run(cmd, cwd=RT_STACK, log_path=os.path.join(validation, "rust-mimo-opt.log"))
     if rc == 0:

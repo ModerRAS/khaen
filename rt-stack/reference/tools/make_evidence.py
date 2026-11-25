@@ -43,7 +43,7 @@ EXTERNAL_INPUTS = [
     ("scratch/lead/planner/TSPI-RT-STACK-WBS.md", "authority: WBS task table T03 row + write-scope/DoD discipline"),
     ("scratch/lead/planner/DSP-HOST-DECISION.md", "authority: unified model / FIR / calibration / RT spec"),
     ("scratch/lead/planner/DSP-HOST-CPU-BUDGET.md", "authority: F_ji = P_j*G_ji*A_i and fused-length arithmetic"),
-    ("calibration-spec/CONTRACT.md", "context: tspi-calibration/v1 delay/polarity/PEQ semantics"),
+    ("calibration-spec/CONTRACT.md", "context: khaen-calibration/v1 delay/polarity/PEQ semantics"),
     ("audio/overlay/etc/tspi-audio/layout-presets.yml", "context: 4.1.2 role->DAC mapping (line 219)"),
     ("upmix/examples/profiles/upmix-4.1.2-movie.yml", "context: existing channelmap v2 4.1.2 profile/roles"),
     ("web/docs/API.md", "context: existing REST/channelmap surface (compat boundary)"),

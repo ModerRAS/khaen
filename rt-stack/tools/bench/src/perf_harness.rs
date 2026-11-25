@@ -29,21 +29,21 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use tspi_dsp_core::abi::TspiBlockAckV1;
-use tspi_dsp_core::compile::FusionForm;
-use tspi_dsp_core::direct::{
+use khaen_core::abi::TspiBlockAckV1;
+use khaen_core::compile::FusionForm;
+use khaen_core::direct::{
     direct_block_f32, direct_state_zero_f32, DirectCoeffsF32, DirectLayout, DirectTopology,
     DIRECT_MAX_PARTICIPANTS, DIRECT_MAX_ROLES, DIRECT_NO_SOURCE,
 };
-use tspi_dsp_core::partitioned::{
+use khaen_core::partitioned::{
     partitioned_block_f32, partitioned_state_zero_f32, PartitionedLayout, PartitionedPlan,
 };
-use tspi_dsp_core::rt::TBLOCK_128_48K_NS;
-use tspi_dsp_core::schedule_plan::{
+use khaen_core::rt::TBLOCK_128_48K_NS;
+use khaen_core::schedule_plan::{
     admit_deadline, build_fallback_schedule, build_schedule, evaluate_fallback, evaluate_hot_swap,
     DeadlineBudgets, FallbackBudgets, HotSwapSpec, KernelForm, PlanProfile,
 };
-use tspi_dsp_core::workers::{
+use khaen_core::workers::{
     ack_phase, set_cutoff, wait_phase_done, worker_phase_b1, worker_phase_b2, worker_phase_b3,
     WorkerDagPlan, WorkerPartials, WORKER_ACK_FLAG_VALID,
 };

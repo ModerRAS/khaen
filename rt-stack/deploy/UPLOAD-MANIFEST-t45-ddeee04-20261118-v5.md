@@ -18,16 +18,16 @@
 | --- | --- | --- |
 | `deploy/` | `bin/00..08` + `make-release-bundle.sh` + `make-deploy-package.sh`、`lib/`（含 `release_tar.py`）、`config/`、`tools/`、`tests/`、README、本 UPLOAD-MANIFEST | `/var/tmp/tspi-rt-stack-deploy/`（root 执行） |
 | `service/` | host/daemon/target/irq-affinity units + host.service.d/90-safe-mute.{conf,env}.example + README | `/etc/systemd/system/`（04 安装；target Wants/After host+daemon） |
-| `release-bundle/`（16 文件） | `bin/tspi-rt-host`（**T45 新**）、`bin/tspi-rt-daemon`、`units/`（6）、`etc/`（5 个 `*.example`）、manifest.json、README.deploy.md、SHA256SUMS | `/opt/tspi-rt-stack/releases/t45-ddeee04-20261118-v5/{bin,units,manifest.json,README.deploy.md}` + `current`（symlink） |
+| `release-bundle/`（16 文件） | `bin/khaen-rt-host`（**T45 新**）、`bin/tspi-rt-daemon`、`units/`（6）、`etc/`（5 个 `*.example`）、manifest.json、README.deploy.md、SHA256SUMS | `/opt/tspi-rt-stack/releases/t45-ddeee04-20261118-v5/{bin,units,manifest.json,README.deploy.md}` + `current`（symlink） |
 | `README-UPLOAD.md`、`SHA256SUMS` | 上传说明 + 包级逐文件校验和 | `/var/tmp/` 保留（校验用） |
 
 ## 2. 关键文件 sha256（完整清单见包内 `SHA256SUMS`；bundle 14 项见 `rt-stack/evidence/release-v5/ARTIFACTS.md` §2）
 
 | 文件 | 大小(B) | sha256 |
 | --- | ---: | --- |
-| bin/tspi-rt-host（bundle，**T45 重编译**） | 1198400 | `e6f07776f58c34492b05c934bd04f9b6c00e8c99b8f59f41a6b1655783486522` |
+| bin/khaen-rt-host（bundle，**T45 重编译**） | 1198400 | `e6f07776f58c34492b05c934bd04f9b6c00e8c99b8f59f41a6b1655783486522` |
 | bin/tspi-rt-daemon（bundle，与 M4 字节相同） | 1286384 | `804a8bcd94bc73cf8aff29bc459633abbee0cf55d50c512ad4215c410c577c18` |
-| units/tspi-rt-host.service（F3/F4） | 3594 | `1ddda0fb07e2b60e326b0a430336238f8ca65b7d58373b448923ccb8464be708` |
+| units/khaen-rt-host.service（F3/F4） | 3594 | `1ddda0fb07e2b60e326b0a430336238f8ca65b7d58373b448923ccb8464be708` |
 | units/tspi-rt-daemon.service（F3） | 2522 | `7d3028ab244fe86c2fcf54bd43fbede882a51c1e3cd0c6ea2d766dcebdde9182` |
 | etc/rt-host.env.example（**T45 开关示例**） | 1327 | `fa8428c7cf1e12dbc75ead5a51bee03e2ccb9487db8adc7aa48524545882fd37` |
 | etc/rt-host.toml.example（T45 注释） | 1927 | `884d6c84f9438549c8e6f5cae9c536c4fac14d46fe60bf39e22c77756e9eb591` |
@@ -46,7 +46,7 @@ test -x deploy/bin/05-atomic-switch.sh && test -x deploy/bin/03-retire-c.sh && e
 chmod +x deploy/bin/*.sh deploy/tools/*.sh deploy/tests/*.sh \
          deploy/config/irq-affinity-pin deploy/config/motu-48k-keeper   # 仅中转丢位时兜底
 python3 deploy/lib/release_manifest.py verify release-bundle --require-arch aarch64   # files_checked=14, ok
-python3 deploy/lib/check_elf.py release-bundle/bin/tspi-rt-host --require-arch aarch64
+python3 deploy/lib/check_elf.py release-bundle/bin/khaen-rt-host --require-arch aarch64
 python3 deploy/lib/check_elf.py release-bundle/bin/tspi-rt-daemon --require-arch aarch64
 ```
 

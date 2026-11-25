@@ -15,13 +15,13 @@
 //! identity + 单个 100 Hz −6 dB Q1.0 → plan → host plan-arena（fake/file sink）→
 //! 输出幅频 vs 解析 `|H|` ≤ 0.5 dB（20 Hz–20 kHz）。
 
-use tspi_dsp_core::abi::{
+use khaen_core::abi::{
     TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1, TspiPlanIirHeaderV2, TspiRoleIirV2, TspiRoleV1,
     PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS,
     TSPI_PLAN_ABI_V1, TSPI_PLAN_ABI_V2, TSPI_PLAN_IIR_MAGIC, TSPI_PLAN_IIR_VERSION,
     TSPI_PLAN_MAGIC,
 };
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, RT_WORKERS, SAMPLE_RATES_HZ,
     TAPS_NORMAL_MAX,
 };
@@ -338,7 +338,7 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
             reserved1: 0,
             peq_count: role.peq.len() as u16,
             reserved2: 0,
-            name_hash: tspi_dsp_core::nodes::crc32c(role.role_id.as_bytes()),
+            name_hash: khaen_core::nodes::crc32c(role.role_id.as_bytes()),
             reserved3: 0,
             reserved4: 0,
         });
@@ -507,7 +507,7 @@ pub fn compile_peq_plan(req: &PeqPlanRequest) -> Result<PeqPlanArtifact, String>
     header.graph_id = graph_id;
     header.header_crc32c = 0;
     let mut header_array = header_bytes(&header);
-    header.header_crc32c = tspi_dsp_core::nodes::crc32c(&header_array);
+    header.header_crc32c = khaen_core::nodes::crc32c(&header_array);
     header_array = header_bytes(&header);
 
     // 4) 拼字节：header + path/diag/role 表 + ctl_meta + pad + IIR 表 + 系数区。
@@ -571,7 +571,7 @@ fn validate_request(req: &PeqPlanRequest) -> Result<(), String> {
             format!("{} 越界", req.container_channels),
         ));
     }
-    if req.workers != RT_WORKERS && req.workers != tspi_dsp_core::rt::RT_WORKERS_FALLBACK {
+    if req.workers != RT_WORKERS && req.workers != khaen_core::rt::RT_WORKERS_FALLBACK {
         return Err(peq_err("workers", format!("{} 必须 4 或 2", req.workers)));
     }
     if req.roles.is_empty() || req.roles.len() > MAX_OUTPUT_ROLES {
@@ -719,7 +719,7 @@ fn build_iir_table(entries: &[TspiRoleIirV2], iir_blobs: &[Vec<u8>]) -> Result<V
     for blob in iir_blobs {
         crc_input.extend_from_slice(blob);
     }
-    let crc = tspi_dsp_core::nodes::crc32c(&crc_input);
+    let crc = khaen_core::nodes::crc32c(&crc_input);
     table[12..16].copy_from_slice(&crc.to_le_bytes());
     Ok(table)
 }
@@ -778,7 +778,7 @@ fn verify_artifact(artifact: &PeqPlanArtifact) -> Result<(), String> {
     let mut header_array = header_bytes(header);
     let written_crc = header.header_crc32c;
     header_array[124..128].fill(0);
-    if tspi_dsp_core::nodes::crc32c(&header_array) != written_crc {
+    if khaen_core::nodes::crc32c(&header_array) != written_crc {
         return Err(peq_err("header.header_crc32c", "header CRC-32C 自校验失败"));
     }
     // 字节长度 / 系数区 / 表顺序
@@ -804,8 +804,8 @@ fn verify_artifact(artifact: &PeqPlanArtifact) -> Result<(), String> {
             return Err(peq_err("iir_table", "IIR 表越界"));
         }
         let iir_header = TspiPlanIirHeaderV2 {
-            magic: tspi_dsp_core::abi::TSPI_PLAN_IIR_MAGIC,
-            version: tspi_dsp_core::abi::TSPI_PLAN_IIR_VERSION,
+            magic: khaen_core::abi::TSPI_PLAN_IIR_MAGIC,
+            version: khaen_core::abi::TSPI_PLAN_IIR_VERSION,
             entry_bytes: PLAN_IIR_ENTRY_BYTES as u16,
             entry_count: iir_count as u16,
             reserved0: 0,
@@ -824,7 +824,7 @@ fn verify_artifact(artifact: &PeqPlanArtifact) -> Result<(), String> {
             }
             crc_input.extend_from_slice(&artifact.plan_bytes[start..end]);
         }
-        let crc = tspi_dsp_core::nodes::crc32c(&crc_input);
+        let crc = khaen_core::nodes::crc32c(&crc_input);
         let written = &artifact.plan_bytes[iir_offset + 12..iir_offset + 16];
         if written != crc.to_le_bytes() {
             return Err(peq_err(
@@ -833,7 +833,7 @@ fn verify_artifact(artifact: &PeqPlanArtifact) -> Result<(), String> {
             ));
         }
         if artifact.plan_bytes[iir_offset..iir_offset + 4]
-            != tspi_dsp_core::abi::TSPI_PLAN_IIR_MAGIC.to_le_bytes()
+            != khaen_core::abi::TSPI_PLAN_IIR_MAGIC.to_le_bytes()
         {
             return Err(peq_err("iir_table.magic", "IIR 表 magic 不符"));
         }

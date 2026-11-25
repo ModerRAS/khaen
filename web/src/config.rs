@@ -1,6 +1,6 @@
 //! 配置模型与加载。
 //!
-//! 默认路径：Linux \`/etc/tspi-audio-web/config.toml\`，Windows（开发）\`./config.toml\`。
+//! 默认路径：Linux \`/etc/khaen-audio-web/config.toml\`，Windows（开发）\`./config.toml\`。
 //! 支持环境变量覆盖（见 README），TSPI_MOCK=1 时无需配置文件。
 
 use std::path::{Path, PathBuf};
@@ -50,7 +50,7 @@ impl Default for AppConfig {
             listen: "0.0.0.0:80".into(),
             token: PLACEHOLDER_TOKEN.into(),
             session_ttl_secs: 12 * 3600,
-            auth_file: "/etc/tspi-audio-web/auth.json".into(),
+            auth_file: "/etc/khaen-audio-web/auth.json".into(),
             cookie_secure: false,
             log_lines: 100,
             mock: false,
@@ -311,7 +311,7 @@ impl Default for ModeConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            state_file: "/etc/tspi-audio-web/state.json".into(),
+            state_file: "/etc/khaen-audio-web/state.json".into(),
             switch_script: "/usr/local/bin/tspi-mode".into(),
             // D4：默认开机不自动恢复音频模式（audio off，用户手动切换）。
             restore_on_start: false,
@@ -461,7 +461,7 @@ pub struct MotuConfig {
 impl Default for MotuConfig {
     fn default() -> Self {
         Self {
-            snapshot_dir: "/var/lib/tspi-audio-web/motu-snapshots".into(),
+            snapshot_dir: "/var/lib/khaen-audio-web/motu-snapshots".into(),
             link_local_cidr: "169.254.111.200/16".into(),
             cache_ttl_ms: 12_000,
             discover_timeout_ms: 2_500,
@@ -487,7 +487,7 @@ pub fn default_config_path() -> PathBuf {
     if cfg!(windows) {
         PathBuf::from("config.toml")
     } else {
-        PathBuf::from("/etc/tspi-audio-web/config.toml")
+        PathBuf::from("/etc/khaen-audio-web/config.toml")
     }
 }
 
@@ -800,7 +800,7 @@ mod tests {
         assert_eq!(parsed.channelmap.default_layout, "5.3.2");
         assert_eq!(
             parsed.motu.snapshot_dir,
-            "/var/lib/tspi-audio-web/motu-snapshots"
+            "/var/lib/khaen-audio-web/motu-snapshots"
         );
         assert_eq!(parsed.motu.link_local_cidr, defaults.motu.link_local_cidr);
         assert_eq!(parsed.motu.ws_port, 1280);

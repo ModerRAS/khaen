@@ -3,15 +3,15 @@
 //
 // 本文件经 src/swap.rs 末尾的 cfg(test) mod swap_tests { include!(...) } 进入单测构建
 // （cargo 不自动发现 tests/<子目录>；公共注册属 integrator，勿写入 public_registration.rs）。
-// 运行：cargo test -p tspi-rt-host swap
+// 运行：cargo test -p khaen-rt-host swap
 // 全部测试名 t20_ 前缀；离线：不打开设备、不执行真实 mlockall（admission 用 MockMemory）。
 
 use super::*;
 
 use crate::admission::{MockMemory, MCL_CURRENT, MCL_FUTURE, MLOCK_ALL_FLAGS, RLIM_INFINITY};
 use core::mem::offset_of;
-use tspi_dsp_core::plan::PlanBuf;
-use tspi_dsp_core::workers::set_cutoff;
+use khaen_core::plan::PlanBuf;
+use khaen_core::workers::set_cutoff;
 
 // ---------------------------------------------------------------------------
 // 夹具：2x2 path + 2 diag + 2 role 的小图（快速、覆盖表/系数/延迟口径）
@@ -874,7 +874,7 @@ fn t20_admit_accepts_plan_abi_v2_without_iir() {
     // GAP-T66-3 向后/向前兼容：v2 且无 IIR 表（reserved3 全 0）等价 v1 语义，必须准入。
     let mut reg = PlanRegistry::new();
     let mut fixture = Fixture::canonical();
-    fixture.header.abi_version = tspi_dsp_core::abi::TSPI_PLAN_ABI_V2;
+    fixture.header.abi_version = khaen_core::abi::TSPI_PLAN_ABI_V2;
     let version = admit_fixture(&mut reg, &fixture);
     assert_eq!(version, 1);
     assert!(reg.iir_entries(version).expect("v2 plan").is_empty());

@@ -5,10 +5,10 @@
   * 无 tab / CRLF；section 合法；未知 key 拒绝（防拼写错误）；
   * .service 需要 [Service] Type/ExecStart 与 [Install] WantedBy；.target 需要 [Unit] 与 [Install]；
   * ExecStart 首 token 必须是绝对路径（允许前缀 -/@/+/!）；Type/Restart 枚举合法；
-  * tspi-rt-host.service 必须是 RT 门槛（LimitRTPRIO=99 + LimitMEMLOCK=infinity）；
+  * khaen-rt-host.service 必须是 RT 门槛（LimitRTPRIO=99 + LimitMEMLOCK=infinity）；
   * tspi-rt-stack.target 必须 Wants/After 自研 host+daemon（F-18/T28-P0-1：否则只 start target 拉不起 host）；
   * 新栈 unit 不得依赖/启动旧 C（camilladsp、tspi-upmix-autodetect、tspi-audio.target、tspi-mode、
-    tspi-audio-web、tspi-boot-mode）；缺省同时检查 service/ 与 deploy/config/（task-223 T72-N9：
+    khaen-audio-web、tspi-boot-mode）；缺省同时检查 service/ 与 deploy/config/（task-223 T72-N9：
     keeper 的 Before= 曾残留旧 unit 名，deploy/config 不能漏检）；
   * 90-safe-mute.conf.example（drop-in）只允许 [Service] 的 Environment/EnvironmentFile/ExecStart 类 key；
     F-17：必须用 EnvironmentFile 覆盖 rt-host.env 的 normal（Environment= 会被 EnvironmentFile 覆盖），
@@ -56,7 +56,7 @@ UNIT_KEYS = {
 TYPE_OK = {'simple', 'exec', 'forking', 'oneshot', 'dbus', 'notify', 'notify-reload', 'idle'}
 RESTART_OK = {'no', 'on-success', 'on-failure', 'on-abnormal', 'on-abort', 'on-watchdog', 'always'}
 OLD_C = ('camilladsp', 'tspi-upmix-autodetect', 'tspi-audio.target', 'tspi-mode',
-         'tspi-audio-web', 'tspi-boot-mode')
+         'khaen-audio-web', 'tspi-boot-mode')
 
 
 def parse(path):
@@ -189,11 +189,11 @@ def check(path):
     if is_target and 'Service' in sections:
         problems.append('.target 不应含 [Service]')
     # RT host 门槛
-    if name == 'tspi-rt-host.service':
+    if name == 'khaen-rt-host.service':
         if values.get(('Service', 'LimitRTPRIO'), [''])[0] != '99':
-            problems.append('tspi-rt-host 必须 LimitRTPRIO=99（RT 门槛）')
+            problems.append('khaen-rt-host 必须 LimitRTPRIO=99（RT 门槛）')
         if values.get(('Service', 'LimitMEMLOCK'), [''])[0] != 'infinity':
-            problems.append('tspi-rt-host 必须 LimitMEMLOCK=infinity（mlockall 准入）')
+            problems.append('khaen-rt-host 必须 LimitMEMLOCK=infinity（mlockall 准入）')
         # task-192：T45 IRQ 持久化 oneshot 必须真的约束 host（Requires+After；否则 pin 失败仍启动）
         req = []
         for v in values.get(('Unit', 'Requires'), []):
@@ -202,11 +202,11 @@ def check(path):
         for v in values.get(('Unit', 'After'), []):
             aft += v.split()
         if 'tspi-irq-affinity.service' not in req:
-            problems.append('tspi-rt-host 必须 Requires=tspi-irq-affinity.service（pin 失败不启动 host）')
+            problems.append('khaen-rt-host 必须 Requires=tspi-irq-affinity.service（pin 失败不启动 host）')
         if 'tspi-irq-affinity.service' not in aft:
-            problems.append('tspi-rt-host 必须 After=tspi-irq-affinity.service（先钉核后启动）')
+            problems.append('khaen-rt-host 必须 After=tspi-irq-affinity.service（先钉核后启动）')
     # F3/F4（2026-11-18 板端缺陷回归）：host/daemon 的 RuntimeDirectory/LogsDirectory 与 ALSA 设备白名单。
-    if name in ('tspi-rt-host.service', 'tspi-rt-daemon.service'):
+    if name in ('khaen-rt-host.service', 'tspi-rt-daemon.service'):
         rd = []
         for v in values.get(('Service', 'RuntimeDirectory'), []):
             rd += v.split()
@@ -235,24 +235,24 @@ def check(path):
             modes = values.get(('Service', 'LogsDirectoryMode'), [])
             if modes and modes[0] != '0755':
                 problems.append(f'F3：{name} LogsDirectoryMode 应为 0755（got {modes[0]}）')
-    if name == 'tspi-rt-host.service':
+    if name == 'khaen-rt-host.service':
         da = []
         for v in values.get(('Service', 'DeviceAllow'), []):
             da += [v.strip()]
         if 'char-alsa rw' not in da:
-            problems.append('F4：tspi-rt-host 必须 DeviceAllow=char-alsa rw（ALSA 设备组）')
+            problems.append('F4：khaen-rt-host 必须 DeviceAllow=char-alsa rw（ALSA 设备组）')
         for v in da:
             if '/dev/snd' in v or '*' in v:
                 problems.append(f'F4：DeviceAllow 不得用设备通配（systemd 252+cgroup v2 不生效）: {v}')
         if len([v for v in da if v]) > 1:
-            problems.append(f'F4：tspi-rt-host 只应有一条 DeviceAllow（实际 {len(da)} 条）')
+            problems.append(f'F4：khaen-rt-host 只应有一条 DeviceAllow（实际 {len(da)} 条）')
     # F-18/T28-P0-1：target 必须显式 Wants/After host+daemon
     if name == 'tspi-rt-stack.target':
         for key in ('Wants', 'After'):
             items = []
             for v in values.get(('Unit', key), []):
                 items += v.split()
-            for need in ('tspi-rt-host.service', 'tspi-rt-daemon.service'):
+            for need in ('khaen-rt-host.service', 'tspi-rt-daemon.service'):
                 if need not in items:
                     problems.append(f'target {key}= 缺 {need}（F-18：只 start target 拉不起 host/daemon）')
             # task-192：只 start target 时也必须拉起 IRQ 持久化 oneshot（不能只依赖 host 的 Requires）
@@ -270,8 +270,8 @@ def check(path):
         before = []
         for v in values.get(('Unit', 'Before'), []):
             before += v.split()
-        if 'tspi-rt-host.service' not in before:
-            problems.append('tspi-irq-affinity.service 必须 Before=tspi-rt-host.service（host 启动前钉核）')
+        if 'khaen-rt-host.service' not in before:
+            problems.append('tspi-irq-affinity.service 必须 Before=khaen-rt-host.service（host 启动前钉核）')
         # B1（2026-11-20 板窗）：开机竞态防护——ExecStartPre 先等依赖 IRQ 节点就绪，再由 ExecStart 钉核。
         # （v11 重启实测：oneshot ~4s 先跑，end0 IRQ56/57 节点未注册 → apply fail-closed → host 因 Requires= 不启动）
         pre = [v.strip() for v in values.get(('Service', 'ExecStartPre'), [])]

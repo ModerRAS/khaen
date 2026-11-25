@@ -6,9 +6,9 @@
 - 运行：
 
       cd rt-stack
-      cargo test -p tspi-fir-designer nos
-      cargo test -p tspi-fir-designer t38               # 精确 35 passed（推荐）
-      cargo test -p tspi-fir-designer nos -- --list     # 注意：nos 过滤会多命中 1 个无关的 apodizing 诊断测试
+      cargo test -p khaen-designer nos
+      cargo test -p khaen-designer t38               # 精确 35 passed（推荐）
+      cargo test -p khaen-designer nos -- --list     # 注意：nos 过滤会多命中 1 个无关的 apodizing 诊断测试
 
 ## 为什么用 include! 而不是 public_registration.rs
 
@@ -23,13 +23,13 @@ cargo 只把 tests/*.rs（顶层文件）当集成测试目标，不会自动发
         include!("../tests/T38/nos_cases.rs");
     }
 
-本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p tspi-fir-designer nos
+本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p khaen-designer nos
 执行（T38 executed = 35），测试名过滤路径含 nos；不需要 integrator 注册，也不要再把它加到
 public_registration.rs（会重复注册/编译失败）。
 
 注意：WBS T38 DoD 命令 `nos` 是按子串过滤，还会命中 apodizing 的
 `t35_apodizing_diagnostics_v16_numbers`（diagnostics 含 nos），所以 DoD 日志是
-running 36 = 35 T38 + 1 无关命中；要精确只看 T38 用 `cargo test -p tspi-fir-designer t38`。
+running 36 = 35 T38 + 1 无关命中；要精确只看 T38 用 `cargo test -p khaen-designer t38`。
 
 ## 测试覆盖（按契约分组）
 

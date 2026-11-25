@@ -1,6 +1,6 @@
 # 实施计划
 
-状态：**已实施（2026-11-16）**。`tspi-calibrate` 42 项测试通过，`tspi-audio-web` `cargo check` 通过。分频器设计与 ART MIMO 系数不在本清单内。分析文件里的 `peak_db` 是脉冲幅度，不是文件 dBFS；削波门限由 `position_usable(snr, peak)` 提供，加载测点时只按 SNR < 25 dB 排除。
+状态：**已实施（2026-11-16）**。`khaen-calibrate` 42 项测试通过，`khaen-audio-web` `cargo check` 通过。分频器设计与 ART MIMO 系数不在本清单内。分析文件里的 `peak_db` 是脉冲幅度，不是文件 dBFS；削波门限由 `position_usable(snr, peak)` 提供，加载测点时只按 SNR < 25 dB 排除。
 
 - [x] 1. 滤波器模型改为可校正的双二阶
 - `Peq` 增加 `type`（缺省 `peaking`，另含 `low_shelf` / `high_shelf`）
@@ -56,7 +56,7 @@
 - _需求: 1, 5, 6_
 
 - [x] 9. 契约 v1.1 与 Rust 校验
-- `CONTRACT.md` 增加 v1.1：shelf、Q ≥ 0.1 且有限；v1 旧规则保留；校验命令写 `tspi-calibrate validate`
+- `CONTRACT.md` 增加 v1.1：shelf、Q ≥ 0.1 且有限；v1 旧规则保留；校验命令写 `khaen-calibrate validate`
 - 新增 `check.rs`：独立 RBJ 与 schema 校验。`validate` 拒绝未知 type；只含 Peaking 且 Q ≤ 10 时注明 v1 可读
 - `check-pair` 用同一套复数响应做 Δφ、CD、陷波、纹波
 - `web/src/channelmap.rs` 的 `PeqBand` 接受 type，并按 v1.1 放宽 Q
@@ -68,6 +68,6 @@
 - 8 个已知模态（至少两个 Q>10）+ 倾斜 + 噪声：频率 ±3 Hz、Q ±30%、模态增益 ≤ 0
 - 深谷且 boost cap = 0：无正增益
 - `flat` 与一条非平直曲线：1/6 oct 残差 RMS ≤ 1 dB
-- pair 被破坏时回退；`tspi-calibrate validate` 的 v1 / v1.1 用例
+- pair 被破坏时回退；`khaen-calibrate validate` 的 v1 / v1.1 用例
 - `peq.rs` 与 `check.rs` 的幅度差 ≤ 0.1 dB
 - _需求: 7, 8_

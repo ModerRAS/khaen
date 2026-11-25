@@ -11,9 +11,9 @@ use axum::Router;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-use tspi_audio_web::build_router;
-use tspi_audio_web::config::{AppConfig, RunMode};
-use tspi_audio_web::state::{AppState, MockOptions};
+use khaen_audio_web::build_router;
+use khaen_audio_web::config::{AppConfig, RunMode};
+use khaen_audio_web::state::{AppState, MockOptions};
 
 const TOKEN: &str = "mock-token";
 
@@ -195,7 +195,7 @@ async fn api_requires_auth() {
 async fn login_session_and_logout() {
     let app = TestApp::new();
     let (cookie, csrf) = app.login().await;
-    assert!(cookie.starts_with("tspi_session="));
+    assert!(cookie.starts_with("khaen_session="));
 
     // 会话可用
     let (status, _, body) = app
@@ -313,7 +313,7 @@ async fn first_run_setup_password_then_password_login() {
         .next()
         .unwrap()
         .to_string();
-    assert!(cookie.starts_with("tspi_session="));
+    assert!(cookie.starts_with("khaen_session="));
 
     // 已配置后 status 不再要求 setup，重复 setup 409
     let (_, _, body) = app
@@ -1482,7 +1482,7 @@ async fn channelmap_fir_upload_and_test_tone() {
     assert_eq!(entry["level"], "recommended");
     assert!(entry["group_delay_ms"].is_null());
 
-    let wav = tspi_audio_web::channelmap::build_test_tone_wav(1, 0, 48_000, 100, false);
+    let wav = khaen_audio_web::channelmap::build_test_tone_wav(1, 0, 48_000, 100, false);
     let (status, _, entry) = app
         .post_token(
             "/api/channelmap/fir",

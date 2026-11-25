@@ -2,7 +2,7 @@
 //
 // 注册方式：crates/calibration/src/stage_backend.rs 末尾
 //   #[cfg(test)] mod t67_tests { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/T67/stage_backend.rs")); }
-// 运行：cargo test -p tspi-calibration stage_backend
+// 运行：cargo test -p khaen-calibration stage_backend
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

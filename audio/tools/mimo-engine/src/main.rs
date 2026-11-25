@@ -1,4 +1,4 @@
-// tspi-mimo-fir: ART-like 全矩阵 MIMO FIR 引擎原型（离线 benchmark + 系数导入）
+// khaen-mimo-fir: ART-like 全矩阵 MIMO FIR 引擎原型（离线 benchmark + 系数导入）
 // v2: 持久 worker 线程（channel 派发，无每块 spawn）；系数 manifest（raw f32 / wav）；稀疏路径跳过；band_limit 元数据。
 use realfft::RealFftPlanner;
 use rustfft::num_complex::Complex;

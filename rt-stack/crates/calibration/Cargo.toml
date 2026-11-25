@@ -1,16 +1,16 @@
 # TSPI 校准 daemon：job / sweep / capture / fit / compile-apply（T06 scaffold；leaf T60-T66）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
-name = "tspi-calibration"
+name = "khaen-calibration"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "TSPI 校准 daemon：job / sweep / capture / fit / compile-apply（T06 scaffold；leaf T60-T66）"
 
 [dependencies]
-tspi-dsp-core = { workspace = true }
-tspi-cal-dsp = { workspace = true }
-tspi-rt-host = { workspace = true }
-tspi-dsp-compat = { workspace = true }
-tspi-fir-designer = { workspace = true }
-tspi-modal-design = { workspace = true }
+khaen-core = { workspace = true }
+khaen-cal-dsp = { workspace = true }
+khaen-rt-host = { workspace = true }
+khaen-compat = { workspace = true }
+khaen-designer = { workspace = true }
+khaen-modal-design = { workspace = true }

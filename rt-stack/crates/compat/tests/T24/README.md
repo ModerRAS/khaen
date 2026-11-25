@@ -4,14 +4,14 @@
 - 被测模块：crates/compat/src/ws.rs（W01–W22 必需子集、prepare/commit 实际 ack、
   GetCaptureSignalRms、rate/volume/mute/fader、未知命令拒收）。
 - 运行：在 rt-stack/ 下 ```
-  cargo test -p tspi-dsp-compat ws            # DoD 命令（测试名统一 ws_ 前缀）
-  cargo test -p tspi-dsp-compat               # 整 crate 回归（T13 + T24 + T57）
+  cargo test -p khaen-compat ws            # DoD 命令（测试名统一 ws_ 前缀）
+  cargo test -p khaen-compat               # 整 crate 回归（T13 + T24 + T57）
   ```
 
 Cargo 自动把 tests/T24/main.rs 发现为独立集成测试 target（与 T13/T57 同机制），
 **不需要** integrator 在 public_registration.rs 注册（该文件归 integrator 独占）。
 
-测试夹具：FakePlane 实现 tspi_dsp_compat::ws::WsControlPlane，模拟 T26 宿主控制面
+测试夹具：FakePlane 实现 khaen_compat::ws::WsControlPlane，模拟 T26 宿主控制面
 （运行状态/音量/mute/actual hwparams/RMS/fader/prepare-commit-ack 全部可注入），
 全部内存夹具、无临时文件、无网络/无板端。
 

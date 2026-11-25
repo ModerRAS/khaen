@@ -1,4 +1,4 @@
-//! TSPI RT host（crate tspi-rt-host）——WBS T06 scaffold。
+//! TSPI RT host（crate khaen-rt-host）——WBS T06 scaffold。
 //!
 //! RT host 层：SPSC、admission、clock、swap、format、fault、ALSA/AoIP/scheduler 等。
 //! **本 crate 目前只有 stub**：T16（spsc）、T17（alsa）、T18（admission）、T19（clock）、

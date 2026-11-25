@@ -7,7 +7,7 @@
 
 在 VirtualBox builder VM `tspi-audio-build`（Ubuntu 22.04 x86_64 + Debian 12 arm64 sysroot）上，用
 `deploy/tools/build-aarch64.sh --mode cross-sysroot --with-daemon` 从 **clean HEAD 源**（`git archive HEAD`，
-commit `5c8ea11c93499bb36f33520a548eddfbd47d2da1`）产出 aarch64 `tspi-rt-host` + `tspi-cal`（+ 附带 `tspi-rt-daemon`），
+commit `5c8ea11c93499bb36f33520a548eddfbd47d2da1`）产出 aarch64 `khaen-rt-host` + `tspi-cal`（+ 附带 `tspi-rt-daemon`），
 再经 `make-release-bundle.sh` 打成 release bundle。全程离线（`cargo --offline`）。
 **板端（泰山派 3M，192.0.2.215）安装/运行 = NOT_RUN**：板关机且不可达，本任务未触达。
 
@@ -46,9 +46,9 @@ bash deploy/tools/build-aarch64.sh --mode cross-sysroot --sysroot /home/builder/
 
 ```bash
 cargo build --release --locked --offline --target aarch64-unknown-linux-gnu \
-  -p tspi-rt-host --bin tspi-rt-host \
-  -p tspi-calibration --bin tspi-cal \
-  -p tspi-control --bin tspi-rt-daemon        # 仅 --with-daemon 时
+  -p khaen-rt-host --bin khaen-rt-host \
+  -p khaen-calibration --bin tspi-cal \
+  -p khaen-control --bin tspi-rt-daemon        # 仅 --with-daemon 时
 ```
 
 构建耗时：三 bin 合计 **24.7 s**（8 核；`/usr/bin/time -v` user 112.7 s / sys 33.7 s / wall 24.7 s，exit 0）。
@@ -57,7 +57,7 @@ cargo build --release --locked --offline --target aarch64-unknown-linux-gnu \
 
 | bin | size (B) | sha256 | 角色 |
 | --- | ---: | --- | --- |
-| `bin/tspi-rt-host` | 1,451,984 | `40f158669da28ee94c95a6fbeb78de06004c4d60e8a43c3fb76ef24584fa8f9b` | **目标双 bin 之一**：RT DSP host（生产服务） |
+| `bin/khaen-rt-host` | 1,451,984 | `40f158669da28ee94c95a6fbeb78de06004c4d60e8a43c3fb76ef24584fa8f9b` | **目标双 bin 之一**：RT DSP host（生产服务） |
 | `bin/tspi-cal` | 2,608,352 | `7cc598d2616df6ea1c81e8522b5eebba247de3226971803a791c9251ad0c047b` | **目标双 bin 之一**：校准链 CLI（T67 前置；离线 fake 引擎） |
 | `bin/tspi-rt-daemon` | 3,171,080 | `6db828d15d9ffcb07ad602d4b42642fc8ce0dc6318548939c620e0a73eeaf6fe` | **附带**：control-plane daemon（现行 units/05 切换契约要求 host+daemon 同 active，随包保证 bundle 自一致） |
 
@@ -80,9 +80,9 @@ sha256 `c3218eb2b69ca84c18c3da09375e9ecfc8b1c24897f76e5fd7e13be8126fa6e5`
 | 编译/链接 | 3 bin exit 0（`cargo build --release --locked --offline`） |
 | `check_elf.py --require-arch aarch64` ×3 | PASS |
 | `verify-artifact.sh` ELF/NEEDED/GLIBC/sysroot 门 ×3 | PASS；host 另含 qemu `--selftest` PASS |
-| qemu `tspi-rt-host selftest` | PASS：status=ok，workers=4，bit_exact_graphs=2，format_nonfinite=0 |
-| qemu `tspi-rt-host admission-check` | PASS：status=ok，admission=plan_memory-ok，scheduler=t45-plan-apply-wired |
-| qemu `tspi-rt-host fake-io --blocks 8` | PASS：spsc 8/8，format_nonfinite=0 |
+| qemu `khaen-rt-host selftest` | PASS：status=ok，workers=4，bit_exact_graphs=2，format_nonfinite=0 |
+| qemu `khaen-rt-host admission-check` | PASS：status=ok，admission=plan_memory-ok，scheduler=t45-plan-apply-wired |
+| qemu `khaen-rt-host fake-io --blocks 8` | PASS：spsc 8/8，format_nonfinite=0 |
 | qemu `tspi-rt-daemon check --config`（bind 127.0.0.1:18080） | PASS：status=ok，warnings=[] |
 | qemu `tspi-cal run --design synthetic`（fake 引擎、离线） | exit 0；job-0001 走到 compile（plan.bin 716 B）后按 dry-run 语义 rolled_back；board_run=NOT_RUN |
 | units 契约（B1 `ExecStartPre=irq-affinity-pin wait`） | PASS（check_unit_syntax 6/6 + 打包时 B1 grep 门） |
@@ -95,8 +95,8 @@ cal 对 `--version` 回 `missing value for --version`；daemon 无 `--version`�
 
 ## 4. 脚本缺口修复（G1 + G5/G6）
 
-1. **G1（高）**：`deploy/tools/build-aarch64.sh` 原先 4 个 mode 都只 `cargo build -p tspi-rt-host`。
-   现**默认构建双 bin**（`tspi-rt-host` + `tspi-cal`），新增 `--with-daemon` 追加 `tspi-rt-daemon`；
+1. **G1（高）**：`deploy/tools/build-aarch64.sh` 原先 4 个 mode 都只 `cargo build -p khaen-rt-host`。
+   现**默认构建双 bin**（`khaen-rt-host` + `tspi-cal`），新增 `--with-daemon` 追加 `tspi-rt-daemon`；
    构建后对每个 bin 跑 `check_elf`/`verify-artifact`（G6：cal/daemon 也过架构门；只有 host 跑 qemu selftest）。
 2. **G5（中）**：`deploy/bin/make-release-bundle.sh` 原先只收 host+daemon；现在 `tspi-cal` 存在时自动入包
    （manifest kind=binary → `release_manifest.py verify --require-arch` 会一并校验三 bin 架构）。

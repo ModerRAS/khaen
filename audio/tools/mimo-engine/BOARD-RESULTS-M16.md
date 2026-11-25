@@ -2,7 +2,7 @@
 
 > **状态：16ch 方案已暂停（用户 2026-11-15 口径），本文件仅作留档数据，勿用于 UI/预设。**
 
-> 2026-11-15，板子空闲；tspi-mimo-fir v3（persistent worker，FFT，part=128，4×A72 taskset 4-7，2s 音频，合成系数；稀疏用 manifest 演示系数）。
+> 2026-11-15，板子空闲；khaen-mimo-fir v3（persistent worker，FFT，part=128，4×A72 taskset 4-7，2s 音频，合成系数；稀疏用 manifest 演示系数）。
 
 ## 全矩阵 12×16
 | fs | 512 | 1024 | 2048 | 4096 |

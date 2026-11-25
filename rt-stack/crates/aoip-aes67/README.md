@@ -1,4 +1,4 @@
-# tspi-aoip-aes67
+# khaen-aoip-aes67
 
 自研用户态 AES67 协议 crate（纯 std、**零第三方依赖**）。覆盖三条线：
 
@@ -46,12 +46,12 @@
 
 ~~~rust
 use std::net::Ipv4Addr;
-use tspi_aoip_aes67::mdns::{
+use khaen_aoip_aes67::mdns::{
     ravenna_node_service, ravenna_session_service, DnsName, MdnsAdvertiser,
     MdnsAdvertiserConfig, MdnsBrowser, MdnsBrowserConfig, MdnsEndpoint, RavennaNodeService,
 };
-use tspi_aoip_aes67::rtsp::{RtspClient, RtspServer, RtspServerConfig, RtspStream};
-use tspi_aoip_aes67::http_sdp::{HttpSdpServer, HttpSdpServerConfig, HttpSdpStream};
+use khaen_aoip_aes67::rtsp::{RtspClient, RtspServer, RtspServerConfig, RtspStream};
+use khaen_aoip_aes67::http_sdp::{HttpSdpServer, HttpSdpServerConfig, HttpSdpStream};
 
 // 1) 控制面：RTSP 服务端（DESCRIBE 返回 sdp_write 生成的 SDP；每连接一线程）
 let server = RtspServer::start(
@@ -69,7 +69,7 @@ let http = HttpSdpServer::start(
     HttpSdpServerConfig::new("0.0.0.0:8080".parse()?),
     vec![HttpSdpStream::new("Line 1", sdp.clone())],
 )?;
-let fetched = tspi_aoip_aes67::http_sdp::http_get_sdp(
+let fetched = khaen_aoip_aes67::http_sdp::http_get_sdp(
     "http://192.0.2.222:8080/Line%201.sdp",
     std::time::Duration::from_secs(3),
 )?;
@@ -102,7 +102,7 @@ advertiser.stop(); // 发 goodbye（TTL 0）
 ## 测试
 
 ~~~
-cargo test -p tspi-aoip-aes67
+cargo test -p khaen-aoip-aes67
 # lib 84 + tests/loopback 4 + tests/zero_alloc 1 = 89 passed, 0 failed
 ~~~
 

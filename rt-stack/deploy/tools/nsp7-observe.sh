@@ -13,8 +13,8 @@ T0=$(date +%s)
 while :; do
   NOW=$(date +%s); T=$(( NOW - T0 ))
   [ "$T" -gt "$SECS" ] && break
-  U=$(systemctl is-active tspi-rt-host-nsp7)
-  P=$(pgrep -x tspi-rt-host | head -1)
+  U=$(systemctl is-active khaen-rt-host-nsp7)
+  P=$(pgrep -x khaen-rt-host | head -1)
   ST=$(awk '/^state:/{print $2}' /proc/asound/card1/pcm0p/sub0/status 2>/dev/null)
   HW=$(awk '/hw_ptr/{print $3}' /proc/asound/card1/pcm0p/sub0/status 2>/dev/null)
   AP=$(awk '/appl_ptr/{print $3}' /proc/asound/card1/pcm0p/sub0/status 2>/dev/null)

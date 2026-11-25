@@ -57,7 +57,7 @@
 //! 本模块是设计期一次性导入路径（读文件、分配 Vec、字符串格式化），**不属于 RT-MODULE**，不被
 //! `rt-check forbid/drop-audit` 扫描；不得被 RT 线程调用。
 //!
-//! 状态：**实现 + 真实 `cargo test -p tspi-fir-designer targets`**；未上板、未做真实测量/校准、
+//! 状态：**实现 + 真实 `cargo test -p khaen-designer targets`**；未上板、未做真实测量/校准、
 //! 未与 T37/T55/T64 联调（接口按 §6 提供）。见 evidence/T11/。
 
 use std::fmt;
@@ -3727,7 +3727,7 @@ impl TargetCurve {
             "schema",
             "tspi-target-report-draft/v1",
         );
-        push_json_str(&mut out, &mut first, "tool", "tspi-fir-designer/targets");
+        push_json_str(&mut out, &mut first, "tool", "khaen-designer/targets");
         push_json_str(&mut out, &mut first, "form", report.form.as_str());
         push_json_raw(
             &mut out,

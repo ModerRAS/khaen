@@ -1,5 +1,5 @@
 [package]
-name = "tspi-mimo-diag-plan"
+name = "khaen-mimo-diag-plan"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,8 +9,8 @@ name = "mimo_diag_plan"
 path = "src/main.rs"
 
 [dependencies]
-tspi-calibration = { path = "../../../crates/calibration" }
-tspi-fir-designer = { path = "../../../crates/designer" }
-tspi-dsp-core = { path = "../../../crates/core" }
+khaen-calibration = { path = "../../../crates/calibration" }
+khaen-designer = { path = "../../../crates/designer" }
+khaen-core = { path = "../../../crates/core" }
 
 [workspace]

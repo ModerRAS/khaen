@@ -3,8 +3,8 @@
 //! Reads a plain-text design input (exported by prep/dryrun/export_t66_input.py),
 //! builds the T66 CompileApplyRequest (G path FIRs from the MIMO design + identity
 //! P rows with T65/T64-shaped evidence) and calls the real T66 compiler
-//! (tspi_calibration::compile_apply::compile_plan) used by tspi-cal run.
-//! Writes plan.bin + compile-report.json manifest accepted by tspi-rt-host
+//! (khaen_calibration::compile_apply::compile_plan) used by tspi-cal run.
+//! Writes plan.bin + compile-report.json manifest accepted by khaen-rt-host
 //! plan-arena (plan_sha256 / host_graph_sha256 binding).
 //!
 //! Honesty: T65/T64 shape evidence is derived from the pilot design (identity P,
@@ -15,14 +15,14 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use tspi_calibration::compile_apply::{
+use khaen_calibration::compile_apply::{
     ArtifactBinding, CompileApplyOptions, CompileApplyRequest, DelayPolarityEncoding,
     GPathInput, HeadroomEvidence, MappingBinding, PhaseEvidence, RoleBoostRecord,
     RoleCompileInput, RoleDacSlot, PEQ_FIT_SCHEMA, compile_plan,
 };
-use tspi_calibration::job::sha256_hex;
-use tspi_calibration::phase_fit::{PhaseChannelOp, PhaseFitChecks};
-use tspi_fir_designer::phase::Polarity;
+use khaen_calibration::job::sha256_hex;
+use khaen_calibration::phase_fit::{PhaseChannelOp, PhaseFitChecks};
+use khaen_designer::phase::Polarity;
 
 const PROGRAM_PEAK_DBFS: f64 = -18.0;
 
@@ -272,7 +272,7 @@ fn main_entry() -> Result<(), String> {
     let mut manifest = String::new();
     let _ = writeln!(manifest, "{{");
     let _ = writeln!(manifest, "  \"schema\": \"tspi-cal-compile-apply/v1\",");
-    let _ = writeln!(manifest, "  \"tool\": {{\"name\":\"tspi-mimo-t66-pack\",\"version\":\"task232-1\"}},");
+    let _ = writeln!(manifest, "  \"tool\": {{\"name\":\"khaen-mimo-t66-pack\",\"version\":\"task232-1\"}},");
     let _ = writeln!(manifest, "  \"t66_compiler_invoked\": true,");
     let _ = writeln!(manifest, "  \"pilot_3mic\": true,");
     let _ = writeln!(manifest, "  \"honesty\": \"G FIR from 3-mic pilot reference design; T65/T64-shape evidence derived from identity P (no real T3/T67 acceptance)\",");

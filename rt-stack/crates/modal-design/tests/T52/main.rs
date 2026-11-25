@@ -1,6 +1,6 @@
-//! T52 private integration tests — 模态正则（crate tspi-modal-design）。
+//! T52 private integration tests — 模态正则（crate khaen-modal-design）。
 //!
-//! 运行（在 rt-stack/ 下）：cargo test -p tspi-modal-design regularize
+//! 运行（在 rt-stack/ 下）：cargo test -p khaen-modal-design regularize
 //! 文件位置：crates/modal-design/tests/T52/main.rs（leaf 私有测试；不写 public_registration.rs）。
 //!
 //! 覆盖（WBS T52 DoD）：
@@ -20,22 +20,22 @@
 //! 本文件只构造内存夹具；不采音、不碰板端、不打开 ALSA、不写文件（独立 checker 的 dump 走
 //! stdout，由 evidence 脚本读取）。
 
-use tspi_modal_design::ingest::{sha256_hex, PositionRole};
-use tspi_modal_design::regularize::{
+use khaen_modal_design::ingest::{sha256_hex, PositionRole};
+use khaen_modal_design::regularize::{
     regularize, regularize_from_target_plant, HeadroomSpec, PriorKind, RegularizationPrior,
     RegularizeError, RegularizeErrorKind, RegularizeOptions, RegularizeWarning, WhitelistKind,
     APPLICABILITY_APPLICABLE, APPLICABILITY_BOUNDARY, APPLICABILITY_NOT_APPLICABLE,
     CORRECTION_GAIN_CAP_MAX_DB, CORRECTION_GAIN_CAP_MIN_DB, LAMBDA_GRID, MAX_LAMBDA,
     REGULARIZE_SCHEMA, SELECTION_METHOD_CV, SELECTION_METHOD_L_CURVE, SELECTION_METHOD_PRESERVE,
 };
-use tspi_modal_design::solve::{solve, SolveMode, SolveOptions, SolveProblem, SolveStatus};
-use tspi_modal_design::target::{
+use khaen_modal_design::solve::{solve, SolveMode, SolveOptions, SolveProblem, SolveStatus};
+use khaen_modal_design::target::{
     build_target_matrix, validate_solution, BandDecay, CurveBinding, DecayTarget, EffectivePlant,
     FittedPostBaseline, FrozenPostBaseline, ModalParticipants, PostBaselineInput, PostRoleFit,
     RawPlant, RawPosition, RawResponse, TargetMatrix, TargetSpec, ToneApplicationProof,
     ToneBinding, P1_LAYOUT_4_1_2,
 };
-use tspi_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
+use khaen_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
 
 // ===========================================================================
 // 常量与通用夹具
@@ -154,7 +154,7 @@ fn make_problem_with_scale(
                     .collect::<Vec<ComplexPoint>>(),
             );
         }
-        solve_positions.push(tspi_modal_design::solve::SolvePosition {
+        solve_positions.push(khaen_modal_design::solve::SolvePosition {
             label: format!("P{:02}", position + 1),
             weight: 1.0,
             h_eff,
@@ -228,7 +228,7 @@ fn expect_kind<T>(
     }
 }
 
-fn warning_codes(outcome: &tspi_modal_design::regularize::RegularizeOutcome) -> Vec<&'static str> {
+fn warning_codes(outcome: &khaen_modal_design::regularize::RegularizeOutcome) -> Vec<&'static str> {
     outcome
         .report
         .warnings
@@ -237,7 +237,7 @@ fn warning_codes(outcome: &tspi_modal_design::regularize::RegularizeOutcome) -> 
         .collect()
 }
 
-fn solution_offdiag_max_db(outcome: &tspi_modal_design::regularize::RegularizeOutcome) -> f64 {
+fn solution_offdiag_max_db(outcome: &khaen_modal_design::regularize::RegularizeOutcome) -> f64 {
     let solution = outcome.solution.as_ref().expect("solution required");
     let m = solution.modal.m();
     let mut maximum = f64::NEG_INFINITY;
@@ -987,7 +987,7 @@ fn t52_regularize_headroom_fallback_to_simple_whitelist() {
     assert_eq!(report.headroom.tolerance_db, 2.0);
     assert_eq!(
         report.headroom.band_hz,
-        tspi_modal_design::target::IMPROVEMENT_BAND_HZ
+        khaen_modal_design::target::IMPROVEMENT_BAND_HZ
     );
 }
 
@@ -1108,7 +1108,7 @@ fn t52_regularize_prior_frozen_shrinks_toward_prior() {
         PriorKind::FrozenCoefficients.as_str()
     );
     assert!(warning_codes(&frozen_outcome).contains(&RegularizeWarning::PRIOR_FROZEN));
-    let distance = |solution: &tspi_modal_design::regularize::RegularizedSolution| {
+    let distance = |solution: &khaen_modal_design::regularize::RegularizedSolution| {
         let mut distance = 0.0f64;
         for (index, value) in solution.coeffs_f64.iter().enumerate() {
             distance += (value - prior.coeffs()[index]).powi(2);
@@ -1595,7 +1595,7 @@ fn t52_regularize_zero_plant_degenerate() {
 
 #[test]
 fn t52_regularize_static_guards() {
-    let source = tspi_modal_design::regularize::regularize_source_text_for_guards();
+    let source = khaen_modal_design::regularize::regularize_source_text_for_guards();
     for required in [
         "tspi-modal-regularize/v1",
         "WhitelistKind",
@@ -1813,8 +1813,8 @@ fn t52_regularize_known_fixture_dump() {
         options.cv_folds,
         json_number(options.base.fit_band_hz.0),
         json_number(options.base.fit_band_hz.1),
-        json_number(tspi_modal_design::target::IMPROVEMENT_BAND_HZ.0),
-        json_number(tspi_modal_design::target::IMPROVEMENT_BAND_HZ.1),
+        json_number(khaen_modal_design::target::IMPROVEMENT_BAND_HZ.0),
+        json_number(khaen_modal_design::target::IMPROVEMENT_BAND_HZ.1),
         json_number(options.headroom.correction_cap_db),
         json_number(options.headroom.diagonal_cap_db),
         json_number(options.headroom.tolerance_db)

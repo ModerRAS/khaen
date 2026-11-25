@@ -8,7 +8,7 @@
 //! - 分区卷积复用 T08：B48=64（B12=16）与 B48=128（B12=32）跨块长一致 ≤ 1e-5；
 //! - RT 路径零分配；成本模型 12k 支路 vs 48k 全速融合路径；release 下实测 fake 吞吐。
 //!
-//! 运行：cargo test -p tspi-dsp-core --test mimo12k --release -- --nocapture
+//! 运行：cargo test -p khaen-core --test mimo12k --release -- --nocapture
 
 #![allow(dead_code)]
 
@@ -16,7 +16,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use tspi_dsp_core::mimo12k::{
+use khaen_core::mimo12k::{
     Mimo12kLayout, Mimo12kRuntime, MIMO12K_GROUP, MIMO12K_LOWRATE_HZ,
 };
 const M: usize = 5;

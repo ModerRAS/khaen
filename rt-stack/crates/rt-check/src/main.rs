@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use tspi_rt_check::{abi_layout, drop_audit, forbid, Report, TOOL_VERSION};
+use khaen_rt_check::{abi_layout, drop_audit, forbid, Report, TOOL_VERSION};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -30,7 +30,7 @@ fn main() -> ExitCode {
             }
             run_report("drop-audit", report)
         }
-        Some("host-file") => tspi_rt_check::host_file::run_cli(&args[2..]),
+        Some("host-file") => khaen_rt_check::host_file::run_cli(&args[2..]),
         Some("plan-hash") => not_implemented("plan-hash", "T12/T13（plan 打包与 graph_id 规范化）"),
         Some("state-machine") => not_implemented("state-machine", "T21/T26（状态机模型测试）"),
         Some("-h") | Some("--help") => {

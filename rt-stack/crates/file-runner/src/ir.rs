@@ -161,7 +161,7 @@ pub struct IrDraft {
     pub hash_algo: String,
     /// created_unix（可选；不参与图版本）。
     pub created_unix: Option<u64>,
-    /// 源校准 schema（tspi-calibration/v1 或 v1.1）。
+    /// 源校准 schema（khaen-calibration/v1 或 v1.1）。
     pub source_schema: String,
     /// 源校准文件 SHA-256（64 hex）。
     pub source_sha256: String,
@@ -307,7 +307,7 @@ pub fn parse_ir(value: &Json) -> RunnerResult<IrDraft> {
     };
     let source = value.require_object("source")?;
     let source_schema = require_object_string(source, "schema", "source")?;
-    if source_schema != "tspi-calibration/v1" && source_schema != "tspi-calibration/v1.1" {
+    if source_schema != "khaen-calibration/v1" && source_schema != "khaen-calibration/v1.1" {
         return Err(RunnerError::new(
             E_FILE_IR,
             format!("source.schema '{}' unsupported", source_schema),

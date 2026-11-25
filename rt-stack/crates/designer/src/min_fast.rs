@@ -22,7 +22,7 @@
 //! crates/designer/tests/T33/min_fast_cases.rs，通过文末 include! 在 #[cfg(test)] 下
 //! 编译执行（不改 integrator 独占的 public_registration.rs，见 tests/T33/README.md）。
 //!
-//! 状态：T33 实现 + 真实 cargo test -p tspi-fir-designer min_fast 执行（见 evidence/T33/）。
+//! 状态：T33 实现 + 真实 cargo test -p khaen-designer min_fast 执行（见 evidence/T33/）。
 //! 未做：板端/ALSA/RT 实测、WAV 落盘导出、roots 分解、零点半径检查（spec MAY）、T55 报告（NOT_RUN）。
 
 use std::fmt;

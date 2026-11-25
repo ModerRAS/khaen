@@ -4,14 +4,14 @@
 
 #![allow(dead_code)]
 
-use tspi_file_runner::fir::{build_fir_manifest, magnitude_db_at, FirManifestSpec};
-use tspi_file_runner::graph::{self, PreparedSession};
-use tspi_file_runner::json::Json;
-use tspi_file_runner::runner::{self, RunOptions, RunResult};
-pub use tspi_file_runner::session::MapSource;
-use tspi_file_runner::sha256::sha256_hex;
-use tspi_file_runner::wav::encode_wav_f32;
-use tspi_file_runner::RunnerResult;
+use khaen_file_runner::fir::{build_fir_manifest, magnitude_db_at, FirManifestSpec};
+use khaen_file_runner::graph::{self, PreparedSession};
+use khaen_file_runner::json::Json;
+use khaen_file_runner::runner::{self, RunOptions, RunResult};
+pub use khaen_file_runner::session::MapSource;
+use khaen_file_runner::sha256::sha256_hex;
+use khaen_file_runner::wav::encode_wav_f32;
+use khaen_file_runner::RunnerResult;
 
 /// 夹具采样率。
 pub const FS: u32 = 48_000;
@@ -292,7 +292,7 @@ pub fn pcm16(samples: &[i16]) -> Vec<u8> {
     out
 }
 
-/// 会话夹具（`tspi-file-runner/v1`）。
+/// 会话夹具（`khaen-file-runner/v1`）。
 #[derive(Clone, Debug)]
 pub struct Fixture {
     pub fs: u32,
@@ -522,7 +522,7 @@ impl Fixture {
         }
 
         let mut root = vec![
-            ("schema", Json::String("tspi-file-runner/v1".to_string())),
+            ("schema", Json::String("khaen-file-runner/v1".to_string())),
             ("precision", Json::String("f32-strict".to_string())),
             ("audio", Json::from_entries(audio_entries)),
             ("engine", Json::from_entries(engine_entries)),
@@ -678,7 +678,7 @@ pub fn ir_draft(
         (
             "source",
             Json::from_entries(vec![
-                ("schema", Json::String("tspi-calibration/v1".to_string())),
+                ("schema", Json::String("khaen-calibration/v1".to_string())),
                 ("source_sha256", Json::String(HASH_B.to_string())),
                 ("sample_rate", Json::Number(source_sample_rate as f64)),
             ]),

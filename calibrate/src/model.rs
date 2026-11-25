@@ -146,7 +146,7 @@ pub struct RepeatDetail {
     pub ir_peak_suspect: Vec<bool>,
 }
 
-/// 参考麦（通常是 MOTU 同源时钟）的摘要。不进入 tspi-calibration/v1 的 channels。
+/// 参考麦（通常是 MOTU 同源时钟）的摘要。不进入 khaen-calibration/v1 的 channels。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReferenceSummary {
     pub channel: usize,

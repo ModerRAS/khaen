@@ -1,4 +1,4 @@
-# tests/T11 —— tspi-fir-designer 私有测试（WBS T11 target 导入）
+# tests/T11 —— khaen-designer 私有测试（WBS T11 target 导入）
 
 - 任务：WBS T11（team task-70，owner rt-target-import）；写域 `crates/designer/src/targets.rs` + 本目录 + `rt-stack/evidence/T11/`。
 - 公共注册文件 `public_registration.rs` 属 integrator 独占，**本任务没有改它**（也未改 Cargo.toml/lib.rs/CLI/README/ci/spec/reference）。
@@ -7,7 +7,7 @@
   在单测构建中编译执行（cargo 不自动发现 `tests/<子目录>/*.rs`；该 include! 模式与 T33/T35/T36/T38/T41 一致）。
 - 运行：在 `rt-stack/` 下
   ```
-  cargo test -p tspi-fir-designer targets
+  cargo test -p khaen-designer targets
   ```
   过滤词 `targets` 命中模块路径 `targets::targets_tests::t11_...`，当前 **60 tests / 0 failed**。
 - 覆盖：CSV+sidecar 与单 JSON 两种形式、28 个 E_TGT_* 拒收码与 §6.9.1 唯一码优先级、单位/采样率/

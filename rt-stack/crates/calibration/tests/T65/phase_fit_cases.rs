@@ -3,7 +3,7 @@
 // 本文件经 crates/calibration/src/phase_fit.rs 末尾的
 //   #[cfg(test)] mod t65_tests { include!("../tests/T65/phase_fit_cases.rs"); }
 // 编进 lib 单测（cargo 不自动发现 tests/<子目录>；公共注册属 integrator，不要重复注册）。
-// 运行：cargo test -p tspi-calibration phase_fit
+// 运行：cargo test -p khaen-calibration phase_fit
 //
 // 离线：不打开 ALSA / 不碰板端；全部为解析合成复响应夹具（T49 口径 X=|X|e^{+jφ}，
 // 残余到达延迟 τ 贡献 +2πfτ/fs）。覆盖：相对整数契约（D=round(max t − t)、min=0、D=0=最晚）、
@@ -1375,7 +1375,7 @@ fn t65_phase_fit_time_domain_convolution_matches_measured_domain_conj() {
     // 时域卷积 h 后的测量响应 == 测量域乘 conj(H)（证明 FIR 方向与 T49 共轭域一致）。
     for (channel_index, channel) in ["FL", "FR"].iter().enumerate() {
         let design = &output.firs[channel_index].design;
-        let convolved = tspi_fir_designer::phase::convolve_linear(
+        let convolved = khaen_designer::phase::convolve_linear(
             &signals[channel_index],
             &design.coefficients,
         );

@@ -77,8 +77,8 @@
 //! aoip-halfcheck-REPORT-20261116-1949.md、scratch/lead/inferno/inferno2pipe
 //! （native i32 交错写出）。
 
-use tspi_dsp_core::abi::sample_format;
-use tspi_dsp_core::rt::{t_block_ns_ceil, RtStatus, BLOCK_SIZES, SAMPLE_RATES_HZ};
+use khaen_core::abi::sample_format;
+use khaen_core::rt::{t_block_ns_ceil, RtStatus, BLOCK_SIZES, SAMPLE_RATES_HZ};
 
 use crate::alsa::{self, is_runtime_period, is_runtime_rate, AlsaError, ResolvedDevice};
 use crate::clock::{DiscontinuityReason, LockState};

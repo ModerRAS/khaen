@@ -1,13 +1,13 @@
-# tests/T13 —— tspi-dsp-compat calibration 私有测试（WBS T13）
+# tests/T13 —— khaen-compat calibration 私有测试（WBS T13）
 
 - 任务：WBS T13（calibration-adapter；team task-78）；写域 `crates/compat/tests/T13/`。
 - 文件：`main.rs`（cargo 自动发现为集成测试 target，名 `T13`；类似 T12 的 `tests/T12/main.rs`）。
   不需要改 `tests/public_registration.rs`（integrator 独占）。
 - 运行（在 `rt-stack/` 下；构建输出可用仓库外 `CARGO_TARGET_DIR`）：
 
-  cargo test -p tspi-dsp-compat calibration           # WBS T13 DoD（测试名统一 calibration_ 前缀）
-  cargo test -p tspi-dsp-compat calibration -- --list
-  cargo test -p tspi-dsp-compat                        # 整个 crate（含 public_registration 0 tests）
+  cargo test -p khaen-compat calibration           # WBS T13 DoD（测试名统一 calibration_ 前缀）
+  cargo test -p khaen-compat calibration -- --list
+  cargo test -p khaen-compat                        # 整个 crate（含 public_registration 0 tests）
 
 - 只读输入：`calibration-spec/examples/calibration-4.1.2.example.yml`、
   `...-5.3.2.example.yml`、`...-v11-highshelf.example.yml` 经 `include_str!` 绑定；

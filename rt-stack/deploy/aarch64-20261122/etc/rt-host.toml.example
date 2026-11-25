@@ -1,4 +1,4 @@
-# /etc/tspi-rt-stack/rt-host.toml —— tspi-rt-host 配置模板（schema tspi-rt-host/v1，T155 冻结）
+# /etc/tspi-rt-stack/rt-host.toml —— khaen-rt-host 配置模板（schema khaen-rt-host/v1，T155 冻结）
 # 安装时由 04-install-release.sh 从 .example 复制；不得覆盖已存在文件。
 # 纪律：不得出现 CamillaDSP/旧栈路径；回退只用自研 last-good 或 mute（G-no-C）。
 [host]

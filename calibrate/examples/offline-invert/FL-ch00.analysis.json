@@ -1511,7 +1511,7 @@
     }
   ],
   "meta": {
-    "schema": "tspi-calibration-meta/v1",
+    "schema": "khaen-calibration-meta/v1",
     "sample_rate": 48000,
     "channels": 2,
     "sweep_start_hz": 20.0,

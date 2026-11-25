@@ -9,7 +9,7 @@
 //! 契约来源：
 //! - WBS T62 行：crates/calibration/src/capture.rs —— UMIK 独立 USB ADC 1ch 采集 raw/repeat/
 //!   timebase；MOTU 可选电学 reference 另 channel；漂移与公共相位基准不混设备；验收命令
-//!   cargo test -p tspi-calibration umik_capture。
+//!   cargo test -p khaen-calibration umik_capture。
 //! - WBS §1（唯一 P1 完成定义）、§3（校准设备语义：UMIK 是独立 USB ADC 单通道，MOTU 输出扫频；
 //!   MOTU 可选电学 reference 为另独立通道，不是 MOTU 采 UMIK）、§6（executed test_count>0，
 //!   空 stub/0 tests 不能 PASS）、§7（本模块不打开设备）。
@@ -67,18 +67,18 @@
 //!
 //! 测试注册（T06 纪律）：私有测试在 crates/calibration/tests/T62/umik_capture.rs，由本文件末尾
 //! #[cfg(test)] mod t62_tests { include!(...) } 编进 lib 单测；不要再注册进
-//! tests/public_registration.rs（会重复执行）。运行：cargo test -p tspi-calibration umik_capture。
+//! tests/public_registration.rs（会重复执行）。运行：cargo test -p khaen-calibration umik_capture。
 
 use std::fmt;
 use std::fmt::Write as _;
 
-use tspi_dsp_core::abi::sample_format;
-use tspi_dsp_core::rt::{BLOCK_SIZES, SAMPLE_RATES_HZ};
-use tspi_modal_design::ingest::{
+use khaen_core::abi::sample_format;
+use khaen_core::rt::{BLOCK_SIZES, SAMPLE_RATES_HZ};
+use khaen_modal_design::ingest::{
     CaptureFile, DriftCorrection, MicClock, MicInfo, SampleFormat, TimebaseDiag,
 };
-use tspi_rt_host::clock::{ClockObservation, PpmEstimate, PpmEstimator};
-use tspi_rt_host::format::{self, FormatConfig, PeriodLayout};
+use khaen_rt_host::clock::{ClockObservation, PpmEstimate, PpmEstimator};
+use khaen_rt_host::format::{self, FormatConfig, PeriodLayout};
 
 use crate::job::sha256_hex;
 use crate::sweep::{SweepTimeline, PLACEHOLDER_GRAPH_ID};
@@ -99,7 +99,7 @@ pub const UMIK1_NATIVE_SAMPLE_RATE_HZ: u32 = 48_000;
 /// UMIK 时钟域声明（P1 ingest 只接受 usb；与 MOTU 同源时禁止冒称独立 ADC）。
 pub const UMIK_CLOCK_DOMAIN_USB: &str = "usb";
 /// 多声道/环绕听音位的 UMIK 朝向（90° 校准文件，麦轴垂直朝天花板；ACCEPTANCE §0.1.2）。
-pub use tspi_cal_dsp::capture::UMIK_ORIENTATION_VERTICAL;
+pub use khaen_cal_dsp::capture::UMIK_ORIENTATION_VERTICAL;
 /// 单只近场/轴上的 UMIK 朝向（0° 校准文件；ACCEPTANCE §0.1.2）。
 pub const UMIK_ORIENTATION_AXIAL: &str = "0deg";
 

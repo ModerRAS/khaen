@@ -12,13 +12,13 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use tspi_aoip_aes67::capture::CaptureBlockSource;
-use tspi_aoip_aes67::clock::{frames_to_ns_ceil, ns_to_frames};
-use tspi_aoip_aes67::jitter::{BlockStatus, JitterConfig};
-use tspi_aoip_aes67::receiver::{Aes67Receiver, ReceiverConfig, ReceiverError};
-use tspi_aoip_aes67::rtp;
-use tspi_aoip_aes67::sdp::SdpDocument;
-use tspi_aoip_aes67::sender::{Aes67RtpSender, SenderConfig};
+use khaen_aoip_aes67::capture::CaptureBlockSource;
+use khaen_aoip_aes67::clock::{frames_to_ns_ceil, ns_to_frames};
+use khaen_aoip_aes67::jitter::{BlockStatus, JitterConfig};
+use khaen_aoip_aes67::receiver::{Aes67Receiver, ReceiverConfig, ReceiverError};
+use khaen_aoip_aes67::rtp;
+use khaen_aoip_aes67::sdp::SdpDocument;
+use khaen_aoip_aes67::sender::{Aes67RtpSender, SenderConfig};
 
 /// 每包帧数（1 ms @48k）。
 const FRAMES_PER_PACKET: usize = 48;
@@ -67,14 +67,14 @@ fn unicast_receiver_config(port: u16, channels: u16) -> ReceiverConfig {
         media: Ipv4Addr::LOCALHOST,
         port,
         multicast: false,
-        interfaces: tspi_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
-            group_allow: tspi_aoip_aes67::listen::GroupAllow::EMPTY,
-            source_allow: tspi_aoip_aes67::listen::SourceAllow::EMPTY,
+        interfaces: khaen_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
+            group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
+            source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
         channels,
         rcvbuf_bytes: 4 << 20,
         recv_timeout_ms: 10,
         io_priority: None,
-        clock: tspi_aoip_aes67::receiver::ReceiverClock::Usrv,
+        clock: khaen_aoip_aes67::receiver::ReceiverClock::Usrv,
         jitter: JitterConfig::new(channels, RATE_HZ, BLOCK_FRAMES, 8_192, 8_000)
             .expect("jitter config"),
         ssrc_filter: None,
@@ -203,14 +203,14 @@ fn loopback_multicast_receives_when_platform_allows() {
         media: group,
         port,
         multicast: true,
-        interfaces: tspi_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
-            group_allow: tspi_aoip_aes67::listen::GroupAllow::EMPTY,
-            source_allow: tspi_aoip_aes67::listen::SourceAllow::EMPTY,
+        interfaces: khaen_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
+            group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
+            source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
         channels: 2,
         rcvbuf_bytes: 4 << 20,
         recv_timeout_ms: 10,
         io_priority: None,
-        clock: tspi_aoip_aes67::receiver::ReceiverClock::Usrv,
+        clock: khaen_aoip_aes67::receiver::ReceiverClock::Usrv,
         jitter: JitterConfig::aes67_default(2).expect("jitter"),
         ssrc_filter: None,
     };
@@ -264,7 +264,7 @@ a=mediaclk:direct=0\r\n";
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().expect("cwd"));
     std::fs::create_dir_all(&directory).expect("create tmp dir");
-    let path = directory.join(format!("tspi-aes67-rx-{}.sdp", std::process::id()));
+    let path = directory.join(format!("khaen-aes67-rx-{}.sdp", std::process::id()));
     std::fs::write(&path, text).expect("write sdp");
     let document = SdpDocument::from_file(path.to_str().expect("utf8 path")).expect("load sdp");
     let session = document.parse_validated().expect("sdp profile");
@@ -296,7 +296,7 @@ a=ts-refclk:ptp=IEEE1588-2008:0\r\n",
     );
     let session = document.parse().expect("parse");
     let mut config = ReceiverConfig::from_session(&session, None).expect("config");
-    config.clock = tspi_aoip_aes67::receiver::ReceiverClock::PtpPhc { domain: 0 };
+    config.clock = khaen_aoip_aes67::receiver::ReceiverClock::PtpPhc { domain: 0 };
     assert_eq!(
         config.validate().unwrap_err().name(),
         "ERR_RX_CLOCK_NOT_WIRED"

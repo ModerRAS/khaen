@@ -146,9 +146,9 @@ fn segment_envelope(t: usize, frames: usize, fade: usize) -> f64 {
 }
 
 /// Farina 式反卷积（与 analyze_sweep.py deconvolve 同口径）。
-/// 实现在 `tspi_cal_dsp::deconvolve`，host 求解走同一函数。
+/// 实现在 `khaen_cal_dsp::deconvolve`，host 求解走同一函数。
 pub fn deconvolve(seg: &[f64], sweep: &[f64], tail_frames: usize, reg: f64) -> Vec<f64> {
-    tspi_cal_dsp::deconvolve(seg, sweep, tail_frames, reg)
+    khaen_cal_dsp::deconvolve(seg, sweep, tail_frames, reg)
 }
 
 fn argmax_abs(values: &[f64]) -> usize {

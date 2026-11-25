@@ -3,7 +3,7 @@
 //! ## 为什么在 rt-host（task-210 / Cursor v1.1 N-10）
 //!
 //! task-200 先在 `compat::channel_map` 实现了缺中置下混（S1 兼容层），task-203 又把 host
-//! 接线直接调用 `compat::channel_map` + `compat::roles`，给 rt-host 增加了 `tspi-dsp-compat`
+//! 接线直接调用 `compat::channel_map` + `compat::roles`，给 rt-host 增加了 `khaen-compat`
 //! 依赖。Cursor v1.1 复审 N-10 指出：若「host 不得调用 compat::CenterDownmix」仍是硬约束，
 //! 这是 P1 分层违规（host 不应依赖/调用 compat 的 S1 兼容层）。因此本模块把内容适配
 //! 实现迁入 rt-host 自持（本文件），rt-host 不再依赖/调用 compat；`compat::channel_map`
@@ -56,7 +56,7 @@
 use std::fmt;
 use std::path::Path;
 
-use tspi_dsp_core::rt::{MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES};
+use khaen_core::rt::{MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES};
 
 // ---------------------------------------------------------------------------
 // 冻结常量（缺中置下混；数值改动需 Lead 裁决 + 证据更新）

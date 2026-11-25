@@ -6,10 +6,10 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use tspi_cal_dsp::deconvolve;
-use tspi_cal_dsp::peq_fit::fit_target_fir_only;
-use tspi_dsp_core::mimo12k::Mimo12kRuntime;
-use tspi_mimo_design::emperor::{
+use khaen_cal_dsp::deconvolve;
+use khaen_cal_dsp::peq_fit::fit_target_fir_only;
+use khaen_core::mimo12k::Mimo12kRuntime;
+use khaen_mimo_design::emperor::{
     decim_lowpass, decimate_48_to_12, design_channel, low_extension_hz, DecayMetric, EmperorParams,
 };
 
@@ -1037,7 +1037,7 @@ fn json_string_array(line: &str, key: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use super::{window_from_peak, RESAMP_TAPS};
-    use tspi_mimo_design::emperor::{
+    use khaen_mimo_design::emperor::{
         decim_lowpass, decimate_48_to_12, design_channel, low_extension_hz, EmperorParams,
     };
 

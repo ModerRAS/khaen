@@ -9,7 +9,7 @@
 //! 验证状态（2026-11-22，mimo-opt-20261122 夹具）：5 场景 / 141 个 C# 生成 WAV 的
 //! `SceneFixture::load`（逐 WAV SHA256）→ `h_matrix`（65536 点 rfft）→ `rerender_check` 全部通过，
 //! max|Δ| ≤ 2.12e-8（f32 量化级；把期望值按 f32 舍入后与 WAV 逐位相等），门限 1e-5。
-//! `cargo test -p tspi-room-sim --offline`：54 单元 + 3 mini-fixture 集成测试通过。
+//! `cargo test -p khaen-room-sim --offline`：54 单元 + 3 mini-fixture 集成测试通过。
 pub mod complex;
 pub mod fft;
 pub mod fixture;

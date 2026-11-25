@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use tspi_mimo_design::emperor::{
+use khaen_mimo_design::emperor::{
     decimate_48_to_12, design_channel, low_extension_hz, refuse_legacy_fill_sha, render_48k,
     score_decay, seat_radius_m, EmperorParams,
 };
@@ -119,8 +119,8 @@ fn cmd_solve(args: &[String]) -> Result<(), String> {
                 write_f32(&out_dir.join(format!("g_support_{i}.f32")), g)?;
             }
             let metric = match d.metric {
-                tspi_mimo_design::emperor::DecayMetric::T30 => "T30",
-                tspi_mimo_design::emperor::DecayMetric::T20 => "T20",
+                khaen_mimo_design::emperor::DecayMetric::T30 => "T30",
+                khaen_mimo_design::emperor::DecayMetric::T20 => "T20",
             };
             let supports_json = json_arr(&support_paths);
             let report = format!(
@@ -204,8 +204,8 @@ fn cmd_score(args: &[String]) -> Result<(), String> {
     let ir = read_f32(&req(args, "--ir")?)?;
     let (metric, seconds) = score_decay(&ir, fs)?;
     let name = match metric {
-        tspi_mimo_design::emperor::DecayMetric::T30 => "T30",
-        tspi_mimo_design::emperor::DecayMetric::T20 => "T20",
+        khaen_mimo_design::emperor::DecayMetric::T30 => "T30",
+        khaen_mimo_design::emperor::DecayMetric::T20 => "T20",
     };
     println!("SCORE_OK metric={name} seconds={seconds:.4}");
     Ok(())
@@ -227,8 +227,8 @@ fn deconvolve(rec: &[f64], sweep: &[f64]) -> Result<Vec<f64>, String> {
     let mut si = vec![0.0; n];
     rr[..rec.len()].copy_from_slice(rec);
     sr[..sweep.len()].copy_from_slice(sweep);
-    tspi_mimo_design::fir::fft_in_place(&mut rr, &mut ri);
-    tspi_mimo_design::fir::fft_in_place(&mut sr, &mut si);
+    khaen_mimo_design::fir::fft_in_place(&mut rr, &mut ri);
+    khaen_mimo_design::fir::fft_in_place(&mut sr, &mut si);
     let max_s = sr.iter().zip(si.iter()).map(|(a, b)| a * a + b * b).fold(0.0, f64::max);
     let reg = 1e-3 * max_s.max(1e-12);
     for i in 0..n {
@@ -241,7 +241,7 @@ fn deconvolve(rec: &[f64], sweep: &[f64]) -> Result<Vec<f64>, String> {
     for v in ri.iter_mut() {
         *v = -*v;
     }
-    tspi_mimo_design::fir::fft_in_place(&mut rr, &mut ri);
+    khaen_mimo_design::fir::fft_in_place(&mut rr, &mut ri);
     let scale = n as f64;
     let keep = rec.len().min(n);
     Ok(rr[..keep].iter().map(|v| v / scale).collect())

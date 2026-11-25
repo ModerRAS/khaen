@@ -1,13 +1,13 @@
-# NSP 7ch -> tspi-rt-host 生产化方案（草案，未启用）
+# NSP 7ch -> khaen-rt-host 生产化方案（草案，未启用）
 
 > 来源：motu-meter-dsp 任务 2026-11-22 静音窗口实测（REPORT §4.5/§4.6、RUNBOOK §6/§7）。
-> 状态：**2026-11-22 已由 aes67-daemon 任务安装并启用**（`tspi-rt-host-nsp7.service` active+enabled，全程静音）。
+> 状态：**2026-11-22 已由 aes67-daemon 任务安装并启用**（`khaen-rt-host-nsp7.service` active+enabled，全程静音）。
 > 实施结果/偏差见 §9，证据 `evidence/aes67-daemon-20261122/`；操作入口 `deploy/NSP7-DAEMON-RUNBOOK.md`。
 > 下文的“草案/未启用”表述为原始设计记录，当前以 §9 为准。
 
 ## 1. 目标与边界
 
-- 用 **tspi-rt-host 单进程**替换 standalone aes67-rx：AES67 RX（userspace 7ch 4.1.2）→ plan-arena DSP →
+- 用 **khaen-rt-host 单进程**替换 standalone aes67-rx：AES67 RX（userspace 7ch 4.1.2）→ plan-arena DSP →
   ALSA MOTU，唯一 ALSA owner，CueMix 静音兜底。
 - 输入流就是 **NSP 现有 7ch 4.1.2 SMPTE2110.(41,2)** 流（目的 192.0.2.222:5004），不再需要改 NSP 发送格式。
 - 本方案不改 NSP 的 objects/PCM 捕获逻辑；NSP 侧 PCM 构建的激活是前置条件（见 §5）。
@@ -18,7 +18,7 @@
 |---|---|---|
 | `config/rt-host-nsp7.toml.example` | /etc/tspi-rt-stack/rt-host-nsp7.toml | host 配置（plan-arena + userspace 7ch + ALSA） |
 | `config/rt-host-nsp7.env.example` | /etc/tspi-rt-stack/rt-host-nsp7.env | 环境覆盖（可选） |
-| `config/tspi-rt-host-nsp7.service` | /etc/systemd/system/tspi-rt-host-nsp7.service | 独立 unit；与旧 tspi-rt-host.service 互斥使用 |
+| `config/khaen-rt-host-nsp7.service` | /etc/systemd/system/khaen-rt-host-nsp7.service | 独立 unit；与旧 khaen-rt-host.service 互斥使用 |
 | `config/nsp7-wait-stream.sh` | /usr/local/lib/tspi-rt-stack/nsp7-wait-stream.sh | **NSP-first 启动闸门**（等 udp/5004 RTP 后再 exec host）；unit 的 ExecStart |
 | `tools/nsp7-switch-to-host.sh` / `nsp7-rollback-to-rx.sh` / `nsp7-status.sh` | /root/aes67-rx-work/tools/ | 一键切换/回滚/状态快照（板上操作用） |
 
@@ -28,7 +28,7 @@
 - `/var/lib/tspi-rt-stack/plans/plan-412-identity.bin`：已验收 4.1.2 plan（测试/生产按 sha 记录）；
   **实际生产使用** = 8-in/7-role identity ABI v1，1636 B，sha256 `52f2f3ad…`（graph_id `64acfb34…`）。
 - `/var/lib/tspi-rt-stack/plans/plan-412-flat.bin`：RUN2 flat 真 plan（4860 B，ABI v2，sha `3fced8bc…`）已上传，
-  但它是 **2-in** 设计，tspi-rt-host 的 7ch userspace 只接受 8ch strict 图输入 → 直接接入被拒（详见 §9）。
+  但它是 **2-in** 设计，khaen-rt-host 的 7ch userspace 只接受 8ch strict 图输入 → 直接接入被拒（详见 §9）。
 
 ## 3. 切换步骤（静音窗口；手动 run 先行，通过后再上 unit）
 
@@ -39,11 +39,11 @@ bash /root/aes67-rx-work/tools/stop-rx.sh
 # 2) 准备 SDP/plan（sha256 记录到证据）
 sha256sum /var/lib/tspi-rt-stack/nsp-aes67.sdp /var/lib/tspi-rt-stack/plans/plan-412-identity.bin
 # 3) 手动 run 验收（与 unit 相同 ExecStart 等价）
-/opt/tspi-rt-stack/current/bin/tspi-rt-host run --config /etc/tspi-rt-stack/rt-host-nsp7.toml \
+/opt/tspi-rt-stack/current/bin/khaen-rt-host run --config /etc/tspi-rt-stack/rt-host-nsp7.toml \
   > /var/log/tspi-rt-stack/manual-nsp7.json 2> /var/log/tspi-rt-stack/manual-nsp7.err
 # 4) 验收（另开终端；见 §4）
-# 5) 停手动 run（SIGTERM 优雅退出）→ install unit → systemctl start tspi-rt-host-nsp7
-# 6) 跟随 unit 日志验收 again；systemctl enable tspi-rt-host-nsp7（开机自启）
+# 5) 停手动 run（SIGTERM 优雅退出）→ install unit → systemctl start khaen-rt-host-nsp7
+# 6) 跟随 unit 日志验收 again；systemctl enable khaen-rt-host-nsp7（开机自启）
 ```
 
 ## 4. 验收判据（任一不满足即回退）
@@ -83,15 +83,15 @@ sha256sum /var/lib/tspi-rt-stack/nsp-aes67.sdp /var/lib/tspi-rt-stack/plans/plan
 2. 启动前必须清 stale `session.json/last-error.json/hook-status.*` 并 `Restart-Service Audiosrv`，
    否则 FSA 恢复路径先装 objects hook，PCM 被 "Object capture hook resident; PCM capture is mutually exclusive" 拒绝；
 3. 切到 PCM 前确认 audiodg 无 objects hook 模块；切回 objects 时反向确认无 pcm hook；
-4. 生产启动顺序建议：先 CueMix 静音 → start tspi-rt-host（等待 SOF/无输入也不 fail）→ 再起 NSP PCM 会话；
+4. 生产启动顺序建议：先 CueMix 静音 → start khaen-rt-host（等待 SOF/无输入也不 fail）→ 再起 NSP PCM 会话；
    **注意**：host 的 `aes67_stall_blocks` 失流门限（400 blocks≈1.07s，2× 后 fail-closed）可能早于 NSP 起来
    → 生产必须让 NSP 先出流再启 host，或临时放大 stall 门限（≤1000，2.67s）。本任务未实测 host-first。
 
 ## 7. 回退
 
 ```
-systemctl stop tspi-rt-host-nsp7
-systemctl disable tspi-rt-host-nsp7   # 如需永久回退
+systemctl stop khaen-rt-host-nsp7
+systemctl disable khaen-rt-host-nsp7   # 如需永久回退
 bash /root/aes67-rx-work/tools/start-rx.sh          # 恢复 standalone rx
 # CueMix 保持静音；白天出声窗口再执行 restore-cuemix.sh
 ```
@@ -116,8 +116,8 @@ bash /root/aes67-rx-work/tools/start-rx.sh          # 恢复 standalone rx
 
 | 项 | 值 |
 |---|---|
-| unit | **`tspi-rt-host-nsp7.service`**：active (running)、**enabled（开机自启，reboot 未验证）**；旧 `tspi-rt-host.service` disabled/inactive |
-| host 二进制 | `/usr/local/lib/tspi-rt-stack/f510ed64/tspi-rt-host`（`f510ed64…`，task-284 修复版）；**/opt `775bdb23…` 未替换**（其构建早于 userspace AES67 路径） |
+| unit | **`khaen-rt-host-nsp7.service`**：active (running)、**enabled（开机自启，reboot 未验证）**；旧 `khaen-rt-host.service` disabled/inactive |
+| host 二进制 | `/usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host`（`f510ed64…`，task-284 修复版）；**/opt `775bdb23…` 未替换**（其构建早于 userspace AES67 路径） |
 | 配置 | `/etc/tspi-rt-stack/rt-host-nsp7.toml`（jitter 64000 µs、ring 8192、stall 400、apply_affinity=false） |
 | SDP / plan | `nsp-aes67.sdp`（`731ea83c…`）/ **8-in/7-role identity ABI v1**（`52f2f3ad…`） |
 | 启动顺序 | NSP-first：`nsp7-wait-stream.sh` 等 udp/5004 RTP 出现后才 exec host；systemd `Restart=on-failure/RestartSec=2/StartLimitIntervalSec=0` |

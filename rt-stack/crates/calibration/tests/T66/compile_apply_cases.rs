@@ -3,11 +3,11 @@
 // 本文件经 src/compile_apply.rs 末尾的 #[cfg(test)] mod t66_tests { include!(...) } 进入
 // lib 单测构建（cargo 不自动发现 tests/<Txx>/ 子目录；公共注册属 integrator，勿写入
 // public_registration.rs）。全部测试名 t66_ 前缀。
-// 运行：cargo test -p tspi-calibration compile_apply
+// 运行：cargo test -p khaen-calibration compile_apply
 // 离线：不打开 ALSA/CueMix，不碰板端/S1，不启动 Camilla；admission 用 MockMemory 注入。
 
-use tspi_modal_design::artifact::encode_wav_f32_mono;
-use tspi_rt_host::admission::MockMemory;
+use khaen_modal_design::artifact::encode_wav_f32_mono;
+use khaen_rt_host::admission::MockMemory;
 
 // ---------------------------------------------------------------------------
 // 夹具：4.1.2 七角色 / 五 participants（FL FR SL SR SUB1）+ stereo strict 两角色
@@ -1334,8 +1334,8 @@ fn t64_report_channel(
     name: &str,
     p_fir: &[f64],
     program_peak_dbfs: f64,
-) -> tspi_dsp_compat::ws::JsonValue {
-    use tspi_dsp_compat::ws::{json_object, JsonValue};
+) -> khaen_compat::ws::JsonValue {
+    use khaen_compat::ws::{json_object, JsonValue};
     let gain_db = super::p_row_chain_peak_gain_db(p_fir, FS as f64);
     let max_positive_db = super::p_row_max_positive_db(p_fir, FS as f64).max(0.0);
     let predicted = program_peak_dbfs + gain_db;
@@ -1379,7 +1379,7 @@ fn t64_report_channel(
 
 /// T64 报告字节（compat ws 编码；生产侧 `parse_t64_fit_report` 解析同一 schema）。
 fn t64_report_bytes(channels: &[(&str, &[f64], f64)]) -> Vec<u8> {
-    use tspi_dsp_compat::ws::{json_encode, json_object, JsonValue};
+    use khaen_compat::ws::{json_encode, json_object, JsonValue};
     let document = json_object(vec![
         ("schema", JsonValue::String(PEQ_FIT_SCHEMA.to_string())),
         (

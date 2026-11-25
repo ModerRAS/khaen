@@ -7,7 +7,7 @@
 //!    baseline）与 T64 目标 FIR（P_post 基线形状）/ T65 整数 delay+polarity 编译成
 //!    TspiPlanHeaderV1/TspiPathV1/TspiDiagFirV1/TspiRoleV1 + 系数 blob 的可准入 plan 字节；
 //!    factorized（G path + P diag）与 fused（F_ji = p_j * G_ji，zero-pad 线性卷积）两种形态
-//!    都由 T12 tspi_dsp_core::compile 生成，本模块按 T12 成本报告（或显式 force）选择并打包，
+//!    都由 T12 khaen_core::compile 生成，本模块按 T12 成本报告（或显式 force）选择并打包，
 //!    禁止静默截尾。plan 字节布局与 T20 rt-host::swap::parse_plan_arena 完全对齐
 //!    （header 128B + path/diag/role 表 + 尾部署部 64B 对齐系数 blob）。
 //! 2. **phase/mapping hash 完整**：编译产物的 graph_id（core-v1 §11.10 规范化 SHA-256）之外，
@@ -47,15 +47,15 @@
 //!
 //! # 依赖（只读消费，不改上游文件）
 //!
-//! - T54 tspi_modal_design::artifact：每 path WAV/manifest/version/hash/5x5 participants/
+//! - T54 khaen_modal_design::artifact：每 path WAV/manifest/version/hash/5x5 participants/
 //!   stereo mask/overlay DAC/P/fs/D 与 ArtifactCurrent/stale 判定；
 //! - T64 crate::peq_fit：目标 FIR / D7 boost-headroom 证据 / P 基线形状（本模块只吃类型化输入）；
 //! - T65 crate::phase_fit：整数 delay/polarity ops + FIR 执行方向/残余检查（PhaseChannelOp/
 //!   PhaseFitChecks）；
-//! - T12 tspi_dsp_core::compile：factorized/fused 图、长度/成本/选择、零填充线性卷积；
-//! - T18 tspi_rt_host::admission：validate/plan_memory/admit_with（MockMemory 离线注入）；
-//! - T20 tspi_rt_host::swap：PlanRegistry/admit/stage/arm/complete_swap/swap-ack/quarantine；
-//! - T57 tspi_dsp_compat::roles（经 T54 artifact scope 的 overlay 绑定哈希）；T13/T42/T70 消费
+//! - T12 khaen_core::compile：factorized/fused 图、长度/成本/选择、零填充线性卷积；
+//! - T18 khaen_rt_host::admission：validate/plan_memory/admit_with（MockMemory 离线注入）；
+//! - T20 khaen_rt_host::swap：PlanRegistry/admit/stage/arm/complete_swap/swap-ack/quarantine；
+//! - T57 khaen_compat::roles（经 T54 artifact scope 的 overlay 绑定哈希）；T13/T42/T70 消费
 //!   本模块的 apply ack/actual version/rollback 结果。
 //!
 //! # 契约缺口登记（不改他人写域；报 integrator/Lead）
@@ -90,47 +90,47 @@
 //!
 //! 私有测试：tests/T66/compile_apply_cases.rs 由本文件末尾
 //! #[cfg(test)] mod t66_tests { include!(...) } 编进 lib 单测（cargo 不自动发现 tests/<Txx>/；
-//! 公共注册属 integrator，不改 public_registration.rs）。运行：cargo test -p tspi-calibration compile_apply
+//! 公共注册属 integrator，不改 public_registration.rs）。运行：cargo test -p khaen-calibration compile_apply
 
 use std::fmt;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-use tspi_dsp_compat::ws::{json_parse, JsonValue};
-use tspi_dsp_core::abi::{
+use khaen_compat::ws::{json_parse, JsonValue};
+use khaen_core::abi::{
     plan_abi_supported, TspiBlockAckV1, TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1,
     TspiPlanIirHeaderV2, TspiRoleIirV2, TspiRoleV1, PLAN_IIR_ENTRY_BYTES,
     PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1,
     TSPI_PLAN_ABI_V2, TSPI_PLAN_IIR_MAGIC, TSPI_PLAN_IIR_VERSION, TSPI_PLAN_MAGIC,
 };
-use tspi_dsp_core::compile::{
+use khaen_core::compile::{
     compile, CompileInput, CompileOptions, CompiledPlans, FusionForm, SelectionReason,
     COMPILE_NO_SOURCE,
 };
-use tspi_dsp_core::events::{
+use khaen_core::events::{
     event_name, EV_EPOCH_START, EV_PLAN_ABORTED, EV_PLAN_ADMITTED, EV_PLAN_PREPARED,
     EV_PLAN_STAGED, EV_PLAN_SWAPPED, EV_ROLLBACK, EV_SAFETY_MUTE_ENTER, EV_SAFETY_MUTE_EXIT,
     EV_SWAP_ACK,
 };
-use tspi_dsp_core::nodes::crc32c;
-use tspi_dsp_core::plan::{PlanBuf, PlanToken, StageToken};
-use tspi_dsp_core::rt::{
+use khaen_core::nodes::crc32c;
+use khaen_core::plan::{PlanBuf, PlanToken, StageToken};
+use khaen_core::rt::{
     PlanVersion, RtStatus, BLOCK_SIZES, MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_MATRIX_PATHS,
     MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, RT_WORKERS, SAMPLE_RATES_HZ, TAPS_EXTENDED_MAX,
     TAPS_NORMAL_MAX,
 };
-use tspi_dsp_core::workers::{ack_mask, TspiRtControlV1};
-use tspi_fir_designer::modal_peq::{freq_upper_hz, log_frequency_grid};
-use tspi_fir_designer::phase::{design_integer, IntegerDelaySpec, Polarity as PhasePolarity};
-use tspi_modal_design::artifact::{
+use khaen_core::workers::{ack_mask, TspiRtControlV1};
+use khaen_designer::modal_peq::{freq_upper_hz, log_frequency_grid};
+use khaen_designer::phase::{design_integer, IntegerDelaySpec, Polarity as PhasePolarity};
+use khaen_modal_design::artifact::{
     decode_wav_f32_mono, ArtifactBundle, ArtifactCurrent, ArtifactPath, ArtifactScope,
     ArtifactStatus,
 };
-use tspi_rt_host::admission::{
+use khaen_rt_host::admission::{
     plan_memory, validate as admission_validate, AdmissionEnv, MemoryBackend,
 };
-use tspi_rt_host::swap::{commit_swap_at_block_boundary, PlanRegistry, TspiSwapAckV1};
+use khaen_rt_host::swap::{commit_swap_at_block_boundary, PlanRegistry, TspiSwapAckV1};
 
 use crate::job::{sha256_hex, ArtifactKind, ArtifactRecord, StageCtx, StageFailure};
 use crate::peq_fit::{FIT_FREQ_MIN_HZ, REFERENCE_FREQ_HZ, REPORT_GRID_OCTAVE};
@@ -2045,7 +2045,7 @@ impl CrossoverEvidence {
                 })?;
             if !role
                 .fir_segments
-                .contains(&tspi_dsp_core::nodes::FirSegmentKind::Crossover)
+                .contains(&khaen_core::nodes::FirSegmentKind::Crossover)
             {
                 return Err(ca_err(
                     E_CA_CROSSOVER,
@@ -2072,8 +2072,8 @@ impl CrossoverEvidence {
             }
             let has_target = role
                 .fir_segments
-                .contains(&tspi_dsp_core::nodes::FirSegmentKind::Target);
-            if role.fir_segments.first() != Some(&tspi_dsp_core::nodes::FirSegmentKind::Crossover) {
+                .contains(&khaen_core::nodes::FirSegmentKind::Target);
+            if role.fir_segments.first() != Some(&khaen_core::nodes::FirSegmentKind::Crossover) {
                 return Err(ca_err(
                     E_CA_CROSSOVER,
                     format!("crossover.roles[{}].fir_segments", record.role_id),
@@ -2115,7 +2115,7 @@ impl CrossoverEvidence {
         for role in req.roles {
             if role
                 .fir_segments
-                .contains(&tspi_dsp_core::nodes::FirSegmentKind::Crossover)
+                .contains(&khaen_core::nodes::FirSegmentKind::Crossover)
                 && self.role(&role.role_id).is_none()
             {
                 return Err(ca_err(
@@ -3046,7 +3046,7 @@ pub struct RoleCompileInput {
     /// 空 = 传统单段行为（diag flags 由行内容启发式推断，与历史完全一致）；
     /// 非空 = 显式段来源：<code>diag_flags_for</code> 直接映射
     /// <code>FirSegmentKind::diag_flag()</code>（T39 crossover 段置 bit2）。
-    pub fir_segments: Vec<tspi_dsp_core::nodes::FirSegmentKind>,
+    pub fir_segments: Vec<khaen_core::nodes::FirSegmentKind>,
 }
 
 impl RoleCompileInput {
@@ -3100,7 +3100,7 @@ impl RoleCompileInput {
     /// 显式声明 P_post 段来源（规范序；空 = 传统单段）。
     pub fn with_fir_segments(
         mut self,
-        segments: Vec<tspi_dsp_core::nodes::FirSegmentKind>,
+        segments: Vec<khaen_core::nodes::FirSegmentKind>,
     ) -> CaResult<Self> {
         self.fir_segments = segments;
         self.validate()?;
@@ -3142,13 +3142,13 @@ impl RoleCompileInput {
     /// 是否含 crossover 段。
     pub fn has_crossover_segment(&self) -> bool {
         self.fir_segments
-            .contains(&tspi_dsp_core::nodes::FirSegmentKind::Crossover)
+            .contains(&khaen_core::nodes::FirSegmentKind::Crossover)
     }
 
     /// 是否含 target 段。
     pub fn has_target_segment(&self) -> bool {
         self.fir_segments
-            .contains(&tspi_dsp_core::nodes::FirSegmentKind::Target)
+            .contains(&khaen_core::nodes::FirSegmentKind::Target)
     }
 
     /// 从 T65 PhaseChannelOp 构造（delay/polarity 取自实测 op）。
@@ -3248,7 +3248,7 @@ impl RoleCompileInput {
         }
         // 段来源（显式时）：规范序非降、无重复、类型有限集合（FirSegmentKind 全覆盖）。
         let mut previous_rank: Option<u8> = None;
-        let mut seen_segments: Vec<tspi_dsp_core::nodes::FirSegmentKind> = Vec::new();
+        let mut seen_segments: Vec<khaen_core::nodes::FirSegmentKind> = Vec::new();
         for (index, kind) in self.fir_segments.iter().enumerate() {
             if seen_segments.contains(kind) {
                 return Err(ca_err(
@@ -3721,7 +3721,7 @@ impl CompileApplyOptions {
                 "系数预算必须 >0",
             ));
         }
-        if self.workers != RT_WORKERS && self.workers != tspi_dsp_core::rt::RT_WORKERS_FALLBACK {
+        if self.workers != RT_WORKERS && self.workers != khaen_core::rt::RT_WORKERS_FALLBACK {
             return Err(ca_err(
                 E_CA_OPTIONS,
                 "options.workers",
@@ -5003,8 +5003,8 @@ impl CompiledPlan {
     }
 
     /// 只读 plan view（T18 admission 输入）。
-    pub fn view(&self) -> tspi_dsp_core::rt::PlanView<'_> {
-        tspi_dsp_core::rt::PlanView {
+    pub fn view(&self) -> khaen_core::rt::PlanView<'_> {
+        khaen_core::rt::PlanView {
             header: &self.header,
             paths: &self.paths,
             diags: &self.diags,
@@ -5324,7 +5324,7 @@ pub fn compile_plan(req: &CompileApplyRequest<'_>) -> CaResult<CompiledPlan> {
     req.validate()?;
     let participants = req.participant_role_indices()?;
     let m = participants.len();
-    if m > tspi_dsp_core::rt::MAX_LOW_BAND_PARTICIPANTS {
+    if m > khaen_core::rt::MAX_LOW_BAND_PARTICIPANTS {
         return Err(ca_err(
             E_CA_ROLES,
             "mapping.dense_to_dac",

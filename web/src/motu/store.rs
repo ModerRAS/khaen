@@ -27,7 +27,7 @@ pub fn snapshot_document(id: &str, store: &Datastore) -> Value {
     json!({
         "id": id,
         "saved_unix": util::now_unix(),
-        "tool": "tspi-audio-web",
+        "tool": "khaen-audio-web",
         "values": export_values(store),
     })
 }

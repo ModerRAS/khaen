@@ -1,13 +1,13 @@
 //! host 固定 buffer source 接口（WBS T14：不占 ALSA，按 B×N 块供 T26 播放时轴拉取）。
 
-use tspi_file_runner::runner;
-use tspi_file_runner::source::BlockSource;
-use tspi_file_runner::wav::{decode_wav, encode_wav_f32};
-use tspi_file_runner::{E_FILE_CAPACITY, E_FILE_INTERNAL};
+use khaen_file_runner::runner;
+use khaen_file_runner::source::BlockSource;
+use khaen_file_runner::wav::{decode_wav, encode_wav_f32};
+use khaen_file_runner::{E_FILE_CAPACITY, E_FILE_INTERNAL};
 
 use crate::common::Fixture;
 
-fn decoded(frames: usize) -> tspi_file_runner::wav::DecodedAudio {
+fn decoded(frames: usize) -> khaen_file_runner::wav::DecodedAudio {
     // 2 通道确定性斜坡。
     let mut planar = Vec::with_capacity(2 * frames);
     for frame in 0..frames {

@@ -12,19 +12,19 @@
 //! - 不写 READY/PASS/CERTIFIED。
 //!
 //! 用法（仓库根）：
-//!   cargo run -p tspi-calibration --offline --example multipoint_probe -- fixtures --out DIR
-//!   cargo run -p tspi-calibration --offline --example multipoint_probe -- report --spec DIR/spec.json --out DIR/report
+//!   cargo run -p khaen-calibration --offline --example multipoint_probe -- fixtures --out DIR
+//!   cargo run -p khaen-calibration --offline --example multipoint_probe -- report --spec DIR/spec.json --out DIR/report
 
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_calibration::job::sha256_hex;
-use tspi_calibration::measured_design::{
+use khaen_calibration::job::sha256_hex;
+use khaen_calibration::measured_design::{
     build_measured_design, load_measured_spec, multipoint_evidence_json,
     MEASURED_MULTIPOINT_SCHEMA, MEASURED_SPEC_SCHEMA_V2,
 };
-use tspi_calibration::peq_fit::{fit_peq, PeqFitRequest};
+use khaen_calibration::peq_fit::{fit_peq, PeqFitRequest};
 
 const FS_HZ: u32 = 48_000;
 

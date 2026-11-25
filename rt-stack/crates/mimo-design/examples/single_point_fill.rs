@@ -1,7 +1,7 @@
 //! 单点真实 H 上的 D7 填谷（null fill）离线设计实验（mimo-design 算法在 P=1 的扩展）。
 //!
 //! 用法：
-//!   cargo run --release -p tspi-mimo-design --example single_point_fill -- \
+//!   cargo run --release -p khaen-mimo-design --example single_point_fill -- \
 //!       --h <H_complex.csv> [--gauge <gauge.json>] --out <evidence-dir> \
 //!       [--taps 256,512,1024,2048,4096] [--primary-taps 2048]
 //!
@@ -16,11 +16,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_mimo_design::fill::{
+use khaen_mimo_design::fill::{
     band_indices, db_amp, donor_criterion, evaluate_bands, smooth_complex_power, taps_requirements,
     FillConfig, FillSolver, SinglePointH, DIAG_CAP_DB, SINGLE_POINT_CLAIM, SINGLE_POINT_FILL_SCHEMA,
 };
-use tspi_mimo_design::solve::Cx;
+use khaen_mimo_design::solve::Cx;
 
 struct Args {
     h: PathBuf,
@@ -77,7 +77,7 @@ fn parse_args() -> Result<Args, String> {
 
 /// 读 gauge.json 的 relative_to_ref_db（peak_db 代理）；缺失返回 None。
 fn load_gauge_relative(path: &Path) -> Result<Vec<(String, f64)>, String> {
-    let document = tspi_room_sim::json::Json::parse_file(path)
+    let document = khaen_room_sim::json::Json::parse_file(path)
         .map_err(|error| format!("gauge.json 解析失败: {error}"))?;
     let section = document
         .get("relative_to_ref_db")
@@ -135,7 +135,7 @@ fn band_row_columns() -> &'static str {
     "band_hz,n_points,before_rms_db,after_rms_db,delta_rms_db,valley_freq_hz,before_min_db,after_at_valley_db,fill_at_valley_db,target_fill_at_valley_db,depth_before_db,depth_after_db,depth_reduction_db"
 }
 
-fn band_row_values(rows: &[tspi_mimo_design::fill::BandFillRow]) -> Vec<String> {
+fn band_row_values(rows: &[khaen_mimo_design::fill::BandFillRow]) -> Vec<String> {
     rows.iter()
         .map(|row| {
             format!(
@@ -158,7 +158,7 @@ fn band_row_values(rows: &[tspi_mimo_design::fill::BandFillRow]) -> Vec<String> 
         .collect()
 }
 
-fn design_to_fir_csvs(out: &Path, gauge: &str, tag: &str, design: &tspi_mimo_design::fill::FillDesign) -> Result<(), String> {
+fn design_to_fir_csvs(out: &Path, gauge: &str, tag: &str, design: &khaen_mimo_design::fill::FillDesign) -> Result<(), String> {
     let directory = out.join("fir").join(gauge);
     fs::create_dir_all(&directory).map_err(|error| format!("建 fir 目录失败: {error}"))?;
     for (index, coefficients) in design.h.iter().enumerate() {
@@ -202,7 +202,7 @@ fn run() -> Result<(), String> {
     if host_base.n_sources() == 0 {
         return Err("H 没有通道".to_string());
     }
-    let h_sha = tspi_room_sim::sha256::file_hex(&args.h)
+    let h_sha = khaen_room_sim::sha256::file_hex(&args.h)
         .map_err(|error| format!("H sha256 失败: {error}"))?;
     fs::create_dir_all(&args.out).map_err(|error| format!("建 out 目录失败: {error}"))?;
     let relative = match &args.gauge {

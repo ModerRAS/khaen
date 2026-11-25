@@ -1,9 +1,9 @@
-schema: tspi-calibration/v1
+schema: khaen-calibration/v1
 sample_rate: 48000
 reference_index: 1
 layout: synthetic-2
 created_unix: 1794736597
-tool: tspi-calibrate
+tool: khaen-calibrate
 version: 0.1.0
 note: merged multi-channel calibration
 channels:

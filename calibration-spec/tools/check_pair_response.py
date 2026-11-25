@@ -263,7 +263,7 @@ def main():
             "ripple": ripple <= args.ripple_max,
         }
     ok = all(checks.values())
-    out = {"schema": "tspi-calibration-pair-check/v1", "mode": mode, "files": files,
+    out = {"schema": "khaen-calibration-pair-check/v1", "mode": mode, "files": files,
            "fc_hz": args.fc, "band_hz": [round(f_min, 1), round(f_max, 1)],
            "pass": ok, "checks": checks, "metrics": metrics}
     if args.json:

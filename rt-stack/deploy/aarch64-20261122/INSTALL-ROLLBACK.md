@@ -9,8 +9,8 @@
 
 | 路径 | 内容 |
 | --- | --- |
-| `bin/` | `tspi-rt-host`（1,451,984 B）、`tspi-cal`（2,608,352 B）、`tspi-rt-daemon`（3,171,080 B）—— 全部 ELF64 aarch64 PIE，GLIBC max 2.34 |
-| `units/` | `tspi-rt-host.service`、`tspi-rt-daemon.service`、`tspi-irq-affinity.service`（含 B1 `ExecStartPre=...wait`）、`tspi-rt-stack.target`、`90-safe-mute.{conf,env}.example` |
+| `bin/` | `khaen-rt-host`（1,451,984 B）、`tspi-cal`（2,608,352 B）、`tspi-rt-daemon`（3,171,080 B）—— 全部 ELF64 aarch64 PIE，GLIBC max 2.34 |
+| `units/` | `khaen-rt-host.service`、`tspi-rt-daemon.service`、`tspi-irq-affinity.service`（含 B1 `ExecStartPre=...wait`）、`tspi-rt-stack.target`、`90-safe-mute.{conf,env}.example` |
 | `etc/` | `rt-host.{env,toml}.example`、`rt-daemon.{env,toml}.example`、`rt-host-nsp7.{env,toml}.example`（MOTU/NSP7 形态，复用 motu-meter-dsp 部署样例）、`irq-affinity.env.example` |
 | `manifest.json` | schema `tspi-rt-stack/release/v1`，逐文件 size/sha256；17 文件 |
 | `SHA256SUMS` | 18 项（含 manifest.json 自身） |
@@ -29,11 +29,11 @@ sudo tar -xzf tspi-aarch64-20261122-deploy.tgz -C /var/tmp/tspi-rt-stack-release
 cd /var/tmp/tspi-rt-stack-release-aarch64-20261122
 sha256sum -c SHA256SUMS                       # 18 项全 OK
 python3 <repo>/rt-stack/deploy/lib/release_manifest.py verify . --require-arch aarch64
-#   → ok=true, files_checked=17, binaries=[bin/tspi-rt-host, bin/tspi-rt-daemon, bin/tspi-cal]
+#   → ok=true, files_checked=17, binaries=[bin/khaen-rt-host, bin/tspi-rt-daemon, bin/tspi-cal]
 
 # 目标板 ABI 自检（板端 glibc 2.36 ≥ 产物 2.34）
-file bin/*; ldd bin/tspi-rt-host | grep -E "libasound|libc"
-systemctl is-active tspi-rt-host.service tspi-rt-daemon.service  # 记录现状（只读）
+file bin/*; ldd bin/khaen-rt-host | grep -E "libasound|libc"
+systemctl is-active khaen-rt-host.service tspi-rt-daemon.service  # 记录现状（只读）
 ```
 
 ## 2. 安装（**NOT_RUN**；需授权窗口 `WINDOW.json`）

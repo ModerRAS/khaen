@@ -1,4 +1,4 @@
-# tspi-mimo-fir —— ART-like 全矩阵 MIMO FIR 引擎原型（task-12）
+# khaen-mimo-fir —— ART-like 全矩阵 MIMO FIR 引擎原型（task-12）
 
 > 目标：替代 CamillaDSP 逐路径展开（板载实测不可行，见 ../mimo-bench/BOARD-BENCH-RESULTS.md）。
 > 本原型先做离线 benchmark（合成信号/合成系数），验证 partitioned FFT + 多线程在 RK3576 上的实时性；不接 ALSA/CamillaDSP 全链路。
@@ -16,11 +16,11 @@
 ## 构建/运行
 ```bash
 # x86
-cargo build --release && ./target/release/tspi-mimo-fir --mode fft --n 12 --m 10 --taps 2048 --seconds 5 --threads 4
+cargo build --release && ./target/release/khaen-mimo-fir --mode fft --n 12 --m 10 --taps 2048 --seconds 5 --threads 4
 # aarch64（VM 上 cross，linker/sysroot 指向 Debian12 rootfs）
 cargo build --release --target aarch64-unknown-linux-gnu
 # 板端（RT baseline）
-taskset -c 4-7 /tmp/tspi-mimo-fir --mode fft --n 12 --m 10 --taps 2048 --fs 48000 --seconds 5 --threads 4
+taskset -c 4-7 /tmp/khaen-mimo-fir --mode fft --n 12 --m 10 --taps 2048 --fs 48000 --seconds 5 --threads 4
 ```
 
 ## 首轮结果（x86，参考）

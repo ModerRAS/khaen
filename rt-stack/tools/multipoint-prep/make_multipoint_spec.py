@@ -54,7 +54,7 @@ TOOL_VERSION = "1.0.0"
 SPEC_SCHEMA_V2 = "tspi-cal-measured-design/v2"
 SPEC_SCHEMA_V1 = "tspi-cal-measured-design/v1"
 ANALYSIS_SCHEMA = "tspi-channel-measurement/v1"
-DIAG_SCHEMA = "tspi-calibration-diag/v1"
+DIAG_SCHEMA = "khaen-calibration-diag/v1"
 MANIFEST_SCHEMA = "tspi-cal-multipoint-spec-manifest/v1"
 SYNTH_SCHEMA = "tspi-cal-multipoint-synthetic-fixtures/v1"
 POSITIONS_SCHEMA = "tspi-cal-multipoint-positions/v1"
@@ -318,7 +318,7 @@ def inspect_analysis(path, fs, min_snr_db, ctx, where):
 def inspect_diag(path, min_repeats, min_snr_db, ctx, where):
     """校验旧工具 diag JSON 的测量质量字段（重复次数/clock/onset/峰值嫌疑）。
 
-    真实 diag（tspi-calibration-diag/v1）带 repeats/clock_ppm*/onset_invalid 等字段；
+    真实 diag（khaen-calibration-diag/v1）带 repeats/clock_ppm*/onset_invalid 等字段；
     这里把它们变成 fail-closed 的流程门。字段缺失按“不可判定”拒绝；只有整个 diag 缺失
     才能用 --allow-missing-diag 放宽（且记 warning）。
     """
@@ -417,7 +417,7 @@ def inspect_diag(path, min_repeats, min_snr_db, ctx, where):
 # ---------------------------------------------------------------------------
 TREE_ANALYSIS_RE = re.compile(r"^(?P<ch>[A-Z][A-Z0-9]*)\.(?:analysis\.)?json$")
 TREE_DIAG_RE = re.compile(r"^(?P<ch>[A-Z][A-Z0-9]*)\.diag\.json$")
-# 旧工具 tspi-calibrate measure-multi 的产物命名：FL-ch00.analysis.json / FL-ch00.diag.json
+# 旧工具 khaen-calibrate measure-multi 的产物命名：FL-ch00.analysis.json / FL-ch00.diag.json
 TREE_LEGACY_ANALYSIS_RE = re.compile(r"^(?P<ch>[A-Z][A-Z0-9]*)-ch[0-9]{2}\.analysis\.json$")
 TREE_LEGACY_DIAG_RE = re.compile(r"^(?P<ch>[A-Z][A-Z0-9]*)-ch[0-9]{2}\.diag\.json$")
 FLAT_ANALYSIS_RE = re.compile(r"^(?P<label>[A-Za-z0-9_.-]+)-(?P<ch>[A-Z][A-Z0-9]*)\.analysis\.json$")
@@ -1540,7 +1540,7 @@ def cmd_verify_e2e(args):
     host = read_json(host_path)
     plan = host.get("plan", {})
     alsa = host.get("alsa", {})
-    _make_check(checks, "host.status", "tspi-rt-host plan-arena 状态", "ok", host.get("status"), host.get("status") == "ok")
+    _make_check(checks, "host.status", "khaen-rt-host plan-arena 状态", "ok", host.get("status"), host.get("status") == "ok")
     _make_check(checks, "host.plan_parse", "plan 解析", "t20-ok", plan.get("parse"), plan.get("parse") == "t20-ok")
     _make_check(checks, "host.manifest", "plan manifest 校验", "verified", plan.get("manifest"), plan.get("manifest") == "verified")
     swap = host.get("swap", {})

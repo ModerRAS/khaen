@@ -49,7 +49,7 @@ fi
 # 硬前置：C 已退役；host 已 active；verify 报告 PASS（给了就必须 PASS）
 BAD="$(assert_c_retired || true)"
 [ -z "$(printf '%s' "$BAD" | tr -d '[:space:]')" ] || die "旧 C 未退役，拒绝写 last-good: $(printf '%s' "$BAD" | tr '\n' ' ')" 3
-sunit_active tspi-rt-host.service || die "tspi-rt-host.service 未 active，拒绝写 last-good" 3
+sunit_active khaen-rt-host.service || die "khaen-rt-host.service 未 active，拒绝写 last-good" 3
 if [ -n "$VERIFY_REPORT" ]; then
   [ -f "$VERIFY_REPORT" ] || die "verify report 不存在: $VERIFY_REPORT" 3
   py - "$VERIFY_REPORT" <<'PY' || exit 3

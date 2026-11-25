@@ -1,7 +1,7 @@
 //! [NONRT] 校准 v1/v1.1 -> plan 适配（core-v1 §11.10 / §5.3） ——WBS T13 写域。
 //!
 //! 本模块是 rt-stack compat leaf `calibration`（WBS T13，deps T11/T12/T05）。职责是把
-//! **既有 `tspi-calibration/v1` 与 `/v1.1` YAML（只读、语义不改）** 适配成 P1 自研栈的
+//! **既有 `khaen-calibration/v1` 与 `/v1.1` YAML（只读、语义不改）** 适配成 P1 自研栈的
 //! **内部 IR 草案**（`tspi-cal-ir-draft/v1`），再投影成 T12 编译入口可消费的 P 阶段，
 //! 并绑定 T11 目标曲线（期望响应）引用，供 T26/T60/T66 在 prepare/apply 期使用。
 //!
@@ -39,13 +39,13 @@
 //! # 非目标
 //! - 不设计/拟合 FIR、不算 biquad 系数（T41/T64/T40）、不做 5×5 solver（T50/T51）；
 //! - 不读测量 CSV、不改 CONTRACT 字段、不写/覆盖任何校准文件（只读；T13 无写文件路径）；
-//! - 不做 apply/prepare/rollback/RT、不碰 ALSA/CueMix/服务/板端/网络；不新增依赖（纯 std + `tspi-dsp-core`）；
+//! - 不做 apply/prepare/rollback/RT、不碰 ALSA/CueMix/服务/板端/网络；不新增依赖（纯 std + `khaen-core`）；
 //! - 不定义 overlay layout 解析（T57）与 channelmap 渲染（T25）：本模块只接受调用方给的
 //!   `LayoutRoleTable` / `RenderRoleBase` 作为输入并做一致性校验。
 //!
 //! # 与 T11 的接口（数据合同，无 crate 依赖）
-//! compat crate 只依赖 `tspi-dsp-core`（workspace 依赖未在本任务写域内，禁止加依赖）。T11 的
-//! `TargetCurve` 在 `tspi-fir-designer` crate，因此本模块用 **纯数据视图** 对接：T26/T60 用
+//! compat crate 只依赖 `khaen-core`（workspace 依赖未在本任务写域内，禁止加依赖）。T11 的
+//! `TargetCurve` 在 `khaen-designer` crate，因此本模块用 **纯数据视图** 对接：T26/T60 用
 //! T11 公共访问器构造一个本地 adapter 类型并实现 [`TargetCurveSource`]：
 //!
 //! ```text
@@ -74,14 +74,14 @@
 //!
 //! # RT / 板端
 //! 本模块是 NONRT 控制/设计期路径（读文件、分配 Vec、字符串格式化），**不是 RT-MODULE**，
-//! 不得被 RT worker 调用。当前状态：**leaf 实现 + 真实 `cargo test -p tspi-dsp-compat calibration`**；
+//! 不得被 RT worker 调用。当前状态：**leaf 实现 + 真实 `cargo test -p khaen-compat calibration`**；
 //! 未上板、未做真实校准/测量、未与 T26/T60/T66 集成、未形成实际 plan 字节（见 evidence/T13）。
 
 use std::fmt;
 use std::path::Path;
 
-use tspi_dsp_core::compile::{design_delay_to_plan, CompileOptions, StagePlan};
-use tspi_dsp_core::rt::{
+use khaen_core::compile::{design_delay_to_plan, CompileOptions, StagePlan};
+use khaen_core::rt::{
     BLOCK_SIZES, MAX_LOW_BAND_PARTICIPANTS, MAX_OUTPUT_ROLES, SAMPLE_RATES_HZ, TAPS_EXTENDED_MAX,
     TAPS_NORMAL_MAX,
 };
@@ -91,9 +91,9 @@ use tspi_dsp_core::rt::{
 // ===========================================================================
 
 /// 既有校准 schema v1（字段/语义冻结，本模块只读）。
-pub const CAL_SCHEMA_V1: &str = "tspi-calibration/v1";
+pub const CAL_SCHEMA_V1: &str = "khaen-calibration/v1";
 /// 既有校准 schema v1.1（新增 shelf type 与 peaking q 放宽；本模块只读）。
-pub const CAL_SCHEMA_V11: &str = "tspi-calibration/v1.1";
+pub const CAL_SCHEMA_V11: &str = "khaen-calibration/v1.1";
 /// 内部 IR 草案 schema（P1 新，不是 CONTRACT 字段）。
 pub const IR_SCHEMA: &str = "tspi-cal-ir-draft/v1";
 /// IR 草案整数版本；字段语义变化必须升版（compat-matrix Y24）。
@@ -183,7 +183,7 @@ pub enum CalibrationErrorCode {
     YamlUnsupported,
     /// YAML 顶层不是 mapping。
     YamlRoot,
-    /// schema 缺失/不是 `tspi-calibration/v1` 或 `/v1.1`。
+    /// schema 缺失/不是 `khaen-calibration/v1` 或 `/v1.1`。
     Schema,
     /// 必填字段缺失（sample_rate/reference_index/channels/filters 等）。
     MissingField,
@@ -660,9 +660,9 @@ impl PostStage {
 /// 校准文件 schema 版本（v1/v1.1；字段语义由 CONTRACT 冻结）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CalibrationSchema {
-    /// `tspi-calibration/v1`（filters 只允许 peaking，Q≤10）。
+    /// `khaen-calibration/v1`（filters 只允许 peaking，Q≤10）。
     V1,
-    /// `tspi-calibration/v1.1`（新增 low_shelf/high_shelf；peaking q 无上限）。
+    /// `khaen-calibration/v1.1`（新增 low_shelf/high_shelf；peaking q 无上限）。
     V11,
 }
 

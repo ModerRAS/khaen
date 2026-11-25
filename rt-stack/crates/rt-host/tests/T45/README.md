@@ -8,7 +8,7 @@
 - 运行（DoD 原文）：
 
   ```text
-  cargo test -p tspi-rt-host scheduler_fake
+  cargo test -p khaen-rt-host scheduler_fake
   ```
 
   过滤词 `scheduler_fake` 命中模块路径 `scheduler::scheduler_fake_tests::*`，效果等于全部 63 个用例。

@@ -704,7 +704,7 @@ impl RtspServerConfig {
             bind,
             connection_timeout: timeout,
             session_timeout: timeout,
-            server_name: "tspi-aoip-aes67".to_string(),
+            server_name: "khaen-aoip-aes67".to_string(),
             max_clients: 32,
         }
     }
@@ -1172,7 +1172,7 @@ impl Default for RtspClientConfig {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(5),
-            user_agent: "tspi-aoip-aes67".to_string(),
+            user_agent: "khaen-aoip-aes67".to_string(),
         }
     }
 }

@@ -160,7 +160,7 @@ RULES = [
          reason="后端是 CamillaDSP WS(1234) 并 systemctl 管理 tspi-camilladsp；由新 daemon Web 替代",
          old_c_disposition="REPLACE_SHIM"),
     dict(id="WEB-DEPLOY",
-         globs=["web/deploy/tspi-audio-web.service", "web/deploy/config.toml.example"],
+         globs=["web/deploy/khaen-audio-web.service", "web/deploy/config.toml.example"],
          category="to_delete", role="旧 Web unit/配置模板（REPLACE_SHIM）",
          reason="[camilladsp] ws_url=ws://127.0.0.1:1234、service=tspi-camilladsp.service；不得再部署",
          old_c_disposition="REPLACE_SHIM"),
@@ -196,7 +196,7 @@ RULES = [
     dict(id="DEP-CONF-KEEPER",
          globs=["rt-stack/deploy/config/tspi-motu-48k-keeper.service"],
          category="to_delete", role="新栈 keeper unit 内 Before= 旧 unit 名残留（非激活依赖）",
-         reason="Before= 仅排序、无 Wants/Requires 不拉起 C；但按 G-no-C '其它 unit 不再依赖 C' 应清理为 Before=tspi-rt-host.service",
+         reason="Before= 仅排序、无 Wants/Requires 不拉起 C；但按 G-no-C '其它 unit 不再依赖 C' 应清理为 Before=khaen-rt-host.service",
          old_c_disposition=""),
     dict(id="DEP-KEEPER-DATA",
          globs=["rt-stack/deploy/config/tspi-motu-48k-keeper.timer",
@@ -474,7 +474,7 @@ def render_md(doc):
     lines.append(TICK*3)
     lines.append("")
     lines.append("- 匹配模式：%scamilla[-_ ]?dsp%s、%s\\bcamilla\\b%s、旧 unit 名（tspi-camilladsp / tspi-upmix-autodetect / "
-                 "tspi-audio-web / tspi-audio.target / tspi-boot-mode）、旧 DSP 工具（tspi-upmix / tspi-mode / "
+                 "khaen-audio-web / tspi-audio.target / tspi-boot-mode）、旧 DSP 工具（tspi-upmix / tspi-mode / "
                  "tspi-channelmap）、C 路径（/etc/camilladsp、/run/tspi/camilladsp.*、/usr/local/bin/camilladsp）、"
                  "C WS（ws://...:1234、TSPI_CAMILLADSP_PORT）、%s\\bsox\\b%s、C socket/pipe 行、1234/18080 端口"
                  "（带上下文判定，排除 offset_ns:1234、255.255.255.254:1234 等误报）。"

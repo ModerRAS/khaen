@@ -8,18 +8,18 @@
 //! - 计数分配器：RT f32 入口 8 block + partial/DRAIN 路径 0 分配（与 T08 同口径）。
 //!
 //! Cargo 自动把 tests/T07/main.rs 发现为集成测试 target（不需要 public_registration 注册）。
-//! 运行：cargo test -p tspi-dsp-core direct -- --nocapture
+//! 运行：cargo test -p khaen-core direct -- --nocapture
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use tspi_dsp_core::direct::{
+use khaen_core::direct::{
     direct_block_f32, direct_block_f64, direct_state_zero_f32, direct_state_zero_f64,
     DirectCoeffsF32, DirectCoeffsF64, DirectLayout, DirectTopology, DIRECT_MAX_BLOCK,
     DIRECT_MAX_CONTAINERS, DIRECT_MAX_PARTICIPANTS, DIRECT_MAX_ROLES, DIRECT_MAX_SOURCES,
     DIRECT_MAX_TAPS, DIRECT_NO_SOURCE,
 };
-use tspi_dsp_core::rt::RtStatus;
+use khaen_core::rt::RtStatus;
 
 /// T07 冻结的 f32 工程门（T03 SPEC §4.2 + docs/E2E-ACCEPTANCE.md 待冻结默认；T07 定义并记录）。
 const F32_REL_L2_MAX: f64 = 1e-5;

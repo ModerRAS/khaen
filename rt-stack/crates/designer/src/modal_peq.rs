@@ -12,7 +12,7 @@
 //! 私有测试在 `crates/designer/tests/T41/modal_peq_cases.rs`，通过下面的 `include!` 在
 //! `#[cfg(test)]` 下编译执行（见 tests/T41/README.md；不改 integrator 独占的 public_registration.rs）。
 //!
-//! 状态：T41 leaf 实现 + 真实 `cargo test -p tspi-fir-designer modal_peq` 执行（见 evidence/T41/）。
+//! 状态：T41 leaf 实现 + 真实 `cargo test -p khaen-designer modal_peq` 执行（见 evidence/T41/）。
 //! 未做：板端/ALSA/RT 实测、真实房间数据、与 T64 daemon 的集成（NOT_RUN）。
 
 use std::fmt;
@@ -1059,7 +1059,7 @@ impl PeqDesign {
     pub fn new(fs: u32, mode: DesignMode) -> Result<Self, PeqError> {
         validate_sample_rate(fs)?;
         Ok(Self {
-            tool_name: "tspi-fir-designer".to_string(),
+            tool_name: "khaen-designer".to_string(),
             tool_version: env!("CARGO_PKG_VERSION").to_string(),
             created_unix: 0,
             fs,

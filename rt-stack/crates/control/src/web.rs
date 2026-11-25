@@ -1,7 +1,7 @@
 //! [NONRT] 真实 REST/WS Web 入口与页面（WBS T70；compat K01/K02/K05/K14/K15/K53/K57 + R51 + DEC §6） ——WBS T70 写域。
 //!
 //! 本模块是新栈**唯一 Web 入口**：把 T42 传输无关的 REST 控制核心（crate::rest::RestService）
-//! 与 T24 WS 协议引擎（tspi_dsp_compat::ws::WsSession）接到真实 HTTP/1.1 与 RFC 6455 WebSocket
+//! 与 T24 WS 协议引擎（khaen_compat::ws::WsSession）接到真实 HTTP/1.1 与 RFC 6455 WebSocket
 //! 传输上，并提供可直接日常操作的页面（输入/路由/volume/mute/状态 + 校准
 //! start/cancel/apply/retest/rollback 全交互）；不是占位按钮，也不是只给 curl 的 API。
 //!
@@ -65,7 +65,7 @@
 //! ## 测试（include! 自注册，integrator 不要再写 public_registration.rs）
 //! 私有测试在 crates/control/tests/T70/web_contract.rs，经文件末
 //! #[cfg(test)] mod web_tests { include!("../tests/T70/web_contract.rs"); } 进入 lib 单测构建；
-//! 运行 cargo test -p tspi-control web。全部离线：真实 TCP loopback + MemoryEngine + 测试内
+//! 运行 cargo test -p khaen-control web。全部离线：真实 TCP loopback + MemoryEngine + 测试内
 //! SimCalibration 假后端（模拟 T60 状态机/T66 apply/retest/rollback 回执），不碰板端/设备。
 
 use std::collections::BTreeMap;
@@ -76,7 +76,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use tspi_dsp_compat::ws;
+use khaen_compat::ws;
 
 use crate::rest::{JsonValue, Method, RestRequest, RestResponse, RestService, MAX_BODY_BYTES};
 

@@ -2,7 +2,7 @@
 # T28 06-verify-switch.sh —— 切换后验证（只读；写 verify-report.json）
 #
 # 硬门（任一 FAIL -> exit 5）：
-#   V1 tspi-rt-host.service active（--require-daemon 时 daemon 也 active）
+#   V1 khaen-rt-host.service active（--require-daemon 时 daemon 也 active）
 #   V2 旧 C 退役保持：C unit 无 enabled/active、入口文件不存在、无 camilladsp/tspi-upmix 进程
 #   V3 保留 AoIP/PTP unit inactive（audio-off；--allow-retained-active 可放宽并记 WARN）
 #   V4 新 host 进程存活；/dev/snd 仅由新 host 持有（无其它音频 owner）
@@ -71,10 +71,10 @@ add_check() { # id status detail
 log "== 06 verify-switch（timeout=${TIMEOUT}s settle=${SETTLE_SECS}s）"
 
 # V1 units + /etc 配置（F-18/T28-P0-2：配置缺失时 unit 启动即退，必须硬门）
-if wait_unit_active tspi-rt-host.service "$TIMEOUT"; then
-  add_check V1.unit.host PASS "tspi-rt-host.service active"
+if wait_unit_active khaen-rt-host.service "$TIMEOUT"; then
+  add_check V1.unit.host PASS "khaen-rt-host.service active"
 else
-  add_check V1.unit.host FAIL "tspi-rt-host.service ${TIMEOUT}s 内未 active"
+  add_check V1.unit.host FAIL "khaen-rt-host.service ${TIMEOUT}s 内未 active"
 fi
 MISSING_CFG=""
 for f in rt-host.toml rt-daemon.toml; do
@@ -107,8 +107,8 @@ elif [ "$ALLOW_RETAINED" = "1" ]; then add_check V3.retained NOT_VERIFIED "保�
 else add_check V3.retained FAIL "保留 AoIP/PTP unit 仍 active（设备独占冲突）:$BUSY"; fi
 
 # V4 新 host 进程与设备独占
-HOST_PID="$(pgrep -f 'tspi-rt-host' 2>/dev/null | head -n 1 || true)"
-if [ -n "$HOST_PID" ]; then add_check V4.proc.alive PASS "tspi-rt-host pid=$HOST_PID"; else add_check V4.proc.alive FAIL "未找到 tspi-rt-host 进程"; fi
+HOST_PID="$(pgrep -f 'khaen-rt-host' 2>/dev/null | head -n 1 || true)"
+if [ -n "$HOST_PID" ]; then add_check V4.proc.alive PASS "khaen-rt-host pid=$HOST_PID"; else add_check V4.proc.alive FAIL "未找到 khaen-rt-host 进程"; fi
 # /dev/snd holders（排除新 host pid）
 HOLDERS=""
 SND_DIR="$(p /dev/snd)"
@@ -132,7 +132,7 @@ else add_check V5.ports.1234 FAIL "1234 仍有监听: $LISTEN"; fi
 L80="$(ss -ltnp 2>/dev/null | grep -E ':80\\b' || true)"
 if [ -z "$L80" ]; then
   add_check V5.ports.80 PASS "80 无监听"
-elif printf '%s' "$L80" | grep -Eqi 'tspi-audio-web|camilladsp|tspi-upmix'; then
+elif printf '%s' "$L80" | grep -Eqi 'khaen-audio-web|camilladsp|tspi-upmix'; then
   add_check V5.ports.80 FAIL "80 仍被旧控制面进程监听: $L80"
 else
   add_check V5.ports.80 PASS "80 由新 daemon/系统进程监听（非旧 C）: $(printf '%s' "$L80" | head -n 1)"

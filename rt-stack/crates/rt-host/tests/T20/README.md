@@ -7,8 +7,8 @@
   属 integrator。**integrator 不要再把本文件加进 public_registration.rs**（会重复编译/符号冲突）。
 - 运行：
   ```
-  cargo test -p tspi-rt-host swap            # DoD（91 passed / 0 failed）
-  cargo test -p tspi-rt-host --offline swap -- --list   # t20_ 计数可复算（91 tests；swap 过滤共 94 = 91 T20 + 3 T21 命名含 swap）
+  cargo test -p khaen-rt-host swap            # DoD（91 passed / 0 failed）
+  cargo test -p khaen-rt-host --offline swap -- --list   # t20_ 计数可复算（91 tests；swap 过滤共 94 = 91 T20 + 3 T21 命名含 swap）
   ```
 - 全部离线：admission 用 `MockMemory`（不执行真实 mlockall/getrlimit）、不打开 ALSA/设备、
   不起 RT 线程；crossfade/retire 用栈上 `TspiRtControlV1`/`TspiSwapAckV1`/夹具 plan 字节。

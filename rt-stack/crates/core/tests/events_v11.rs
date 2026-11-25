@@ -3,7 +3,7 @@
 //! 依据：spec/core-v1.md v1.1.1 §8.2 表（36–40 为 v1.1 追加；1–35 冻结不得改号）。
 //! 归属：integrator T90 批次（crates/core/tests/events_v11.rs，integrator 写域）。
 
-use tspi_dsp_core::events::{
+use khaen_core::events::{
     event_name, EV_ACK_SLOT_EXHAUSTED, EV_CROSSFADE_BUDGET_REJECT, EV_EPOCH_ABORTED,
     EV_PLAN_ABORTED, EV_STARTING, EV_STOPPED,
 };

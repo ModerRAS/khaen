@@ -96,14 +96,14 @@ ps -eLo pid,tid,psr,prio,rtprio,comm | grep -E 'irq/|ktimers|rcu' | head -50
 # 2.2 1/2/4 worker，每档 3 重复；同一输入/系数/图（hash 落盘）
 for W in 1 2 4; do
   for R in 1 2 3; do
-    taskset -c 4-7 tspi-bench-dag --workers $W --block 128 --blocks 300 --warmup 30 \
+    taskset -c 4-7 khaen-bench-dag --workers $W --block 128 --blocks 300 --warmup 30 \
       --graph matrix_prod_g4096_p1 --out multicore-W$W-R$R.csv 2>&1 | tee multicore-W$W-R$R.log
   done
 done
 
 # 2.3 64 帧独立窗：同命令 --block 64（单独窗口，不复用 128 数据）
 # 2.4 记录：cat /proc/interrupts、频率、温度、per-worker busy/wait/max_kernel、queue、
-#           xrun/miss 计数；宿主 CPU 占用（pidstat -t -p $(pgrep tspi-rt-host) 1 60）
+#           xrun/miss 计数；宿主 CPU 占用（pidstat -t -p $(pgrep khaen-rt-host) 1 60）
 ~~~
 
 判定：speedup4≥3.2 且 128/64 门通过 → 该项 PASS；任一不满足 → FAIL/NOT_VERIFIED，
@@ -119,7 +119,7 @@ T20 swap + T21 fault + T45 亲和已接线（当前均 NOT_WIRED/NOT_RUN）。
 
 ~~~bash
 # 3.1 soak 启动（示例；真实参数以 deploy/config/rt-host.toml 冻结值为准）
-tspi-rt-host run --config /etc/tspi-rt-stack/rt-host.toml --duration-ms 3600000 \
+khaen-rt-host run --config /etc/tspi-rt-stack/rt-host.toml --duration-ms 3600000 \
   > soak-1h-run1.log 2>&1 &
 HOST_PID=$!
 # 同时每 10 s 采样：温度/频率、/proc/interrupts 差值、进程 RSS、per-worker 统计、

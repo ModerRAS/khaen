@@ -38,21 +38,21 @@ publish = false
 description = "khaen real-time audio DSP engine"
 
 [workspace.dependencies]
-tspi-dsp-core = { path = "crates/core" }
-tspi-fir-designer = { path = "crates/designer" }
-tspi-rt-host = { path = "crates/rt-host" }
+khaen-core = { path = "crates/core" }
+khaen-designer = { path = "crates/designer" }
+khaen-rt-host = { path = "crates/rt-host" }
 # task-235：AES67 用户态接收端（SDP/RTP L24/抖动缓冲/媒体时钟/capture 固定块）
-tspi-aoip-aes67 = { path = "crates/aoip-aes67" }
-tspi-dsp-compat = { path = "crates/compat" }
-tspi-control = { path = "crates/control" }
-tspi-modal-design = { path = "crates/modal-design" }
-tspi-calibration = { path = "crates/calibration" }
-tspi-cal-dsp = { path = "crates/cal-dsp" }
-tspi-file-runner = { path = "crates/file-runner" }
-tspi-bench = { path = "crates/bench" }
+khaen-aoip-aes67 = { path = "crates/aoip-aes67" }
+khaen-compat = { path = "crates/compat" }
+khaen-control = { path = "crates/control" }
+khaen-modal-design = { path = "crates/modal-design" }
+khaen-calibration = { path = "crates/calibration" }
+khaen-cal-dsp = { path = "crates/cal-dsp" }
+khaen-file-runner = { path = "crates/file-runner" }
+khaen-bench = { path = "crates/bench" }
 # calib-chain-20261121 / mimo-opt-20261122：RoomForge 鞋盒 ISM 仿真移植 + 低频 MIMO 设计（纯 std，无外部依赖）
-tspi-room-sim = { path = "crates/room-sim" }
-tspi-mimo-design = { path = "crates/mimo-design" }
+khaen-room-sim = { path = "crates/room-sim" }
+khaen-mimo-design = { path = "crates/mimo-design" }
 
 # Linux 真实 ALSA 后端依赖（WBS T90；Lead 2026-11-17 批准，target-specific 只在 Linux target 编译）。
 # 版本 = crates.io 最新稳定（2026-11-17 查询 max_stable=0.12.1）；Cargo.lock 锁定精确版本。

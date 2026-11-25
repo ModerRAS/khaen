@@ -1,7 +1,7 @@
 //! tspi-rt-daemon —— TSPI 控制面/校准 daemon 入口（WBS T70/T42/T44/T60 的部署接线，T155）。
 //!
 //! 角色（与 service/tspi-rt-daemon.service 契约一致）：REST/WS/Web 的**唯一**控制面进程；
-//! **不直接打开 PCM**（ALSA/设备 owner 只在 tspi-rt-host）。本文件只做进程接线：
+//! **不直接打开 PCM**（ALSA/设备 owner 只在 khaen-rt-host）。本文件只做进程接线：
 //! 读 config -> 建 RestService（T42）+ WebServer（T70，含 WS/REST 桥）-> 监听端口 ->
 //! 优雅退出（SIGINT/SIGTERM 或 --exit-after-ms/T155 证据用）。
 //!
@@ -33,10 +33,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tspi_control::modes::{ModeEngine, SimulatedServices};
-use tspi_control::rest::calibration_job_port::JobManagerPort;
-use tspi_control::rest::{CalibrationPort, MemoryEngine, RestService};
-use tspi_control::web::{WebConfig, WebServer};
+use khaen_control::modes::{ModeEngine, SimulatedServices};
+use khaen_control::rest::calibration_job_port::JobManagerPort;
+use khaen_control::rest::{CalibrationPort, MemoryEngine, RestService};
+use khaen_control::web::{WebConfig, WebServer};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8090";
 const DEFAULT_MAX_CONNECTIONS: usize = 64;
@@ -344,8 +344,8 @@ fn build_calibration_with_mode(
             ),
         ),
         CalBackendMode::Real => (
-            Some(Box::new(tspi_control::host_socket::HostSocketPort::new(
-                tspi_rt_host::cal_control::socket_path(),
+            Some(Box::new(khaen_control::host_socket::HostSocketPort::new(
+                khaen_rt_host::cal_control::socket_path(),
             ))),
             CalibrationReport {
                 mode: mode.as_str(),
@@ -356,7 +356,7 @@ fn build_calibration_with_mode(
                 backend: "unix-socket",
                 resumed_job: None,
                 reason: Some(
-                    "emperor requests go to tspi-rt-host; a missing socket fails the request; synthetic stays true until a recorded measurement exists"
+                    "emperor requests go to khaen-rt-host; a missing socket fails the request; synthetic stays true until a recorded measurement exists"
                         .to_string(),
                 ),
             },
@@ -656,10 +656,10 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tspi_control::rest::calibration_job_port::{
+    use khaen_control::rest::calibration_job_port::{
         cleanup_offline_root, unique_offline_root, CAL_PORT_ENGINE_SYNTHETIC,
     };
-    use tspi_control::rest::{
+    use khaen_control::rest::{
         JsonValue, Method, RestConfig, RestRequest, TOKEN_HEADER,
     };
 

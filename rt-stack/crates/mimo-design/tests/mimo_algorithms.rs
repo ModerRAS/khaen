@@ -7,8 +7,8 @@
 //! 4) Levinson-Durbin 对已知 Toeplitz 的解析解正确；
 //! 5) λ CV 选择可复现（两次运行完全一致）。
 
-use tspi_mimo_design::report::Json;
-use tspi_mimo_design::{run_scene, Cx, RunConfig, SceneInput};
+use khaen_mimo_design::report::Json;
+use khaen_mimo_design::{run_scene, Cx, RunConfig, SceneInput};
 
 const NFFT: usize = 8192;
 
@@ -256,7 +256,7 @@ fn cv_lambda_selection_is_reproducible() {
 
 #[test]
 fn levinson_matches_known_toeplitz() {
-    use tspi_mimo_design::fir::levinson_solve;
+    use khaen_mimo_design::fir::levinson_solve;
     // 与 lib 单测一致的手算 3x3 解
     let ac = [1.0, 0.5, 0.2];
     let b = [1.0, 2.0, 3.0];

@@ -98,7 +98,7 @@ CamillaDSP 4.1.3 · channelmap v2 · 任务 task-17
 
 - install-upmix.sh：12 profile 校验（真实 tspi-channelmap validate/render + 审计）全部通过；
   6 个 ALSA 示例 camilladsp --check 全部通过；无服务启停。
-- WebUI（tspi-audio-web :8088）GET /api/channelmap 返回 12 个 upmix-* profile，布局正确。
+- WebUI（khaen-audio-web :8088）GET /api/channelmap 返回 12 个 upmix-* profile，布局正确。
 - 沙箱 TSPI_CHANNELMAP_* 重定向下 load-profile upmix-4.1.2-music --mode off 成功，渲染的
   配置 camilladsp --check 通过（"Config is valid"），未触碰 /etc active。
 - 独立路径 tspi-upmix apply：A→B 后 rollback，sha256 与 A 一致；配置文件 camilladsp --check 通过。

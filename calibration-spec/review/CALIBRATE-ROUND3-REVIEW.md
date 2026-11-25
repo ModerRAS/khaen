@@ -1,6 +1,6 @@
 # calibrate/ 复审 Round 3（P0 修复验收，2026-11-15）
 
-> 对象：audio-stack Round-2 P0 修复版；release @target/release/tspi-calibrate.exe@
+> 对象：audio-stack Round-2 P0 修复版；release @target/release/khaen-calibrate.exe@
 > sha256=@e364fee99bb8189046c5054e80300fb848d11fea4005ca0ed6cb5ff285bdc6e7@（与声明一致，1,682,432 B）。
 > 方法：只读 review + release 二进制复现 + 独立重建 FR 复频响跑我的 pair checker；未改 calibrate/。
 > 上轮：@CALIBRATE-ROUND2-REVIEW.md@；契约/验收：@../CONTRACT.md@ / @../ACCEPTANCE.md@。
@@ -29,7 +29,7 @@ cargo test 11/11；示例 YAML 通过 validator；外部 checker 可用导出数
 - @main.rs:245/335/465/641@ 未给 @--names@ 时默认名仍 @ch{index}@ 小写，不符合角色 id 正则。
 - @peq.rs:13@ Biquad clamp 仍 freq 10..22000、q≤20，超出契约（freq≥20、q≤10）；拟合输出可能被 validator 拒绝。
 - @main.rs:268-308@ CamillaDSP 片段极性仍只有 @channelmap_roles@ 提示，未在 filters/pipeline 内实现反相。
-- @main.rs:382@ 报告仍 @tspi-calibration-validation/v1@，与 ACCEPTANCE §8 @tspi-calibration-report/v1@（pairs/负向用例/环境/文件 sha256）不一致。
+- @main.rs:382@ 报告仍 @khaen-calibration-validation/v1@，与 ACCEPTANCE §8 @khaen-calibration-report/v1@（pairs/负向用例/环境/文件 sha256）不一致。
 - @main.rs:551-556@ ripple 注释写 1/3 oct，实际 5 点滑动（≈0.2 oct）；建议按 1/3 oct 平滑。
 - @main.rs:567-568@ @target_dev@、@level_diff@ 是 ACCEPTANCE 未要求的额外硬 FAIL 条件（level_diff 对交叉点两侧设计电平不同的系统可能误报）；建议降为 warning 或可配置。
 - @main.rs:394@ @--pairs@ 仍可选：未给时只做全局 margin，覆盖不了 §6.1；建议给了 @--crossovers@ 就强制/自动生成 pairs（至少文档要求必填）。

@@ -28,7 +28,7 @@ $root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrEmpty($Bin)) {
   $Bin = Join-Path $root 'target\debug\tspi-rt-daemon.exe'
 }
-if (-not (Test-Path $Bin)) { throw "daemon binary not found: $Bin (run cargo build -p tspi-control --bin tspi-rt-daemon)" }
+if (-not (Test-Path $Bin)) { throw "daemon binary not found: $Bin (run cargo build -p khaen-control --bin tspi-rt-daemon)" }
 
 # TEMP may point at R: (ImDisk) where mkdir can be denied; use C: workspace temp.
 $runRoot = 'C:\WorkSpace\Claw\scratch\lead\cal-ui-tmp'

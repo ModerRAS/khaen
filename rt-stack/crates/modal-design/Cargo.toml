@@ -1,12 +1,12 @@
 # TSPI 模态 MIMO 设计：ingest / timebase / target / solve / validate / artifact（T06 scaffold；leaf T48-T54）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
-name = "tspi-modal-design"
+name = "khaen-modal-design"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "TSPI 模态 MIMO 设计：ingest / timebase / target / solve / validate / artifact（T06 scaffold；leaf T48-T54）"
 
 [dependencies]
-tspi-dsp-core = { workspace = true }
-tspi-fir-designer = { workspace = true }
+khaen-core = { workspace = true }
+khaen-designer = { workspace = true }

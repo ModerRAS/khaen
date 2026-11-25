@@ -1,16 +1,16 @@
 //! `tspi-fir/v1` manifest 解析/校验/写作（对齐 T55 报告字段面 + fir-toolbox §2.2 规则 1–7）。
 
-use tspi_file_runner::fir::{
+use khaen_file_runner::fir::{
     build_fir_manifest, family_constant_delay, family_expected_delay, load_fir_manifest,
     load_fir_manifest_str, magnitude_db_at, manifest_semantic_sha256, parse_fir_manifest,
     validate_fir_manifest, write_fir_manifest, FirManifestSpec, FIR_FAMILIES,
     FIR_REFERENCE_TOLERANCE_DB, FIR_TAPS_MAX, FIR_TAPS_MIN, PROFILE_EXTENDED, PROFILE_OFFLINE_ONLY,
     PROFILE_REGULAR,
 };
-use tspi_file_runner::json::Json;
-use tspi_file_runner::sha256::sha256_hex;
-use tspi_file_runner::wav::encode_wav_f32;
-use tspi_file_runner::{
+use khaen_file_runner::json::Json;
+use khaen_file_runner::sha256::sha256_hex;
+use khaen_file_runner::wav::encode_wav_f32;
+use khaen_file_runner::{
     E_FILE_BUDGET, E_FILE_DELAY, E_FILE_FORMAT, E_FILE_HASH, E_FILE_NUMERIC, E_FILE_RATE,
     E_FILE_REF, E_FILE_SCHEMA, E_FILE_TAPS,
 };
@@ -50,7 +50,7 @@ fn fir_manifest_round_trip_and_semantic_digest() {
     );
 }
 
-fn spec_of(parsed: &tspi_file_runner::fir::FirManifest) -> FirManifestSpec<'_> {
+fn spec_of(parsed: &khaen_file_runner::fir::FirManifest) -> FirManifestSpec<'_> {
     FirManifestSpec {
         family: &parsed.family,
         fs: parsed.fs,

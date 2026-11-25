@@ -492,7 +492,7 @@ impl AlsaBackend for RealAlsa {
     async fn test_tone(&self, device: Option<&str>) -> AppResult<ToneResult> {
         let view = self.scan().await;
         let device = self.pick_device(&view, device)?;
-        let path = std::env::temp_dir().join("tspi-audio-web-test-tone.wav");
+        let path = std::env::temp_dir().join("khaen-audio-web-test-tone.wav");
         tokio::fs::write(&path, TEST_TONE_WAV)
             .await
             .map_err(|e| AppError::internal(format!("写入测试音文件失败: {e}")))?;

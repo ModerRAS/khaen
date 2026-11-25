@@ -1,14 +1,14 @@
 # TSPI 离线契约检查 CLI（WBS T06；命令入口 abi-layout/forbid/drop-audit）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
-name = "tspi-rt-check"
+name = "khaen-rt-check"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "TSPI offline contract checker CLI：ABI 布局 / RT 禁止行为 / 无析构审计（T06 scaffold）"
 
 [lib]
-name = "tspi_rt_check"
+name = "khaen_rt_check"
 path = "src/lib.rs"
 
 [[bin]]
@@ -16,7 +16,7 @@ name = "rt-check"
 path = "src/main.rs"
 
 [dependencies]
-tspi-dsp-core = { workspace = true }
-tspi-rt-host = { workspace = true }
+khaen-core = { workspace = true }
+khaen-rt-host = { workspace = true }
 # T26：file 端到端（WAV -> T14 session/plan -> 4-worker DAG -> WAV）由 rt-check host-file 驱动。
-tspi-file-runner = { workspace = true }
+khaen-file-runner = { workspace = true }

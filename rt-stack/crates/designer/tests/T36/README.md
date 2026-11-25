@@ -6,8 +6,8 @@
 - 运行：
 
     cd rt-stack
-    cargo test -p tspi-fir-designer brickwall
-    cargo test -p tspi-fir-designer brickwall -- --nocapture   # 诊断数值（V13/V16/规范网格）
+    cargo test -p khaen-designer brickwall
+    cargo test -p khaen-designer brickwall -- --nocapture   # 诊断数值（V13/V16/规范网格）
 
 ## 为什么用 include! 而不是 public_registration.rs
 
@@ -22,7 +22,7 @@ cargo 只把 tests/*.rs（顶层文件）当集成测试目标，不会自动发
         include!("../tests/T36/brickwall_cases.rs");
     }
 
-本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p tspi-fir-designer brickwall
+本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p khaen-designer brickwall
 执行（executed = 31），测试名过滤路径含 brickwall；不需要 integrator 注册，也不要再把它加到
 public_registration.rs（会重复注册/编译失败）。
 

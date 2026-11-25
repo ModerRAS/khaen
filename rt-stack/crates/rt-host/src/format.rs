@@ -87,11 +87,11 @@
 //! 源码级自证：无 allocation/syscall/锁 token（测试
 //! t22_module_has_no_allocation_or_syscall_tokens）。
 
-pub use tspi_dsp_core::abi::TspiHwParamsV1;
-pub use tspi_dsp_core::rt::RtStatus;
+pub use khaen_core::abi::TspiHwParamsV1;
+pub use khaen_core::rt::RtStatus;
 
-use tspi_dsp_core::abi::{sample_format, ABI_VERSION};
-use tspi_dsp_core::rt::{BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
+use khaen_core::abi::{sample_format, ABI_VERSION};
+use khaen_core::rt::{BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
 
 // ---------------------------------------------------------------------------
 // 常量：hw.flags（core-v1 §11.9 bit0..bit3）与对齐/步长契约

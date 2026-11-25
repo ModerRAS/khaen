@@ -1,6 +1,6 @@
-# tspi-calibrate 多遍扫频 / 鲁棒极性 / 时钟漂移
+# khaen-calibrate 多遍扫频 / 鲁棒极性 / 时钟漂移
 
-日期：2026-11-16。只改了 `projects/tspi-audio-dsp/calibrate/`。没有连板、没有动声卡。`tspi-calibration/v1` 的必填字段没有加。
+日期：2026-11-16。只改了 `projects/tspi-audio-dsp/calibrate/`。没有连板、没有动声卡。`khaen-calibration/v1` 的必填字段没有加。
 
 ## 改了哪些文件
 
@@ -88,14 +88,14 @@ merged 4 channels -> target\offline-remerge.yml ; cancellation check PASS (worst
 
 ## 命令输出
 
-工作目录 `projects/tspi-audio-dsp/calibrate`。release 二进制 `target/release/tspi-calibrate.exe`，1,927,168 字节。下面 5 条 warning 是原来就有的未使用项（`A.pos`、`ChannelAnalysis`、`mono_mix`、`run_checked`、`SweepSpec::new`），这次没有新增。
+工作目录 `projects/tspi-audio-dsp/calibrate`。release 二进制 `target/release/khaen-calibrate.exe`，1,927,168 字节。下面 5 条 warning 是原来就有的未使用项（`A.pos`、`ChannelAnalysis`、`mono_mix`、`run_checked`、`SweepSpec::new`），这次没有新增。
 
 ```
 ===== cargo fmt --check =====
 EXIT 0
 
 ===== cargo check =====
-    Checking tspi-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
+    Checking khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
 warning: field `pos` is never read
   --> src\main.rs:27:5
    |
@@ -133,12 +133,12 @@ warning: associated function `new` is never used
 13 |     pub fn new(sample_rate: u32, seconds: f64, level_db: f64) -> Self {
    |            ^^^
 
-warning: `tspi-calibrate` (bin "tspi-calibrate") generated 5 warnings
+warning: `khaen-calibrate` (bin "khaen-calibrate") generated 5 warnings
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.35s
 EXIT 0
 
 ===== cargo test =====
-   Compiling tspi-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
+   Compiling khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
 warning: field `pos` is never read
   --> src\main.rs:27:5
    |
@@ -168,9 +168,9 @@ warning: function `run_checked` is never used
 97 | pub fn run_checked(mut cmd: Command, label: &str) -> Result<(), String> {
    |        ^^^^^^^^^^^
 
-warning: `tspi-calibrate` (bin "tspi-calibrate" test) generated 4 warnings
+warning: `khaen-calibrate` (bin "khaen-calibrate" test) generated 4 warnings
     Finished `test` profile [unoptimized + debuginfo] target(s) in 1.92s
-     Running unittests src\main.rs (target\debug\deps\tspi_calibrate-2b1d8966bb6f561a.exe)
+     Running unittests src\main.rs (target\debug\deps\khaen_calibrate-2b1d8966bb6f561a.exe)
 
 running 21 tests
 test dsp::tests::reflection_five_ms_flips_peak_not_direct_window ... ok
@@ -203,7 +203,7 @@ test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 EXIT 0
 
 ===== cargo build --release =====
-   Compiling tspi-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
+   Compiling khaen-calibrate v0.1.0 (C:\WorkSpace\Claw\projects\tspi-audio-dsp\calibrate)
 warning: field `pos` is never read
   --> src\main.rs:27:5
    |
@@ -241,7 +241,7 @@ warning: associated function `new` is never used
 13 |     pub fn new(sample_rate: u32, seconds: f64, level_db: f64) -> Self {
    |            ^^^
 
-warning: `tspi-calibrate` (bin "tspi-calibrate") generated 5 warnings
+warning: `khaen-calibrate` (bin "khaen-calibrate") generated 5 warnings
     Finished `release` profile [optimized] target(s) in 33.41s
 EXIT 0
 ```

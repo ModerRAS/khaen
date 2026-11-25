@@ -13,9 +13,9 @@
 
 ```powershell
 cd rt-stack
-cargo test -p tspi-rt-host --offline --bin tspi-rt-host t74       # 33 条（17 file + 16 aoip）
-cargo test -p tspi-rt-host --offline --bin tspi-rt-host t74aoip   # 16 条 t74aoip_*（motu/inferno/aes67）
-cargo test -p tspi-rt-host --offline                              # 全量（653 passed）
+cargo test -p khaen-rt-host --offline --bin khaen-rt-host t74       # 33 条（17 file + 16 aoip）
+cargo test -p khaen-rt-host --offline --bin khaen-rt-host t74aoip   # 16 条 t74aoip_*（motu/inferno/aes67）
+cargo test -p khaen-rt-host --offline                              # 全量（653 passed）
 ```
 
 ## 覆盖范围（fake，本机 Windows）

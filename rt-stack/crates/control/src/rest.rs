@@ -1,7 +1,7 @@
 //! [NONRT] 自有 REST 控制面（WBS T42；compat R01-R51 / X01-X22） ——WBS T42 写域。
 //!
 //! 本模块实现新栈自己的 REST 语义层（不是 CamillaDSP/WS shim，也不依赖旧
-//! tspi-audio-web）：配置/模式/状态/volume/mute/target/coeff 版本、鉴权/冲突/统一错误
+//! khaen-audio-web）：配置/模式/状态/volume/mute/target/coeff 版本、鉴权/冲突/统一错误
 //! envelope/API 版本/unknown 拒收、以及 prepare->commit 的 actual ack。HTTP 服务器
 //! 与真实 host/ALSA/校准 daemon 接线属 T26/T70；本模块只提供 transport-agnostic 的
 //! RestRequest -> RestResponse 处理核心，可被任意 HTTP/WS 传输层直接调用。
@@ -79,7 +79,7 @@
 //!   保存。KEEP R03 要求 Argon2id —— integrator 加 argon2 依赖后可替换 KDF 实现；当前
 //!   默认记为未达 Argon2id，不冒充。
 //! - E-3（task-226 收口）：校准 job 的真实 T60 实现经 CalibrationPort trait 注入；daemon
-//!   需要构造真实 port，故 control 依赖 tspi-calibration（crates/control/Cargo.toml 由
+//!   需要构造真实 port，故 control 依赖 khaen-calibration（crates/control/Cargo.toml 由
 //!   integrator 复核，见 evidence/cursor-fix-rest-calibport/MANIFEST.md §5）。trait 保持可
 //!   注入，测试仍用 MemoryCalibration/ScriptedCalibration 替身；未接线时 503（不是空 200）。
 //! - E-4：模式切换完整状态机/独占/回滚属 T44；本模块提供 REST 语义与 RuntimeEngine
@@ -88,7 +88,7 @@
 //! ## 测试（include! 自注册，integrator 不要再写 public_registration.rs）
 //! 私有测试在 crates/control/tests/T42/rest_contract.rs，经文件末
 //! #[cfg(test)] mod rest_tests { include!("../tests/T42/rest_contract.rs"); } 进入 lib
-//! 单测构建；运行 cargo test -p tspi-control rest。全部离线：不打开设备、不启服务、
+//! 单测构建；运行 cargo test -p khaen-control rest。全部离线：不打开设备、不启服务、
 //! 不跑真实 host。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -96,8 +96,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use tspi_dsp_compat::ws;
-use tspi_dsp_core::rt::{RtStatus, BLOCK_SIZES, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
+use khaen_compat::ws;
+use khaen_core::rt::{RtStatus, BLOCK_SIZES, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
 
 // ---------------------------------------------------------------------------
 // 常量（WBS T42 / compat R01-R51 / core-v1 §3/§6.1）
@@ -112,7 +112,7 @@ pub const TOKEN_HEADER: &str = "X-TSPI-Token";
 /// header token 的 Bearer 形式（Authorization: Bearer <token>）。
 pub const AUTHORIZATION_HEADER: &str = "Authorization";
 /// 会话 Cookie 名（R03-R06）。
-pub const SESSION_COOKIE: &str = "tspi_session";
+pub const SESSION_COOKIE: &str = "khaen_session";
 /// 写方法 CSRF 头（K03；Cookie session 必填，header token 免）。
 pub const CSRF_HEADER: &str = "X-TSPI-CSRF";
 /// CSRF 头的兼容别名（旧客户端）。
@@ -5859,7 +5859,7 @@ fn cal_job_body(
     fields.push((
         "calibration_scope",
         JsonValue::str(if info.real_audio {
-            "web-to-cli-stage-pipeline (legacy tspi-calibrate CLI; NOT the P45 production calibration chain)"
+            "web-to-cli-stage-pipeline (legacy khaen-calibrate CLI; NOT the P45 production calibration chain)"
         } else {
             "synthetic-offline-state-machine"
         }),

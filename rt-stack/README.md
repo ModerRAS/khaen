@@ -38,16 +38,16 @@ rt-stack/
 
 | 目录 | package | 角色/模块 | leaf 任务（写域） |
 | --- | --- | --- | --- |
-| `crates/core` | `tspi-dsp-core` | `abi`（§11 ABI）、`rt`（类型/错误码/常量/§12.3 stub）、`events`（§8.2 kind）、`plan`、`direct`、`partitioned`、`workers`、`compile`、`nodes`、`schedule_plan` | T07 direct、T08 partitioned、T09 workers、T12 compile、T23 nodes、T56 schedule_plan |
-| `crates/designer` | `tspi-fir-designer` | `linear`、`targets`、`min_fast`、`min_slow`、`apodizing`、`brickwall`、`corrected`、`nos`、`crossover`、`phase`、`modal_peq`、`report` | T10/T11/T33–T41/T55 |
-| `crates/rt-host` | `tspi-rt-host` | `spsc`、`swap`、`admission`、`clock`、`format`、`fault`、`alsa`、`aoip`、`scheduler`、`content_map`（task-210：host 自持缺中置内容适配，见 `spec/compat-matrix.md` C09）；T26 另加 `src/main.rs`（bin） | T16–T22/T43/T45/T26（+ task-210） |
-| `crates/compat` | `tspi-dsp-compat` | `ws`、`calibration`、`content`、`roles`、`channel_map` | T13/T24/T25/T57 |
-| `crates/control` | `tspi-control` | `rest`、`modes`、`web` | T42/T44/T70 |
-| `crates/modal-design` | `tspi-modal-design` | `ingest`、`timebase`、`target`、`solve`、`regularize`、`validate`、`artifact` | T48–T54 |
-| `crates/calibration` | `tspi-calibration` | `job`、`sweep`、`capture`、`positions`、`peq_fit`、`phase_fit`、`compile_apply` | T60–T66 |
-| `crates/file-runner` | `tspi-file-runner` | T14 自组织整个 `src/` | T14 |
-| `crates/bench` | `tspi-bench` | `metrics`（T47 自组织整个 `src/`） | T47 |
-| `crates/rt-check` | `tspi-rt-check` | lib + bin `rt-check`：`abi_layout`、`forbid`、`drop_audit`；`plan-hash`/`state-machine` 为入口占位 | T06 自有（T12/T21/T26 扩展命令） |
+| `crates/core` | `khaen-core` | `abi`（§11 ABI）、`rt`（类型/错误码/常量/§12.3 stub）、`events`（§8.2 kind）、`plan`、`direct`、`partitioned`、`workers`、`compile`、`nodes`、`schedule_plan` | T07 direct、T08 partitioned、T09 workers、T12 compile、T23 nodes、T56 schedule_plan |
+| `crates/designer` | `khaen-designer` | `linear`、`targets`、`min_fast`、`min_slow`、`apodizing`、`brickwall`、`corrected`、`nos`、`crossover`、`phase`、`modal_peq`、`report` | T10/T11/T33–T41/T55 |
+| `crates/rt-host` | `khaen-rt-host` | `spsc`、`swap`、`admission`、`clock`、`format`、`fault`、`alsa`、`aoip`、`scheduler`、`content_map`（task-210：host 自持缺中置内容适配，见 `spec/compat-matrix.md` C09）；T26 另加 `src/main.rs`（bin） | T16–T22/T43/T45/T26（+ task-210） |
+| `crates/compat` | `khaen-compat` | `ws`、`calibration`、`content`、`roles`、`channel_map` | T13/T24/T25/T57 |
+| `crates/control` | `khaen-control` | `rest`、`modes`、`web` | T42/T44/T70 |
+| `crates/modal-design` | `khaen-modal-design` | `ingest`、`timebase`、`target`、`solve`、`regularize`、`validate`、`artifact` | T48–T54 |
+| `crates/calibration` | `khaen-calibration` | `job`、`sweep`、`capture`、`positions`、`peq_fit`、`phase_fit`、`compile_apply` | T60–T66 |
+| `crates/file-runner` | `khaen-file-runner` | T14 自组织整个 `src/` | T14 |
+| `crates/bench` | `khaen-bench` | `metrics`（T47 自组织整个 `src/`） | T47 |
+| `crates/rt-check` | `khaen-rt-check` | lib + bin `rt-check`：`abi_layout`、`forbid`、`drop_audit`；`plan-hash`/`state-machine` 为入口占位 | T06 自有（T12/T21/T26 扩展命令） |
 
 依赖方向（workspace.dependencies 统一管理）：`core` 为底；`designer`/`rt-host`/`compat` → core；
 `control` → compat+rt-host+core；`modal-design` → designer+core；`calibration` → modal-design+designer+compat+rt-host+core；
@@ -94,9 +94,9 @@ Windows/macOS 开发与 CI **不编译/不链接** libasound，T17 fake backend 
 ```text
 cargo test --workspace                 # 必须真实执行（T06 自证测试 > 0；leaf 验收时 executed test_count > 0）
 cargo fmt --all --check                # 必须干净
-cargo run -p tspi-rt-check --bin rt-check -- abi-layout
-cargo run -p tspi-rt-check --bin rt-check -- forbid --root crates
-cargo run -p tspi-rt-check --bin rt-check -- drop-audit --root crates
+cargo run -p khaen-rt-check --bin rt-check -- abi-layout
+cargo run -p khaen-rt-check --bin rt-check -- forbid --root crates
+cargo run -p khaen-rt-check --bin rt-check -- drop-audit --root crates
 # 或一键：
 pwsh -File ci/check.ps1 [-Offline]     # Windows
 sh ci/check.sh                          # POSIX（CARGO_OFFLINE=1 强制 --offline）
@@ -121,7 +121,7 @@ T06/T90 的实测即使用外部 target 目录，未向仓库写 target/。
   `tests/<Txx>/main.rs` 自动发现；`T16/T17`（rt-host）、`T11/T33–T39/T41`（designer）等用
   `src/*.rs` 内 `#[cfg(test)] include!` 自注册，**不要**再写入 `public_registration.rs`（会重复注册/编译失败）。
 - leaf 测试放 `crates/<crate>/tests/<Txx>/<name>.rs`，测试函数名/模块名带任务关键字
-  （例如 `cargo test -p tspi-dsp-core direct`）；合入时由 integrator 在 `public_registration.rs` 加
+  （例如 `cargo test -p khaen-core direct`）；合入时由 integrator 在 `public_registration.rs` 加
   `#[path = "<Txx>/<name>.rs"] mod ...;`。
 - T06 自有测试：`crates/core/tests/const_contract.rs`、`crates/rt-host/tests/abi_layout.rs`、
   `crates/rt-check/tests/{forbid_fixtures,drop_audit_fixtures,cli_smoke}.rs`。
@@ -164,13 +164,13 @@ RT-MODULE 标记：DSP 纯 RT 模块文件头写 `//! RT-MODULE: ...`（同时�
 
 ## 10. T26 host 入口（fake/file 端到端；未上板）
 
-- crates/rt-host/src/main.rs（bin tspi-rt-host）：唯一 I/O owner 的 host 入口集成。命令：
-  - tspi-rt-host selftest：4 worker DAG 与 T07 直算 bit-exact（stereo identity + 2x2 offdiag 两图）+ admission/format 前置校验 + fake 闭环；
-  - tspi-rt-host fake-io --blocks N：fake 设备闭环（合成 2ch → B1 串行 → B2 四线程并行 → B3 串行 → T22 f32 设备字节；T16 有界 SPSC desc 环、T19 每块 tick 预算计数）；
-  - tspi-rt-host admission-check：T18 plan_memory 容量/预算 + T22 format 契约自校验。
+- crates/rt-host/src/main.rs（bin khaen-rt-host）：唯一 I/O owner 的 host 入口集成。命令：
+  - khaen-rt-host selftest：4 worker DAG 与 T07 直算 bit-exact（stereo identity + 2x2 offdiag 两图）+ admission/format 前置校验 + fake 闭环；
+  - khaen-rt-host fake-io --blocks N：fake 设备闭环（合成 2ch → B1 串行 → B2 四线程并行 → B3 串行 → T22 f32 设备字节；T16 有界 SPSC desc 环、T19 每块 tick 预算计数）；
+  - khaen-rt-host admission-check：T18 plan_memory 容量/预算 + T22 format 契约自校验。
 - rt-check host-file --work DIR --frames N（或 --session FILE --output FILE）：file 端到端 WAV → T14 session/plan（BlockSource 同源切分）→ T09 4-worker DAG → 真实 WAV。rt-host 不能反向依赖 file-runner（会成环），故 file 命令入口在 rt-check。
 - 本 T26 批次未接：T20 swap/crossfade、T21 fault 事件导出、T42/T44 REST/WS+mode、T45 内核亲和/IRQ 实写、T25/T23/T56 的整链入口；真实 ALSA/MOTU 打开与板端 RT/soak 亦未做（NOT_RUN）。
-- **T155 最终接线（部署前冻结）**：`tspi-rt-host run --config rt-host.toml`（schema tspi-rt-host/v1）：建图 / ALSA owner 契约(fake) / 4 worker DAG + T45 调度计划逐块 gate / T20 swap all-ack / T21 fault 事件+watchdog / Web 端口（external 或 spawn 探测 /healthz 200）/ 优雅退出（SIGINT/SIGTERM、--blocks、--duration-ms、TSPI_HOST_SAFE_MODE=mute 保护输出）；`tspi-rt-daemon serve --config rt-daemon.toml`（schema tspi-rt-daemon/v1）：T42 REST + T44 modes + T70 Web/WS 同端口，`/healthz` 200、`/` 8656 B 页面。配置模板 deploy/config/rt-host.toml.example、rt-daemon.toml.example；aarch64 gnu 双 bin release `t155-final-20261117`（tspi-rt-host 768,384 B sha256 e011745c…；tspi-rt-daemon 1,210,296 B sha256 009a110e…；manifest 11 files 校验 ok）。
+- **T155 最终接线（部署前冻结）**：`khaen-rt-host run --config rt-host.toml`（schema khaen-rt-host/v1）：建图 / ALSA owner 契约(fake) / 4 worker DAG + T45 调度计划逐块 gate / T20 swap all-ack / T21 fault 事件+watchdog / Web 端口（external 或 spawn 探测 /healthz 200）/ 优雅退出（SIGINT/SIGTERM、--blocks、--duration-ms、TSPI_HOST_SAFE_MODE=mute 保护输出）；`tspi-rt-daemon serve --config rt-daemon.toml`（schema tspi-rt-daemon/v1）：T42 REST + T44 modes + T70 Web/WS 同端口，`/healthz` 200、`/` 8656 B 页面。配置模板 deploy/config/rt-host.toml.example、rt-daemon.toml.example；aarch64 gnu 双 bin release `t155-final-20261117`（khaen-rt-host 768,384 B sha256 e011745c…；tspi-rt-daemon 1,210,296 B sha256 009a110e…；manifest 11 files 校验 ok）。
 - **T155 仍未接/未测**：真实 ALSA PCM open/duplex（backend=fake only）、内核亲和/FIFO/IRQ 实写（T45 只计划不写内核）、T25/T23/T56 整链入口、板端安装/启动/真实设备/浏览器/真实 systemd（NOT_RUN）；T20 crossfade 双图仅 swap ack 层、T21 事件未接 UI 消费、daemon 用 MemoryEngine 替身（真实 host engine 注入属 follow-up）。
 
 ## 9. 变更记录
@@ -178,7 +178,7 @@ RT-MODULE 标记：DSP 纯 RT 模块文件头写 `//! RT-MODULE: ...`（同时�
 | 日期 | 变更 |
 | --- | --- |
 | 2026-11-17 | T06：建立唯一 workspace + 10 crate scaffold + rt-check（abi-layout/forbid/drop-audit）+ ci/ + 本 README；cargo test --workspace / cargo fmt --all --check 真实执行（见 evidence/T06/manifest.md）。 |
-| 2026-11-17 | T26（task-132）：crates/rt-host/src/main.rs host 入口（bin tspi-rt-host：selftest/fake-io/admission-check，4 worker B2 四线程并行、T16 SPSC/T19 tick/T22 format/T18 admission 串行接线）+ rt-check host-file（T14 file WAV→4-worker DAG→WAV 端到端）+ 集成测试；验证见 evidence/T26/manifest.md。T20/T21/T42/T44/T45/T25/T23/T56 入口接线与真实 ALSA/板端仍 NOT_RUN。 |
-| 2026-11-17 | **T155（task-155）最终接线**：tspi-rt-host run --config（建图/ALSA owner 契约/T45 调度计划/T20 swap all-ack/T21 fault 事件/T70 Web 接线/优雅退出/safe-mode mute）+ tspi-rt-daemon serve --config（T42 REST+T44 modes+T70 Web/WS）；deploy 新增 rt-host.toml/rt-daemon.toml 模板并冻结 env 契约；aarch64 gnu 双 bin 重建（tspi-rt-host 768,384 B sha256 e011745c…、tspi-rt-daemon 1,210,296 B sha256 009a110e…，release t155-final-20261117，manifest 11 files ok）；全 workspace 57 target/1990 passed/0 failed，fmt/rt-check 全绿。见 evidence/final-wiring/ |
+| 2026-11-17 | T26（task-132）：crates/rt-host/src/main.rs host 入口（bin khaen-rt-host：selftest/fake-io/admission-check，4 worker B2 四线程并行、T16 SPSC/T19 tick/T22 format/T18 admission 串行接线）+ rt-check host-file（T14 file WAV→4-worker DAG→WAV 端到端）+ 集成测试；验证见 evidence/T26/manifest.md。T20/T21/T42/T44/T45/T25/T23/T56 入口接线与真实 ALSA/板端仍 NOT_RUN。 |
+| 2026-11-17 | **T155（task-155）最终接线**：khaen-rt-host run --config（建图/ALSA owner 契约/T45 调度计划/T20 swap all-ack/T21 fault 事件/T70 Web 接线/优雅退出/safe-mode mute）+ tspi-rt-daemon serve --config（T42 REST+T44 modes+T70 Web/WS）；deploy 新增 rt-host.toml/rt-daemon.toml 模板并冻结 env 契约；aarch64 gnu 双 bin 重建（khaen-rt-host 768,384 B sha256 e011745c…、tspi-rt-daemon 1,210,296 B sha256 009a110e…，release t155-final-20261117，manifest 11 files ok）；全 workspace 57 target/1990 passed/0 failed，fmt/rt-check 全绿。见 evidence/final-wiring/ |
 | 2026-11-17 | T90 批次：rt-host 增加 Linux target-specific `alsa=0.12` 依赖（cfg 门控 + Windows 不编译）+ core events v1.1 kind 36–40 + T10/T60 私有集成测试注册 + README/ci 更新；验证见 evidence/T90/manifest.md。 
 | 2026-11-17 | **INTEGRATOR-BATCH2（task-105）**：core::rt `TICK_READS_PER_BLOCK_MAX` 2→3（I04，加断言测试）；`TspiWorkerAffinityV1`（32B/align8）+ `TspiPlanHeaderV1` v1.1 affinity/ctl 字段提升到 `core::abi`（repr(C) 合法对齐版 **errata E1** 待 T02 确认，abi-layout scanned 109→120）；`AdmissionEnv/Report` 合并 sched 字段（cpu_set_mask/allowed_cpu/actual_cpu/expected_workers/sched_priority/irq_dependency_mask/ack_mask），validate 加 expected_workers 一致性闸门；T45 include! 自注册确认（不入 public_registration）。验证见 `evidence/INTEGRATOR-BATCH2/manifest.md`：全量 43 target/964 passed/0 failed（T55 收口后终态）、fmt exit 0、rt-check 3 PASS ||

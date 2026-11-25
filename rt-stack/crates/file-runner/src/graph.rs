@@ -18,12 +18,12 @@
 //! fused 图只作为设计期产物计算摘要（chosen/reason/fused digest 进元数据），执行形态固定 factorized
 //! （fused 的 RT 执行归 T26/T56 hybrid DAG），不做“假合并省算”。
 
-use tspi_dsp_core::compile::{compile, CompileInput, CompileOptions, CompileReport, FusedGraph};
-use tspi_dsp_core::direct::{
+use khaen_core::compile::{compile, CompileInput, CompileOptions, CompileReport, FusedGraph};
+use khaen_core::direct::{
     DirectCoeffsF32, DirectTopology, DIRECT_MAX_PARTICIPANTS, DIRECT_MAX_ROLES, DIRECT_NO_SOURCE,
 };
-use tspi_dsp_core::rt::RtStatus;
-use tspi_dsp_core::workers::WorkerDagPlan;
+use khaen_core::rt::RtStatus;
+use khaen_core::workers::WorkerDagPlan;
 
 use crate::fir::{self, LoadedFir};
 use crate::ir::{IrDraft, StaleReason};
@@ -792,8 +792,8 @@ fn build_normal_graph(
 fn summary_from(report: &CompileReport) -> CompileSummary {
     CompileSummary {
         chosen: match report.chosen {
-            tspi_dsp_core::compile::FusionForm::Factorized => "factorized".to_string(),
-            tspi_dsp_core::compile::FusionForm::FusedGp => "fused_gp".to_string(),
+            khaen_core::compile::FusionForm::Factorized => "factorized".to_string(),
+            khaen_core::compile::FusionForm::FusedGp => "fused_gp".to_string(),
         },
         reason: selection_reason_str(report.reason).to_string(),
         fused_feasible: report.fused_feasible,
@@ -809,8 +809,8 @@ fn summary_from(report: &CompileReport) -> CompileSummary {
     }
 }
 
-fn selection_reason_str(reason: tspi_dsp_core::compile::SelectionReason) -> &'static str {
-    use tspi_dsp_core::compile::SelectionReason;
+fn selection_reason_str(reason: khaen_core::compile::SelectionReason) -> &'static str {
+    use khaen_core::compile::SelectionReason;
     match reason {
         SelectionReason::FusedCheaper => "fused_cheaper",
         SelectionReason::FusedNotCheaper => "fused_not_cheaper",

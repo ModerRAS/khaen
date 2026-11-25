@@ -1,11 +1,11 @@
 //! `tspi-cal-ir-draft/v1` 校准 IR 草案：解析/绑定/stale 六原因/P 与 D/polarity 应用（对齐 T13）。
 
-use tspi_file_runner::ir::{
+use khaen_file_runner::ir::{
     binding_json, parse_ir, IrCurrent, Polarity, PostEncoding, StaleReason, IR_HASH_ALGO,
     IR_MAX_ROLES, IR_SCHEMA,
 };
-use tspi_file_runner::json::Json;
-use tspi_file_runner::{E_FILE_DELAY, E_FILE_IR, E_FILE_TAPS};
+use khaen_file_runner::json::Json;
+use khaen_file_runner::{E_FILE_DELAY, E_FILE_IR, E_FILE_TAPS};
 
 use crate::common::{
     ir_draft, ir_role_metadata, map_mut, nested_mut, HASH_A, HASH_B, ROLE_SCATTER,
@@ -36,7 +36,7 @@ fn ir_parse_valid_role_metadata() {
     assert_eq!(parsed.ir_hash, HASH_A);
     assert_eq!(parsed.hash_algo, IR_HASH_ALGO);
     assert_eq!(parsed.encoding, PostEncoding::RoleMetadata);
-    assert_eq!(parsed.source_schema, "tspi-calibration/v1");
+    assert_eq!(parsed.source_schema, "khaen-calibration/v1");
     assert_eq!(parsed.source_sha256, HASH_B);
     assert_eq!(parsed.source_sample_rate, 48_000);
     assert_eq!(parsed.layout.as_deref(), Some("4.1.2"));
@@ -110,7 +110,7 @@ fn ir_rejects_structural_errors() {
     let mut bad = valid.clone();
     map_mut(nested_mut(&mut bad, &["source"])).insert(
         "schema".to_string(),
-        Json::String("tspi-calibration/v2".to_string()),
+        Json::String("khaen-calibration/v2".to_string()),
     );
     assert_eq!(parse_ir(&bad).expect_err("source schema").code(), E_FILE_IR);
 

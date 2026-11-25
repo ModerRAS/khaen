@@ -149,7 +149,7 @@ mod tests {
     /// R:\Temp 在本机不可写；先探测 current_dir（cargo test 的包根），失败再退回 temp_dir。
     fn scratch_path(name: &str) -> std::path::PathBuf {
         let file_name = format!(
-            "tspi-room-sim-sha256-{}-{}-{name}",
+            "khaen-room-sim-sha256-{}-{}-{name}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

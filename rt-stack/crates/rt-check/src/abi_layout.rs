@@ -10,12 +10,12 @@ pub const RT_CHECK_ABI_LAYOUT_SCANNED: usize = 120;
 
 use core::mem::{align_of, offset_of, size_of};
 
-use tspi_dsp_core::abi::{
+use khaen_core::abi::{
     TspiBlockAckV1, TspiBlockDescV1, TspiDiagFirV1, TspiEpochInfoV1, TspiEventV1, TspiHwParamsV1,
     TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, TspiSpscHeaderV1, TspiWorkerAffinityV1,
     TspiWorkerStatsV1,
 };
-use tspi_dsp_core::rt;
+use khaen_core::rt;
 
 use crate::Report;
 

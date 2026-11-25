@@ -41,7 +41,7 @@ rt-stack/tools/calib-batch/
 | 现有实现 | 本工具如何对齐 |
 |---|---|
 | `rt-stack/crates/calibration/src/job.rs`（JobStage 10 阶段 / JobRequest full/retest） | 批量流程把 T67 full job 拆成可一次跑完的 phase：preflight->freeze->baseline->apply->after->pilot->analyze；真实 apply 走 prep/apply.sh（REST job apply，B4 解锁后启用），**不重写 JobManager** |
-| `stage_backend.rs`（fake/UMIK 采集、48k、-50 dBFS、SNR/xrun/峰值门） | 批量 fake transport 复用同一组口径常量（48k 生产、-50 起步、SNR>=25、峰值<=-1 dBFS）；真实采集调用 `tspi-calibrate measure-multi` |
+| `stage_backend.rs`（fake/UMIK 采集、48k、-50 dBFS、SNR/xrun/峰值门） | 批量 fake transport 复用同一组口径常量（48k 生产、-50 起步、SNR>=25、峰值<=-1 dBFS）；真实采集调用 `khaen-calibrate measure-multi` |
 | `peq_fit.rs`（1/48 oct 格、Q/S/gain 界限、D7 +3 dB boost 帽） | 分析报告记录 PEQ 相关观察（模态 FR 偏差/高带平坦度）；fake apply 的 PEQ 拟合只是演示，**不是 T64 算法** |
 | `phase_fit.rs`（延迟/极性/相位 RMS 门） | 汇报质量门引用其 0.5 sample / 30 deg 口径作为观察参考；批量流程不改 phase 契约 |
 | `positions.rs`（design>=6/holdout>=3、repeats>=3、SNR 25、repeat spread 门） | config 校验强制同样点数/复次；质量 CSV 记录 SNR、repeat delay/mag 散差 |
@@ -64,7 +64,7 @@ python3 tspi_cal_batch.py plan \
 
 窗口前还要准备（每项冻结 hash 记入证据）：
 1. `prep/preflight.sh`、`prep/apply.sh`、`prep/restore.sh`（从 `prep-example/` 复制并填入窗口真实路径/端点）；
-2. `tspi-calibrate` 二进制与 `calibration-spec/mics/umik1_718-7696_90deg.txt` 在板端就位；
+2. `khaen-calibrate` 二进制与 `calibration-spec/mics/umik1_718-7696_90deg.txt` 在板端就位；
 3. 点位标记（P1..P9，label/role 已进 config）；三麦固定位架好（pilot 不进签收）。
 
 ### 4.2 窗口内（板端，只执行）
@@ -114,7 +114,7 @@ python3 tspi_cal_batch.py selftest --out <证据目录>
 | 场景 | 依赖 |
 |---|---|
 | plan（工作站/板端） | python3.8+，**仅标准库** |
-| run --transport cmd（板端） | python3.8+，仅标准库；tspi-calibrate/prep 脚本由窗口准备 |
+| run --transport cmd（板端） | python3.8+，仅标准库；khaen-calibrate/prep 脚本由窗口准备 |
 | analyze / fake 自测（工作站） | numpy>=1.20（无 numpy 时 analyze 明确报错，不静默降级） |
 
 板端零 numpy 依赖已用 `python3 stdlib-only-check.py` 验证（阻断 numpy 导入后 plan + `run --transport cmd --dry-run` + version 均 exit 0）。

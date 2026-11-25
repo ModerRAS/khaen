@@ -2,13 +2,13 @@
 //
 // 本文件经 src/aes67_rx.rs 末尾的 cfg(test) mod aes67_rx_proto_tests { include!(...) }
 // 进入单测构建（cargo 不自动发现 tests/<子目录>）。运行：
-//   cargo test -p tspi-rt-host aes67_rx_proto
+//   cargo test -p khaen-rt-host aes67_rx_proto
 // 全部测试名 t235_ 前缀；离线：不打开 ALSA/设备、不连板端；UDP 仅本机回环（bind smoke）。
 
 use super::*;
-use tspi_aoip_aes67::clock::frames_to_ns_ceil;
-use tspi_aoip_aes67::jitter::{self, JitterConfig};
-use tspi_aoip_aes67::rtp::Header;
+use khaen_aoip_aes67::clock::frames_to_ns_ceil;
+use khaen_aoip_aes67::jitter::{self, JitterConfig};
+use khaen_aoip_aes67::rtp::Header;
 
 /// 单 flow 2ch 自定义计划（H16 slot 0/1 = FL/FR）。
 fn stereo_plan() -> Aes67RxFlowPlan {
@@ -240,16 +240,16 @@ fn t235_aes67rx_config_plan_and_block_contract_errors() {
 #[test]
 fn t235_aes67rx_bind_two_unicast_flows_smoke() {
     use std::net::{Ipv4Addr, SocketAddr};
-    use tspi_aoip_aes67::receiver::{ReceiverClock, ReceiverConfig};
+    use khaen_aoip_aes67::receiver::{ReceiverClock, ReceiverConfig};
 
     fn unicast(port: u16, channels: u16) -> ReceiverConfig {
         ReceiverConfig {
             media: Ipv4Addr::LOCALHOST,
             port,
             multicast: false,
-            interfaces: tspi_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
-            group_allow: tspi_aoip_aes67::listen::GroupAllow::EMPTY,
-            source_allow: tspi_aoip_aes67::listen::SourceAllow::EMPTY,
+            interfaces: khaen_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
+            group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
+            source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
             channels,
             rcvbuf_bytes: 1 << 20,
             recv_timeout_ms: 10,

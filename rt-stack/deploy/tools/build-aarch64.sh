@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T147/T149/G1 build-aarch64.sh —— 生成可部署的 aarch64 `tspi-rt-host` + `tspi-cal`（板端 Debian 12 / RK3576）
+# T147/T149/G1 build-aarch64.sh —— 生成可部署的 aarch64 `khaen-rt-host` + `tspi-cal`（板端 Debian 12 / RK3576）
 #
 # 背景（T147）：Windows 开发机对 aarch64-unknown-linux-musl 交叉在 alsa-sys 处失败（缺 aarch64 libasound
 #   pkg-config sysroot）。生产构建走 **aarch64-unknown-linux-gnu**（板端 glibc 2.36 + libasound2 1.2.8）。
@@ -17,7 +17,7 @@
 #   ./build-aarch64.sh --mode cross-sysroot --sysroot /home/builder/audio-build/rootfs \
 #        --out /var/tmp/tspi-release-<id> --release-id <id> [--selftest-qemu PATH] [--with-daemon] [--live]
 #   ./build-aarch64.sh --mode native --out /var/tmp/release [--live]
-# 产物（G1 修复）：默认双 bin = tspi-rt-host + tspi-cal（goal-8 aarch64 迁移）；
+# 产物（G1 修复）：默认双 bin = khaen-rt-host + tspi-cal（goal-8 aarch64 迁移）；
 #   --with-daemon 追加 tspi-rt-daemon（现行 service/ units 要求 host+daemon 同时 active 时使用）。
 # 退出码: 0 成功；2 用法/缺输入；3 环境不满足（记录缺项，不假装构建）；7 构建/打包失败。
 set -uo pipefail
@@ -63,7 +63,7 @@ case "$MODE" in
     [ "$(uname -m)" = "aarch64" ] || die "native 模式需要在 aarch64 板/机器上执行（当前 $(uname -m)）" 3
     need_cmd_or_die cargo; need_cmd_or_die rustc; need_cmd_or_die pkg-config
     pkg-config --exists alsa || die "缺 libasound2-dev（pkg-config alsa 不存在）：apt install -y build-essential pkg-config libasound2-dev" 3
-    BUILD=(cargo build --release --locked --target "$TARGET" -p tspi-rt-host --bin tspi-rt-host -p tspi-calibration --bin tspi-cal)
+    BUILD=(cargo build --release --locked --target "$TARGET" -p khaen-rt-host --bin khaen-rt-host -p khaen-calibration --bin tspi-cal)
     ;;
   cross-sysroot)
     [ -n "$SYSROOT" ] || die "cross-sysroot 需要 --sysroot <Debian12 aarch64 rootfs>" 2
@@ -76,7 +76,7 @@ case "$MODE" in
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=--sysroot=$SYSROOT"
     say "cross env: PKG_CONFIG_SYSROOT_DIR=$PKG_CONFIG_SYSROOT_DIR linker=aarch64-linux-gnu-gcc rustflags=$CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS"
-    BUILD=(cargo build --release --locked --target "$TARGET" -p tspi-rt-host --bin tspi-rt-host -p tspi-calibration --bin tspi-cal)
+    BUILD=(cargo build --release --locked --target "$TARGET" -p khaen-rt-host --bin khaen-rt-host -p khaen-calibration --bin tspi-cal)
     VERIFY_ARGS=(--sysroot "$SYSROOT")
     ;;
   cross-multiarch)
@@ -85,22 +85,22 @@ case "$MODE" in
     export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig}"
     pkg-config --exists alsa || die "缺 arm64 libasound .pc（dpkg --add-architecture arm64; apt install libasound2-dev:arm64）" 3
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-    BUILD=(cargo build --release --locked --target "$TARGET" -p tspi-rt-host --bin tspi-rt-host -p tspi-calibration --bin tspi-cal)
+    BUILD=(cargo build --release --locked --target "$TARGET" -p khaen-rt-host --bin khaen-rt-host -p khaen-calibration --bin tspi-cal)
     ;;
   cross-zig)
     need_cmd_or_die cargo; need_cmd_or_die cargo-zigbuild
     export PKG_CONFIG_ALLOW_CROSS=1
     export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig}"
     pkg-config --exists alsa || die "缺 arm64 libasound .pc；zig 只解决链接器，不提供 libasound sysroot" 3
-    BUILD=(cargo zigbuild --release --locked --target "$TARGET" -p tspi-rt-host --bin tspi-rt-host -p tspi-calibration --bin tspi-cal)
+    BUILD=(cargo zigbuild --release --locked --target "$TARGET" -p khaen-rt-host --bin khaen-rt-host -p khaen-calibration --bin tspi-cal)
     ;;
   *) die "未知 --mode: $MODE（native|cross-sysroot|cross-multiarch|cross-zig）" 2 ;;
 esac
 # G1（aarch64-20261122）：默认双 bin（host + cal）；--with-daemon 追加 daemon（现行 service/ 契约需要时）
-[ "$WITH_DAEMON" = "1" ] && BUILD+=(-p tspi-control --bin tspi-rt-daemon)
+[ "$WITH_DAEMON" = "1" ] && BUILD+=(-p khaen-control --bin tspi-rt-daemon)
 [ "$OFFLINE" = "1" ] && BUILD+=("--offline")
 BIN_DIR="$TARGET_DIR/$TARGET/release"
-BIN="$BIN_DIR/tspi-rt-host"
+BIN="$BIN_DIR/khaen-rt-host"
 BIN_CAL="$BIN_DIR/tspi-cal"
 BIN_DAEMON="$BIN_DIR/tspi-rt-daemon"
 [ "$MISSING" -eq 0 ] || die "环境缺项 $MISSING 个：只记录 NOT_BUILT，不假装成功" 3

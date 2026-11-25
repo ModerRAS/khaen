@@ -1,6 +1,6 @@
-//! T50 private integration tests — 模态目标构建（crate tspi-modal-design）.
+//! T50 private integration tests — 模态目标构建（crate khaen-modal-design）.
 //!
-//! 运行（在 rt-stack/ 下）：cargo test -p tspi-modal-design target
+//! 运行（在 rt-stack/ 下）：cargo test -p khaen-modal-design target
 //! 文件位置：crates/modal-design/tests/T50/main.rs（leaf 私有测试；Cargo 自动发现为
 //! integration test target T50；不写 public_registration.rs，由 integrator 决定注册方式）。
 //!
@@ -20,11 +20,11 @@
 //!
 //! 本文件只构造内存夹具；不采音、不碰板端、不打开 ALSA、不写文件。
 
-use tspi_modal_design::ingest::{
+use khaen_modal_design::ingest::{
     sha256_hex, AnalysisMeta, CaptureInfo, FrPoint, IngestSession, MicInfo, PlaybackInfo,
     PositionRole, ReferenceInfo, SampleFormat, SourceAnalysis, SpeakerInfo, StimulusInfo, ToolInfo,
 };
-use tspi_modal_design::target::{
+use khaen_modal_design::target::{
     build_stereo_strict_target, build_target_matrix, validate_solution,
     validate_stereo_strict_solution, BandDecay, BandLimit, CurveApplySite, CurveBinding, DecayMode,
     DecayTarget, EffectivePlant, FittedPostBaseline, ModalMatrix, ModalMatrixCell,
@@ -33,7 +33,7 @@ use tspi_modal_design::target::{
     ToneApplicationProof, ToneBinding, ToneShape, P1_LAYOUT_4_1_2, P1_MIMO_PARTICIPANT_IDS,
     TARGET_SCHEMA,
 };
-use tspi_modal_design::timebase::{
+use khaen_modal_design::timebase::{
     de_phase_analysis, CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity, SlotPhase,
 };
 
@@ -251,7 +251,7 @@ fn frozen_baseline_with_roles(
     try_fitted_baseline_with_roles(grid, participants, tone, roles).unwrap()
 }
 
-fn default_baseline(grid: &[f64]) -> tspi_modal_design::target::FrozenPostBaseline {
+fn default_baseline(grid: &[f64]) -> khaen_modal_design::target::FrozenPostBaseline {
     let participants = ModalParticipants::p1_4_1_2();
     let roles = baseline_roles(grid, &participants, 0.0, 0, 1);
     frozen_baseline_with_roles(grid, participants, ToneBinding::flat(), roles)
@@ -1706,7 +1706,7 @@ fn flat_positions(
         .collect()
 }
 
-fn stereo_baseline(grid: &[f64]) -> tspi_modal_design::target::FrozenPostBaseline {
+fn stereo_baseline(grid: &[f64]) -> khaen_modal_design::target::FrozenPostBaseline {
     let participants = ModalParticipants::stereo_strict();
     let roles = baseline_roles(grid, &participants, 0.0, 0, 1);
     frozen_baseline_with_roles(grid, participants, ToneBinding::flat(), roles)
@@ -2266,7 +2266,7 @@ fn t50_target_error_codes_stable() {
 
 #[test]
 fn t50_target_static_guards_pure_compute() {
-    let source = tspi_modal_design::target::target_source_text_for_guards();
+    let source = khaen_modal_design::target::target_source_text_for_guards();
     assert!(source.contains("pub fn build_target_matrix"));
     assert!(source.contains("pub fn build_stereo_strict_target"));
     assert!(source.contains("pub fn validate_solution"));

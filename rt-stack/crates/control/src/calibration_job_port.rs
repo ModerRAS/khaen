@@ -4,7 +4,7 @@
 //! RestService::with_calibration(..)，于是 T42 的 R48 端点
 //! （start/status/list/cancel/apply/retest/rollback）接到**真实的** T60 job 状态机：
 //! 单 job 互斥、stage 进度、checkpoint、协作式取消、prepared->apply、rollback last-good
-//! 都由 tspi_calibration::job::JobManager 执行，不是内存投影。
+//! 都由 khaen_calibration::job::JobManager 执行，不是内存投影。
 //!
 //! ## 离线口径（任务 task-226：夜间纯离线，不出声）
 //! - 测量引擎 = stage_backend::EngineKind::Fake（合成样本，不打开声卡）；
@@ -38,8 +38,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tspi_calibration::fit_wiring::{synthetic_design, FitWiring};
-use tspi_calibration::job::{
+use khaen_calibration::fit_wiring::{synthetic_design, FitWiring};
+use khaen_calibration::job::{
     sha256_hex, CalibrationJobBackend, ExitDisposition, JobError, JobKind, JobManager,
     JobManagerConfig, JobRequest, JobSnapshot, JobStage, SafeOutputController, SafetyError,
 };
@@ -48,12 +48,12 @@ use super::calibration_cli_stage::{
     CliSafety, CliStageBackend, CliStageConfig, CAL_PORT_BACKEND_CLI, CAL_PORT_ENGINE_CLI,
     CAL_PORT_NOTE_CLI,
 };
-use tspi_calibration::stage_backend::{
+use khaen_calibration::stage_backend::{
     EngineKind, StageBackend, StageBackendConfig, StageDeviceConfig, StageLevelConfig,
     StageMeasurementMode, StageSweepConfig,
 };
-use tspi_calibration::sweep::SweepOutput;
-use tspi_dsp_core::abi::sample_format::S24_3LE_INTERLEAVED;
+use khaen_calibration::sweep::SweepOutput;
+use khaen_core::abi::sample_format::S24_3LE_INTERLEAVED;
 
 use super::*;
 
@@ -158,7 +158,7 @@ impl JobManagerPort {
     /// CLI stage 后端 port（`TSPI_CAL_STAGE=cli`）：真实 MOTU/UMIK 测量 + file-backend apply。
     ///
     /// 与 `synthetic_offline` 共用同一 T60 JobManager/REST 语义；区别只在
-    /// backend（本机 calib-stage.sh）与 safety（systemctl stop/start tspi-rt-host）。
+    /// backend（本机 calib-stage.sh）与 safety（systemctl stop/start khaen-rt-host）。
     /// apply 只能写 active.yml（host 尚未消费 calibration.yml），因此 engine_info 的
     /// note 明确 NOT_APPLIED_TO_AUDIO，不得标 actual。
     pub fn cli_stage(

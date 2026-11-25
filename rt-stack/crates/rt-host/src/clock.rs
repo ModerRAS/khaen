@@ -59,9 +59,9 @@
 use core::fmt;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use tspi_dsp_core::abi::TspiEpochInfoV1;
-use tspi_dsp_core::rt::{RtStatus, SAMPLE_RATES_HZ};
-use tspi_dsp_core::workers::TspiRtControlV1;
+use khaen_core::abi::TspiEpochInfoV1;
+use khaen_core::rt::{RtStatus, SAMPLE_RATES_HZ};
+use khaen_core::workers::TspiRtControlV1;
 
 // ---------------------------------------------------------------------------
 // 常量（core-v1 §3.4/§6.4/§12.3；T19 运行期阈值在此冻结）

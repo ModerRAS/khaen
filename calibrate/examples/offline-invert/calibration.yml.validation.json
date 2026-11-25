@@ -1,5 +1,5 @@
 {
-  "schema": "tspi-calibration-validation/v1",
+  "schema": "khaen-calibration-validation/v1",
   "passed": true,
   "f_min_hz": 80.0,
   "f_max_hz": 20000.0,

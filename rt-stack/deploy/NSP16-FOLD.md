@@ -2,10 +2,10 @@
 
 2026-11-23 只读了 dsp-host 上正在用的两份文件：
 
-- `/etc/systemd/system/tspi-rt-host-nsp16.service`
+- `/etc/systemd/system/khaen-rt-host-nsp16.service`
 - `/etc/tspi-rt-stack/rt-host-nsp16.toml`
 
-对照仓库里的 `service/tspi-rt-host.service` 和 `deploy/config/rt-host.toml.example`。没有改板上的进程，也没有重启。
+对照仓库里的 `service/khaen-rt-host.service` 和 `deploy/config/rt-host.toml.example`。没有改板上的进程，也没有重启。
 
 ## 收进部署文件的
 
@@ -19,8 +19,8 @@
 
 ## 故意不收的
 
-- 服务名 `tspi-rt-host-nsp16`。下次安装的服务名用 `tspi-rt-host`。现在这块板仍由 `tspi-rt-host-nsp16.service` 拉起
-- `ExecStart` 前面的 `nsp16-wait-stream.sh`。它只等 UDP 5010 上出现 RTP，再执行同一份 `tspi-rt-host`。不是第二套 DSP
-- 二进制路径 `/usr/local/lib/tspi-rt-stack/16ch/tspi-rt-host`。名字仍是 `tspi-rt-host`
-- `tspi-rt-host-nsp7.service` 和 nsp7 的配置。7 声道那份不动
+- 服务名 `khaen-rt-host-nsp16`。下次安装的服务名用 `khaen-rt-host`。现在这块板仍由 `khaen-rt-host-nsp16.service` 拉起
+- `ExecStart` 前面的 `nsp16-wait-stream.sh`。它只等 UDP 5010 上出现 RTP，再执行同一份 `khaen-rt-host`。不是第二套 DSP
+- 二进制路径 `/usr/local/lib/tspi-rt-stack/16ch/khaen-rt-host`。名字仍是 `khaen-rt-host`
+- `khaen-rt-host-nsp7.service` 和 nsp7 的配置。7 声道那份不动
 - 通用模板里已经有的块长、采样率、22 声道播放、周期 128、缓冲 1024、优先级数字

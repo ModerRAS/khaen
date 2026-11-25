@@ -5,13 +5,13 @@
 
 use std::path::PathBuf;
 
-use tspi_rt_check::forbid;
+use khaen_rt_check::forbid;
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ci/fixtures")
 }
 
-fn scan(rel: &str) -> tspi_rt_check::Report {
+fn scan(rel: &str) -> khaen_rt_check::Report {
     forbid::scan_path(&fixtures().join(rel)).expect("scan fixture")
 }
 

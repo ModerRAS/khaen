@@ -6,7 +6,7 @@
 Why this file exists
 --------------------
 The 7ch 4.1.2 userspace path uses make_plan_412_test.py (8-in / 7-role / 8-out).
-The 16ch AES67 path needs plan.n_in=16 so tspi-rt-host derives
+The 16ch AES67 path needs plan.n_in=16 so khaen-rt-host derives
 graph_input_channels=16 (aes67_rx adapters are limited by plan.n_in).  This is
 an independent fixture generator (no project code import), mirroring the T66
 ABI v1 layout documented by make_plan_412_test.py; it never patches a binary.

@@ -5,7 +5,7 @@
 - 运行：
 
   cd rt-stack
-  cargo test -p tspi-fir-designer min_slow
+  cargo test -p khaen-designer min_slow
 
   点时刻实测（2026-11-17）：18 passed / 0 failed / 227 filtered out，exit 0；见
   rt-stack/evidence/T34/run-tests.log 与 test-list.txt（18 tests, 0 benchmarks）。
@@ -24,7 +24,7 @@ cargo 只把 tests/*.rs（顶层文件）当集成测试目标，不会自动发
         include!("../tests/T34/min_slow_cases.rs");
     }
 
-本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p tspi-fir-designer min_slow 执行
+本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p khaen-designer min_slow 执行
 （executed = 18），测试名过滤路径含 min_slow（模块路径 min_slow::min_slow_tests::t34_*）；
 不需要 integrator 注册，也不要再把它加到 public_registration.rs（会重复注册/编译失败，因为
 文件按模块内联语义编写、依赖 super::* 的私有作用域，例如 Fft/bessel_i0/kaiser_window 等

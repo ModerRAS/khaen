@@ -61,7 +61,7 @@ Web 服务里的「MOTU / CueMix」页通过本机 CueMix 5 datastore 读写 Ult
 | 取消静音 | 用最近快照把这 280 格推子写回去。不改 `kMainTrim`，不动 18..29 |
 | 恢复快照 | 键集等于 client.py 的 `MIXER_KEYS`：`kiMixFader` / `kiMixPan` / `kiMixSolo` / `kiMixMute` / `kiMixStereo` / `koBusFader` / `koBusMute` / `kHostOutMixMode` / `kFPGAPatch` / `kLoopbackSource` / `kLoopbackFirst` / `kNetControlEnable`。不含 `kMainTrim`，这样监听音量和矩阵恢复分开 |
 
-快照 id 形如 `20261116T030405006Z-0001`。真机目录默认 `/var/lib/tspi-audio-web/motu-snapshots/`，只留最近 20 份。mock 的快照在内存里，不落盘。id 只允许字母数字、`-`、`_`，长度 ≤ 80，拒绝 `..`。
+快照 id 形如 `20261116T030405006Z-0001`。真机目录默认 `/var/lib/khaen-audio-web/motu-snapshots/`，只留最近 20 份。mock 的快照在内存里，不落盘。id 只允许字母数字、`-`、`_`，长度 ≤ 80，拒绝 `..`。
 
 `k48V`（id 5004）在页面上只读：index 0 是 Mic/Line 1，index 1 是 Mic/Line 2。写入留作后续。
 

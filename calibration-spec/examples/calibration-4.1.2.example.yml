@@ -1,13 +1,13 @@
-# tspi-calibration/v1 示例：4.1.2（MOTU 映射：FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7；ch6 空）
+# khaen-calibration/v1 示例：4.1.2（MOTU 映射：FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7；ch6 空）
 # 映射唯一表（K1 + D8 2026-11-17 终局）：SUB1=index 7 / Line Out 8 是唯一物理口；槽 6 空。
 # Line Out 10（ch9）仅为当时 Line Out 8 不出声的历史临时测试接法，不是设计候选——不得改 index=9。
 # pair 口径（C-15 + D3）：4.1.2 只有 FL:SUB1:80、FR:SUB1:80 是真分频对；高度全频（K2）、环绕/中置低频不汇总 SUB。
-schema: tspi-calibration/v1
+schema: khaen-calibration/v1
 sample_rate: 48000
 reference_index: 0
 layout: "4.1.2"
 created_unix: 1794725000
-tool: {name: tspi-calibrate, version: "0.1.0"}
+tool: {name: khaen-calibrate, version: "0.1.0"}
 note: "示例数据，仅演示格式"
 measurement:
   mode: direct

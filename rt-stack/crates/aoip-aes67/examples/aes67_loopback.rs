@@ -1,19 +1,19 @@
 // AES67 用户态接收端 + 自带最小 RTP 发送端：单进程 loopback 演示（task-235 证据用）。
 //
 // 运行（离线、仅本机回环 UDP，不打开声卡/不连板端）：
-//   cargo run -q -p tspi-aoip-aes67 --example aes67_loopback
+//   cargo run -q -p khaen-aoip-aes67 --example aes67_loopback
 // 输出一行 JSON：块数/帧数/通道/逐通道 RMS/主频（Goertzel）/抖动缓冲计数/接收端报告。
 // 生产发送端归 task-236（rt-stack/tools/aes67-sender）；本示例只为 receiver 验收。
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
-use tspi_aoip_aes67::capture::CaptureBlockSource;
-use tspi_aoip_aes67::clock::frames_to_ns_ceil;
-use tspi_aoip_aes67::jitter::{BlockStatus, JitterConfig};
-use tspi_aoip_aes67::receiver::{Aes67Receiver, ReceiverClock, ReceiverConfig};
-use tspi_aoip_aes67::rtp;
-use tspi_aoip_aes67::sender::{Aes67RtpSender, SenderConfig};
+use khaen_aoip_aes67::capture::CaptureBlockSource;
+use khaen_aoip_aes67::clock::frames_to_ns_ceil;
+use khaen_aoip_aes67::jitter::{BlockStatus, JitterConfig};
+use khaen_aoip_aes67::receiver::{Aes67Receiver, ReceiverClock, ReceiverConfig};
+use khaen_aoip_aes67::rtp;
+use khaen_aoip_aes67::sender::{Aes67RtpSender, SenderConfig};
 
 const BLOCK_FRAMES: usize = 128;
 const RATE_HZ: u32 = 48_000;
@@ -42,9 +42,9 @@ fn main() {
         media: Ipv4Addr::LOCALHOST,
         port: 0,
         multicast: false,
-        interfaces: tspi_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
-            group_allow: tspi_aoip_aes67::listen::GroupAllow::EMPTY,
-            source_allow: tspi_aoip_aes67::listen::SourceAllow::EMPTY,
+        interfaces: khaen_aoip_aes67::listen::ReceiverInterfaces::from_addr(Ipv4Addr::LOCALHOST),
+            group_allow: khaen_aoip_aes67::listen::GroupAllow::EMPTY,
+            source_allow: khaen_aoip_aes67::listen::SourceAllow::EMPTY,
         channels: 2,
         rcvbuf_bytes: 4 << 20,
         recv_timeout_ms: 10,

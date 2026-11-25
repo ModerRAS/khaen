@@ -16,7 +16,7 @@
 > A53 后 T45 plan accepted，但 irqbalance 会在 ≤25s 内搬回 A72。本轮把持久化做进 deploy：
 > ① `04-install-release.sh` 安装时 **disable+stop irqbalance**（记录原状态）并立即写
 > IRQ58→CPU1/IRQ56→CPU2/IRQ57→CPU3 后回读校验；② 新增 `service/tspi-irq-affinity.service`
-> （oneshot，`Before=tspi-rt-host.service`，host `Requires=` 它），每次 host 启动前重新钉核；
+> （oneshot，`Before=khaen-rt-host.service`，host `Requires=` 它），每次 host 启动前重新钉核；
 > ③ `01-preflight-switch.sh` 增 **J 门**、`06-verify-switch.sh` 增 **V10 门**（irqbalance 未复活 +
 > IRQ 仍在 A53 + T45 IRQ 放置前置）。依据 task-189 实测 `evidence/board-irq-affinity/`；
 > 本地 dry-run 22/22 PASS，**板端 IRQ 持久化执行 NOT_RUN**，证据 `evidence/cursor-fix-irqpersist/`。
@@ -109,7 +109,7 @@ deploy/
 都是 FAIL（2026-11-20 之前的实现只会给 NOT_VERIFIED，等于没防线）。
 
 **操作纪律：不要在 rt-host 运行时带电插拔 MOTU USB**——重枚举正是速率漂移与主机侧 USB/xhci 异常的触发点。
-需要改接线时先 `systemctl stop tspi-rt-host`（或断电接线后上电），接好再起。
+需要改接线时先 `systemctl stop khaen-rt-host`（或断电接线后上电），接好再起。
 
 ## 3.2 板级韧性：把"一挂 8 小时"变成"30 秒自恢复 + 留证据"
 
@@ -183,7 +183,7 @@ deploy/
 /opt/tspi-rt-stack/releases/<id>/{bin,units,manifest.json,README.deploy.md}
 /opt/tspi-rt-stack/current            Linux symlink（无符号链接权限的夹具降级为 current.release 指针文件）
 /etc/systemd/system/tspi-rt-{host,daemon}.service + tspi-rt-stack.target
-/etc/systemd/system/tspi-irq-affinity.service   task-192 IRQ 钉核 oneshot（Before=tspi-rt-host.service）
+/etc/systemd/system/tspi-irq-affinity.service   task-192 IRQ 钉核 oneshot（Before=khaen-rt-host.service）
 /etc/systemd/system/tspi-motu-48k-keeper.{service,timer} + /etc/udev/rules.d/95-tspi-motu-48k-keeper.rules
 /usr/local/lib/tspi/motu-48k-keeper（1s 静音 48k；不碰 CueMix/Toslink 路由）
 /usr/local/lib/tspi/irq-affinity-pin           task-192 钉核脚本（写 /proc/irq/<irq>/smp_affinity_list + 回读）
@@ -213,13 +213,13 @@ A53(0-3)+A72(4-7)，实测 G-4096 仅 96.1 blocks/s，而 4-7 全 A72 为 314.8 
   `install-record.json` 供回滚/审计。理由：task-189 证明只写 /proc 会被 irqbalance 覆盖；
   disable 保证重启后不再自动均衡。
 - **b) oneshot 钉核**：`service/tspi-irq-affinity.service`（`Type=oneshot`、`RemainAfterExit=yes`、
-  `Before=tspi-rt-host.service`，`ExecStart=/usr/local/lib/tspi/irq-affinity-pin apply`）在每次 host
+  `Before=khaen-rt-host.service`，`ExecStart=/usr/local/lib/tspi/irq-affinity-pin apply`）在每次 host
   启动前重新按 `/etc/tspi-rt-stack/irq-affinity.env` 写 `smp_affinity_list` 并回读
-  `effective_affinity_list`；`tspi-rt-host.service` 用 `Requires=`/`After=` 依赖它——钉核失败则 host
+  `effective_affinity_list`；`khaen-rt-host.service` 用 `Requires=`/`After=` 依赖它——钉核失败则 host
   不启动（fail-safe，不用错误拓扑跑 admission）。理由：覆盖开机、手动 `systemctl enable --now irqbalance`、
   热插拔后 IRQ 号/亲和漂移；比只停 irqbalance 更能证明「host 启动瞬间 IRQ 已在 A53」。
 - **b2) 开机竞态等待（B1；2026-11-20 板窗）**：v11 重启实测 oneshot 开机 ~4s 先跑，而 end0 的 IRQ56/57 节点由
-  stmmac 稍后才注册 → `irq-affinity-pin apply` fail-closed，`tspi-rt-host.service` 因 `Requires=` 不启动
+  stmmac 稍后才注册 → `irq-affinity-pin apply` fail-closed，`khaen-rt-host.service` 因 `Requires=` 不启动
   （target/daemon active 但无音频 owner）。修复固化：oneshot 增加
   `ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait`（轮询 0.2s，上限 `TSPI_IRQ_WAIT_SECS` 默认 60s，
   0=只查一次；超时仍 fail-closed 不启动 host）与 `TimeoutStartSec=120`；`irq-affinity-pin` 新增 `wait` 动作
@@ -253,7 +253,7 @@ T26 启动序列接管（task-189 REPORT §5）。
 板子每次重启后先跑只读检查（完整版含判定表/取证/回退：**`deploy/REBOOT-RECOVERY-CHECKLIST.md`**）：
 
 ```bash
-systemctl is-active tspi-irq-affinity.service tspi-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target
+systemctl is-active tspi-irq-affinity.service khaen-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target
 cat /proc/irq/58/smp_affinity_list /proc/irq/56/smp_affinity_list /proc/irq/57/smp_affinity_list   # 期望 1 2 3
 curl -sS -o /dev/null -w 'healthz=%{http_code}\n' http://127.0.0.1:80/healthz                         # 期望 200（daemon 在 :80；8090 仅 loopback probe）
 grep -c '^ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait$' /etc/systemd/system/tspi-irq-affinity.service  # 期望 1（v12+）
@@ -261,7 +261,7 @@ grep -c '^ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait$' /etc/systemd/
 
 - host inactive 而 target/daemon active → **首查 irq-affinity**（`journalctl -b -u tspi-irq-affinity`）；
   wait 超时 = IRQ 号变化/设备未枚举，改 pins 或 `TSPI_IRQ_WAIT_SECS` 后重启 oneshot；**不得**用
-  `systemctl start tspi-rt-host.service` 绕过 Requires= 前置。
+  `systemctl start khaen-rt-host.service` 绕过 Requires= 前置。
 - `08 --mute` 后 daemon/healthz 缺失是已知 B2（08 只拉 host）→ `systemctl start tspi-rt-stack.target` 补齐后终验。
 - 全量只读复核：`06-verify-switch.sh --live --require-daemon --require-health`（含 V10.bootwait / V10.legacy-dropin）。
 
@@ -286,8 +286,8 @@ python deploy/tests/check_rollback_file.py --deploy deploy --service service
   unit 语法 **7/7**、rollback 契约 ok；**板端重启复验 NOT_RUN**（上电后按 `deploy/REBOOT-RECOVERY-CHECKLIST.md`
   执行并取证 V10.bootwait/legacy-dropin/19/19）。
 - 2026-11-18 **task-223（v6b 包 / T72-N9 unit 依赖修复）**：`deploy/config/tspi-motu-48k-keeper.service` 的
-  `Before=` 删除旧 C unit 名（只保留 `tspi-rt-host.service`，48k 先于 host 的排序语义不变）；
-  `deploy/tests/check_unit_syntax.py` 缺省同时检查 `service/` 与 `deploy/config/`，并把 `tspi-audio-web`、
+  `Before=` 删除旧 C unit 名（只保留 `khaen-rt-host.service`，48k 先于 host 的排序语义不变）；
+  `deploy/tests/check_unit_syntax.py` 缺省同时检查 `service/` 与 `deploy/config/`，并把 `khaen-audio-web`、
   `tspi-boot-mode` 加入旧 C 拒绝词（此前 keeper 不在缺省检查范围 → 6/6 PASS 却漏检）；unit 语法 **7/7**；
   v6b 上传包与本地/板端 before-after 证据见 `evidence/cursor-fix-unit-deps/`。
 - 2026-11-18 **task-218（现行 release-v5）**：按 git ddeee04 在 builder VM 重打 aarch64 host/daemon/web、重打 bundle/上传包，
@@ -357,12 +357,12 @@ web aarch64 dist 现行 = **release-v5（task-218，ddeee04 树重打）4,519,29
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
 | 板端执行（T71） | **NOT_RUN** | 本任务不连板、不停 S1、不改运行中服务 |
-| aarch64 `tspi-rt-host`（gnu） | **BUILT（task-218 v5，现行；T45 真写内核）** | builder VM + Debian12 aarch64 sysroot 交叉（git ddeee04 重编译）：**1,198,400 B，sha256 `e6f07776f58c34492b05c934bd04f9b6c00e8c99b8f59f41a6b1655783486522`**；ELF aarch64、NEEDED libasound.so.2/libgcc_s/libc、GLIBC max 2.34；qemu selftest/admission-check/fake-io/run(fake) PASS + **T45 probe（sudo）`kernel_applied=true/SCHED_FIFO/mlockall/main_cpu=0/workers 2-5`；非 root fail-closed rc=1**。见 `evidence/release-v5/`（release-v3 M4 的 1,176,128 B `fb247696…` 已被取代） |
+| aarch64 `khaen-rt-host`（gnu） | **BUILT（task-218 v5，现行；T45 真写内核）** | builder VM + Debian12 aarch64 sysroot 交叉（git ddeee04 重编译）：**1,198,400 B，sha256 `e6f07776f58c34492b05c934bd04f9b6c00e8c99b8f59f41a6b1655783486522`**；ELF aarch64、NEEDED libasound.so.2/libgcc_s/libc、GLIBC max 2.34；qemu selftest/admission-check/fake-io/run(fake) PASS + **T45 probe（sudo）`kernel_applied=true/SCHED_FIFO/mlockall/main_cpu=0/workers 2-5`；非 root fail-closed rc=1**。见 `evidence/release-v5/`（release-v3 M4 的 1,176,128 B `fb247696…` 已被取代） |
 | aarch64 `tspi-rt-daemon`（gnu） | **BUILT（task-218 v5 重编译，字节同 M4）** | **1,286,384 B，sha256 `804a8bcd94bc73cf8aff29bc459633abbee0cf55d50c512ad4215c410c577c18`**（T45 未改 daemon 源，重编译字节相同）；qemu `check --config` + `serve`+/healthz 200/优雅退出 PASS；release bundle `t45-ddeee04-20261118-v5` 含双 bin（14 files / --require-arch aarch64 ok；F3/F4 修复 units）；M2b 的 1,281,952 B `4fbfdd33…` 已被取代 |
 | aarch64-musl 构建 | **NOT_BUILT** | T147 本机真尝试在 alsa-sys 处 exit 101（缺 aarch64 libasound sysroot/pkg-config）；板端 Debian 12 是 glibc，生产走 gnu 路径 |
-| aarch64 `tspi-audio-web` dist（gnu） | **BUILT（task-218 v5 重打，字节同 M4，未上板）** | **4,519,296 B，sha256 `d458ae7b90d683ad541946a9e6f761918fdd4f5af06dcd8e177842735d95d240`**（ddeee04 树重打，web 源码自 29e16af 未变→与 M2b/M4 同字节）；源码 4 档白名单 [44.1/48/88.2/96k] + 176.4/192k 黑名单；cargo test 168/168；qemu mock healthz 200、PUT 192000→400、PUT 176400→400、PUT 96000→200。见 `web/dist/INSTALL-MANIFEST.md`、`evidence/release-v5/logs/web-rebuild/`（task-162 的 4,535,680 B `502ae949…` 已被取代） |
+| aarch64 `khaen-audio-web` dist（gnu） | **BUILT（task-218 v5 重打，字节同 M4，未上板）** | **4,519,296 B，sha256 `d458ae7b90d683ad541946a9e6f761918fdd4f5af06dcd8e177842735d95d240`**（ddeee04 树重打，web 源码自 29e16af 未变→与 M2b/M4 同字节）；源码 4 档白名单 [44.1/48/88.2/96k] + 176.4/192k 黑名单；cargo test 168/168；qemu mock healthz 200、PUT 192000→400、PUT 176400→400、PUT 96000→200。见 `web/dist/INSTALL-MANIFEST.md`、`evidence/release-v5/logs/web-rebuild/`（task-162 的 4,535,680 B `502ae949…` 已被取代） |
 | P1 发布包（T31/T32） | **PACKAGED（候选，NOT ACCEPTED）** | `evidence/release-v1/`：release notes/验收矩阵/证据索引/产物 sha；P1 板端门 T67–T69/T71/T72/T74 NOT_RUN；终审 v0.9 P0/P1 未关闭；性能门后移 P4 |
-| host 生产 CLI `run --config` | **WIRED（T155）** | `tspi-rt-host run --config rt-host.toml`：建图 / ALSA owner 契约(fake) / 4 worker DAG + T45 调度计划 / T20 swap(all-ack) / T21 fault 事件+watchdog / Web 端口接线(external 或 spawn 探测 /healthz 200) / 优雅退出(SIGINT/SIGTERM 或 --blocks/--duration-ms)。配置 schema `tspi-rt-host/v1` 见 `deploy/config/rt-host.toml.example` |
+| host 生产 CLI `run --config` | **WIRED（T155）** | `khaen-rt-host run --config rt-host.toml`：建图 / ALSA owner 契约(fake) / 4 worker DAG + T45 调度计划 / T20 swap(all-ack) / T21 fault 事件+watchdog / Web 端口接线(external 或 spawn 探测 /healthz 200) / 优雅退出(SIGINT/SIGTERM 或 --blocks/--duration-ms)。配置 schema `khaen-rt-host/v1` 见 `deploy/config/rt-host.toml.example` |
 | daemon `serve --config` | **WIRED（T155）** | `tspi-rt-daemon serve --config rt-daemon.toml`：T42 REST + T44 modes + T70 Web/WS 同端口；`/healthz` 200、`/` 8656 B 页面；`--exit-after-ms`/SIGTERM 优雅退出。schema `tspi-rt-daemon/v1` 见 `deploy/config/rt-daemon.toml.example` |
 | safe-mute 变量（F-17） | **WIRED（T155 + 2026-11-17 修复）** | host 读 `TSPI_HOST_SAFE_MODE=normal|mute`；drop-in 经 `EnvironmentFile=90-safe-mute.env` 覆盖 rt-host.env 的 normal（systemd.exec：EnvironmentFile 覆盖 Environment=）；08-rollback 安装后核对 `/proc/<MainPID>/environ` 含 mute（回退解析 EnvironmentFiles；F5，2026-11-18） |
 | 新栈 target Wants / toml 安装（F-18/T28-P0） | **WIRED（2026-11-17 修复；release-v4 已重打）** | `tspi-rt-stack.target` Wants/After host+daemon；04 首次安装 `rt-host.toml`/`rt-daemon.toml`（不覆盖）+ env；01/06 把配置存在性当硬门；05 start 后等 host+daemon active |

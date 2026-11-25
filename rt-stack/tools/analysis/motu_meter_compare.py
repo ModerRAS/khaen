@@ -3,7 +3,7 @@
 """motu_meter_compare.py -- compare MOTU meter recordings from silent DSP-chain runs.
 
 Inputs are the <TAG>.meters.jsonl files written by motu_meters.py (--all) plus the
-<TAG>.host.json report of tspi-rt-host.  Produces, per run:
+<TAG>.host.json report of khaen-rt-host.  Produces, per run:
 
   * per-output-meter steady-window peak (dBFS) and median,
   * host report essentials (blocks / capture counters / ALSA xruns / engine / plan),

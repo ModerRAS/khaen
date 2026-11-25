@@ -3,7 +3,7 @@
 // 本文件经 crates/calibration/src/capture.rs 末尾的
 //   #[cfg(test)] mod t62_tests { include!("../tests/T62/umik_capture.rs"); }
 // 编进 lib 单测（cargo 不自动发现 tests/<子目录>；公共注册属 integrator，不要重复注册）。
-// 运行：cargo test -p tspi-calibration umik_capture
+// 运行：cargo test -p khaen-calibration umik_capture
 //
 // 离线：不打开 ALSA / 不碰板端；用合成 UMIK/MOTU 采集块验证 raw 解码、repeat onset、
 // render frame 与 capture sample 的 clock 拟合（repeat-interval + T19 交叉复核）、
@@ -12,8 +12,8 @@
 use super::*;
 
 use crate::sweep::{compile_timeline, SweepConfig, SweepOutput, SweepStimulus, SweepTimeline};
-use tspi_dsp_core::abi::{sample_format, ABI_VERSION};
-use tspi_rt_host::format::{DitherCfg, TspiHwParamsV1};
+use khaen_core::abi::{sample_format, ABI_VERSION};
+use khaen_rt_host::format::{DitherCfg, TspiHwParamsV1};
 
 const FS: u32 = 48_000;
 const EPOCH_START_NS: u64 = 1_000_000_000;

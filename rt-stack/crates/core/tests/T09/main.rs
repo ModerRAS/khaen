@@ -13,18 +13,18 @@
 //! 条件分支内的分配语义未由此证明，需 T06/T26 的 rt-check/MIR/类型级 lint 覆盖调用图。
 //!
 //! Cargo 自动把 tests/T09/main.rs 发现为集成测试 target（不需要 public_registration 注册）。
-//! 运行：cargo test -p tspi-dsp-core workers -- --nocapture
+//! 运行：cargo test -p khaen-core workers -- --nocapture
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::thread;
 
-use tspi_dsp_core::abi::{TspiBlockAckV1, TspiBlockDescV1, ABI_VERSION};
-use tspi_dsp_core::direct::{
+use khaen_core::abi::{TspiBlockAckV1, TspiBlockDescV1, ABI_VERSION};
+use khaen_core::direct::{
     direct_block_f32, DirectCoeffsF32, DirectLayout, DirectTopology, DIRECT_MAX_PARTICIPANTS,
     DIRECT_MAX_ROLES, DIRECT_NO_SOURCE,
 };
-use tspi_dsp_core::rt::RtStatus;
-use tspi_dsp_core::workers::{
+use khaen_core::rt::RtStatus;
+use khaen_core::workers::{
     ack_all, ack_mask, ack_phase, ack_phase_labeled, consume_block_start, execute_block_scheduled,
     master_start_block, publish_block_start, read_block_start, set_cutoff, wait_block_start,
     wait_phase_done, wait_phases, worker_begin_block, worker_phase_b1, worker_phase_barrier,
@@ -666,7 +666,7 @@ fn workers_ack_mask_parameterized_and_bounded_waits() {
     assert_eq!(ack_mask(1), 0x1);
     assert_eq!(ack_mask(2), 0x3);
     assert_eq!(ack_mask(4), 0xF);
-    assert_eq!(ack_mask(4), tspi_dsp_core::rt::ACK_MASK_ALL);
+    assert_eq!(ack_mask(4), khaen_core::rt::ACK_MASK_ALL);
 
     // expected=2：0x3 到齐才算 all-ack；先缺一位必须有界失败。
     let ack2 = make_ack(0, 1, 1, 2);
@@ -872,7 +872,7 @@ fn workers_ack_phase_and_late_slot_label() {
     assert!(ack_phase_labeled(&ack, 1, 0, 5, 9, 4).is_ok());
     assert_eq!(ack.phase_done[0].load(Ordering::Acquire), 0x3);
     // 迟到 worker 只记本地 stats（不写 ack 槽）。
-    let mut stats = tspi_dsp_core::abi::TspiWorkerStatsV1::default();
+    let mut stats = khaen_core::abi::TspiWorkerStatsV1::default();
     stats.flags = 0;
     worker_record_late(&mut stats);
     assert_eq!(stats.late_blocks, 1);
@@ -1547,7 +1547,7 @@ fn workers_rt_visible_types_and_layout() {
     assert!(!needs_drop::<TspiBlockAckV1>());
     assert!(!needs_drop::<RtStatus>());
     let ctl = TspiRtControlV1::new();
-    assert_eq!(ctl.magic, tspi_dsp_core::abi::TSPI_RING_MAGIC);
+    assert_eq!(ctl.magic, khaen_core::abi::TSPI_RING_MAGIC);
     assert_eq!(ctl.abi_version, ABI_VERSION);
     assert_eq!(ctl.size, 128);
     assert_eq!(ctl.block_start_seq.load(Ordering::Acquire), 0);

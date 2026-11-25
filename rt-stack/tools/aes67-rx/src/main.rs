@@ -19,12 +19,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tspi_aoip_aes67::capture::CaptureBlockSource;
-use tspi_aoip_aes67::clock::frames_to_ns_ceil;
-use tspi_aoip_aes67::jitter::{BlockStatus, JitterConfig};
-use tspi_aoip_aes67::receiver::{Aes67Receiver, ReceiverClock, ReceiverConfig};
-use tspi_aoip_aes67::sdp::{Encoding, RefClk, SdpDocument, Session};
-use tspi_aoip_aes67::sender::{Aes67RtpSender, SenderConfig};
+use khaen_aoip_aes67::capture::CaptureBlockSource;
+use khaen_aoip_aes67::clock::frames_to_ns_ceil;
+use khaen_aoip_aes67::jitter::{BlockStatus, JitterConfig};
+use khaen_aoip_aes67::receiver::{Aes67Receiver, ReceiverClock, ReceiverConfig};
+use khaen_aoip_aes67::sdp::{Encoding, RefClk, SdpDocument, Session};
+use khaen_aoip_aes67::sender::{Aes67RtpSender, SenderConfig};
 
 const RATE_HZ: u32 = 48_000;
 const BLOCK_FRAMES: usize = 128;
@@ -826,7 +826,7 @@ fn spawn_playback(
                         latency_frames + media_frames_written,
                         RATE_HZ,
                     ));
-                    let wall_ns = tspi_aoip_aes67::clock::UsrvClock::origin()
+                    let wall_ns = khaen_aoip_aes67::clock::UsrvClock::origin()
                         .elapsed()
                         .as_nanos() as u64;
                     let lead_us = wall_ns.saturating_sub(media_ns) / 1_000;
@@ -1263,7 +1263,7 @@ fn cmd_run(cli: &Cli) -> Result<(), String> {
         .map(|text| escape_json(text))
         .unwrap_or_default();
     let report = format!(
-        "{{\"schema\":\"tspi-aes67-rx/1\",\"mode\":\"run\",\"verdict\":\"{}\",\
+        "{{\"schema\":\"khaen-aes67-rx/1\",\"mode\":\"run\",\"verdict\":\"{}\",\
 \"started_unix_ms\":{started_unix_ms},\"ended_unix_ms\":{ended_unix_ms},\"duration_ms\":{elapsed_ms},\
 \"sdp\":{{\"path\":{},\"source\":\"{}\",\"media\":\"{}\",\"port\":{},\"multicast\":{},\
 \"channels\":{},\"rate_hz\":{},\"encoding\":\"{}\",\"ptime_us\":{},\"payload_type\":{},\
@@ -1580,7 +1580,7 @@ fn cmd_selftest(cli: &Cli) -> Result<(), String> {
         .collect::<Vec<_>>()
         .join(",");
     let report = format!(
-        "{{\"schema\":\"tspi-aes67-rx/1\",\"mode\":\"selftest\",\"verdict\":\"{}\",\
+        "{{\"schema\":\"khaen-aes67-rx/1\",\"mode\":\"selftest\",\"verdict\":\"{}\",\
 \"started_unix_ms\":{started_unix_ms},\"ended_unix_ms\":{ended_unix_ms},\"duration_ms\":{elapsed_ms},\
 \"sdp\":{{\"path\":{},\"source\":\"{}\",\"media\":\"{}\",\"port\":{},\"multicast\":{},\
 \"channels\":{},\"rate_hz\":{},\"encoding\":\"{}\",\"ptime_us\":{},\"payload_type\":{},\
@@ -1716,7 +1716,7 @@ fn cmd_tone(cli: &Cli) -> Result<(), String> {
     let sent = run_tone_sender(&config, &stop)?;
     let elapsed = started.elapsed().as_secs_f64();
     println!(
-        "{{\"schema\":\"tspi-aes67-rx/1\",\"mode\":\"tone\",\"dest\":\"{}\",\"channels\":{},\
+        "{{\"schema\":\"khaen-aes67-rx/1\",\"mode\":\"tone\",\"dest\":\"{}\",\"channels\":{},\
 \"frames_per_packet\":{},\"tones_hz\":[{}],\"amplitude_db\":{},\"sent_frames\":{},\
 \"duration_ms\":{}}}",
         dest,
@@ -1740,7 +1740,7 @@ fn cmd_sdp_info(cli: &Cli) -> Result<(), String> {
     let session = doc.parse_validated().map_err(|e| e.name().to_string())?;
     let summary = summarize_sdp(&doc, &session);
     let report = format!(
-        "{{\"schema\":\"tspi-aes67-rx/1\",\"mode\":\"sdp-info\",\"verdict\":\"PASS\",\
+        "{{\"schema\":\"khaen-aes67-rx/1\",\"mode\":\"sdp-info\",\"verdict\":\"PASS\",\
 \"path\":\"{}\",\"media\":\"{}\",\"port\":{},\"multicast\":{},\"channels\":{},\"rate_hz\":{},\
 \"encoding\":\"{}\",\"ptime_us\":{},\"payload_type\":{},\"refclk\":\"{}\",\"ptp_domain\":{},\
 \"localmac\":{},\"text\":\"{}\"}}",

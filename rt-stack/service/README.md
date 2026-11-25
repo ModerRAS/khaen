@@ -1,7 +1,7 @@
 # T28/T155 service —— 新栈 systemd 单元（T71 安装；本目录不等于已上板）
 
 > WBS T28（release-owner）。**状态（2026-11-17 修复后）：单元与 CLI 契约已冻结（T155），仍未安装/未上板。**
-> - `tspi-rt-host`：aarch64 gnu 已 BUILT（768,384 B，sha256 e011745c…，见 `evidence/final-wiring/`）；`run --config` WIRED
+> - `khaen-rt-host`：aarch64 gnu 已 BUILT（768,384 B，sha256 e011745c…，见 `evidence/final-wiring/`）；`run --config` WIRED
 >   （真实 ALSA 播放/duplex 仍 NOT_WIRED，backend=fake）。
 > - `tspi-rt-daemon`：aarch64 gnu 已 BUILT（1,210,296 B，sha256 009a110e…）；`serve --config` WIRED；真实板端运行 NOT_RUN。
 > - 本目录是 T71 的**安装源**：`04-install-release.sh` 从 release bundle 的 `units/` 复制；改动后必须重新打 bundle
@@ -22,11 +22,11 @@
 | 文件 | 作用 | 状态 |
 | --- | --- | --- |
 | `tspi-rt-stack.target` | 新栈总目标：**Wants/After host+daemon**（F-18/T28-P0-1；只 start target 即可拉起两者） | 冻结（T155 + F-18 修复） |
-| `tspi-rt-host.service` | 自研 RT DSP host：唯一 ALSA/设备 owner；RT 门槛 LimitRTPRIO=99/LimitMEMLOCK=infinity；**F3** RuntimeDirectory/LogsDirectory=tspi-rt-stack；**F4** DeviceAllow=char-alsa rw | 冻结（CLI WIRED；真实 ALSA NOT_WIRED；2026-11-18 F3/F4） |
+| `khaen-rt-host.service` | 自研 RT DSP host：唯一 ALSA/设备 owner；RT 门槛 LimitRTPRIO=99/LimitMEMLOCK=infinity；**F3** RuntimeDirectory/LogsDirectory=tspi-rt-stack；**F4** DeviceAllow=char-alsa rw | 冻结（CLI WIRED；真实 ALSA NOT_WIRED；2026-11-18 F3/F4） |
 | `tspi-rt-daemon.service` | 控制面/校准 daemon：REST/WS/Web + calibration job 唯一控制面；不直接打开 PCM；**F3** RuntimeDirectory/LogsDirectory=tspi-rt-stack | 冻结（bin BUILT/WIRED；板端 NOT_RUN；2026-11-18 F3） |
-| `tspi-irq-affinity.service` | **task-192 + B1**：T45 依赖 IRQ 亲和持久化 oneshot（`Before=tspi-rt-host.service`，`RemainAfterExit=yes`，ExecStart=`/usr/local/lib/tspi/irq-affinity-pin apply`）；**B1**：`ExecStartPre=…irq-affinity-pin wait` 先等 IRQ 节点就绪 + `TimeoutStartSec=120`；host 启动前把 IRQ58/56/57 钉回 A53 并回读校验 | 新增（B1 固化：本机 mock 28/28；板端重启 NOT_RUN） |
-| `tspi-rt-host.service.d/90-safe-mute.conf.example` | 回滚兜底 drop-in：追加 `EnvironmentFile=/etc/tspi-rt-stack/90-safe-mute.env`（保护静音，绝不回 C） | 冻结（F-17 修复） |
-| `tspi-rt-host.service.d/90-safe-mute.env.example` | **host 实际读取的** `TSPI_HOST_SAFE_MODE=mute`（F-17；不得写 `TSPI_RT_HOST_SAFE_MODE`） | 冻结（F-17 修复） |
+| `tspi-irq-affinity.service` | **task-192 + B1**：T45 依赖 IRQ 亲和持久化 oneshot（`Before=khaen-rt-host.service`，`RemainAfterExit=yes`，ExecStart=`/usr/local/lib/tspi/irq-affinity-pin apply`）；**B1**：`ExecStartPre=…irq-affinity-pin wait` 先等 IRQ 节点就绪 + `TimeoutStartSec=120`；host 启动前把 IRQ58/56/57 钉回 A53 并回读校验 | 新增（B1 固化：本机 mock 28/28；板端重启 NOT_RUN） |
+| `khaen-rt-host.service.d/90-safe-mute.conf.example` | 回滚兜底 drop-in：追加 `EnvironmentFile=/etc/tspi-rt-stack/90-safe-mute.env`（保护静音，绝不回 C） | 冻结（F-17 修复） |
+| `khaen-rt-host.service.d/90-safe-mute.env.example` | **host 实际读取的** `TSPI_HOST_SAFE_MODE=mute`（F-17；不得写 `TSPI_RT_HOST_SAFE_MODE`） | 冻结（F-17 修复） |
 
 配套配置模板在 `deploy/config/{rt-host,rt-daemon}.{env,toml}.example`：`04-install-release.sh` 首次安装到
 `/etc/tspi-rt-stack/`（不覆盖既有）。**缺 toml 时 host/daemon 启动即退**，01-preflight 与 06-verify 都把配置存在性当硬门（T28-P0-2）。
@@ -71,7 +71,7 @@
    **J IRQ 持久化**（irqbalance 未 enabled/active、oneshot+env 已安装、IRQ effective 已在 A53 且 T45 IRQ 前置 PASS）。
 4. `03-retire-c.sh`：旧 C/shim/入口 stop+disable(+mask)，清除 /run/tspi 旧 marker。
 5. `05` 在 retire 之后才 start keeper → **start `tspi-irq-affinity.service`（钉核；ExecStartPre 先等 IRQ 节点就绪）** →
-   `enable/start tspi-rt-stack.target`，并**逐个等 `tspi-rt-host.service`、`tspi-rt-daemon.service` active**
+   `enable/start tspi-rt-stack.target`，并**逐个等 `khaen-rt-host.service`、`tspi-rt-daemon.service` active**
    （F-18/T28-P0-a；超时即回滚 last-good/mute）。
 6. 停止：`systemctl stop tspi-rt-stack.target`（PartOf 传播）；不得用旧 tspi-mode/camilladsp 入口。
 7. 回退：`08-rollback.sh` 只回自研 last-good 或 mute；C 保持 masked。

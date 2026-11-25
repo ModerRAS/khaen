@@ -1,8 +1,8 @@
 //! 自有 JSON 解析/规范化写作 + 自有 SHA-256 的契约测试。
 
-use tspi_file_runner::json::Json;
-use tspi_file_runner::sha256::{hex, is_hex64, sha256, sha256_hex};
-use tspi_file_runner::{E_FILE_FIELD, E_FILE_JSON, MAX_JSON_DEPTH};
+use khaen_file_runner::json::Json;
+use khaen_file_runner::sha256::{hex, is_hex64, sha256, sha256_hex};
+use khaen_file_runner::{E_FILE_FIELD, E_FILE_JSON, MAX_JSON_DEPTH};
 
 fn err_code(text: &str) -> &'static str {
     Json::parse(text).expect_err("must fail").code()

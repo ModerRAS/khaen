@@ -37,11 +37,11 @@
 //! 若 integrator 需要统一注册位置可直接调整，不影响本模块 API）。真实测量/真实 apply/板端
 //! T67-T69 全部 **NOT_RUN**（见 evidence/cursor-fix-fitwiring/NOT-RUN.md）。
 
-use tspi_dsp_compat::ws::{json_encode, json_object, JsonValue};
-use tspi_dsp_core::abi::TspiBlockAckV1;
-use tspi_dsp_core::rt::{PlanVersion, RT_WORKERS};
-use tspi_modal_design::artifact::ArtifactStatus;
-use tspi_rt_host::admission::{AdmissionEnv, MockMemory};
+use khaen_compat::ws::{json_encode, json_object, JsonValue};
+use khaen_core::abi::TspiBlockAckV1;
+use khaen_core::rt::{PlanVersion, RT_WORKERS};
+use khaen_modal_design::artifact::ArtifactStatus;
+use khaen_rt_host::admission::{AdmissionEnv, MockMemory};
 
 use crate::compile_apply::{
     compile_plan, p_row_chain_peak_gain_db, p_row_max_positive_db, ApplyAck, ApplySession,
@@ -64,8 +64,8 @@ use crate::phase_fit::{
 };
 use crate::positions::{MultipointPlan, PositionQualityReport};
 use crate::stage_backend::StageDelegate;
-use tspi_dsp_core::compile::FusionForm;
-use tspi_fir_designer::phase::Polarity;
+use khaen_core::compile::FusionForm;
+use khaen_designer::phase::Polarity;
 
 // ---------------------------------------------------------------------------
 // schema / 常量 / 稳定错误码
@@ -183,7 +183,7 @@ pub struct FitWiringDesign {
     /// 多点测量计划（T63；T64/T65 共用，participants/positions/common_d0 一致）。
     pub plan: MultipointPlan,
     /// T64 目标曲线（只接受 T11 内置 flat/tilt10；T64 会再校验）。
-    pub target: tspi_fir_designer::targets::TargetCurve,
+    pub target: khaen_designer::targets::TargetCurve,
     /// T64 每（测点, 通道）实测幅度曲线。
     pub curves: Vec<PositionCurve>,
     /// T64 每通道工作频带（可空 = 全带）。
@@ -526,7 +526,7 @@ impl FitWiring {
         self
     }
 
-    /// 注入真实 host plan-arena 应用配置（T67 补齐：apply 用真实 tspi-rt-host 进程）。
+    /// 注入真实 host plan-arena 应用配置（T67 补齐：apply 用真实 khaen-rt-host 进程）。
     ///
     /// 注入后 Apply 段不再消费 `ApplyAckSource` 的离线模型：plan 字节写盘 -> host
     /// plan-arena 加载/校验/跑 block -> host 报告 note_block_all_ack 汇总 -> T66
@@ -1266,7 +1266,7 @@ impl FitWiring {
             session.commit().map_err(ca_failure)?.pending_version
         };
         // 2) ack 来源：
-        //    - 配置了 host apply：真实 tspi-rt-host plan-arena 进程加载同一 plan 字节并跑
+        //    - 配置了 host apply：真实 khaen-rt-host plan-arena 进程加载同一 plan 字节并跑
         //      block，报告里的 swap（note_block_all_ack，synthetic=false）映射为 TspiBlockAckV1；
         //    - 未配置：沿用 T66 ApplyAckSource seam（离线模型，证据标 simulated）。
         let host_config = self.host_apply.clone();
@@ -2079,9 +2079,9 @@ pub fn apply_measured_crossover_experiment(
 /// - T54/T57：mapping/artifact/G path 为确定性夹具（hash 由内容决定，不是全零伪 hash）；
 /// - apply：T66 NONRT 离线模型（OfflineSyntheticAck）；T3 后实测 NOT_RUN。
 pub fn synthetic_design() -> Result<FitWiringDesign, String> {
-    use tspi_fir_designer::modal_peq::{log_frequency_grid, CurvePoint};
-    use tspi_fir_designer::targets::{builtin_target, BuiltinOptions, BuiltinTarget};
-    use tspi_modal_design::timebase::CommonD0;
+    use khaen_designer::modal_peq::{log_frequency_grid, CurvePoint};
+    use khaen_designer::targets::{builtin_target, BuiltinOptions, BuiltinTarget};
+    use khaen_modal_design::timebase::CommonD0;
 
     use crate::compile_apply::{MappingBinding, RoleDacSlot};
     use crate::positions::{

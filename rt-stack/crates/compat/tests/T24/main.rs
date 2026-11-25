@@ -12,11 +12,11 @@
 //! - 命令表/错误码/JSON 编解码/ack 判据等契约级检查。
 //!
 //! Cargo 自动把 tests/T24/main.rs 发现为集成测试 target；DoD 命令：
-//! cargo test -p tspi-dsp-compat ws（测试名统一 ws_ 前缀）。
+//! cargo test -p khaen-compat ws（测试名统一 ws_ 前缀）。
 //! 本文件不写临时文件（%TEMP% 可能在内存盘上），全部内存夹具。
 
-use tspi_dsp_compat::ws::*;
-use tspi_dsp_core::rt::RtStatus;
+use khaen_compat::ws::*;
+use khaen_core::rt::RtStatus;
 
 // ---------------------------------------------------------------------------
 // 夹具辅助

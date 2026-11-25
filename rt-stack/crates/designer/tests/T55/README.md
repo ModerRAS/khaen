@@ -5,7 +5,7 @@
 - 测试文件：report_cases.rs（19 个 #[test]，函数名统一 t55_*）。
 - 运行（在 rt-stack/ 下）：
 
-    cargo test -p tspi-fir-designer report
+    cargo test -p khaen-designer report
 
   点时刻实测（2026-11-17）：38 passed / 0 failed / 291 filtered out，exit 0（其中 T55 自有 19 项）；
   见 rt-stack/evidence/T55/run-tests-wbs-command.log 与 test-list.txt。
@@ -24,7 +24,7 @@ cargo 只把 tests/*.rs（顶层文件）当集成测试目标，不会自动发
         include!("../tests/T55/report_cases.rs");
     }
 
-本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p tspi-fir-designer report 执行
+本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p khaen-designer report 执行
 （executed > 0），测试名过滤路径含 report；不需要 integrator 注册，也不要再把它加到
 public_registration.rs（会重复注册/编译失败，因为文件按模块内联语义编写，依赖 super::* 的私有
 作用域，例如 ringing_metrics / latency_tier / band_stat / build_budget 等内部函数）。

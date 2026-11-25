@@ -43,7 +43,7 @@
 //!   与 §3.5（重复延迟极差/公共 D 残差门）；
 //! - rt-stack/README.md §3 写域纪律；
 //! - 上游实现（只读）：T63 `crate::positions`（MultipointPlan/质量门/design/validation 分组）、
-//!   T49 `tspi_modal_design::timebase`（CommonD0/PhaseBasis 冻结语义）、T40 `tspi_fir_designer::phase`
+//!   T49 `khaen_modal_design::timebase`（CommonD0/PhaseBasis 冻结语义）、T40 `khaen_designer::phase`
 //!   （整数延迟/极性 FIR 与解析验证）、T60 `crate::job`（StageCtx/artifact/sha256）。
 //!
 //! # 稳定错误码（REST/log/evidence 引用；未知一律拒收）
@@ -89,9 +89,9 @@ use std::fmt;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use tspi_dsp_core::rt::SAMPLE_RATES_HZ;
-use tspi_fir_designer::phase::{design_integer, IntegerDelaySpec, PhaseDesign, Polarity};
-use tspi_modal_design::timebase::{CommonD0, PhaseBasis};
+use khaen_core::rt::SAMPLE_RATES_HZ;
+use khaen_designer::phase::{design_integer, IntegerDelaySpec, PhaseDesign, Polarity};
+use khaen_modal_design::timebase::{CommonD0, PhaseBasis};
 
 use crate::job::{sha256_hex, ArtifactKind, ArtifactRecord, StageCtx, StageFailure};
 use crate::positions::{MultipointPlan, PositionQualityReport, QualityScope};
@@ -1187,7 +1187,7 @@ fn estimate_polarity(
 // 响应收集 / 覆盖 / 相位基准 / 测量 hash
 // ---------------------------------------------------------------------------
 
-use tspi_modal_design::ingest::PositionRole;
+use khaen_modal_design::ingest::PositionRole;
 
 #[derive(Clone, Copy, Debug)]
 struct ResponseSlot<'p, 'r> {

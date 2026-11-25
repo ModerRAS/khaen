@@ -48,26 +48,26 @@
 //! - coeff blob 无 header 偏移字段：本 leaf 约定 coeff blob 位于 plan 字节尾部
 //!   （coeff_base = bytes.len() - total_coeff_bytes，表/元数据只能在其前），供 T12/T26 打包对齐。
 
-pub use tspi_dsp_core::plan::{PlanToken, StageToken};
-pub use tspi_dsp_core::rt::{PlanVersion, RtControl, RtStatus};
+pub use khaen_core::plan::{PlanToken, StageToken};
+pub use khaen_core::rt::{PlanVersion, RtControl, RtStatus};
 
 use core::mem::{align_of, needs_drop, size_of};
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use tspi_dsp_core::abi::{
+use khaen_core::abi::{
     plan_abi_supported, TspiBlockAckV1, TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1,
     TspiPlanIirHeaderV2, TspiRoleIirV2, TspiRoleV1, ABI_VERSION, PLAN_IIR_ENTRY_BYTES,
     PLAN_IIR_HEADER_BYTES, PLAN_IIR_MAX_SECTIONS, PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1,
     TSPI_PLAN_IIR_MAGIC, TSPI_PLAN_IIR_VERSION, TSPI_PLAN_MAGIC,
     TSPI_RING_MAGIC,
 };
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     t_block_ns_ceil, PlanView, BLOCK_SIZES, MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_MATRIX_PATHS,
     MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, QUARANTINE_SLOTS, RT_WORKERS, RT_WORKERS_FALLBACK,
     SAMPLE_RATES_HZ, SWITCH_ARMED, SWITCH_IDLE, TAPS_EXTENDED_MAX, TAPS_NORMAL_MAX,
 };
-use tspi_dsp_core::workers::{ack_mask, TspiRtControlV1};
+use khaen_core::workers::{ack_mask, TspiRtControlV1};
 
 use crate::admission::{self, AdmissionEnv, AdmissionReport, MemoryBackend, PlatformMemory};
 
@@ -1365,7 +1365,7 @@ fn parse_plan_iir(
         let end = start + entry.coeff_len_bytes as usize;
         crc_bytes.extend_from_slice(&bytes[start..end]);
     }
-    if tspi_dsp_core::nodes::crc32c(&crc_bytes) != iir_header.table_crc32c {
+    if khaen_core::nodes::crc32c(&crc_bytes) != iir_header.table_crc32c {
         return Err(RtStatus::ERR_HASH);
     }
     // 系数硬门：有限 + biquad 稳定（极点单位圆内）。

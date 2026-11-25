@@ -67,7 +67,7 @@ SCHEMA_H_DIAG = "tspi-h-diag/v1"
 SCHEMA_SESSION = "tspi-mimo-measurement/v1"
 SCHEMA_POSITION = "tspi-mimo-position/v1"
 SCHEMA_ANALYSIS = "tspi-channel-measurement/v1"
-SCHEMA_ANALYSIS_META = "tspi-calibration-meta/v1"
+SCHEMA_ANALYSIS_META = "khaen-calibration-meta/v1"
 
 
 def utc_now():

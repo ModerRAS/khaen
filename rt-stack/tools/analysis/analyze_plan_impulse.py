@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """analyze_plan_impulse.py -- prove the plan-arena graph applies exactly the plan.bin
-filter, from the impulse renders of tspi-rt-host (backend=fake + [sink] out).
+filter, from the impulse renders of khaen-rt-host (backend=fake + [sink] out).
 
 Inputs (written by render-identity-impulse.toml / render-plan-impulse.toml):
   <dir>/render-identity-impulse.raw   2ch f32le (graph=stereo_identity)

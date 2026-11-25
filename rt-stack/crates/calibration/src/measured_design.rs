@@ -4,7 +4,7 @@
 //! `tspi-cal` 只支持 `--design synthetic`——真实测量数据无法进入 T64/T65 fit，导致
 //! "测量 -> 设计 fit" 断链（pilot REPORT §9 B4）。
 //!
-//! 本模块把 **真实板端测量产物**（旧工具 `tspi-calibrate` 的 `*.analysis.json`，
+//! 本模块把 **真实板端测量产物**（旧工具 `khaen-calibrate` 的 `*.analysis.json`，
 //! schema `tspi-channel-measurement/v1`，含 1/48 oct FR 幅度+相位、绝对延迟、SNR、
 //! 极性置信度；以及同目录 `*.diag.json` 的槽位 nominal/actual onset）转换为
 //! [crate::fit_wiring::FitWiringDesign]：
@@ -42,12 +42,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_dsp_compat::ws::{json_object, json_parse, JsonValue};
-use tspi_dsp_core::rt::RT_WORKERS;
-use tspi_fir_designer::modal_peq::CurvePoint;
-use tspi_fir_designer::targets::{builtin_target, BuiltinOptions, BuiltinTarget};
-use tspi_modal_design::timebase::CommonD0;
-use tspi_rt_host::admission::AdmissionEnv;
+use khaen_compat::ws::{json_object, json_parse, JsonValue};
+use khaen_core::rt::RT_WORKERS;
+use khaen_designer::modal_peq::CurvePoint;
+use khaen_designer::targets::{builtin_target, BuiltinOptions, BuiltinTarget};
+use khaen_modal_design::timebase::CommonD0;
+use khaen_rt_host::admission::AdmissionEnv;
 
 use crate::compile_apply::{
     ArtifactBinding, CompileApplyOptions, DelayPolarityEncoding, ExperimentMode, GPathInput,
@@ -666,7 +666,7 @@ pub fn load_g_paths_file(path: &Path) -> Result<InjectedGPaths, String> {
         return Err(format!("{E_MEASURED_G_PATHS}: participants 为空"));
     }
     let m = participants.len();
-    if m > tspi_dsp_core::rt::MAX_LOW_BAND_PARTICIPANTS {
+    if m > khaen_core::rt::MAX_LOW_BAND_PARTICIPANTS {
         return Err(format!(
             "{E_MEASURED_G_PATHS}: participants {m} 超过 MAX_LOW_BAND_PARTICIPANTS"
         ));
@@ -1213,8 +1213,8 @@ fn interp_curve_db(points: &[CurvePoint], freq_hz: f64) -> Option<f64> {
 fn seat_spread_report(
     curves: &[PositionCurve],
     design_labels: &[String],
-) -> Vec<tspi_dsp_compat::ws::JsonValue> {
-    use tspi_dsp_compat::ws::{json_object, JsonValue};
+) -> Vec<khaen_compat::ws::JsonValue> {
+    use khaen_compat::ws::{json_object, JsonValue};
     if design_labels.len() < 2 {
         return Vec::new();
     }
@@ -1862,7 +1862,7 @@ fn measured_summary_json(
     g_paths_sha256: &str,
     crossover_json: Option<JsonValue>,
 ) -> String {
-    use tspi_dsp_compat::ws::{json_encode, json_object};
+    use khaen_compat::ws::{json_encode, json_object};
     let primary = positions
         .iter()
         .find(|position| position.design)
@@ -2260,7 +2260,7 @@ fn measured_summary_json(
 /// - holdout.evaluation=PREDICTED_FROM_MEASURED_CURVES_AT_VALIDATION_POSITIONS：
 ///   用拟合出的 P 作用到 validation 位置实测曲线的预测残差，不是 apply 后 remeasure。
 pub fn multipoint_evidence_json(design: &FitWiringDesign, peq: &PeqFitReport) -> String {
-    use tspi_dsp_compat::ws::{json_encode, json_object};
+    use khaen_compat::ws::{json_encode, json_object};
     let plan = &design.plan;
     let positions: Vec<JsonValue> = plan
         .positions
@@ -2555,8 +2555,8 @@ pub fn multipoint_evidence_json(design: &FitWiringDesign, peq: &PeqFitReport) ->
 mod measured_design_tests {
     use super::*;
     use crate::peq_fit::{fit_peq, PeqFitOutput, PeqFitRequest};
-    use tspi_dsp_compat::ws::json_parse;
-    use tspi_modal_design::ingest::PositionRole;
+    use khaen_compat::ws::json_parse;
+    use khaen_modal_design::ingest::PositionRole;
 
     // -----------------------------------------------------------------------
     // 夹具：合成旧工具 analysis JSON（1/24 oct 20–20k；phase 已对齐、delay 声明）

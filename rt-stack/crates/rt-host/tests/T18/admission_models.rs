@@ -3,15 +3,15 @@
 // 本文件经 src/admission.rs 末尾的 cfg(test) mod admission_tests { include!(...) } 进入
 // 单测构建（cargo 不自动发现 tests/<子目录>；公共注册属 integrator，勿写入
 // tests/public_registration.rs）。运行：
-//   cargo test -p tspi-rt-host admission
+//   cargo test -p khaen-rt-host admission
 // 全部测试名 t18_ 前缀；离线：只用 MockMemory，不调用真实 mlockall/getrlimit，不碰设备。
 
 use super::*;
 use core::mem::needs_drop;
-use tspi_dsp_core::abi::{
+use khaen_core::abi::{
     TspiDiagFirV1, TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, ABI_VERSION, TSPI_PLAN_MAGIC,
 };
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     PlanView, RtStatus, BLOCK_SIZES, MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_MATRIX_PATHS,
     MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, MAX_WORKER_STACK_BYTES, RT_WORKERS, RT_WORKERS_FALLBACK,
     SAMPLE_RATES_HZ, TAPS_EXTENDED_MAX,

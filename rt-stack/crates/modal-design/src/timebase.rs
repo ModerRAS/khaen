@@ -1,7 +1,7 @@
 //! [NONRT] 公共时间轴/相位/ppm（T49） ——WBS T49 写域。
 //!
 //! 本模块是 P1 低频 MIMO 设计链的**时间轴/相位重建层**：把 T48 ingest
-//! （`tspi-modal-design::ingest`，契约 `tspi-modal-ingest/v1`）已经校验过的
+//! （`khaen-modal-design::ingest`，契约 `tspi-modal-ingest/v1`）已经校验过的
 //! raw/source/diag/position 产物读成**公共时间基准**，供 T50（target）/T52–T54
 //! （solver/validate/artifact）与 T63/T66/T67/T68（多点/编译应用/复测/独立
 //! checker）消费。本模块是纯计算：**不采音、不写盘、不做解卷积、不打开任何音频
@@ -113,7 +113,7 @@ use crate::ingest::{
     CaptureFile, DriftCorrection, IngestBundle, IngestMeasurement, IngestPosition, IngestSession,
     PositionRole, SampleFormat, SourceAnalysis, TimebaseDiag,
 };
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     MAX_INPUT_CHANNELS, MAX_LOW_BAND_PARTICIPANTS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ,
 };
 

@@ -7,7 +7,7 @@
 - 运行（在 rt-stack/ 下，DoD 原文）：
 
 ~~~text
-cargo test -p tspi-rt-host admission
+cargo test -p khaen-rt-host admission
 ~~~
 
 - 期望：running 65 tests ... 65 passed; 0 failed（executed test_count = 65 > 0，WBS 非空测试门；Linux 上 66）。
@@ -29,7 +29,7 @@ mod admission_tests {
 }
 ~~~
 
-本文件因此参与 lib 的单测构建，真实被 cargo test -p tspi-rt-host admission 执行
+本文件因此参与 lib 的单测构建，真实被 cargo test -p khaen-rt-host admission 执行
 （executed = 65；测试路径 admission::admission_tests::t18_* 含 admission）。
 integrator 不要再把它加到 public_registration.rs（会重复注册/编译失败）。
 

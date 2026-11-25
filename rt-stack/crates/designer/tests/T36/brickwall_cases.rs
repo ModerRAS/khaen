@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/designer/src/brickwall.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （cargo 不自动发现 tests/<Txx>/ 子目录；public_registration.rs 属 integrator，不改）。
-// 运行：cargo test -p tspi-fir-designer brickwall
+// 运行：cargo test -p khaen-designer brickwall
 //
 // use super::* 由外层 #[cfg(test)] 模块提供（include! 共享作用域）。
 

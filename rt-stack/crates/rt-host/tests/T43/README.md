@@ -1,11 +1,11 @@
-# tests/T43 —— AoIP 端点接入私有测试（tspi-rt-host）
+# tests/T43 —— AoIP 端点接入私有测试（khaen-rt-host）
 
 - 任务：WBS T43 / team task-110（aoip-endpoints，deps T17/T19/T05）。
 - 实现文件：`crates/rt-host/src/aoip.rs`（[NONRT]/[IO]）；本目录只放私有测试。
 - 注册方式：`src/aoip.rs` 末尾 `#[cfg(test)] mod aoip_fake_tests { include!("../tests/T43/aoip_fake.rs"); }`。
   **不是** integrator 的 `tests/public_registration.rs` 注册（同 T16/T17/T18/T19/T22/T45 范式），
   integrator 不要再注册（会重复）。
-- 运行：`cargo test -p tspi-rt-host aoip_fake`（WBS T43 DoD；全部用例名 `t43_` 前缀）。
+- 运行：`cargo test -p khaen-rt-host aoip_fake`（WBS T43 DoD；全部用例名 `t43_` 前缀）。
 
 ## 覆盖
 

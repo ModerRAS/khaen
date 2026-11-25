@@ -1,6 +1,6 @@
 # MIMO FIR 引擎板载实测（干净环境，RT OEM 8e274274 / 6.1.99-rt36，2026-11-15）
 
-> 条件：板子空闲、无 cyclictest/xrun 并发；`tspi-mimo-fir` FFT 原型（part=block=128，合成系数，per-output limiter）；taskset 绑核；每用例 2s 音频；CPU% 为进程多核合计（>100% = 多核并行）。
+> 条件：板子空闲、无 cyclictest/xrun 并发；`khaen-mimo-fir` FFT 原型（part=block=128，合成系数，per-output limiter）；taskset 绑核；每用例 2s 音频；CPU% 为进程多核合计（>100% = 多核并行）。
 
 ## 48 kHz，4 线程绑 A72（4-7）
 | 矩阵 | taps | rtf | cpu% |

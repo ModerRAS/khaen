@@ -81,7 +81,7 @@ use crate::ingest::{sha256_hex, IngestSession, PositionRole};
 use crate::timebase::{
     AbsoluteResponse, CommonD0, ComplexPoint, Polarity, ResolvedPolarity, SlotPhase,
 };
-use tspi_fir_designer::modal_peq::{ChannelPeq, DesignMode, PeqLimits};
+use khaen_designer::modal_peq::{ChannelPeq, DesignMode, PeqLimits};
 
 // ===========================================================================
 // 常量

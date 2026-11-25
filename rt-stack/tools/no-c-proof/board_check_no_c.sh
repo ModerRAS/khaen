@@ -5,14 +5,14 @@
 # 输出：JSON（机器可读、可作前后快照）+ 人类可读摘要；供 T72 验收与 T71 窗口前后对比。
 #
 # 检查项（硬门 FAIL -> exit 5）：
-#   N1 进程      ps 等价（/proc 扫描）无 camilladsp / tspi-upmix / tspi-audio-web / tspi-mode / sox DSP 进程
+#   N1 进程      ps 等价（/proc 扫描）无 camilladsp / tspi-upmix / khaen-audio-web / tspi-mode / sox DSP 进程
 #   N2 旧 unit   旧音频 unit 不存在，或 disabled/masked 且 inactive（active/enabled 即 FAIL）
-#   N3 cgroup    任何进程 cgroup / system.slice 无旧 unit（camilladsp/tspi-upmix/tspi-audio-web）
+#   N3 cgroup    任何进程 cgroup / system.slice 无旧 unit（camilladsp/tspi-upmix/khaen-audio-web）
 #   N4 旧端口    1234（CamillaDSP WS）与 18080 无 LISTEN，也无连接
 #   N5 旧入口    /run/tspi/camilladsp.{yml,env}、/etc/tspi/last-mode、/run/tspi/mode 均不存在
 #   N6 socket/pipe  无 camilladsp 命名 socket/FIFO；无进程 fd 指向 camilladsp/tspi-upmix 或旧 /run/tspi 路径
 #   N7 PCM owner 新 host 是 MOTU PCM 唯一 owner（/dev/snd 持有者仅 host；/proc/asound owner_pid 仅 host）
-#   N8 新栈      tspi-rt-host 单实例 active，exe 位于 /opt/tspi-rt-stack 且记录 sha256（--require-daemon 时 daemon 亦 active）
+#   N8 新栈      khaen-rt-host 单实例 active，exe 位于 /opt/tspi-rt-stack 且记录 sha256（--require-daemon 时 daemon 亦 active）
 #   N9 依赖入口  无 *.wants/*.requires 指向旧 unit；新栈 unit 无正向旧 C 依赖（Before= 等 ordering-only 也 FAIL，按 G-no-C）
 #   N10 历史文件 旧 C 二进制/配置存在仅 INFO（历史文件保留 != 旧服务运行；不 FAIL）
 #
@@ -145,7 +145,7 @@ for row in "${PROC_LIST[@]}"; do
   [ -n "$row" ] || continue
   _pid="${row%%|*}"; _rest="${row#*|}"; _comm="${_rest%%|*}"; _args="${_rest#*|}"
   case "$_comm $_args" in
-    *tspi-rt-host*) HOST_PIDS+=("$_pid") ;;
+    *khaen-rt-host*) HOST_PIDS+=("$_pid") ;;
     *tspi-rt-daemon*) DAEMON_PIDS+=("$_pid") ;;
   esac
 done
@@ -161,7 +161,7 @@ old_proc_kind() {
   case "$comm $args" in
     *camilladsp*) printf 'camilladsp' ;;
     *tspi-upmix*) printf 'tspi-upmix' ;;
-    *tspi-audio-web*) printf 'tspi-audio-web' ;;
+    *khaen-audio-web*) printf 'khaen-audio-web' ;;
     *tspi-mode*) printf 'tspi-mode' ;;
     *) case " $args " in *"sox "*) printf 'sox' ;; *) return 0 ;; esac ;;
   esac
@@ -175,13 +175,13 @@ for row in "${PROC_LIST[@]}"; do
   if [ -n "$k" ]; then N1_HITS+=("pid=$_pid comm=$_comm kind=$k"); fi
 done
 if [ "${#N1_HITS[@]}" -eq 0 ]; then
-  pass N1.process "无 camilladsp/sox/旧 DSP 进程" "ps 等价 /proc 扫描命中 0（camilladsp|tspi-upmix|tspi-audio-web|tspi-mode|sox）"
+  pass N1.process "无 camilladsp/sox/旧 DSP 进程" "ps 等价 /proc 扫描命中 0（camilladsp|tspi-upmix|khaen-audio-web|tspi-mode|sox）"
 else
   fail N1.process "发现旧 DSP/C 进程" "$(join_detail "${N1_HITS[@]:0:5}")"
 fi
 
 # ---- N2 旧 unit 状态 -------------------------------------------------------
-OLD_UNITS="tspi-camilladsp.service tspi-upmix-autodetect.service tspi-audio.target tspi-boot-mode.service tspi-audio-web.service"
+OLD_UNITS="tspi-camilladsp.service tspi-upmix-autodetect.service tspi-audio.target tspi-boot-mode.service khaen-audio-web.service"
 N2_BAD=(); N2_ROWS=()
 for u in $OLD_UNITS; do
   if systemctl cat "$u" >/dev/null 2>&1; then
@@ -206,18 +206,18 @@ CGROOT="$(p /sys/fs/cgroup)"
 if [ -d "$CGROOT" ]; then
   for d in "$CGROOT"/system.slice/*; do
     [ -e "$d" ] || continue
-    case "${d##*/}" in *camilladsp*|*tspi-upmix*|*tspi-audio-web*) N3_HITS+=("slice=${d##*/}") ;; esac
+    case "${d##*/}" in *camilladsp*|*tspi-upmix*|*khaen-audio-web*) N3_HITS+=("slice=${d##*/}") ;; esac
   done
 fi
 for d in "$(p /proc)"/[0-9]*; do
   [ -r "$d/cgroup" ] || continue
   cg="$(cat "$d/cgroup" 2>/dev/null || true)"
   case "$cg" in
-    *camilladsp*|*tspi-upmix*|*tspi-audio-web*) N3_HITS+=("pid=${d##*/} cgroup=$cg") ;;
+    *camilladsp*|*tspi-upmix*|*khaen-audio-web*) N3_HITS+=("pid=${d##*/} cgroup=$cg") ;;
   esac
 done
 if [ "${#N3_HITS[@]}" -eq 0 ]; then
-  pass N3.cgroup "无进程位于旧 C unit cgroup" "/proc/*/cgroup 与 system.slice 均无 camilladsp/tspi-upmix/tspi-audio-web"
+  pass N3.cgroup "无进程位于旧 C unit cgroup" "/proc/*/cgroup 与 system.slice 均无 camilladsp/tspi-upmix/khaen-audio-web"
 else
   fail N3.cgroup "仍有进程在旧 C unit cgroup" "$(join_detail "${N3_HITS[@]:0:5}")"
 fi
@@ -330,10 +330,10 @@ if [ "${#HOST_PIDS[@]}" -eq 0 ]; then
   if [ "$ALLOW_HOST_INACTIVE" = "1" ]; then
     nv N8.host "新 host 未运行（已放宽）" "回滚/mute 阶段快照；T72 播放/校准验收时必须 active"
   else
-    fail N8.host "tspi-rt-host 未运行" "未找到 tspi-rt-host 进程（phase=$PHASE）"
+    fail N8.host "khaen-rt-host 未运行" "未找到 khaen-rt-host 进程（phase=$PHASE）"
   fi
 elif [ "${#HOST_PIDS[@]}" -gt 1 ]; then
-  fail N8.host "tspi-rt-host 多实例" "pids=$(join_detail "${HOST_PIDS[@]}")（双实例=双 PCM owner 风险）"
+  fail N8.host "khaen-rt-host 多实例" "pids=$(join_detail "${HOST_PIDS[@]}")（双实例=双 PCM owner 风险）"
 else
   HOST_PID="${HOST_PIDS[0]}"
   HOST_EXE="$(readlink "$(p /proc)/$HOST_PID/exe" 2>/dev/null || true)"
@@ -343,7 +343,7 @@ else
   if [ -e "${_real}" ] && command -v sha256sum >/dev/null 2>&1; then
     HOST_SHA="$(sha256sum "${_real}" 2>/dev/null | awk '{print $1}' || true)"
   fi
-  _unit_act="$(systemctl is-active tspi-rt-host.service 2>/dev/null || true)"
+  _unit_act="$(systemctl is-active khaen-rt-host.service 2>/dev/null || true)"
   _exe_ok=0
   case "$HOST_EXE" in */opt/tspi-rt-stack/*) _exe_ok=1 ;; esac
   if [ "${_exe_ok}" = "1" ] && [ "${_unit_act:-}" = "active" ]; then
@@ -389,7 +389,7 @@ for d in "$(p /etc/systemd/system)"/*.wants "$(p /etc/systemd/system)"/*.require
     if [ -e "$l" ] || [ -L "$l" ]; then
       bn="${l##*/}"
       case "$bn" in
-        tspi-camilladsp.service|tspi-upmix-autodetect.service|tspi-audio-web.service|tspi-audio.target|tspi-boot-mode.service)
+        tspi-camilladsp.service|tspi-upmix-autodetect.service|khaen-audio-web.service|tspi-audio.target|tspi-boot-mode.service)
           N9_BAD+=("activation-symlink=$l") ;;
       esac
     fi
@@ -398,14 +398,14 @@ done
 for f in "$(p /etc/systemd/system)"/*camilladsp*.socket "$(p /etc/systemd/system)"/*camilladsp*.path "$(p /etc/systemd/system)"/*tspi-audio*.socket; do
   if [ -e "$f" ]; then N9_BAD+=("socket/path-unit=$f"); fi
 done
-NEW_UNITS="tspi-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target tspi-motu-48k-keeper.service"
+NEW_UNITS="khaen-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target tspi-motu-48k-keeper.service"
 for u in $NEW_UNITS; do
   content="$(systemctl cat "$u" 2>/dev/null || true)"
   [ -n "$content" ] || continue
   while IFS= read -r line; do
     case "$line" in
       '#'*) continue ;;
-      *camilladsp*|*tspi-upmix*|*tspi-audio.target*|*tspi-audio-web*|*tspi-boot-mode*)
+      *camilladsp*|*tspi-upmix*|*tspi-audio.target*|*khaen-audio-web*|*tspi-boot-mode*)
         case "$line" in
           ConditionPathExists=!*|AssertPathExists=!*) continue ;;
           Before=*|After=*) N9_BAD+=("$u ordering-only: $line") ;;

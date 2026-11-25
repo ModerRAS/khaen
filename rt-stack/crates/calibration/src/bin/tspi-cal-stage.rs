@@ -32,8 +32,8 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use tspi_calibration::job::sha256_hex;
-use tspi_calibration::stage_backend::{
+use khaen_calibration::job::sha256_hex;
+use khaen_calibration::stage_backend::{
     run_board_measurement, EngineKind, StageBackendConfig, StageDeviceConfig, StageMeasurementMode,
     StageSweepConfig, STAGE_DEFAULT_DRIVE_LEVEL_DBFS, STAGE_FORBIDDEN_SAMPLE_RATES_HZ,
     STAGE_UMIK_SAMPLE_RATE_HZ,
@@ -139,7 +139,7 @@ impl Args {
     }
 }
 
-fn parse_outputs(text: &str) -> Result<Vec<tspi_calibration::sweep::SweepOutput>, String> {
+fn parse_outputs(text: &str) -> Result<Vec<khaen_calibration::sweep::SweepOutput>, String> {
     let mut outputs = Vec::new();
     for (slot, token) in text.split(',').enumerate() {
         let token = token.trim();
@@ -155,7 +155,7 @@ fn parse_outputs(text: &str) -> Result<Vec<tspi_calibration::sweep::SweepOutput>
         if speaker.trim().is_empty() {
             return Err("--outputs speaker must be non-empty".to_string());
         }
-        outputs.push(tspi_calibration::sweep::SweepOutput::new(
+        outputs.push(khaen_calibration::sweep::SweepOutput::new(
             slot as u32,
             speaker.trim(),
             channel,
@@ -213,7 +213,7 @@ fn build_config(args: &Args) -> Result<StageBackendConfig, String> {
         block_frames,
         buffer_frames,
         settle_ms,
-        sample_format: tspi_dsp_core::abi::sample_format::S24_3LE_INTERLEAVED,
+        sample_format: khaen_core::abi::sample_format::S24_3LE_INTERLEAVED,
     };
 
     let mic = if mode == StageMeasurementMode::AcousticUmik {
@@ -236,7 +236,7 @@ fn build_config(args: &Args) -> Result<StageBackendConfig, String> {
     } else {
         None
     };
-    let mut level = tspi_calibration::stage_backend::StageLevelConfig::default();
+    let mut level = khaen_calibration::stage_backend::StageLevelConfig::default();
     level.default_drive_level_dbfs = level_db;
     level.hot_level_authorized = args.has("hot-level-authorized");
     Ok(StageBackendConfig {
@@ -249,11 +249,11 @@ fn build_config(args: &Args) -> Result<StageBackendConfig, String> {
         outputs,
         engine,
         session_label: args.or_default("session-label", "stage"),
-        graph_id: tspi_calibration::sweep::PLACEHOLDER_GRAPH_ID.to_string(),
+        graph_id: khaen_calibration::sweep::PLACEHOLDER_GRAPH_ID.to_string(),
         epoch_id: 1,
-        apply_settle_ms: tspi_calibration::stage_backend::DEFAULT_APPLY_SETTLE_MS,
+        apply_settle_ms: khaen_calibration::stage_backend::DEFAULT_APPLY_SETTLE_MS,
         // 板端 smoke CLI 不接二次测量播放旁路：保持既有 aplay 行为。
-        remeasure_playback: tspi_calibration::stage_backend::RemeasurePlayback::Aplay,
+        remeasure_playback: khaen_calibration::stage_backend::RemeasurePlayback::Aplay,
         remeasure_host: Default::default(),
     })
 }
@@ -341,7 +341,7 @@ fn main_entry() -> Result<u8, (String, u8)> {
                             evidence.engine,
                             evidence.simulated,
                             evidence.out_dir,
-                            tspi_calibration::stage_backend::gates_json(&evidence.gates)
+                            khaen_calibration::stage_backend::gates_json(&evidence.gates)
                         ),
                     );
                     Ok(0)

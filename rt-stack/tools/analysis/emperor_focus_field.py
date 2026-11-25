@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE = ["cargo", "run", "-q", "-p", "tspi-mimo-design", "--example", "emperor_focus", "--"]
+EXAMPLE = ["cargo", "run", "-q", "-p", "khaen-mimo-design", "--example", "emperor_focus", "--"]
 
 
 def run_example(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:

@@ -961,7 +961,7 @@ pub fn build_fir_manifest(spec: &FirManifestSpec<'_>) -> RunnerResult<Json> {
     let verification = Json::from_entries(vec![
         ("method", Json::String(spec.verification_method.to_string())),
         ("passed", Json::Bool(true)),
-        ("ref_impl", Json::String("tspi-file-runner/v1".to_string())),
+        ("ref_impl", Json::String("khaen-file-runner/v1".to_string())),
     ]);
     let mut entries: Vec<(&str, Json)> = vec![
         ("schema", Json::String(FIR_SCHEMA.to_string())),

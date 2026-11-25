@@ -65,7 +65,7 @@
 //!   与 ack 判据。
 //! - 不定义校准 job 进度命令：R48/DEC 第 6 节的校准进度属 T42 REST + T70 Web 面；本任务不扩
 //!   WS 命令集，避免与 T42 口径分叉（记录在 evidence/T24 的 NOT_RUN/边界）。
-//! - 不碰板端/ALSA/CueMix/服务/模式；无第三方依赖（纯 std + tspi-dsp-core，不加 Cargo 依赖）。
+//! - 不碰板端/ALSA/CueMix/服务/模式；无第三方依赖（纯 std + khaen-core，不加 Cargo 依赖）。
 //!
 //! 与 T42 REST 的一致性（同一判据，不两套口径）：
 //! - commit_not_acked / stale_plan / switch_busy / admission_rejected 等错误码由
@@ -76,7 +76,7 @@
 
 use core::fmt::Write as _;
 
-use tspi_dsp_core::rt::{RtStatus, SAMPLE_RATES_HZ};
+use khaen_core::rt::{RtStatus, SAMPLE_RATES_HZ};
 
 // ---------------------------------------------------------------------------
 // 常量（W01–W22 / X10–X13 / core-v1 第 3.4 节、第 9.2 节）

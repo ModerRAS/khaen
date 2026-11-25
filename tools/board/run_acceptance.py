@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_KEY = ROOT / "deploy" / "ssh" / "tspi_audio_ed25519"
 DEFAULT_HOST = "192.0.2.215"
 DEFAULT_USER = "root"
-DEFAULT_CALIBRATE_BIN = "/tmp/tspi-calibrate"
+DEFAULT_CALIBRATE_BIN = "/tmp/khaen-calibrate"
 
 SOAK_UNIT = "tspi-soak12.service"
 SOAK_SERVICE_ARGV = ("systemctl", "is-active", SOAK_UNIT)
@@ -291,8 +291,8 @@ def validate_calibrate_bin(path: str) -> str | None:
         return "calibrate bin must not contain .."
     if any(ch not in _BIN_CHARS for ch in path):
         return "calibrate bin contains unsafe characters"
-    if posixpath.basename(path) != "tspi-calibrate":
-        return "calibrate bin basename must be tspi-calibrate"
+    if posixpath.basename(path) != "khaen-calibrate":
+        return "calibrate bin basename must be khaen-calibrate"
     return None
 
 
@@ -1713,7 +1713,7 @@ def parse_and_validate(argv: Sequence[str]) -> Options:
     parser.add_argument(
         "--calibrate-bin",
         default=DEFAULT_CALIBRATE_BIN,
-        help="remote tspi-calibrate path (default /tmp/tspi-calibrate)",
+        help="remote khaen-calibrate path (default /tmp/khaen-calibrate)",
     )
     parser.add_argument(
         "--pairs",

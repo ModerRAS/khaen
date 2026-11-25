@@ -8,7 +8,7 @@
 //! 运行（release、cargo --offline）：
 //!
 //! ~~~text
-//! cargo run --release --offline -p tspi-dsp-core --example mimo12k_budget
+//! cargo run --release --offline -p khaen-core --example mimo12k_budget
 //! ~~~
 //!
 //! 固定口径（与 mimo12k 生产语义一致；只用于成本测量，不评价声学）：
@@ -26,11 +26,11 @@
 
 use std::time::Instant;
 
-use tspi_dsp_core::mimo12k::{
+use khaen_core::mimo12k::{
     Mimo12kLayout, Mimo12kRuntime, MIMO12K_GROUP, MIMO12K_LOWRATE_HZ, MIMO12K_MAX_PARTICIPANTS,
     MIMO12K_MAX_TAPS,
 };
-use tspi_dsp_core::rt::{RtStatus, MAX_PARTITIONS, TAPS_EXTENDED_MAX};
+use khaen_core::rt::{RtStatus, MAX_PARTITIONS, TAPS_EXTENDED_MAX};
 
 /// participants 数（生产 MIMO 低频 5x5；g 全零只测成本）。
 const M: usize = 5;

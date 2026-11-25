@@ -1,10 +1,10 @@
-# tspi-audio-web API 文档
+# khaen-audio-web API 文档
 
 > 适用版本：v0.1.0 · 默认监听 `0.0.0.0:80`（局域网直接 `http://<设备IP>/`，无需记端口；mock 为 `127.0.0.1:80`；
 > 如 80 被占用可改 `listen` 回退 8088）· 除静态资源外均返回 JSON
 > 与代码保持一致：以 `src/routes/` 为准；发现不一致请提 issue。
 >
-> **现行口径（2026-11-17，F-04/F-44）**：本文件对应的 `tspi-audio-web` 属 **S1 退役栈镜像**——Phase 1 运行镜像不安装它（compat-matrix §F-21），现行 REST/WS/Web 由 `tspi-rt-daemon`（T42/T44/T70）提供；本文仅作历史/迁移参考。
+> **现行口径（2026-11-17，F-04/F-44）**：本文件对应的 `khaen-audio-web` 属 **S1 退役栈镜像**——Phase 1 运行镜像不安装它（compat-matrix §F-21），现行 REST/WS/Web 由 `tspi-rt-daemon`（T42/T44/T70）提供；本文仅作历史/迁移参考。
 > **CamillaDSP 已退役**（Phase 1 不运行，仅历史/离线 oracle）；旧 web 只保留只读 legacy 状态面（`GET /api/camilladsp` 带 `legacy: true`），**不再提供启停接口**（F-04 已删除 `POST /api/camilladsp/{start,stop,restart}`）。
 > **采样率硬约束**：只允许 **44.1/48/88.2/96 kHz**（默认 48 kHz；Dante 96 kHz）；**禁止 176.4/192 kHz**，`PUT /api/audio/format` 提交 192000/176400 → **400**。
 
@@ -12,10 +12,10 @@
 
 | 项目 | 说明 |
 | --- | --- |
-| 管理密码 | 首次打开 Web 设置（`POST /api/auth/setup`），Argon2id 哈希写 `/etc/tspi-audio-web/auth.json`（0600）；设置后密码登录 |
-| token（恢复兜底） | 配置文件 `/etc/tspi-audio-web/config.toml` 的 `token`；保留用于恢复/CLI，`--print-token` 可查，不因设置密码失效 |
+| 管理密码 | 首次打开 Web 设置（`POST /api/auth/setup`），Argon2id 哈希写 `/etc/khaen-audio-web/auth.json`（0600）；设置后密码登录 |
+| token（恢复兜底） | 配置文件 `/etc/khaen-audio-web/config.toml` 的 `token`；保留用于恢复/CLI，`--print-token` 可查，不因设置密码失效 |
 | 公开接口 | `GET /healthz`、`GET /api/auth/status`、`POST /api/auth/setup`（仅未设置密码时）、`POST /api/auth/login`、静态资源 |
-| 其余接口 | 必须认证：浏览器会话 Cookie `tspi_session`（HttpOnly/SameSite=Strict），或请求头 `X-Auth-Token` / `Authorization: Bearer <token>` |
+| 其余接口 | 必须认证：浏览器会话 Cookie `khaen_session`（HttpOnly/SameSite=Strict），或请求头 `X-Auth-Token` / `Authorization: Bearer <token>` |
 | CSRF | 会话 Cookie 的写操作（POST/PUT/PATCH/DELETE）必须带 `X-CSRF-Token`（登录响应/`GET /api/auth/session` 返回）；Header token 认证不需要 |
 | 会话 | 有效期 `session_ttl_secs`（默认 43200 秒）；内存会话，服务重启后失效 |
 | 登录限速 | 同一客户端密码/token 连续失败 5 次锁定 `login_lockout_secs` 秒（默认 60） |
@@ -59,15 +59,15 @@
 ### POST /api/auth/setup（无需认证，仅未配置时）
 
 请求：`{ "password": "至少 8 位", "confirm": "再次输入" }`；密码 ≥8 位（推荐 10+）、两次一致。
-成功写 `/etc/tspi-audio-web/auth.json`（Argon2id PHC，0600）并立即登录；已配置后返回 **409 conflict**。
+成功写 `/etc/khaen-audio-web/auth.json`（Argon2id PHC，0600）并立即登录；已配置后返回 **409 conflict**。
 
-响应 200（同时 `Set-Cookie: tspi_session=...`）：同登录响应。
+响应 200（同时 `Set-Cookie: khaen_session=...`）：同登录响应。
 
 ### POST /api/auth/login
 
 请求二选一：`{ "password": "管理密码" }` 或 `{ "token": "配置里的 token" }`（token 为恢复/CLI 兜底，两者都可）。
 
-响应 200（同时 `Set-Cookie: tspi_session=...; HttpOnly; SameSite=Strict`）：
+响应 200（同时 `Set-Cookie: khaen_session=...; HttpOnly; SameSite=Strict`）：
 
 ~~~json
 { "ok": true, "csrf_token": "48 位十六进制", "expires_in": 43200, "auth_kind": "session" }
@@ -273,7 +273,7 @@ Inferno 无统一配置文件（上游用 `INFERNO_*` 环境变量 / `/etc/asoun
 
 校验不一致时 `ok: false`、`rollback: true`，`mismatches[]` 带 `key/index/expected/actual`，并带 `error: { "code": "internal_error", "message": "..." }`。
 
-真机快照目录默认 `/var/lib/tspi-audio-web/motu-snapshots/`，只留最近 20 份。mock 快照只在内存里。
+真机快照目录默认 `/var/lib/khaen-audio-web/motu-snapshots/`，只留最近 20 份。mock 快照只在内存里。
 
 ## 10. 声道分配 / 校准 / remap（channelmap v2）
 

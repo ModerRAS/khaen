@@ -47,7 +47,7 @@
 //!   且 slot 覆盖 0..participants.len()、render_frame_index 与 capture_sample_index 随 slot 严格递增。
 //!   全部 position 必须共享同一 session_id/epoch_id/graph_id（公共 render frame 基准；跨 position
 //!   不复用 capture 属正常，时间轴重建由 T49 完成）。
-//! - analysis.json：schema tspi-channel-measurement/v1 + meta schema tspi-calibration-meta/v1；
+//! - analysis.json：schema tspi-channel-measurement/v1 + meta schema khaen-calibration-meta/v1；
 //!   必须与 session 的 fs/设备/通道/sweep 参数一致，channel == speaker.out_index，FR 频点有限且严格递增，
 //!   freq_hz ∈ (0, fs/2]。onset_invalid=true / clock_ppm_ok=false / clock_ppm_significant=true 且
 //!   drift_corrected!=true → 拒交付。
@@ -86,7 +86,7 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     MAX_INPUT_CHANNELS, MAX_LOW_BAND_PARTICIPANTS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ,
 };
 
@@ -96,10 +96,10 @@ pub const SESSION_SCHEMA: &str = "tspi-mimo-measurement/v1";
 pub const POSITION_SCHEMA: &str = "tspi-mimo-position/v1";
 /// 公共时轴 diag schema（本模块冻结）。
 pub const DIAG_SCHEMA: &str = "tspi-mimo-diag/v1";
-/// source 分析产物 schema（复用 tspi-calibrate measure-multi；只读兼容）。
+/// source 分析产物 schema（复用 khaen-calibrate measure-multi；只读兼容）。
 pub const ANALYSIS_SCHEMA: &str = "tspi-channel-measurement/v1";
-/// source 分析产物 meta schema（复用 tspi-calibrate measure-multi；只读兼容）。
-pub const ANALYSIS_META_SCHEMA: &str = "tspi-calibration-meta/v1";
+/// source 分析产物 meta schema（复用 khaen-calibrate measure-multi；只读兼容）。
+pub const ANALYSIS_META_SCHEMA: &str = "khaen-calibration-meta/v1";
 /// 输入文件 hash 清单文件名。
 pub const SHA256SUMS_FILE: &str = "SHA256SUMS";
 /// session 清单文件名。
@@ -660,7 +660,7 @@ pub struct TimebaseDiag {
     pub onset_invalid: bool,
 }
 
-/// source 分析产物的 meta（schema tspi-calibration-meta/v1，复用 measure-multi）。
+/// source 分析产物的 meta（schema khaen-calibration-meta/v1，复用 measure-multi）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisMeta {
     /// 采样率。
@@ -2115,7 +2115,7 @@ fn parse_session(
     let block_frames = match opt_u64(entries, "block_frames", context)? {
         None => None,
         Some(value) => {
-            if value > u16::MAX as u64 || !tspi_dsp_core::rt::BLOCK_SIZES.contains(&(value as u16))
+            if value > u16::MAX as u64 || !khaen_core::rt::BLOCK_SIZES.contains(&(value as u16))
             {
                 return Err(IngestError::unsupported(
                     format!("{context}.block_frames"),

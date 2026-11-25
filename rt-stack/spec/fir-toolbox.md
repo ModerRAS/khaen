@@ -986,7 +986,7 @@ JSON 形式：`source_hash` 若给出，必须是 points 数组的**规范序列
 |---|---|---|
 | crates/designer/src/crossover.rs | 89,661 / 6df537d0e15fc4c48ff31c1a9702d66a994b7c74e562d431455f123ae1403dba | RULED 模块文档（§45-58）、FC 常量（§113-118）、AnalyticPhase/家族极性实现 |
 | crates/designer/tests/T39/crossover_cases.rs | 50,719 / 973bde610173b7d27af30c5dc37f1e057ca7efbd060a4fd2b8f47ffa9d8616fa | RULED 档位（§1082+）/家族极性（§1133+）/AnalyticPhase 自洽用例 |
-| rt-stack/evidence/T39/run-tests.log | 2,561 / b98ff89e10d8c15df6907493be7bb3f113625f9d9b331df64bbf63c4b27d8160 | `cargo test -p tspi-fir-designer crossover`：15 passed / 0 failed |
+| rt-stack/evidence/T39/run-tests.log | 2,561 / b98ff89e10d8c15df6907493be7bb3f113625f9d9b331df64bbf63c4b27d8160 | `cargo test -p khaen-designer crossover`：15 passed / 0 failed |
 | rt-stack/evidence/T39/metrics.log | 16,605 / b5726a1353d411314f2d7ac87762b346d0d9a5d446c5df926aff2eab3d66e776 | LR4 sum dev 0.0288 dB；BW6 flat_dev 2.8710 accepted=false；BW7 0.000422 等 |
 | rt-stack/evidence/T39/MANIFEST.md | 16,615 / c2bcf3b0d1bccac06047295dde31e6f9f0427d8259d864e7400611eac65c6a9f | §5 §4.1 映射 / §6 设计口径 / §7 实测快照（注意 §2 源码/测试哈希为修复前口径） |
 | scratch/lead/rt-reviews/FIR-DESIGNER-review.md | 10,884 / 848750cf87a2cc55e62651940045e23dc483c9bd3e1b4b6a82ab19baf608f5f1 | 外部评审：I01 fc>0.2fs 未落地、I02 §4.1 构造冲突 → 由 errata B + T39 修复关闭 |
@@ -1006,9 +1006,9 @@ JSON 形式：`source_hash` 若给出，必须是 points 数组的**规范序列
 
 复跑（组 A 收尾实测，详见各证据目录 COMMANDS.md）：
 
-    cargo test -p tspi-fir-designer --offline            # 0 failed
-    cargo test -p tspi-fir-designer --offline xover      # T39 filter，executed > 0
-    cargo test -p tspi-fir-designer --offline t11        # T11 filter，executed > 0
+    cargo test -p khaen-designer --offline            # 0 failed
+    cargo test -p khaen-designer --offline xover      # T39 filter，executed > 0
+    cargo test -p khaen-designer --offline t11        # T11 filter，executed > 0
     python rt-stack/evidence/T04/check_spec.py           # exit 0（本 errata 的断言已加入）
 
 注：本轮修复后 `crossover.rs` 与 `tests/T39/crossover_cases.rs` 哈希再次变化，§12.9 表中的 2026-11-17 13:0x 快照仅作历史记录；最新哈希以 `evidence/cursor-overflow/F-22|F-24/after.sha256` 为准。本 errata 除 F-22/F-23/F-24 条款外不改其它判据语义。

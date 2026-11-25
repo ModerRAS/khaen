@@ -1,4 +1,4 @@
-# 校准规范（设计侧）—— tspi-calibration/v1 / v1.1
+# 校准规范（设计侧）—— khaen-calibration/v1 / v1.1
 
 > 维护：upmix-dev（设计/契约/验收）；实现：audio-stack（projects/tspi-audio-dsp/calibrate/，Rust）。
 > Lead 要求：本 task 只出**规范和 review**，不改 calibrate/ 代码。
@@ -8,7 +8,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| CONTRACT.md | tspi-calibration/v1 / v1.1 YAML 契约：字段/语义/归一化/到 channelmap v2 与 CamillaDSP 的映射/校验规则 |
+| CONTRACT.md | khaen-calibration/v1 / v1.1 YAML 契约：字段/语义/归一化/到 channelmap v2 与 CamillaDSP 的映射/校验规则 |
 | ACCEPTANCE.md | 验收口径 T0–T6：1:1 环回、UMIK 实测、**应用后复测（T3 必须，K4）**、holdout（T6）、**合并响应/相位抵消判据**、64/128 帧实时链路、负向用例；话筒方向/校准文件、kMainTrim/电平/噪声底、报告 schema |
 | examples/ | 5.3.2、4.1.2，以及 v1.1 两通道 high_shelf（`calibration-v11-highshelf.example.yml` + 同名 `.camilladsp.yml`） |
 | tools/validate_calibration.py | 契约校验器（支持 v1/v1.1；**独立复核**入口；stdlib + PyYAML；可板端跑）。v1.1：peaking q≥0.1 无上限；shelf q∈[0.1, 1.0] |
@@ -18,12 +18,12 @@
 
 ## 校验入口
 
-`tspi-calibrate validate` 是**主入口**（producer 自带，板端可跑）；Python 校验器保留为**独立复核**
+`khaen-calibrate validate` 是**主入口**（producer 自带，板端可跑）；Python 校验器保留为**独立复核**
 （支持 v1/v1.1，不依赖 Rust 二进制；额外提供 `--layout-presets` 映射交叉校验和逐条 warning 明细）。
 
 ```bash
 # 主入口（Rust）
-tspi-calibrate validate calibration.yml
+khaen-calibrate validate calibration.yml
 
 # 独立复核（Python）
 python3 tools/validate_calibration.py calibration.yml \
@@ -86,9 +86,9 @@ python3 tools/check_pair_response.py --h1 FL-fr.csv --h2 SUB1-fr.csv --fc 80
 - Round 3 review（P0 修复后）：@review/CALIBRATE-ROUND3-REVIEW.md@ —— **P0 全部关闭**（极性只取校准字段、arecord 参数化、
   measure-multi 逐槽互相关检测、FR re/im+phase_ref 可独立重建）；外部 checker 复算与其 pairs.json 一致；余 P1（reference_index、
   fit 归一化、角色名、PEQ clamp、报告 schema、SNR 等）不阻塞板端。待板端 T1/T4/T5。
-- 2026-11-16：**v1.1 已实现**：Rust `tspi-calibrate` 写出 `schema: tspi-calibration/v1.1`；`filters[].type` 允许
+- 2026-11-16：**v1.1 已实现**：Rust `khaen-calibrate` 写出 `schema: khaen-calibration/v1.1`；`filters[].type` 允许
   `peaking|low_shelf|high_shelf`，v1.1 的 `q` 只要求有限且 ≥ 0.1（无上限）；v1 文件仍只允许 peaking 且 Q≤10。
-  校验入口分工：`tspi-calibrate validate` 为主入口，Python 校验器为独立复核（支持 v1/v1.1）。
+  校验入口分工：`khaen-calibrate validate` 为主入口，Python 校验器为独立复核（支持 v1/v1.1）。
 - 2026-11-16：**校验器收尾**：修复「v1.1 纯 Peaking 但 Q>10 仍被标注『v1 可读取』」的误报（v1 消费方会拒绝 Q>10），
   该提示改为只在文件无 error 时给出。用例矩阵（v1 示例 ×4、v1.1 high_shelf、v1.1 Q>10、Q=0.1/Q=10 边界、Q<0.1、q=.nan、
   freq 19/20000/20001、v1+shelf、未知 schema、未知 type）与 Rust `validate` 交叉核对结论一致；

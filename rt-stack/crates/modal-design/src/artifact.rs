@@ -2,7 +2,7 @@
 //!
 //! **状态：T54 leaf 实现（WBS T54）。** 本模块把 T51/T52 的完整 G 修正系数
 //! （g[out][in][tap]，**不含** delta_D baseline；完整 G = delta_D*I + g，与
-//! tspi_dsp_core::compile::CompileInput.g 布局一致）冻结成一套**逐路径系数 artifact**：
+//! khaen_core::compile::CompileInput.g 布局一致）冻结成一套**逐路径系数 artifact**：
 //! 每路径一个单声道 WAVE_FORMAT_IEEE_FLOAT（f32，fs = 设计 fs，长度 = taps，
 //! **不做任何归一化**）+ 一个确定性 JSON manifest（schema tspi-modal-artifact/v1）。
 //!
@@ -68,7 +68,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use tspi_dsp_core::rt::{MAX_LOW_BAND_PARTICIPANTS, TAPS_NORMAL_MAX};
+use khaen_core::rt::{MAX_LOW_BAND_PARTICIPANTS, TAPS_NORMAL_MAX};
 
 use crate::ingest::sha256_hex;
 use crate::regularize::RegularizeOutcome;

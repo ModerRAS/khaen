@@ -40,7 +40,7 @@ python tools/board/run_acceptance.py t5 --out DIR
 | `--out DIR` | 必填 | `run.json`、`logs/`、拉回的产物 |
 | `--host` | `192.0.2.215` | 板子地址 |
 | `--key` | `deploy/ssh/tspi_audio_ed25519` | ed25519 私钥；dry-run 只检查文件存在 |
-| `--calibrate-bin` | `/tmp/tspi-calibrate` | 板上二进制，必须是绝对路径且文件名是 `tspi-calibrate` |
+| `--calibrate-bin` | `/tmp/khaen-calibrate` | 板上二进制，必须是绝对路径且文件名是 `khaen-calibrate` |
 | `--pairs` | 无 | live 的 `t4` 和 `all` 必填，原样传给 `merge`；**pair=同一源信号+互补 LR4 分频，fc 必须等于 profile 某 HP/LP 频率**；effect channel（C/SL/SR/HFL/HFR）不参与 pair；D3：5.3.2 中置全频设计、当前无中置，中置 HP80/重定向/pair deferred/NEEDS_HW；当前 4.1.2 只允许 `FL:SUB1:80,FR:SUB1:80`（C-15/B2） |
 | `--cuemix-state FILE` | 无 | T1 记录用的 JSON；不给则两个 CueMix 字段为 null |
 

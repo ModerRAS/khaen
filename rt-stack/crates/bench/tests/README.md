@@ -1,4 +1,4 @@
-# tests/ —— tspi-bench 私有测试占位
+# tests/ —— khaen-bench 私有测试占位
 
 - 公共注册文件：`public_registration.rs`（integrator 独占）。
 - T06 自证测试（integrator 写）：abi_layout.rs / const_contract.rs 等。

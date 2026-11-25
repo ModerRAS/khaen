@@ -3,7 +3,7 @@
 // 归属：WBS T34 / task-72，owner rt-fir-minslow；写域 leaf + tests/T34 + evidence/T34。
 // 本文件通过 src/min_slow.rs 末尾的 include! 进入 #[cfg(test)] 子模块执行：
 //
-//     cargo test -p tspi-fir-designer min_slow
+//     cargo test -p khaen-designer min_slow
 //
 // 测试覆盖（对应 spec fir-toolbox.md v1.2 §3.3 判据 1–6、§3.8 家族互斥、§3.2 判据 2/3、
 // §1.2/§1.3/§1.4/§1.5/§2.4、§9 V17 参考构造）：

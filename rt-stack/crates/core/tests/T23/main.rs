@@ -16,17 +16,17 @@
 //! - 未按 role 名硬编码：重命名不改变图语义，高度无默认 HP/LP/人工 delay。
 //!
 //! 自包含（无第三方依赖）；Cargo 自动把 tests/T23/main.rs 发现为集成测试 target。
-//! 运行：cargo test -p tspi-dsp-core nodes
+//! 运行：cargo test -p khaen-core nodes
 
 use std::sync::atomic::AtomicU32;
 
-use tspi_dsp_core::abi::TspiBlockAckV1;
-use tspi_dsp_core::compile::{CompileOptions, FusionForm, COMPILE_NO_SOURCE};
-use tspi_dsp_core::direct::{
+use khaen_core::abi::TspiBlockAckV1;
+use khaen_core::compile::{CompileOptions, FusionForm, COMPILE_NO_SOURCE};
+use khaen_core::direct::{
     direct_block_f32, direct_block_f64, DirectCoeffsF32, DirectCoeffsF64, DirectLayout,
     DirectTopology,
 };
-use tspi_dsp_core::nodes::{
+use khaen_core::nodes::{
     compose_fir_segments, crc32c, db_to_linear, modal_freq_upper_hz, scatter_zero_fill_containers,
     volume_gain_db_at_frame, volume_linear_gain_at_frame, volume_ramp_db_step, ClipGuardConfig,
     FirSegment, FirSegmentKind, GraphConfig, LimiterConfig, LowBandConfig, LoweredGraph,
@@ -35,9 +35,9 @@ use tspi_dsp_core::nodes::{
     F32_QUANTIZATION_TOL_DB, MODAL_BIQUADS_MAX, OUTPUT_FIR_SEGMENTS_MAX, POLE_RADIUS_MAX,
     ROLE_FLAG_ENABLED, ROLE_FLAG_ZERO_FILL,
 };
-use tspi_dsp_core::partitioned::{partitioned_block_f32, PartitionedLayout, PartitionedPlan};
-use tspi_dsp_core::rt::RtStatus;
-use tspi_dsp_core::workers::{
+use khaen_core::partitioned::{partitioned_block_f32, PartitionedLayout, PartitionedPlan};
+use khaen_core::rt::RtStatus;
+use khaen_core::workers::{
     execute_block_scheduled, WorkerDagPlan, WorkerPartials, WorkerScheduleStats,
     WORKER_ACK_FLAG_VALID,
 };
@@ -982,10 +982,10 @@ fn nodes_modal_iir_not_truncated_into_fir_and_commutes() {
     for (index, slot) in iir_ir.iter_mut().enumerate() {
         let input = if index == 0 { 1.0 } else { 0.0 };
         *slot =
-            tspi_dsp_core::nodes::biquad_process_df2t_f64(&band.b, &band.a, &mut iir_state, input);
+            khaen_core::nodes::biquad_process_df2t_f64(&band.b, &band.a, &mut iir_state, input);
     }
-    let kernel_then_iir = tspi_dsp_core::compile::convolve_linear(&fir, &iir_ir);
-    let iir_then_kernel = tspi_dsp_core::compile::convolve_linear(&iir_ir, &fir);
+    let kernel_then_iir = khaen_core::compile::convolve_linear(&fir, &iir_ir);
+    let iir_then_kernel = khaen_core::compile::convolve_linear(&iir_ir, &fir);
     assert_eq!(kernel_then_iir.len(), iir_then_kernel.len());
     let mut max_diff: f64 = 0.0;
     for (left, right) in kernel_then_iir.iter().zip(iir_then_kernel.iter()) {

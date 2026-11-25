@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/designer/src/apodizing.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （见 tests/T35/README.md；不改 integrator 独占的 public_registration.rs）。
-// 运行：cargo test -p tspi-fir-designer apodizing
+// 运行：cargo test -p khaen-designer apodizing
 //
 // T04 参考向量：evidence/T04/recompute-vectors.mjs V16（apodizing/brickwall/边界）。
 

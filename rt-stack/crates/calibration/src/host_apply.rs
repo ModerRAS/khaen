@@ -3,7 +3,7 @@
 //! 背景（T67 pilot 阻塞）：T66 `compile_apply` 的 Apply 段此前只有
 //! `OfflineSyntheticAck`（T66 自己标注的 NONRT 离线模型），"host plan apply" 完全
 //! 未接线（pilot REPORT §9）。本模块把 **真实 T66 plan 字节** 交给真实的
-//! `tspi-rt-host run --config <plan-arena>`：
+//! `khaen-rt-host run --config <plan-arena>`：
 //!
 //! 1. `write_plan_bundle`：把 `CompiledPlan.plan_bytes` 写为 `plan.bin`，把
 //!    `compile-report.json` 写为 manifest（host 用 `plan_sha256` + `host_graph_sha256`
@@ -33,8 +33,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tspi_dsp_compat::ws::{json_encode, json_object, json_parse, JsonValue};
-use tspi_dsp_core::abi::TspiBlockAckV1;
+use khaen_compat::ws::{json_encode, json_object, json_parse, JsonValue};
+use khaen_core::abi::TspiBlockAckV1;
 
 use crate::compile_apply::CompiledPlan;
 use crate::job::sha256_hex;
@@ -64,7 +64,7 @@ pub const E_HOST_ACK: &str = "E_WIRING_HOST_ACK";
 /// rt-host plan-arena 应用配置（本 crate 只写文件/起进程，不打开设备）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostApplyConfig {
-    /// `tspi-rt-host` 可执行文件路径（默认 env TSPI_RT_HOST_BIN 或 "tspi-rt-host"）。
+    /// `khaen-rt-host` 可执行文件路径（默认 env TSPI_RT_HOST_BIN 或 "khaen-rt-host"）。
     pub host_bin: PathBuf,
     /// ALSA backend："fake"（离线）或 "alsa"（板端真实设备；由 host 打开）。
     pub backend: String,
@@ -105,7 +105,7 @@ impl Default for HostApplyConfig {
     fn default() -> Self {
         let host_bin = std::env::var("TSPI_RT_HOST_BIN")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("tspi-rt-host"));
+            .unwrap_or_else(|_| PathBuf::from("khaen-rt-host"));
         HostApplyConfig {
             host_bin,
             backend: "fake".to_string(),
@@ -304,7 +304,7 @@ impl HostApplyOutcome {
             (
                 "note",
                 JsonValue::String(
-                    "block all-ack 来自真实 tspi-rt-host plan-arena 运行（per-block completed_block_ack）；
+                    "block all-ack 来自真实 khaen-rt-host plan-arena 运行（per-block completed_block_ack）；
 abi 映射为 TspiBlockAckV1 后喂 T66 ApplySession。backend=fake 时无真实声卡/声音；backend=alsa 属板端窗口。"
                         .to_string(),
                 ),
@@ -423,7 +423,7 @@ pub fn run_host_apply(
         .output()
         .map_err(|error| {
             format!(
-                "{E_HOST_RUN}: 启动 {} 失败：{error}（离线需 --host-bin 指向已构建的 tspi-rt-host；板端为 /opt/tspi-rt-stack/current/bin/tspi-rt-host）",
+                "{E_HOST_RUN}: 启动 {} 失败：{error}（离线需 --host-bin 指向已构建的 khaen-rt-host；板端为 /opt/tspi-rt-stack/current/bin/khaen-rt-host）",
                 config.host_bin.display()
             )
         })?;
@@ -603,7 +603,7 @@ mod host_apply_tests {
     }
 
     const GOOD_REPORT: &str = concat!(
-        r#"{"status":"ok","mode":"tspi-rt-host-run","graph":"plan-arena","blocks":8,"#,
+        r#"{"status":"ok","mode":"khaen-rt-host-run","graph":"plan-arena","blocks":8,"#,
         r#""plan":{"source":"primary","path":"work/plan.bin","bytes":716,"sha256":"AAAA","#,
         r#""graph_id":"CCCC","version":1,"parse":"t20-ok","header_crc32c":"ok","#,
         r#""manifest":"verified","form":"factorized","admission":"mock"},"#,
@@ -621,7 +621,7 @@ mod host_apply_tests {
     #[test]
     fn t224_host_config_text_is_plan_arena_with_manifest() {
         let config = HostApplyConfig {
-            host_bin: PathBuf::from("tspi-rt-host"),
+            host_bin: PathBuf::from("khaen-rt-host"),
             backend: "fake".to_string(),
             work_dir: PathBuf::from("work"),
             ..HostApplyConfig::default()

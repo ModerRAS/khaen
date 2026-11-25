@@ -37,14 +37,14 @@ pub fn audit_types() -> Report {
         }};
     }
 
-    use tspi_dsp_core::abi::{
+    use khaen_core::abi::{
         TspiBlockAckV1, TspiBlockDescV1, TspiDiagFirV1, TspiEpochInfoV1, TspiEventV1,
         TspiHwParamsV1, TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, TspiSpscHeaderV1,
         TspiWorkerStatsV1,
     };
-    use tspi_dsp_core::rt::{BlockIo, PlanRef, PlanView, RtControl, RtStatus, WorkerRtCtx};
-    use tspi_rt_host::fault::{EventRingLane, SafetyAction, WatchdogAction};
-    use tspi_rt_host::format::{DitherCfg, FormatStats};
+    use khaen_core::rt::{BlockIo, PlanRef, PlanView, RtControl, RtStatus, WorkerRtCtx};
+    use khaen_rt_host::fault::{EventRingLane, SafetyAction, WatchdogAction};
+    use khaen_rt_host::format::{DitherCfg, FormatStats};
 
     no_drop!("RtStatus", RtStatus);
     no_drop!("PlanRef", PlanRef);

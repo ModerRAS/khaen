@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把 tspi-calibration/v1 或 v1.1 应用到消费方配置（纯标准库 + PyYAML）。
+"""把 khaen-calibration/v1 或 v1.1 应用到消费方配置（纯标准库 + PyYAML）。
 
 不修改输入文件。退出码：0 成功（可有 WARN）；1 校验/合并失败；2 用法、依赖或读取错误。
 
@@ -522,7 +522,7 @@ def main(argv=None):
         description="把校准应用到 channelmap profile，或把 CamillaDSP 片段合并进完整配置。",
     )
     ap.add_argument("--channelmap", help="模式 1：channelmap v2 profile")
-    ap.add_argument("--calibration", help="模式 1：tspi-calibration/v1 或 v1.1 YAML")
+    ap.add_argument("--calibration", help="模式 1：khaen-calibration/v1 或 v1.1 YAML")
     ap.add_argument("--layout-role-map", default="auto",
                     help="auto=通道名对 role id；或一个 {name: role_id} YAML")
     ap.add_argument("--channelmap-bin", default=None, help="tspi-channelmap 路径（默认同仓库 overlay）")

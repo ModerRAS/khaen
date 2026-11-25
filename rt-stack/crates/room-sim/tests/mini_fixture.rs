@@ -5,13 +5,13 @@
 
 use std::path::{Path, PathBuf};
 
-use tspi_room_sim::fft::rfft;
-use tspi_room_sim::fixture::SceneFixture;
-use tspi_room_sim::ism::{arrivals, ArrivalPlacement};
-use tspi_room_sim::rir::render;
-use tspi_room_sim::room::{Position, RoomModel, SurfaceReflections};
-use tspi_room_sim::sha256::file_hex;
-use tspi_room_sim::wav::{read_f32_mono, write_f32_mono};
+use khaen_room_sim::fft::rfft;
+use khaen_room_sim::fixture::SceneFixture;
+use khaen_room_sim::ism::{arrivals, ArrivalPlacement};
+use khaen_room_sim::rir::render;
+use khaen_room_sim::room::{Position, RoomModel, SurfaceReflections};
+use khaen_room_sim::sha256::file_hex;
+use khaen_room_sim::wav::{read_f32_mono, write_f32_mono};
 
 const SAMPLE_RATE_HZ: u32 = 8000;
 const FFT_SIZE: usize = 256;
@@ -27,7 +27,7 @@ fn scratch_root(tag: &str) -> PathBuf {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     let root = base.join(format!(
-        "tspi-room-sim-mini-{tag}-{}-{unique}",
+        "khaen-room-sim-mini-{tag}-{}-{unique}",
         std::process::id()
     ));
     std::fs::create_dir_all(&root).unwrap();
@@ -60,7 +60,7 @@ fn mini_mics() -> Vec<(&'static str, Position, &'static str)> {
 
 const GROUND_TRUTH_TEMPLATE: &str = r#"{
   "format": "tspi-roomforge-mimo-fixture/v1",
-  "generator": "tspi-room-sim mini fixture test",
+  "generator": "khaen-room-sim mini fixture test",
   "generator_version": "0.0.0",
   "scene_id": "scene-mini",
   "seed": 42,

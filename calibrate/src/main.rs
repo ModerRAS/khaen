@@ -1,4 +1,4 @@
-//! tspi-calibrate：多声道扬声器延迟/极性/相位/PEQ 校准工具。
+//! khaen-calibrate：多声道扬声器延迟/极性/相位/PEQ 校准工具。
 //! 单二进制；测量用 aplay/arecord（S24_3LE），DSP/拟合/合并验证全在 Rust 内完成。
 mod check;
 mod dsp;
@@ -295,7 +295,7 @@ fn flip_estimators(e: &model::PolarityEstimators, off: i32) -> model::PolarityEs
 
 fn meta(sp: &SweepParams, pb: &str, pbc: usize, cap: &str, capc: usize) -> Meta {
     Meta {
-        schema: "tspi-calibration-meta/v1".into(),
+        schema: "khaen-calibration-meta/v1".into(),
         sample_rate: sp.rate,
         channels: pbc,
         sweep_start_hz: sp.start_hz,
@@ -863,12 +863,12 @@ fn cmd_fit(a: &A) -> Result<(), String> {
     let rms = rep.rms;
     let max = rep.max_abs;
     let cal = Calibration {
-        schema: "tspi-calibration/v1.1".into(),
+        schema: "khaen-calibration/v1.1".into(),
         sample_rate: meas.meta.sample_rate,
         reference_index: meas.channel,
         layout: a.get("layout").map(|s| s.to_string()),
         created_unix: Some(now_unix()),
-        tool: Some("tspi-calibrate".into()),
+        tool: Some("khaen-calibrate".into()),
         version: Some(env!("CARGO_PKG_VERSION").into()),
         note: format!(
             "channel {} correct target={target_id}; rms_residual={:.3}dB max={:.2}dB applied_boost={:.2}dB total_boost={:.2}dB headroom={:.2}dB clip_risk={}",
@@ -1210,7 +1210,7 @@ fn cal_to_camilladsp(cal: &Calibration) -> serde_json::Value {
         }
     }
     serde_json::json!({
-        "schema": "tspi-calibration-camilladsp/v1",
+        "schema": "khaen-calibration-camilladsp/v1",
         "note": "filters/pipeline 可直接合并进渲染后的 CamillaDSP config（极性已由 Gain inverted 实现）；channelmap_roles 仅 advisory，两条路径二选一，勿同时应用以免双反相",
         "filters": filters,
         "pipeline": pipeline,
@@ -1560,12 +1560,12 @@ fn cmd_merge(a: &A) -> Result<(), String> {
         ch.filters = stages.clone();
     }
     let cal = Calibration {
-        schema: "tspi-calibration/v1.1".into(),
+        schema: "khaen-calibration/v1.1".into(),
         sample_rate: rate as u32,
         reference_index,
         layout: a.get("layout").map(|s| s.to_string()),
         created_unix: Some(now_unix()),
-        tool: Some("tspi-calibrate".into()),
+        tool: Some("khaen-calibrate".into()),
         version: Some(env!("CARGO_PKG_VERSION").into()),
         note: "merged multi-channel calibration".into(),
         channels,
@@ -1719,7 +1719,7 @@ fn cmd_merge(a: &A) -> Result<(), String> {
     let cal_sha = format!("{:x}", Sha256::digest(&cal_bytes));
     // validation.json：保留既有 schema/字段，新增 status/gate/advisory 说明。
     let validation = ValidationReport {
-        schema: "tspi-calibration-validation/v1".into(),
+        schema: "khaen-calibration-validation/v1".into(),
         passed: pairs_given && all_pairs_pass,
         f_min_hz: f_lo,
         f_max_hz: f_max,
@@ -1810,8 +1810,8 @@ fn cmd_merge(a: &A) -> Result<(), String> {
         "reason": "全局全通道求和只作 advisory 诊断，不参与 overall_status/overall_pass（ACCEPTANCE §6.1/C-P1-5）",
     });
     let report = serde_json::json!({
-        "schema": "tspi-calibration-report/v1",
-        "tool": {"name": "tspi-calibrate", "version": env!("CARGO_PKG_VERSION")},
+        "schema": "khaen-calibration-report/v1",
+        "tool": {"name": "khaen-calibrate", "version": env!("CARGO_PKG_VERSION")},
         "created_unix": now_unix(),
         "calibration_file": {"path": out.display().to_string(), "sha256": cal_sha},
         "layout": cal.layout, "sample_rate": cal.sample_rate,
@@ -2898,7 +2898,7 @@ fn cmd_measure_multi(a: &A) -> Result<(), String> {
         }
         slot_onsets.push(abs_delay);
         let diag = serde_json::json!({
-            "schema": "tspi-calibration-diag/v1",
+            "schema": "khaen-calibration-diag/v1",
             "channel": ch, "name": name, "slot": i,
             "nominal_start": nominal, "actual_start": start, "lag_samples": lag,
             "repeats": repeats,
@@ -2966,7 +2966,7 @@ fn cmd_measure_multi(a: &A) -> Result<(), String> {
             (Some(fit.ppm), fit.valid, Some(fit.residual_rms))
         };
         let session = serde_json::json!({
-            "schema": "tspi-calibration-session-diag/v1",
+            "schema": "khaen-calibration-session-diag/v1",
             "repeats": repeats,
             "repeat_gap_seconds": if repeats > 1 { repeat_gap_s } else { 0.0 },
             "slot_samples": slot,
@@ -3113,28 +3113,28 @@ fn cmd_check_pair(a: &A) -> Result<(), String> {
 
 fn usage() {
     println!(
-        r#"tspi-calibrate — 多声道延迟/极性/相位/PEQ 校准（Rust 单二进制）
+        r#"khaen-calibrate — 多声道延迟/极性/相位/PEQ 校准（Rust 单二进制）
 
 用法:
-  tspi-calibrate sweep        --out F.raw [--channels 22 --channel 0 --rate 48000 --seconds 5 --level-db -30 --start-hz 20 --end-hz 20000 --pre-seconds 1 --post-seconds 1]
-  tspi-calibrate sweep-all    --dir DIR [--channels 22 ...]
-  tspi-calibrate measure      --out cap.raw --channel N [--playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 2 ...]
-  tspi-calibrate analyze      --capture cap.raw --out-prefix results/ch00 --channel N [--capture-channel 0 --capture-channels 2 --repeats 3 --repeat-gap 0.2 --robust-polarity --drift-correct --max-ppm 100 --fr-points N --fr-oct 1/48]
-  tspi-calibrate fit          --analysis results/ch00.analysis.json --out results/ch00.calibration.yml [--target flat|tilt10|@file#id --band 80:16000 --band FL=80:16000 --hp 80 --lp 16000 --boost-cap-db 3 --positions DIR --max-stages 22]
-  tspi-calibrate measure-multi --out-dir DIR --out-prefix results/run --channels 0,1,2,3 --names FL,FR,SL,SR [--mic umik --period-size 512 --buffer-size 2048 --repeats 3 --repeat-gap 0.2 --robust-polarity --drift-correct --capture2 hw:4,0 --capture2-channels 20 --capture2-channel 0 --capture2-name REF]
-  tspi-calibrate measure-multi --out-dir DIR --loopback-map 9:7 --capture-channels 8 --verify-mapping   # T1 抽检（out9→in7，可多对 9:7,1:1）
+  khaen-calibrate sweep        --out F.raw [--channels 22 --channel 0 --rate 48000 --seconds 5 --level-db -30 --start-hz 20 --end-hz 20000 --pre-seconds 1 --post-seconds 1]
+  khaen-calibrate sweep-all    --dir DIR [--channels 22 ...]
+  khaen-calibrate measure      --out cap.raw --channel N [--playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 2 ...]
+  khaen-calibrate analyze      --capture cap.raw --out-prefix results/ch00 --channel N [--capture-channel 0 --capture-channels 2 --repeats 3 --repeat-gap 0.2 --robust-polarity --drift-correct --max-ppm 100 --fr-points N --fr-oct 1/48]
+  khaen-calibrate fit          --analysis results/ch00.analysis.json --out results/ch00.calibration.yml [--target flat|tilt10|@file#id --band 80:16000 --band FL=80:16000 --hp 80 --lp 16000 --boost-cap-db 3 --positions DIR --max-stages 22]
+  khaen-calibrate measure-multi --out-dir DIR --out-prefix results/run --channels 0,1,2,3 --names FL,FR,SL,SR [--mic umik --period-size 512 --buffer-size 2048 --repeats 3 --repeat-gap 0.2 --robust-polarity --drift-correct --capture2 hw:4,0 --capture2-channels 20 --capture2-channel 0 --capture2-name REF]
+  khaen-calibrate measure-multi --out-dir DIR --loopback-map 9:7 --capture-channels 8 --verify-mapping   # T1 抽检（out9→in7，可多对 9:7,1:1）
                        [--band-limit 7:130 --level-override 7:-30]   # 指定通道带限扫频/单独电平（保护 LFE 等）
-  tspi-calibrate simulate     --dir DIR [--channels 4 --delays 0,3.5,10,20 --polarities 1,1,1,1 --names FL,FR,SL,SR]
-  tspi-calibrate merge        --dir results --out calibration.yml [--names FL,FR,C,SUB1,SL,SR,HFL,HFR --layout 4.1.2 --crossovers 80,2000 --pairs FL:SUB1:80 --match FL,FR --target flat|tilt10|@file#id --boost-cap-db 3 --max-stages 22 --require-high-confidence --allow-sub-polarity-from-listening-position]
-  tspi-calibrate validate     calibration.yml
-  tspi-calibrate check-pair   --dir results --calibration calibration.yml --pairs FL:SUB1:80
+  khaen-calibrate simulate     --dir DIR [--channels 4 --delays 0,3.5,10,20 --polarities 1,1,1,1 --names FL,FR,SL,SR]
+  khaen-calibrate merge        --dir results --out calibration.yml [--names FL,FR,C,SUB1,SL,SR,HFL,HFR --layout 4.1.2 --crossovers 80,2000 --pairs FL:SUB1:80 --match FL,FR --target flat|tilt10|@file#id --boost-cap-db 3 --max-stages 22 --require-high-confidence --allow-sub-polarity-from-listening-position]
+  khaen-calibrate validate     calibration.yml
+  khaen-calibrate check-pair   --dir results --calibration calibration.yml --pairs FL:SUB1:80
 
 说明:
   - D4 目标曲线：内置 flat（默认）/tilt10（20Hz 0 → 20kHz -10dB，log-f）；旧 tilt(-3dB@16k) superseded；其它曲线用 --target @file.yml#id 导入。
   - D7 boost/headroom：--boost-cap-db 默认 3（>3 钳 3、<0 归 0）；fit/merge 报告记录 applied_boost_db/total_boost_db/max_predicted_gain_db/predicted_peak_dbfs/headroom_db/clip_risk；headroom 参考电平默认 -18 dBFS（-18+总正向帽12=-6，报告可追溯）。
   - sweep 为 S24_3LE 裸流；measure 先起 arecord 再 aplay 单通道扫频（其余通道静音），默认 -30 dBFS。
   - analyze 用 Farina 逆滤波 + 相位斜率分数延迟；delay/polarity/phase 分开输出。默认频响 300 点，另写 1/48 oct 的 fr_modal.csv。
-  - fit/merge 把实测校正到目标曲线（默认平坦），写出 tspi-calibration/v1.1 与 CamillaDSP 片段，并写 predicted.csv / optimizer.json。
+  - fit/merge 把实测校正到目标曲线（默认平坦），写出 khaen-calibration/v1.1 与 CamillaDSP 片段，并写 predicted.csv / optimizer.json。
   - 给出 --pairs 时，使交叉对复频响失败的段会回退。merge 在 80–20k 与分频点做合成响应检查。"#
     );
 }
@@ -3652,12 +3652,12 @@ mod tests {
     #[test]
     fn shelf_fragment_uses_slope_not_q() {
         let cal = Calibration {
-            schema: "tspi-calibration/v1.1".into(),
+            schema: "khaen-calibration/v1.1".into(),
             sample_rate: 48_000,
             reference_index: 0,
             layout: Some("test".into()),
             created_unix: Some(0),
-            tool: Some("tspi-calibrate".into()),
+            tool: Some("khaen-calibrate".into()),
             version: Some("0.1.0".into()),
             note: "test".into(),
             channels: vec![ChannelCalibration {

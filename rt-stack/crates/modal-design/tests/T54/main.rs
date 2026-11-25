@@ -1,7 +1,7 @@
 //! T54 private integration tests -- per-path modal artifact (WAV/manifest/hash/role/stale) --
-//! crate tspi-modal-design (WBS T54; task-150; owner rt-artifact2).
+//! crate khaen-modal-design (WBS T54; task-150; owner rt-artifact2).
 //!
-//! Run (from rt-stack/): cargo test -p tspi-modal-design artifact
+//! Run (from rt-stack/): cargo test -p khaen-modal-design artifact
 //! Location: crates/modal-design/tests/T54/main.rs (leaf private tests; public_registration.rs untouched).
 //!
 //! Coverage (WBS T54 DoD):
@@ -29,7 +29,7 @@
 
 use std::fs;
 
-use tspi_modal_design::artifact::{
+use khaen_modal_design::artifact::{
     build_artifact, decode_wav_f32_mono, encode_wav_f32_mono, ArtifactBundle, ArtifactCurrent,
     ArtifactErrorKind, ArtifactInput, ArtifactProvenance, ArtifactSolution, ArtifactStaleReason,
     ArtifactStatus, ArtifactTool, OverlayDacBinding, OverlayRole, ARTIFACT_CLAIM,
@@ -39,21 +39,21 @@ use tspi_modal_design::artifact::{
     R_POST_BASELINE_MISSING, R_SOLUTION_MISSING, R_SOLUTION_NOT_DELIVERABLE, STATUS_FAIL,
     STATUS_INCOMPLETE, STATUS_READY, W_ART_DESIGN_ONLY,
 };
-use tspi_modal_design::ingest::{sha256_hex, PositionRole};
-use tspi_modal_design::regularize::{
+use khaen_modal_design::ingest::{sha256_hex, PositionRole};
+use khaen_modal_design::regularize::{
     regularize_from_target_plant, HeadroomSpec, RegularizeOptions, WhitelistKind,
     CORRECTION_GAIN_CAP_MAX_DB,
 };
-use tspi_modal_design::solve::{solve_from_target_plant, SolveOptions, SolveStatus};
-use tspi_modal_design::target::{
+use khaen_modal_design::solve::{solve_from_target_plant, SolveOptions, SolveStatus};
+use khaen_modal_design::target::{
     build_stereo_strict_target, build_target_matrix, BandDecay, CurveBinding, DecayTarget,
     EffectivePlant, FittedPostBaseline, FrozenPostBaseline, ModalParticipants, PostBaselineInput,
     PostRoleFit, RawPlant, RawPosition, RawResponse, TargetMatrix, TargetSpec,
     ToneApplicationProof, ToneBinding, HEIGHT_ROLE_IDS, MODAL_CORRECTION_BAND_HZ, P1_LAYOUT_4_1_2,
     STEREO_STRICT_OUTPUT_ROLE_IDS,
 };
-use tspi_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
-use tspi_modal_design::validate::{
+use khaen_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
+use khaen_modal_design::validate::{
     validate_holdout, BandIr, HoldoutReport, HoldoutRequest, HoldoutVerdict, IrOrigin, IrState,
     NoiseRepeats, RoleRepeats, TuningDeclaration,
 };
@@ -302,7 +302,7 @@ fn build_target(baseline: &FrozenPostBaseline, plant: &EffectivePlant) -> Target
 fn solve_outcome(
     target: &TargetMatrix,
     plant: &EffectivePlant,
-) -> tspi_modal_design::solve::SolveOutcome {
+) -> khaen_modal_design::solve::SolveOutcome {
     let mut options = SolveOptions::default();
     options.taps = 1;
     options.delay_samples = 0;
@@ -403,7 +403,7 @@ fn holdout_report(
     target: &TargetMatrix,
     design_plant: &EffectivePlant,
     holdout_plant: &EffectivePlant,
-    solution: &tspi_modal_design::target::ModalMatrix,
+    solution: &khaen_modal_design::target::ModalMatrix,
     participants: &ModalParticipants,
     grid: &[f64],
 ) -> HoldoutReport {
@@ -435,7 +435,7 @@ fn overlay_binding() -> OverlayDacBinding {
 }
 
 fn tool() -> ArtifactTool {
-    ArtifactTool::new("tspi-modal-design", "t54-tests").unwrap()
+    ArtifactTool::new("khaen-modal-design", "t54-tests").unwrap()
 }
 
 fn provenance() -> ArtifactProvenance {
@@ -451,8 +451,8 @@ struct Fixture {
     baseline: FrozenPostBaseline,
     target: TargetMatrix,
     design_plant_hash: String,
-    solve: tspi_modal_design::solve::SolveOutcome,
-    regularize: tspi_modal_design::regularize::RegularizeOutcome,
+    solve: khaen_modal_design::solve::SolveOutcome,
+    regularize: khaen_modal_design::regularize::RegularizeOutcome,
     holdout: HoldoutReport,
     overlay: OverlayDacBinding,
     tool: ArtifactTool,
@@ -1908,7 +1908,7 @@ struct StereoFixture {
     baseline: FrozenPostBaseline,
     design_plant_hash: String,
     target: TargetMatrix,
-    solve: tspi_modal_design::solve::SolveOutcome,
+    solve: khaen_modal_design::solve::SolveOutcome,
     holdout: HoldoutReport,
     overlay: OverlayDacBinding,
     tool: ArtifactTool,

@@ -20,7 +20,7 @@
 //! tests/center_downmix/main.rs 同模式；不改 public_registration.rs）。布局输入为真实 overlay
 //! `audio/overlay/etc/tspi-audio/layout-presets.yml`（include_str! 绑定），不写临时文件。
 
-use tspi_rt_host::content_map::{
+use khaen_rt_host::content_map::{
     center_downmix_gain_linear_f64, center_downmix_worst_case_added_db, CenterDownmixConfig,
     CenterDownmixPlan, CenterDownmixSource, CenterDownmixStatus, CenterDownmixTarget,
     CenterSpeakerState, ContentMapErrorCode, LayoutPresets,

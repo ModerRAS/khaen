@@ -101,15 +101,15 @@ reset_board() {
   export MOCK_SHOW_ENV_REAL=1
   local u
   for u in tspi-audio.target tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service \
-           tspi-audio-web.service tspi-statime-inferno.service tspi-aes67-daemon.service \
+           khaen-audio-web.service tspi-statime-inferno.service tspi-aes67-daemon.service \
            tspi-ravenna-lkm.service tspi-ptp4l-master.service tspi-phc2sys.service; do
     printf 'enabled\n' > "$MOCK_STATE/enabled/$u"
   done
-  touch "$MOCK_STATE/active/tspi-audio-web.service"
-  printf '100 tspi-audio-web --config /etc/tspi-audio-web/config.toml\n' >> "$MOCK_PROCS"
+  touch "$MOCK_STATE/active/khaen-audio-web.service"
+  printf '100 khaen-audio-web --config /etc/khaen-audio-web/config.toml\n' >> "$MOCK_PROCS"
   cp "$PROJECT"/audio/overlay/etc/systemd/system/*.service "$MOCK_STATE/units/" 2>/dev/null || true
   cp "$PROJECT"/audio/overlay/etc/systemd/system/*.target "$MOCK_STATE/units/" 2>/dev/null || true
-  cp "$PROJECT/web/deploy/tspi-audio-web.service" "$MOCK_STATE/units/" 2>/dev/null || true
+  cp "$PROJECT/web/deploy/khaen-audio-web.service" "$MOCK_STATE/units/" 2>/dev/null || true
   cp "$RS"/service/*.service "$RS"/service/*.target "$MOCK_STATE/units/" 2>/dev/null || true
 }
 make_window() {
@@ -153,7 +153,7 @@ PYEOF
 make_bundle() {  # id -> sets BUNDLE
   local id="$1"
   mkdir -p "$TMP/bin-$id"
-  make_elf_aarch64 "$TMP/bin-$id/tspi-rt-host"
+  make_elf_aarch64 "$TMP/bin-$id/khaen-rt-host"
   rm -rf "$TMP/bundle-$id"
   bash "$DEPLOY/bin/make-release-bundle.sh" --live --bin-dir "$(winpath "$TMP/bin-$id")" \
     --out "$(winpath "$TMP/bundle-$id")" --release-id "$id" >"$LOGD/bundle-$id.log" 2>&1
@@ -237,7 +237,7 @@ case_preflight_no_release() {
 case_bundle_build() {
   reset_board
   make_bundle t-001; a_rc 0 $? "make-release-bundle"
-  a_file "$BUNDLE/manifest.json"; a_file "$BUNDLE/bin/tspi-rt-host"; a_file "$BUNDLE/SHA256SUMS"; a_file "$BUNDLE/README.deploy.md"
+  a_file "$BUNDLE/manifest.json"; a_file "$BUNDLE/bin/khaen-rt-host"; a_file "$BUNDLE/SHA256SUMS"; a_file "$BUNDLE/README.deploy.md"
   a_file "$BUNDLE/units/tspi-irq-affinity.service"   # task-192：IRQ 持久化 oneshot 必须随 bundle
   # B1（2026-11-20 板窗）：bundle unit 必须携带开机等待前置（打包门；旧 service/ 不得进 v12）
   a_contains "$BUNDLE/units/tspi-irq-affinity.service" "ExecStartPre=/usr/local/lib/tspi/irq-affinity-pin wait"
@@ -250,7 +250,7 @@ case_install_release() {
   bash "$DEPLOY/bin/04-install-release.sh" --live --root "$ROOT" --authorize "$WIN" --bundle "$BUNDLE" --evidence "$(winpath "$TMP/ev-install")" >"$LOGD/install.log" 2>&1
   a_rc 0 $? "install-release"
   a_file "$BOARD/opt/tspi-rt-stack/releases/t-001/manifest.json"
-  a_file "$BOARD/etc/systemd/system/tspi-rt-host.service"
+  a_file "$BOARD/etc/systemd/system/khaen-rt-host.service"
   a_file "$BOARD/etc/systemd/system/tspi-rt-stack.target"
   a_contains "$MOCK_LOG" "enable tspi-rt-stack.target"
   local rel; rel="$(current_release_dir 2>/dev/null || true)"
@@ -283,7 +283,7 @@ case_install_release() {
 case_install_bad_arch() {
   reset_board; make_window "$WIN" valid
   mkdir -p "$TMP/bin-bad"
-  make_pe_x86_64 "$TMP/bin-bad/tspi-rt-host"
+  make_pe_x86_64 "$TMP/bin-bad/khaen-rt-host"
   bash "$DEPLOY/bin/make-release-bundle.sh" --live --allow-foreign-arch --bin-dir "$(winpath "$TMP/bin-bad")" --out "$(winpath "$TMP/bundle-bad")" --release-id bad >"$LOGD/bundle-bad.log" 2>&1
   a_rc 0 $? "foreign bundle 打包"
   bash "$DEPLOY/bin/04-install-release.sh" --live --root "$ROOT" --authorize "$WIN" --bundle "$TMP/bundle-bad" --evidence "$(winpath "$TMP/ev-bad")" >"$LOGD/install-bad.log" 2>&1
@@ -297,7 +297,7 @@ case_retire_live() {
   a_contains "$MOCK_LOG" "disable tspi-camilladsp.service"
   a_contains "$MOCK_LOG" "mask tspi-camilladsp.service"
   a_contains "$MOCK_LOG" "disable tspi-upmix-autodetect.service"
-  a_contains "$MOCK_LOG" "stop tspi-audio-web.service"
+  a_contains "$MOCK_LOG" "stop khaen-audio-web.service"
   a_contains "$MOCK_LOG" "disable tspi-audio.target"
   a_log_no_c_start
   a_absent "$BOARD/run/tspi/camilladsp.yml"
@@ -309,7 +309,7 @@ case_retire_live() {
 }
 case_verify_detects_c() {
   reset_board
-  systemctl start tspi-rt-host.service >/dev/null 2>&1
+  systemctl start khaen-rt-host.service >/dev/null 2>&1
   printf 'enabled\n' > "$MOCK_STATE/enabled/tspi-camilladsp.service"
   touch "$MOCK_STATE/active/tspi-camilladsp.service"
   printf '999 camilladsp -p 1234 -a 127.0.0.1 -l warn --gain1=-120 --gain2=0 /run/tspi/camilladsp.yml\n' >> "$MOCK_PROCS"
@@ -320,7 +320,7 @@ case_verify_detects_c() {
   rm -f "$MOCK_STATE/active/tspi-camilladsp.service"
   grep -v "camilladsp" "$MOCK_PROCS" > "$MOCK_PROCS.t" 2>/dev/null; mv -f "$MOCK_PROCS.t" "$MOCK_PROCS" 2>/dev/null || true
   printf 'disabled\n' > "$MOCK_STATE/enabled/tspi-camilladsp.service"
-  systemctl start tspi-rt-host.service >/dev/null 2>&1
+  systemctl start khaen-rt-host.service >/dev/null 2>&1
   bash "$DEPLOY/bin/06-verify-switch.sh" --live --root "$ROOT" --evidence "$(winpath "$TMP/ev-verify-nomask")" >"$LOGD/verify-nomask.log" 2>&1
   a_rc 5 $? "C disabled 但未 mask 时 verify 应 exit 5"
   a_contains "$TMP/ev-verify-nomask/verify-report.json" "not-masked"
@@ -328,19 +328,19 @@ case_verify_detects_c() {
 case_rollback_mute() {
   reset_board; make_window "$WIN" valid
   local u
-  for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service tspi-audio-web.service; do
+  for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service khaen-audio-web.service; do
     printf 'masked\n' > "$MOCK_STATE/enabled/$u"
   done
   printf 'disabled\n' > "$MOCK_STATE/enabled/tspi-audio.target"
-  systemctl stop tspi-audio-web.service >/dev/null 2>&1
-  systemctl start tspi-rt-host.service >/dev/null 2>&1
+  systemctl stop khaen-audio-web.service >/dev/null 2>&1
+  systemctl start khaen-rt-host.service >/dev/null 2>&1
   bash "$DEPLOY/bin/08-rollback.sh" --live --root "$ROOT" --authorize "$WIN" --evidence "$(winpath "$TMP/ev-rb-mute")" --mute >"$LOGD/rb-mute.log" 2>&1
   a_rc 10 $? "无 last-good 的 --mute 应 exit 10"
-  a_file "$BOARD/etc/systemd/system/tspi-rt-host.service.d/90-safe-mute.conf"
+  a_file "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf"
   a_file "$BOARD/etc/tspi-rt-stack/90-safe-mute.env"
   # F-17：drop-in 用 EnvironmentFile（不是 Environment=），env 写正确变量名，能压过 rt-host.env 的 normal。
-  a_contains "$BOARD/etc/systemd/system/tspi-rt-host.service.d/90-safe-mute.conf" "EnvironmentFile=/etc/tspi-rt-stack/90-safe-mute.env"
-  a_not_contains "$BOARD/etc/systemd/system/tspi-rt-host.service.d/90-safe-mute.conf" "Environment=TSPI_"
+  a_contains "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf" "EnvironmentFile=/etc/tspi-rt-stack/90-safe-mute.env"
+  a_not_contains "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf" "Environment=TSPI_"
   a_contains "$BOARD/etc/tspi-rt-stack/90-safe-mute.env" "TSPI_HOST_SAFE_MODE=mute"
   a_not_contains "$BOARD/etc/tspi-rt-stack/90-safe-mute.env" "TSPI_RT_HOST_SAFE_MODE"
   a_file "$TMP/ev-rb-mute/rollback-report.json"
@@ -359,7 +359,7 @@ case_atomic_success() {
   a_json "$TMP/ev-switch/verify/verify-report.json" "d['fails']==0"
   a_contains "$MOCK_LOG" "enable tspi-rt-stack.target"
   a_contains "$MOCK_STATE/enabled/tspi-camilladsp.service" "masked"
-  a_file "$MOCK_STATE/active/tspi-rt-host.service"
+  a_file "$MOCK_STATE/active/khaen-rt-host.service"
   # F-18/T28-P0-a：start target 后 host+daemon 都必须 active（target Wants= 生效）。
   a_file "$MOCK_STATE/active/tspi-rt-daemon.service"
   a_file "$BOARD/etc/tspi-rt-stack/rt-host.toml"
@@ -389,7 +389,7 @@ case_atomic_fail_start() {
   export MOCK_FAIL_MATCH="start tspi-rt-stack.target"
   do_switch t-001 "$TMP/ev-switch-fail"; a_rc 10 $? "启动失败应回退为 mute(10)"
   a_json "$TMP/ev-switch-fail/result.json" "d['final_state']=='DEGRADED_MUTE' and d['exit']==10"
-  a_file "$BOARD/etc/systemd/system/tspi-rt-host.service.d/90-safe-mute.conf"
+  a_file "$BOARD/etc/systemd/system/khaen-rt-host.service.d/90-safe-mute.conf"
   a_json "$TMP/ev-switch-fail/rollback/rollback-report.json" "d['final_state']=='DEGRADED_MUTE'"
   a_log_no_c_start
   export MOCK_FAIL_MATCH=""
@@ -410,10 +410,10 @@ case_restore_last_good() {
 case_rollback_contract() {
   reset_board
   mkdir -p "$TMP/reg/bin" "$TMP/reg/releases/t/r1/bin"
-  make_elf_aarch64 "$TMP/reg/releases/t/r1/bin/tspi-rt-host"
+  make_elf_aarch64 "$TMP/reg/releases/t/r1/bin/khaen-rt-host"
   printf '{"schema":"tspi-rt-stack/release/v1","release_id":"r1","files":[]}\n' > "$TMP/reg/releases/t/r1/manifest.json"
-  printf '{"schema":"tspi-rt-stack/last-good/v1","release_id":"r1","release_dir":"%s","binary_sha256":{"tspi-rt-host":"%s"},"units_sha256":{"tspi-rt-host.service":"%s"},"verified_at":"2026-11-17T00:00:00+08:00","c_policy":"never-camilladsp","previous":null}\n' \
-    "$(winpath "$TMP/reg/releases/t/r1")" "$(sha256sum "$TMP/reg/releases/t/r1/bin/tspi-rt-host" | awk '{print $1}')" "$(sha256sum "$TMP/reg/releases/t/r1/manifest.json" | awk '{print $1}')" > "$TMP/reg/last-good.json"
+  printf '{"schema":"tspi-rt-stack/last-good/v1","release_id":"r1","release_dir":"%s","binary_sha256":{"khaen-rt-host":"%s"},"units_sha256":{"khaen-rt-host.service":"%s"},"verified_at":"2026-11-17T00:00:00+08:00","c_policy":"never-camilladsp","previous":null}\n' \
+    "$(winpath "$TMP/reg/releases/t/r1")" "$(sha256sum "$TMP/reg/releases/t/r1/bin/khaen-rt-host" | awk '{print $1}')" "$(sha256sum "$TMP/reg/releases/t/r1/manifest.json" | awk '{print $1}')" > "$TMP/reg/last-good.json"
   python "$HERE/check_rollback_file.py" --deploy "$(winpath "$DEPLOY")" --service "$(winpath "$RS/service")" --last-good "$(winpath "$TMP/reg/last-good.json")" --require-release >"$LOGD/rb-contract.log" 2>&1
   a_rc 0 $? "rollback 契约检查 PASS"
   cp -r "$DEPLOY" "$TMP/bad-deploy"
@@ -428,24 +428,24 @@ case_unit_syntax() {
   a_json "$TMP/units-report.json" "d['ok'] is True and d['checked']>=3"
   a_contains "$TMP/units-report.json" "tspi-irq-affinity.service"
   # F3/F4（2026-11-18 板窗缺陷回归）
-  a_contains "$RS/service/tspi-rt-host.service" "RuntimeDirectory=tspi-rt-stack"
-  a_contains "$RS/service/tspi-rt-host.service" "LogsDirectory=tspi-rt-stack"
-  a_contains "$RS/service/tspi-rt-host.service" "DeviceAllow=char-alsa rw"
-  a_not_contains "$RS/service/tspi-rt-host.service" "DeviceAllow=/dev/snd/*"
+  a_contains "$RS/service/khaen-rt-host.service" "RuntimeDirectory=tspi-rt-stack"
+  a_contains "$RS/service/khaen-rt-host.service" "LogsDirectory=tspi-rt-stack"
+  a_contains "$RS/service/khaen-rt-host.service" "DeviceAllow=char-alsa rw"
+  a_not_contains "$RS/service/khaen-rt-host.service" "DeviceAllow=/dev/snd/*"
   a_contains "$RS/service/tspi-rt-daemon.service" "RuntimeDirectory=tspi-rt-stack"
   a_contains "$RS/service/tspi-rt-daemon.service" "LogsDirectory=tspi-rt-stack"
   rm -rf "$TMP/bad-units"; cp -r "$RS/service" "$TMP/bad-units"
-  printf 'BogusKey=1\n' >> "$TMP/bad-units/tspi-rt-host.service"
+  printf 'BogusKey=1\n' >> "$TMP/bad-units/khaen-rt-host.service"
   python "$HERE/check_unit_syntax.py" "$(winpath "$TMP/bad-units")" >"$LOGD/units-bad.log" 2>&1
   a_rc 3 $? "未知 key 应 FAIL(3)"
   # F4 负例：DeviceAllow 改回 /dev/snd/* 通配必须 FAIL
   rm -rf "$TMP/bad-units2"; cp -r "$RS/service" "$TMP/bad-units2"
-  sed -i 's|DeviceAllow=char-alsa rw|DeviceAllow=/dev/snd/* rw|' "$TMP/bad-units2/tspi-rt-host.service"
+  sed -i 's|DeviceAllow=char-alsa rw|DeviceAllow=/dev/snd/* rw|' "$TMP/bad-units2/khaen-rt-host.service"
   python "$HERE/check_unit_syntax.py" "$(winpath "$TMP/bad-units2")" >"$LOGD/units-bad2.log" 2>&1
   a_rc 3 $? "F4：DeviceAllow=/dev/snd/* 通配应 FAIL(3)"
   # F3 负例：删除 RuntimeDirectory 必须 FAIL
   rm -rf "$TMP/bad-units3"; cp -r "$RS/service" "$TMP/bad-units3"
-  sed -i '/^RuntimeDirectory=tspi-rt-stack$/d' "$TMP/bad-units3/tspi-rt-host.service"
+  sed -i '/^RuntimeDirectory=tspi-rt-stack$/d' "$TMP/bad-units3/khaen-rt-host.service"
   python "$HERE/check_unit_syntax.py" "$(winpath "$TMP/bad-units3")" >"$LOGD/units-bad3.log" 2>&1
   a_rc 3 $? "F3：缺 RuntimeDirectory 应 FAIL(3)"
   # B1（2026-11-20 板窗）负例：删掉开机等待 ExecStartPre → FAIL(3)
@@ -469,7 +469,7 @@ case_check_elf() {
 }
 case_bundle_dryrun() {
   mkdir -p "$TMP/bin-dry"
-  make_elf_aarch64 "$TMP/bin-dry/tspi-rt-host"
+  make_elf_aarch64 "$TMP/bin-dry/khaen-rt-host"
   bash "$DEPLOY/bin/make-release-bundle.sh" --dry-run --bin-dir "$(winpath "$TMP/bin-dry")" --out "$(winpath "$TMP/bundle-dry")" --release-id dry >"$LOGD/bundle-dry.log" 2>&1
   a_rc 0 $? "bundle --dry-run"
   a_absent "$TMP/bundle-dry/manifest.json"
@@ -505,7 +505,7 @@ case_irq_persist_regression() {
   a_rc 0 $? "04 安装（含停 irqbalance + 写 pin）"
   bash "$DEPLOY/bin/03-retire-c.sh" --live --root "$ROOT" --authorize "$WIN" --evidence "$(winpath "$TMP/ev-irq-retire")" >"$LOGD/irq-retire.log" 2>&1
   a_rc 0 $? "03 退役（verify 需 C 已退役）"
-  systemctl start tspi-rt-host.service >/dev/null 2>&1
+  systemctl start khaen-rt-host.service >/dev/null 2>&1
   bash "$DEPLOY/bin/06-verify-switch.sh" --live --root "$ROOT" --settle-secs 0 --evidence "$(winpath "$TMP/ev-irq-verify-ok")" >"$LOGD/irq-verify-ok.log" 2>&1
   a_rc 0 $? "基线 verify（IRQ 已钉 A53）应 rc=0"
   # 模拟 irqbalance 复活并搬回依赖 IRQ（task-189 实测 58→7、56→3、57→5）
@@ -646,30 +646,30 @@ PYEOF
   a_file "$TMP/pkg-x/deploy/bin/05-atomic-switch.sh"
   a_file "$TMP/pkg-x/deploy/bin/make-deploy-package.sh"
   a_file "$TMP/pkg-x/deploy/lib/release_tar.py"
-  a_file "$TMP/pkg-x/service/tspi-rt-host.service"
+  a_file "$TMP/pkg-x/service/khaen-rt-host.service"
   a_file "$TMP/pkg-x/release-bundle/manifest.json"
   a_file "$TMP/pkg-x/README-UPLOAD.md"
   # 修复已随包：F2 移走再 mask、F5 /proc 环境核对、F3/F4 unit 键
   a_contains "$TMP/pkg-x/deploy/bin/03-retire-c.sh" "unit_file_move_before_mask"
   a_contains "$TMP/pkg-x/deploy/lib/common.sh" "TSPI_PROC_ROOT"
-  a_contains "$TMP/pkg-x/service/tspi-rt-host.service" "DeviceAllow=char-alsa rw"
-  a_contains "$TMP/pkg-x/service/tspi-rt-host.service" "RuntimeDirectory=tspi-rt-stack"
+  a_contains "$TMP/pkg-x/service/khaen-rt-host.service" "DeviceAllow=char-alsa rw"
+  a_contains "$TMP/pkg-x/service/khaen-rt-host.service" "RuntimeDirectory=tspi-rt-stack"
 }
 
 case_retire_mask_unit_file() {  # F2：/etc/systemd/system 普通 unit 文件 → 备份+移走再 mask
   reset_board; make_window "$WIN" valid
-  printf '[Unit]\nDescription=old web shim (fixture)\n[Service]\nExecStart=/usr/local/bin/tspi-audio-web\n' \
-    > "$BOARD/etc/systemd/system/tspi-audio-web.service"
+  printf '[Unit]\nDescription=old web shim (fixture)\n[Service]\nExecStart=/usr/local/bin/khaen-audio-web\n' \
+    > "$BOARD/etc/systemd/system/khaen-audio-web.service"
   bash "$DEPLOY/bin/03-retire-c.sh" --live --root "$ROOT" --authorize "$WIN" \
     --evidence "$(winpath "$TMP/ev-retire-f2")" >"$LOGD/retire-f2.log" 2>&1
   a_rc 0 $? "F2：普通 unit 文件先备份移走再 mask（03 live）"
-  a_absent "$BOARD/etc/systemd/system/tspi-audio-web.service"
-  a_file "$TMP/ev-retire-f2/retired-unit-files/tspi-audio-web.service"
-  a_contains "$TMP/ev-retire-f2/retired-unit-files/tspi-audio-web.service" "old web shim (fixture)"
-  a_file "$TMP/ev-retire-f2/retired-unit-files/tspi-audio-web.service.sha256"
+  a_absent "$BOARD/etc/systemd/system/khaen-audio-web.service"
+  a_file "$TMP/ev-retire-f2/retired-unit-files/khaen-audio-web.service"
+  a_contains "$TMP/ev-retire-f2/retired-unit-files/khaen-audio-web.service" "old web shim (fixture)"
+  a_file "$TMP/ev-retire-f2/retired-unit-files/khaen-audio-web.service.sha256"
   a_file "$TMP/ev-retire-f2/moved-unit-files.tsv"
-  a_contains "$TMP/ev-retire-f2/moved-unit-files.tsv" "tspi-audio-web.service"
-  a_eq "masked" "$(cat "$MOCK_STATE/enabled/tspi-audio-web.service" 2>/dev/null || true)" "F2：移走后 mask 应成功"
+  a_contains "$TMP/ev-retire-f2/moved-unit-files.tsv" "khaen-audio-web.service"
+  a_eq "masked" "$(cat "$MOCK_STATE/enabled/khaen-audio-web.service" 2>/dev/null || true)" "F2：移走后 mask 应成功"
   a_contains "$TMP/ev-retire-f2/result.txt" "FAILS=0"
   # 负例：若单位未移走直接 mask，真实/mock 都会失败 → 03 必须 exit 5（这里验证 helper 先移走的顺序不可省）
   a_contains "$LOGD/retire-f2.log" "已备份并移走普通 unit 文件"
@@ -679,20 +679,20 @@ case_env_resolve() {  # F5：unit_env_contains 走 /proc/<MainPID>/environ → E
   reset_board
   mkdir -p "$BOARD/proc/4321"
   printf 'TSPI_HOST_SAFE_MODE=mute\0PATH=/usr/bin\0' > "$BOARD/proc/4321/environ"
-  touch "$MOCK_STATE/active/tspi-rt-host.service"
+  touch "$MOCK_STATE/active/khaen-rt-host.service"
   # A) /proc/<MainPID>/environ 含 mute（真实进程环境，主通道）
-  bash -c '. "$1/lib/common.sh"; unit_env_contains tspi-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
+  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
     _ "$(winpath "$DEPLOY")" >/dev/null 2>&1
   a_rc 0 $? "F5-A：/proc/<MainPID>/environ 含 mute 应 PASS"
   # B) 无 /proc environ（进程不可读）→ 回退解析 EnvironmentFiles
   rm -f "$BOARD/proc/4321/environ"
   printf 'TSPI_HOST_SAFE_MODE=mute\n' > "$BOARD/etc/tspi-rt-stack/rt-host.env"
-  bash -c '. "$1/lib/common.sh"; unit_env_contains tspi-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
+  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
     _ "$(winpath "$DEPLOY")" >/dev/null 2>&1
   a_rc 0 $? "F5-B：无 proc 时回退 EnvironmentFiles 含 mute 应 PASS"
   # C) 服务在但无静音（proc/environFiles 均 normal）→ 必须 FAIL（保留判定能力）
   printf 'TSPI_HOST_SAFE_MODE=normal\n' > "$BOARD/etc/tspi-rt-stack/rt-host.env"
-  bash -c '. "$1/lib/common.sh"; unit_env_contains tspi-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
+  bash -c '. "$1/lib/common.sh"; unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"' \
     _ "$(winpath "$DEPLOY")" >/dev/null 2>&1
   a_rc 1 $? "F5-C：服务在但无 mute 必须 FAIL（不得假阳性）"
 }
@@ -700,11 +700,11 @@ case_env_resolve() {  # F5：unit_env_contains 走 /proc/<MainPID>/environ → E
 case_mute_env_runtime() {  # F5：08 --mute 用运行时环境核对，报告 已生效 且留证据通道
   reset_board; make_window "$WIN" valid
   local u
-  for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service tspi-audio-web.service; do
+  for u in tspi-camilladsp.service tspi-upmix-autodetect.service tspi-boot-mode.service khaen-audio-web.service; do
     printf 'masked\n' > "$MOCK_STATE/enabled/$u"
   done
   printf 'disabled\n' > "$MOCK_STATE/enabled/tspi-audio.target"
-  systemctl stop tspi-audio-web.service >/dev/null 2>&1
+  systemctl stop khaen-audio-web.service >/dev/null 2>&1
   mkdir -p "$BOARD/proc/4321"
   printf 'TSPI_HOST_SAFE_MODE=mute\0PATH=/usr/bin\0' > "$BOARD/proc/4321/environ"
   bash "$DEPLOY/bin/08-rollback.sh" --live --root "$ROOT" --authorize "$WIN" \

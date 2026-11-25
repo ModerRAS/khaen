@@ -16,15 +16,15 @@
 //! - 内存模型（系数/表/历史/scratch，T08/T18 口径）与确定性（同输入同计划）。
 //!
 //! Cargo 自动把 tests/T56/main.rs 发现为集成测试 target（不需要 public_registration 注册）。
-//! 运行：cargo test -p tspi-dsp-core schedule_plan -- --nocapture
+//! 运行：cargo test -p khaen-core schedule_plan -- --nocapture
 //!
 //! 本测试只消费 T09/T12/T55 已合入的只读 API；不依赖板端/ALSA/RT 实测（NOT_RUN）。
 
-use tspi_dsp_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
-use tspi_dsp_core::compile::FusionForm;
-use tspi_dsp_core::direct::{DirectTopology, DIRECT_NO_SOURCE};
-use tspi_dsp_core::rt::RtStatus;
-use tspi_dsp_core::schedule_plan::{
+use khaen_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
+use khaen_core::compile::FusionForm;
+use khaen_core::direct::{DirectTopology, DIRECT_NO_SOURCE};
+use khaen_core::rt::RtStatus;
+use khaen_core::schedule_plan::{
     admit_deadline, admit_hot_swap, admit_runtime, build_fallback_schedule, build_offline_schedule,
     build_schedule, evaluate_fallback, evaluate_hot_swap, fft_size_for, fft_transform_flops,
     fft_transform_macs, full_path_len, fused_len, recommended_kernel, route_support,
@@ -33,7 +33,7 @@ use tspi_dsp_core::schedule_plan::{
     StageKind, TapsProfile, ERR_CROSSFADE_BUDGET, RT_E_CROSSFADE_ALIGN, SCHEDULE_MAX_TASKS,
     SCHEDULE_PHASES, SCHEDULE_STAGE_KINDS, SCHEDULE_WORKERS_FALLBACK, SCHEDULE_WORKERS_MAX,
 };
-use tspi_dsp_core::workers::{ack_mask, WorkerDagPlan};
+use khaen_core::workers::{ack_mask, WorkerDagPlan};
 
 const GATE_48K_128: u64 = 1_333_333;
 const GATE_48K_64: u64 = 666_666;

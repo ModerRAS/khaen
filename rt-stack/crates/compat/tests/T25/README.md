@@ -5,8 +5,8 @@
 - 运行（在 rt-stack/ 下）：
 
   ```
-  cargo test -p tspi-dsp-compat content     # DoD 命令（测试名统一 content_ 前缀）
-  cargo test -p tspi-dsp-compat             # 整 crate 回归（T13 + T24 + T25 + T57）
+  cargo test -p khaen-compat content     # DoD 命令（测试名统一 content_ 前缀）
+  cargo test -p khaen-compat             # 整 crate 回归（T13 + T24 + T25 + T57）
   ```
 
   Cargo 自动把 tests/T25/main.rs 发现为独立集成测试 target（与 T13/T24/T57 同机制），

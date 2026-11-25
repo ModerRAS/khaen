@@ -1,4 +1,4 @@
-# tspi-calibrate — 多声道扬声器校准（Rust 单二进制）
+# khaen-calibrate — 多声道扬声器校准（Rust 单二进制）
 
 逐通道对数扫频（默认 **-30 dBFS**；T1 电学环回固定 **-12 dBFS**，见板端 runbook，一次只响一个通道）→ MOTU 1:1 → UMIK 采集 → Farina 反卷积 →
 每通道 **延迟 / 极性 / 相位** 分开报告 → PEQ + 延迟校准 YAML（可被 CamillaDSP 直接消费）→ 合并与相位抵消检查。
@@ -17,26 +17,26 @@ cargo test          # 离线测试（sweep/Farina/分数延迟/PEQ 拟合/合并
 
 ```bash
 # 0) 只测一个通道（其余 21 通道静音；-30dBFS）
-./tspi-calibrate measure --out cap-ch0.raw --channel 0 \
+./khaen-calibrate measure --out cap-ch0.raw --channel 0 \
   --playback hw:4,0 --playback-channels 22 \
   --capture hw:3,0 --capture-channels 2 \
   --rate 48000 --seconds 5 --level-db -30 --pre-seconds 1 --post-seconds 1
 
 # 1) 分析：Farina 逆滤波 + 相位斜率分数延迟；输出 fr CSV / impulse CSV / analysis JSON
-./tspi-calibrate analyze --capture cap-ch0.raw --capture-channels 2 --capture-channel 0 \
+./khaen-calibrate analyze --capture cap-ch0.raw --capture-channels 2 --capture-channel 0 \
   --channel 0 --out-prefix results/ch00 --impulse-out results/ch00.impulse.csv \
   --rate 48000 --seconds 5 --pre-seconds 1 --post-seconds 1
 
 # 2) 每通道 fit（也可直接对 results 目录 merge）
-./tspi-calibrate fit --analysis results/ch00.analysis.json --out results/ch00.calibration.yml --max-stages 8
+./khaen-calibrate fit --analysis results/ch00.analysis.json --out results/ch00.calibration.yml --max-stages 8
 
 # 3) 合并 + 相位抵消检查（pair 必须是“同源信号 + 互补 LR4 分频”，fc 等于 profile 某 HP/LP）
 #    当前 4.1.2：FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7（ch6 空）；只有 FL/FR 与 SUB1 是真分频对
-./tspi-calibrate merge --dir results --out calibration.yml \
+./khaen-calibrate merge --dir results --out calibration.yml \
   --names FL,FR,SL,SR,HFL,HFR,SUB1 --layout 4.1.2 --crossovers 80 \
   --pairs FL:SUB1:80,FR:SUB1:80 --max-stages 8
 # 5.3.2（NEEDS_HW，十只/三 SUB 接好后才跑）：
-# ./tspi-calibrate merge --dir results --out calibration.yml \
+# ./khaen-calibrate merge --dir results --out calibration.yml \
 #   --names FL,FR,C,SL,SR,SUB1,SUB2,SUB3,HFL,HFR --layout 5.3.2 --crossovers 80 \
 #   --pairs FL:SUB1:80,FR:SUB1:80 --max-stages 8
 # 注意：高度（HFL/HFR）全频、无 2 kHz 分频；中置 C 按设计与主箱相同为全频（D3 2026-11-17），
@@ -51,15 +51,15 @@ cargo test          # 离线测试（sweep/Farina/分数延迟/PEQ 拟合/合并
 - **4.1.2 运行态 mapping（D8 2026-11-17 裁决 = 最终）**：`FL0 FR1 SL2 SR3 HFL4 HFR5 SUB1=7`（Line Out 8；槽 6 空）。
   Line Out 10（槽 9/ch9）只是当时 Line Out 8 不出声的**临时测试接法，不是设计候选**：不得再写待核实/二选一，不要生成 index=9 的校准。
 
-## 输出契约（tspi-calibration/v1 与 v1.1）
+## 输出契约（khaen-calibration/v1 与 v1.1）
 
 ```yaml
-schema: tspi-calibration/v1.1
+schema: khaen-calibration/v1.1
 sample_rate: 48000
 reference_index: 3          # 相对延迟=0 的通道
 layout: 4.1.2
 created_unix: 1794736489
-tool: tspi-calibrate
+tool: khaen-calibrate
 version: 0.1.0
 note: merged multi-channel calibration
 channels:
@@ -72,7 +72,7 @@ channels:
   - {type: high_shelf, freq: 4000.0, q: 0.7, gain_db: -2.0}          # q = RBJ slope S
 ```
 
-新写出的文件是 `schema: tspi-calibration/v1.1`。v1 文件仍只接受 peaking，且 `q` ∈ [0.1, 10]。
+新写出的文件是 `schema: khaen-calibration/v1.1`。v1 文件仍只接受 peaking，且 `q` ∈ [0.1, 10]。
 
 - peaking 的 `q` 是 Q。v1.1 要求有限且 ≥ 0.1，窄模态可以 >10。走 channelmap 时板端仍只接受 [0.1, 10]。
 - `low_shelf` / `high_shelf` 的 `q` 是 RBJ shelf slope S，不是 Q，必须在 [0.1, 1.0]。`fit` 默认 S=0.7。
@@ -114,9 +114,9 @@ channels:
 ## 离线示例（无硬件）
 
 ```bash
-./tspi-calibrate simulate --dir examples/offline --channels 4 --delays 0,3.5,10,20 \
+./khaen-calibrate simulate --dir examples/offline --channels 4 --delays 0,3.5,10,20 \
   --polarities 1,1,1,1 --names FL,FR,SL,SR --pre-seconds 0.5
-./tspi-calibrate merge --dir examples/offline --out examples/offline/calibration.yml \
+./khaen-calibrate merge --dir examples/offline --out examples/offline/calibration.yml \
   --names FL,FR,SL,SR --layout synthetic-4 --crossovers 80,2000
 ```
 
@@ -162,7 +162,7 @@ channels:
 - 默认角色名改大写 `CH<index>`（符合角色 id 约定；真实布局请显式传 `--names FL,FR,...`）；
 - PEQ clamp 收敛到契约范围：freq 20–20k、q 0.1–10、gain ±18 dB；`--max-stages` ≤22（producer 预算；契约校验上限 32，C-P2-4）；
 - CamillaDSP 片段新增真正的极性实现：`Gain` filter `{gain:0, inverted:true}` 进入 pipeline（不再只是 channelmap 提示）。
-- 仍未做（后置）：1/3 oct 纹波平滑改为频率窗、`--pairs` 与 `--crossovers` 联动、measure-multi 诊断入 JSON、带限/重复 SNR、`tspi-calibration-report/v1` 完整报告（tests[]/holdout/mic 字段）。
+- 仍未做（后置）：1/3 oct 纹波平滑改为频率窗、`--pairs` 与 `--crossovers` 联动、measure-multi 诊断入 JSON、带限/重复 SNR、`khaen-calibration-report/v1` 完整报告（tests[]/holdout/mic 字段）。
 - **2026-11-17 B2 已知缺口**（详见 `calibration-spec/review` 与 `scratch/lead/doc-audit/B2-EVIDENCE.md`）：
   ① `global_validation` 仍进 overall（C-P1-5）；② `negative_controls` 不参与 overall_pass（C-P1-6）；
   ③ 无 `capture_peak_dbfs`/带限 SNR 硬门（C-P1-11）；④ 无 `--inject-*`（C-P1-10）；⑤ 无 `--mic-cal`（C-18，落点待定）。
@@ -207,7 +207,7 @@ channels:
 | `--sub-reference-nearfield` | 关 | 参考麦放在低音炮近场时，SUB 极性改跟参考麦 |
 | `--cuemix-guard URL --cuemix-token TOKEN` | 关 | 测量前 `POST /api/motu/direct-mute {"mute":true}`，结束后恢复。只接受 `http://host:port` |
 
-`clock_ppm = (实测重复间隔 / 标称间隔 − 1) × 1e6`。有效起点少于 3 个时不估计 ppm（`clock_ppm` 为空、`clock_ppm_ok=false`）。`--drift-correct` 把采集按这个 ppm 拉回标称时钟后再算延迟。槽间间隔少于 3 个时 `session.diag.json` 的 `slot_clock_ppm` 为空。`tspi-calibration/v1` 的必填字段不改；新字段只出现在 analysis / diag / report。
+`clock_ppm = (实测重复间隔 / 标称间隔 − 1) × 1e6`。有效起点少于 3 个时不估计 ppm（`clock_ppm` 为空、`clock_ppm_ok=false`）。`--drift-correct` 把采集按这个 ppm 拉回标称时钟后再算延迟。槽间间隔少于 3 个时 `session.diag.json` 的 `slot_clock_ppm` 为空。`khaen-calibration/v1` 的必填字段不改；新字段只出现在 analysis / diag / report。
 
 选峰前对采集和扫频做带通（全带 80–8000 Hz，窄带按扫频起止收进 90%），再用归一化相关 `|c|/sqrt(Σseg²·Σsrc²)` 取峰，并丢掉偏离重复栅格 5% 或 2000 样本以上的孤立峰。带通峰会偏早，滞后在 ±1200 样本内收回全带相关最大的位置。参考麦在 `clock_ppm_ok=false`、`onset_invalid=true`、`snr_db<20` 或极性 `unknown` 时写入 `reference.valid=false` 和主 JSON 的 `reference_invalid`，不改主麦 `polarity`。只有参考结果有效且和主麦不一致时，才跟随参考麦并把置信度降为 `low`。
 

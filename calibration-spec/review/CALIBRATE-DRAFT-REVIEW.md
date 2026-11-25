@@ -38,7 +38,7 @@
 | P1-7 | @src/main.rs:217@（phase_sum_margin） | @dly = delays[i] + m.delay_samples@ 把“归一化修正”和“原始绝对延迟”相加；虽然当前恰好相加为常数，但语义重复、对舍入/其它调用会出错 | 只用归一化后的 delay（相对参考），或只用原始延迟差；不要二者相加 |
 | P1-8 | @src/dsp.rs:64-96@（fractional_delay_samples） | 相位斜率固定用 200–8000 Hz；SUB（30–80 Hz）与高频分频（2 kHz）的延迟误差/群延迟可能被带外相位污染 | 延迟估计按目标频带（pair crossover 附近）或做多频带估计；验收时报告 delay@band |
 | P1-9 | @src/dsp.rs:171-173@（SNR） | SNR 用 IR 尾部粗估，未做带限（200 Hz–8 kHz）、未做重复统计 | 按 ACCEPTANCE T2 做带限 SNR + ≥3 次重复/中位数；SNR <25 dB 时拒绝该次测量 |
-| P1-10 | @src/model.rs:99-117@（ValidationReport） | 报告结构与 ACCEPTANCE §8 的 `tspi-calibration-report/v1` 不一致（无 pair 指标/负向用例/环境/文件哈希） | 统一报告 schema；至少含 pairs[]、metrics、thresholds、negative_controls、artifacts sha256 |
+| P1-10 | @src/model.rs:99-117@（ValidationReport） | 报告结构与 ACCEPTANCE §8 的 `khaen-calibration-report/v1` 不一致（无 pair 指标/负向用例/环境/文件哈希） | 统一报告 schema；至少含 pairs[]、metrics、thresholds、negative_controls、artifacts sha256 |
 | P1-11 | @src/main.rs:408-448@（simulate） | frac_delay 线性插值且截尾（丢掉末尾），仅作离线演示；不能作为 1:1 环回验证 | 明确 simulate≠T1；新增 1:1 电学环回测量/验证路径（play→capture 同一接口），用于 T1 映射/隔离/延迟/极性精度 |
 | P1-12 | @src/main.rs:130-149@ | 默认设备 `hw:4,0 / hw:3,0` 硬编码；板端 card 编号变化会错 | 从 tspi-mode/参数读取 device，或强制要求显式传入并打印核对 |
 

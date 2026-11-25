@@ -1,7 +1,7 @@
 //! [NONRT] CLI stage backend —— 真实音频校准（TSPI_CAL_STAGE=cli）。
 //!
 //! 角色：daemon 在 CLI 模式（env \`TSPI_CAL_STAGE=cli\` / toml \`[calibration] stage="cli"\`）
-//! 构造本 backend 注入 T60 JobManager（tspi_calibration::job::JobManager）。每个 JobStage
+//! 构造本 backend 注入 T60 JobManager（khaen_calibration::job::JobManager）。每个 JobStage
 //! 都调用本机脚本 \`/usr/local/lib/tspi/calib-stage.sh <stage> <job_dir> <json_args>\`：
 //! 真实 MOTU/UMIK 测量（measure-multi）、Farina 分析、PEQ 拟合、merge、validate、file apply。
 //!
@@ -15,7 +15,7 @@
 //! ## 设备交接
 //! T60 worker 在 sweep_capture/remeasure/holdout 前调 \`SafeOutputController::
 //! acquire_calibration_owner\`，stage 成功后调 \`release_calibration_owner\`。本模块的
-//! \`CliSafety\` 用 \`systemctl stop/start tspi-rt-host\` 真让出/恢复 MOTU（恢复后保持
+//! \`CliSafety\` 用 \`systemctl stop/start khaen-rt-host\` 真让出/恢复 MOTU（恢复后保持
 //! \`90-safe-mute.env\` 的 mute）；脚本自身也在 measure/retest 内 stop/start 兜底。
 //!
 //! 只在本 job 的 worker 线程（NONRT）调用；不触碰 RT 图、不直接打开 PCM。
@@ -28,7 +28,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tspi_calibration::job::{
+use khaen_calibration::job::{
     sha256_hex, ArtifactKind, CalibrationJobBackend, ExitDisposition, JobStage,
     SafeOutputController, SafetyError, StageCtx, StageFailure,
 };
@@ -44,7 +44,7 @@ pub const CAL_PORT_NOTE_CLI: &str =
 /// 默认 stage 脚本路径（可被 env \`TSPI_CAL_STAGE_SCRIPT\` 覆盖）。
 pub const DEFAULT_STAGE_SCRIPT: &str = "/usr/local/lib/tspi/calib-stage.sh";
 /// 默认 host unit（可被 env \`TSPI_CAL_HOST_UNIT\` 覆盖）。
-pub const DEFAULT_HOST_UNIT: &str = "tspi-rt-host";
+pub const DEFAULT_HOST_UNIT: &str = "khaen-rt-host";
 /// 默认校准状态根（可被 env \`TSPI_CAL_ROOT\` 覆盖）。
 pub const DEFAULT_CAL_ROOT: &str = "/var/lib/tspi-rt-stack/calibration";
 /// 默认 mute drop-in（可被 env \`TSPI_CAL_SAFE_MUTE_ENV\` 覆盖）。
@@ -723,7 +723,7 @@ mod tests {
 
     #[test]
     fn cli_safety_construction_does_not_run_commands() {
-        let safety = CliSafety::with_paths("tspi-rt-host", "/tmp/does-not-exist-cal", "/tmp/no.env");
+        let safety = CliSafety::with_paths("khaen-rt-host", "/tmp/does-not-exist-cal", "/tmp/no.env");
         assert_eq!(safety.last_good_version(), None);
         assert!(!safety.mute_configured());
     }

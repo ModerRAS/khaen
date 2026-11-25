@@ -5,4 +5,4 @@ channelmap_roles:
 filters: {}
 note: filters/pipeline 可直接合并进渲染后的 CamillaDSP config；反相通过 channelmap roles sources[].inverted 实现
 pipeline: []
-schema: tspi-calibration-camilladsp/v1
+schema: khaen-calibration-camilladsp/v1

@@ -2,13 +2,13 @@
 
 use std::path::PathBuf;
 
-use tspi_rt_check::drop_audit;
+use khaen_rt_check::drop_audit;
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ci/fixtures")
 }
 
-fn scan(rel: &str) -> tspi_rt_check::Report {
+fn scan(rel: &str) -> khaen_rt_check::Report {
     drop_audit::scan_path(&fixtures().join(rel)).expect("scan fixture")
 }
 

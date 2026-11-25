@@ -5,7 +5,7 @@
 - 运行：
 
   cd rt-stack
-  cargo test -p tspi-fir-designer min_fast
+  cargo test -p khaen-designer min_fast
 
   点时刻实测（2026-11-17）：16 passed / 0 failed / 80 filtered out，exit 0；见
   rt-stack/evidence/T33/run-tests.log 与 test-list.txt（16 tests, 0 benchmarks）。
@@ -24,7 +24,7 @@ cargo 只把 tests/*.rs（顶层文件）当集成测试目标，不会自动发
         include!("../tests/T33/min_fast_cases.rs");
     }
 
-本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p tspi-fir-designer min_fast 执行
+本文件因此参与 src/lib.rs 的单测构建，真实被 cargo test -p khaen-designer min_fast 执行
 （executed = 16），测试名过滤路径含 min_fast；不需要 integrator 注册，也不要再把它加到
 public_registration.rs（会重复注册/编译失败，因为文件按模块内联语义编写、依赖 super::* 的私有
 作用域，例如 Fft/ResponseSpectrum 等实现细节）。

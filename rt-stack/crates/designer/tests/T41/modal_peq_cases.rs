@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/designer/src/modal_peq.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （见 tests/T41/README.md；不改 integrator 独占的 public_registration.rs）。
-// 运行：cargo test -p tspi-fir-designer modal_peq
+// 运行：cargo test -p khaen-designer modal_peq
 
 // use super::* 由外层 #[cfg(test)] 模块提供（include! 共享作用域）
 
@@ -622,7 +622,7 @@ fn t41_export_schema_and_determinism() {
     assert_eq!(v.get("fs").unwrap().as_f64(), 48000.0);
     assert_eq!(v.get("created_unix").unwrap().as_f64(), 1_700_000_000.0);
     let tool = v.get("tool").unwrap();
-    assert_eq!(tool.get("name").unwrap().as_str(), "tspi-fir-designer");
+    assert_eq!(tool.get("name").unwrap().as_str(), "khaen-designer");
     assert!(!tool.get("version").unwrap().as_str().is_empty());
     let channels = v.get("channels").unwrap().as_arr();
     assert_eq!(channels.len(), 1);

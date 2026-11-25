@@ -6,7 +6,7 @@
   T42 "crates/control/src/rest.rs"、T24 "crates/compat/src/ws.rs"、T60 "crates/calibration/src/job.rs"、
   T66 "crates/calibration/src/compile_apply.rs"。
 - 测试文件："web_contract.rs"（40 tests；含真实 TCP loopback HTTP+WS fake web 端到端交互）。
-- 运行："cargo test -p tspi-control web"（或加 "--offline"；全部离线，不打开设备、不启外部服务、不跑板端）。
+- 运行："cargo test -p khaen-control web"（或加 "--offline"；全部离线，不打开设备、不启外部服务、不跑板端）。
 - 证据："rt-stack/evidence/T70/"（真实执行日志、SAMPLE 响应、页面快照、manifest）。
 
 ## 注册方式（不要改 public_registration.rs）

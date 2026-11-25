@@ -1,6 +1,6 @@
 # 校准验收口径（延迟/极性/PEQ、应用后复测与 holdout、合并响应/相位抵消）
 
-> 配套 CONTRACT.md（tspi-calibration/v1 / v1.1）。本文件给**可执行判定标准**：测什么、怎么算、阈值多少、失败怎么报。
+> 配套 CONTRACT.md（khaen-calibration/v1 / v1.1）。本文件给**可执行判定标准**：测什么、怎么算、阈值多少、失败怎么报。
 > 所有阈值默认面向 48 kHz / 4.1.2 与 5.3.2（两布局共用；布局差异见 §6.3）；96 kHz 时以时间为准（采样点阈值按比例换算）。
 > 版本：**2026-11-17（B2 修订）**。依据 `scratch/lead/doc-audit/CONSOLIDATED.md` §3.1/§4 B2（C-13/14/15/16/17/18 + B2 组 P1/P2），
 > 证据 `scratch/lead/doc-audit/B2-EVIDENCE.md`。
@@ -134,7 +134,7 @@ Line Out 10（槽 9）只是当时 Line Out 8 不出声的**临时测试接法**
   in7→out9、其它 input→output、out7/out8 downstream 是否断开）；T1 时 out7/out8 等被环回牵涉的输出不得接后级；
   最终 insert 模式必须关闭全部 input→output 直通（in7→out7、in8→out8 等），否则硬件直通与 USB DSP 双路径并存；
   报告需记录该状态与关闭证据。
-- 报告字段（tspi-calibration-report/v1 或最终验收报告）必须包含：
+- 报告字段（khaen-calibration-report/v1 或最终验收报告）必须包含：
   ```json
   "t1": {
     "status": "partial",
@@ -284,12 +284,12 @@ T3 的测量必须是 **measured**（应用后实测），不得用 predicted �
 
 ## 8. 报告格式（机器可读 + 人读）
 
-producer/verifier 输出 `tspi-calibration-report/v1` JSON（**缺字段=不可判定，不得补写 PASS**）：
+producer/verifier 输出 `khaen-calibration-report/v1` JSON（**缺字段=不可判定，不得补写 PASS**）：
 
 ```json
 {
-  "schema": "tspi-calibration-report/v1",
-  "tool": {"name": "tspi-calibrate", "version": "0.1.0"},
+  "schema": "khaen-calibration-report/v1",
+  "tool": {"name": "khaen-calibrate", "version": "0.1.0"},
   "created_unix": 1794725000,
   "calibration_file": {"path": "...", "sha256": "..."},
   "layout": "4.1.2", "sample_rate": 48000,

@@ -1,6 +1,6 @@
-//! T53 private integration tests — 模态 holdout 预测校验 + T20 质量窗（crate tspi-modal-design）。
+//! T53 private integration tests — 模态 holdout 预测校验 + T20 质量窗（crate khaen-modal-design）。
 //!
-//! 运行（在 rt-stack/ 下）：cargo test -p tspi-modal-design holdout
+//! 运行（在 rt-stack/ 下）：cargo test -p khaen-modal-design holdout
 //! 文件位置：crates/modal-design/tests/T53/main.rs（leaf 私有测试；不写 public_registration.rs）。
 //!
 //! 覆盖（WBS T53 DoD）：
@@ -17,16 +17,16 @@
 //!
 //! 本文件只构造内存夹具；不采音、不碰板端、不打开 ALSA、不写文件。
 
-use tspi_modal_design::ingest::sha256_hex;
-use tspi_modal_design::solve::{solve_from_target_plant, SolveOptions};
-use tspi_modal_design::target::{
+use khaen_modal_design::ingest::sha256_hex;
+use khaen_modal_design::solve::{solve_from_target_plant, SolveOptions};
+use khaen_modal_design::target::{
     build_target_matrix, BandDecay, CurveBinding, DecayTarget, EffectivePlant, FittedPostBaseline,
     FrozenPostBaseline, ModalMatrix, ModalParticipants, PostBaselineInput, PostRoleFit, RawPlant,
     RawPosition, RawResponse, TargetMatrix, TargetSpec, ToneApplicationProof, ToneBinding,
     P1_LAYOUT_4_1_2,
 };
-use tspi_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
-use tspi_modal_design::validate::{
+use khaen_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
+use khaen_modal_design::validate::{
     band_filter_ir, estimate_t20_window, expected_1_24_oct_points, holdout_labels_sha256,
     min_improvement_band_points, validate_holdout, BandIr, GateStatus, HoldoutRequest,
     HoldoutVerdict, IrOrigin, IrState, NoiseRepeats, PointStatus, RoleRepeats, TuningDeclaration,
@@ -174,7 +174,7 @@ fn flat_points(grid: &[f64], magnitude: f64) -> Vec<ComplexPoint> {
 
 fn raw_position_row(
     label: &str,
-    role: tspi_modal_design::ingest::PositionRole,
+    role: khaen_modal_design::ingest::PositionRole,
     participants: &ModalParticipants,
     grid: &[f64],
     row: &[f64; 5],
@@ -218,7 +218,7 @@ fn make_design_plant(
         .map(|(index, row)| {
             raw_position_row(
                 &format!("P{:02}", index + 1),
-                tspi_modal_design::ingest::PositionRole::Design,
+                khaen_modal_design::ingest::PositionRole::Design,
                 participants,
                 grid,
                 row,
@@ -236,7 +236,7 @@ fn make_holdout_plant(
 ) -> EffectivePlant {
     let mut positions = vec![raw_position_row(
         "PH00",
-        tspi_modal_design::ingest::PositionRole::Design,
+        khaen_modal_design::ingest::PositionRole::Design,
         participants,
         grid,
         &[1.0, 0.9, 0.8, 0.7, 0.6],
@@ -244,7 +244,7 @@ fn make_holdout_plant(
     for (index, row) in rows.iter().enumerate() {
         positions.push(raw_position_row(
             &format!("H{:02}", index + 1),
-            tspi_modal_design::ingest::PositionRole::Validation,
+            khaen_modal_design::ingest::PositionRole::Validation,
             participants,
             grid,
             row,
@@ -673,10 +673,10 @@ fn full_request(
 }
 
 fn point_by_role<'a>(
-    report: &'a tspi_modal_design::validate::HoldoutReport,
+    report: &'a khaen_modal_design::validate::HoldoutReport,
     position: &str,
     role: &str,
-) -> &'a tspi_modal_design::validate::PointPrediction {
+) -> &'a khaen_modal_design::validate::PointPrediction {
     report
         .prediction
         .points
@@ -1175,7 +1175,7 @@ fn t53_holdout_both_missing_not_run() {
 fn t53_holdout_sigma_definition_and_monotonic() {
     let fixture = pass_fixture();
     let irs = make_band_ir(&HOLDOUT_LABELS, 0.40, 0.32, SECONDS_IR);
-    let run = |delta: f64| -> tspi_modal_design::validate::HoldoutReport {
+    let run = |delta: f64| -> khaen_modal_design::validate::HoldoutReport {
         let repeats = make_repeats(&fixture.participants, &fixture.grid, &HOLDOUT_LABELS, delta);
         let request = full_request(&fixture.design_plant, repeats, irs.clone());
         validate_holdout(
@@ -1532,8 +1532,8 @@ fn t53_holdout_band_filter() {
 
 fn expect_error_with_code(
     result: Result<
-        tspi_modal_design::validate::HoldoutReport,
-        tspi_modal_design::validate::ValidateError,
+        khaen_modal_design::validate::HoldoutReport,
+        khaen_modal_design::validate::ValidateError,
     >,
     code: &str,
 ) {
@@ -1564,7 +1564,7 @@ fn t53_holdout_plant_binding_errors() {
             .map(|(index, row)| {
                 raw_position_row(
                     &format!("P{:02}", index + 1),
-                    tspi_modal_design::ingest::PositionRole::Design,
+                    khaen_modal_design::ingest::PositionRole::Design,
                     &fixture.participants,
                     &fixture.grid,
                     row,
@@ -1744,7 +1744,7 @@ fn t53_holdout_hash_deterministic_and_json_contract() {
 
 #[test]
 fn t53_holdout_static_guards() {
-    let source = tspi_modal_design::validate::validate_source_text_for_guards();
+    let source = khaen_modal_design::validate::validate_source_text_for_guards();
     assert!(source.contains("pub fn validate_holdout"));
     assert!(source.contains("DECLARED_GATES"));
     assert!(source.contains("sigma_squared_complex_c"));
@@ -1929,7 +1929,7 @@ fn t53_validate_holdout_manifest_contract() {
     assert_eq!(report.schema, VALIDATE_REPORT_SCHEMA);
     assert_eq!(report.verdict, HoldoutVerdict::PredictedPass);
     // design 预测摘要必须与 T50 validate_solution 独立调用一致（只是摘要，不作 holdout 门）。
-    let design = tspi_modal_design::target::validate_solution(
+    let design = khaen_modal_design::target::validate_solution(
         &fixture.target,
         &fixture.design_plant,
         &fixture.solution,
@@ -1970,7 +1970,7 @@ fn t53_validate_holdout_manifest_contract() {
 fn t53_holdout_i_raw_report_cap_truncation() {
     let fixture = pass_fixture();
     let irs = make_band_ir(&HOLDOUT_LABELS, 0.40, 0.32, SECONDS_IR);
-    let run = |delta: f64| -> tspi_modal_design::validate::HoldoutReport {
+    let run = |delta: f64| -> khaen_modal_design::validate::HoldoutReport {
         let repeats = make_repeats(&fixture.participants, &fixture.grid, &HOLDOUT_LABELS, delta);
         let request = full_request(&fixture.design_plant, repeats, irs.clone());
         validate_holdout(

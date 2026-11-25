@@ -381,7 +381,7 @@ pub struct WorkerRtCtx<'a> {
 ///
 /// 位置说明：core-v1 §12.3 的 core::rt::master_block 签名需要 &RtControl，
 /// 而 §13.2 把类型位置写在 rt-host::swap；T06 scaffold 以 core::rt 为规范定义、
-/// 由 tspi-rt-host::swap 重导出，保证两个路径都存在（见 README 契约偏差记录）。
+/// 由 khaen-rt-host::swap 重导出，保证两个路径都存在（见 README 契约偏差记录）。
 #[repr(C, align(64))]
 #[derive(Debug)]
 pub struct RtControl {

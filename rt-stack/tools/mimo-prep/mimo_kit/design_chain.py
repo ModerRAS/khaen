@@ -138,7 +138,7 @@ def design_real(h, outdir, taps=4096, delay=2048, registry=None):
     if not hv["ok"]:
         raise pv.ProvenanceRefusal(hv["codes"], {"h_guard": hv, "arm": (h.get("info") or {}).get("arm")})
     design_dir = os.path.join(outdir, "design")
-    prov = {"schema": "tspi-mimo-design-provenance/v1", "task": "task-252", "live": True,
+    prov = {"schema": "khaen-mimo-design-provenance/v1", "task": "task-252", "live": True,
             "h_arm": h["info"].get("arm"), "h_sha256": h["info"].get("h_sha256"),
             "h_guard": {"ok": hv["ok"], "codes": hv["codes"], "policy": hv["policy"],
                         "mic_stats": hv["metrics"].get("mic_stats"),

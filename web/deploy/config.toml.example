@@ -1,5 +1,5 @@
 # tpsi-audio-web 配置文件示例
-# 安装到 /etc/tspi-audio-web/config.toml（权限 0600，含 access token）。
+# 安装到 /etc/khaen-audio-web/config.toml（权限 0600，含 access token）。
 # 首次启动时若本文件不存在，服务会自动生成一份并打印随机 token；
 # 若 token 为空或仍为 CHANGE_ME，也会自动生成并写回本文件。
 
@@ -9,14 +9,14 @@
 listen = "0.0.0.0:80"
 
 # 访问 token。所有 API（/healthz 除外）都需要它。
-# 修改后执行: systemctl restart tspi-audio-web
-# 查看当前 token: sudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token
+# 修改后执行: systemctl restart khaen-audio-web
+# 查看当前 token: sudo khaen-audio-web --config /etc/khaen-audio-web/config.toml --print-token
 # 启动时会把当前 token 同步到环境变量 TSPI_WEB_TOKEN_FILE（默认 /etc/tspi/web-token，OEM 约定），
 # 避免 first-boot 生成的 web-token 与 Web 自生成 token 不一致导致登录 401。
 token = "CHANGE_ME"
 # 管理密码哈希（Argon2id，0600；首次打开 Web 设置密码时创建）。
 # 不存在 = 显示“首次设置管理密码”页；设置后密码登录，token 保留为恢复/CLI 兜底。
-auth_file = "/etc/tspi-audio-web/auth.json"
+auth_file = "/etc/khaen-audio-web/auth.json"
 
 # 登录会话有效期（秒），默认 12 小时。
 session_ttl_secs = 43200
@@ -110,7 +110,7 @@ output_device = ""
 # 运行模式切换（dante / aes67 / off）。
 enabled = true
 # 持久化当前模式；重启后按 restore_on_start 恢复。
-state_file = "/etc/tspi-audio-web/state.json"
+state_file = "/etc/khaen-audio-web/state.json"
 # audio-stack 提供的统一切换脚本：tspi-mode <dante|aes67|off> --json
 # 状态查询：tspi-mode status --json（schema=tspi-audio/v1，含 ptp_role/ptp_lock/pid 及嵌套 ptp/aoip/camilladsp/alsa/last_error）
 # 退出码：0 就绪 / 2 参数 / 3 前置 / 4 设备 / 5 PTP未锁 / 7 DSP启动失败 / 8 自检失败 / 9 已回滚 / 10 另一切换进行中
@@ -169,7 +169,7 @@ default_target_level = 2048
 
 [motu]
 # CueMix / UltraLite-mk5。写入前快照目录，只保留最近 20 份。mock 模式不落盘、不执行 ip。
-snapshot_dir = "/var/lib/tspi-audio-web/motu-snapshots"
+snapshot_dir = "/var/lib/khaen-audio-web/motu-snapshots"
 link_local_cidr = "169.254.111.200/16"
 cache_ttl_ms = 12000
 discover_timeout_ms = 2500

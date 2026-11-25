@@ -1,9 +1,9 @@
-//! T26 host **file 端到端**：WAV -> `tspi-file-runner` session/plan（T14）-> T09 4-worker
+//! T26 host **file 端到端**：WAV -> `khaen-file-runner` session/plan（T14）-> T09 4-worker
 //! 静态 DAG（T14 prepared graph 自带 `WorkerDagPlan`）-> WAV。
 //!
 //! 本模块是 T26 入口集成的一部分：rt-host crate 不能依赖 file-runner（file-runner 已依赖
 //! rt-host，反向依赖会成环），因此 file 路径的命令入口放在 `rt-check`（它同时依赖二者），
-//! 由 `rt-check host-file` 真实执行；fake 设备路径见 `tspi-rt-host` bin 的
+//! 由 `rt-check host-file` 真实执行；fake 设备路径见 `khaen-rt-host` bin 的
 //! `fake-io`/`selftest`。两条路径共用 T14 `BlockSource` 的输入切分语义（T14 source.rs）。
 //!
 //! 明确未做：真实 ALSA/板端播放、RT/soak、控制面 REST/WS。
@@ -12,15 +12,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use tspi_dsp_core::workers::WorkerDagPlan;
-use tspi_file_runner::fir::{build_fir_manifest, magnitude_db_at, FirManifestSpec};
-use tspi_file_runner::graph;
-use tspi_file_runner::json::Json;
-use tspi_file_runner::runner::{self, RunOptions};
-use tspi_file_runner::session::FsSource;
-use tspi_file_runner::sha256::sha256_hex;
-use tspi_file_runner::source::BlockSource;
-use tspi_file_runner::wav;
+use khaen_core::workers::WorkerDagPlan;
+use khaen_file_runner::fir::{build_fir_manifest, magnitude_db_at, FirManifestSpec};
+use khaen_file_runner::graph;
+use khaen_file_runner::json::Json;
+use khaen_file_runner::runner::{self, RunOptions};
+use khaen_file_runner::session::FsSource;
+use khaen_file_runner::sha256::sha256_hex;
+use khaen_file_runner::source::BlockSource;
+use khaen_file_runner::wav;
 
 /// host-file 采样率（v1 runtime 48k；96k 由 session 自带，不改这里）。
 const FS: u32 = 48_000;
@@ -64,7 +64,7 @@ pub struct HostFileOutcome {
     pub output_bytes: usize,
     /// 独立解码复核的帧数（= 输出帧数）。
     pub decoded_frames: usize,
-    /// T14 报告（`tspi-file-runner-report/v1` canonical JSON）。
+    /// T14 报告（`khaen-file-runner-report/v1` canonical JSON）。
     pub runner_report: String,
 }
 
@@ -199,7 +199,7 @@ pub fn make_sample(dir: &Path, frames: usize) -> Result<(), String> {
         })
         .collect();
     let session = Json::from_entries(vec![
-        ("schema", Json::String("tspi-file-runner/v1".to_string())),
+        ("schema", Json::String("khaen-file-runner/v1".to_string())),
         ("precision", Json::String("f32-strict".to_string())),
         (
             "audio",

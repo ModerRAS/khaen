@@ -161,8 +161,8 @@ START_FAIL=0
 if ! stage 7-start bash -c "\"$TSPI_SYSTEMCTL\" daemon-reload && \"$TSPI_SYSTEMCTL\" enable tspi-rt-stack.target && \"$TSPI_SYSTEMCTL\" start tspi-motu-48k-keeper.service && \"$TSPI_SYSTEMCTL\" start tspi-irq-affinity.service && \"$TSPI_SYSTEMCTL\" start tspi-rt-stack.target"; then
   warn "启动 tspi-rt-stack.target 失败：进入回滚（last-good/mute）"
   FINAL="START_FAILED"; EXIT_CODE=5; START_FAIL=1
-elif ! wait_unit_active tspi-rt-host.service "$TIMEOUT"; then
-  warn "tspi-rt-host ${TIMEOUT}s 内未 active（target Wants=未生效或 host 启动失败）：进入回滚"
+elif ! wait_unit_active khaen-rt-host.service "$TIMEOUT"; then
+  warn "khaen-rt-host ${TIMEOUT}s 内未 active（target Wants=未生效或 host 启动失败）：进入回滚"
   FINAL="START_TIMEOUT_HOST"; EXIT_CODE=5; START_FAIL=1
 elif ! wait_unit_active tspi-rt-daemon.service "$TIMEOUT"; then
   warn "tspi-rt-daemon ${TIMEOUT}s 内未 active（T28-P0-a 要求 host+daemon 都 active）：进入回滚"

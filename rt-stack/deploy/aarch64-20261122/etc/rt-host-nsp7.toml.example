@@ -1,7 +1,7 @@
-# /etc/tspi-rt-stack/rt-host-nsp7.toml —— tspi-rt-host：NSP 真实 7ch 4.1.2 AES67 -> plan-arena -> MOTU
-# schema: tspi-rt-host/v1（未启用/未安装；生产切换前必须先跑手动 run --config 并通过 RUNBOOK §7 验收）
+# /etc/tspi-rt-stack/rt-host-nsp7.toml —— khaen-rt-host：NSP 真实 7ch 4.1.2 AES67 -> plan-arena -> MOTU
+# schema: khaen-rt-host/v1（未启用/未安装；生产切换前必须先跑手动 run --config 并通过 RUNBOOK §7 验收）
 # 安全前提：CueMix koTrim[0..11]=100 + kMainTrim=100（物理静音），或 MOTU/功放已物理静音；
-#           tspi-rt-host 本身不控制 MOTU 静音，禁止在未静音时启动本配置。
+#           khaen-rt-host 本身不控制 MOTU 静音，禁止在未静音时启动本配置。
 [host]
 block_size = 128              # AES67 userspace 固定 128 帧块
 sample_rate = 48000           # AES67 profile 固定 48k

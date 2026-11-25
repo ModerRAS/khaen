@@ -1,12 +1,12 @@
 # /etc/tspi-rt-stack/rt-host-nsp7.toml
-# tspi-rt-host：NSP 真实 7ch 4.1.2 AES67 -> plan-arena DSP -> MOTU（常驻 systemd）
+# khaen-rt-host：NSP 真实 7ch 4.1.2 AES67 -> plan-arena DSP -> MOTU（常驻 systemd）
 # 来源：rt-stack/deploy/config/rt-host-nsp7.toml.example + motu-meter-dsp-20261122 64ms soak 配置
 # 安全：本配置不控制 MOTU 静音；启动前提 = CueMix koTrim[0..11]=100 + kMainTrim=100（物理静音）。
 # 状态：2026-11-22 aes67-daemon 任务安装；见 rt-stack/evidence/aes67-daemon-20261122/RUNBOOK.md
 #
 # plan 选型（2026-11-22 实测结论）：
 #   RUN2 flat/tilt10 的真实 plan（4860B, ABI v2, sha 3fced8bc…/eaa144a4…）是 **2-in** 设计
-#   （plan.adapter n_src=2），tspi-rt-host 的 userspace AES67 单 flow 7ch 只接受 **8ch strict 图输入**
+#   （plan.adapter n_src=2），khaen-rt-host 的 userspace AES67 单 flow 7ch 只接受 **8ch strict 图输入**
 #   （错误：ERR_ROLES …只支持 8ch strict(4.1.2) 图输入（got 2）），因此不能直接接 NSP 7ch 流。
 #   生产常驻链路改用 window-nsp-e2e 已验证的 8-in/7-role 4.1.2 identity plan（ABI v1，1636B，
 #   n_in=8 / n_out=8 / sha 52f2f3adaeb4058180cea88a63232cd4ba02321d7521f60331f62afff5cb1c0d）。

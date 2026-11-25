@@ -15,10 +15,10 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use tspi_calibration::compile_apply::GPathInput;
-use tspi_calibration::job::sha256_hex;
-use tspi_calibration::measured_design::load_g_paths_file;
-use tspi_dsp_compat::ws::{json_encode, json_object, json_parse, JsonValue};
+use khaen_calibration::compile_apply::GPathInput;
+use khaen_calibration::job::sha256_hex;
+use khaen_calibration::measured_design::load_g_paths_file;
+use khaen_compat::ws::{json_encode, json_object, json_parse, JsonValue};
 
 fn text(value: impl Into<String>) -> JsonValue {
     JsonValue::String(value.into())

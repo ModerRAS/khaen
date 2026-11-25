@@ -25,7 +25,7 @@
 //! crates/designer/tests/T34/min_slow_cases.rs，通过文末 include! 在 #[cfg(test)] 下编译执行
 //! （不改 integrator 独占的 public_registration.rs，见 tests/T34/README.md）。
 //!
-//! 状态：T34 实现 + 真实 cargo test -p tspi-fir-designer min_slow 执行（见 evidence/T34/）。
+//! 状态：T34 实现 + 真实 cargo test -p khaen-designer min_slow 执行（见 evidence/T34/）。
 //! 未做：板端/ALSA/RT 实测、WAV 落盘导出、roots 分解、零点半径检查（spec MAY）、T55 报告（NOT_RUN）。
 
 use std::fmt;

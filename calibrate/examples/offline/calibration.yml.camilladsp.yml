@@ -64,4 +64,4 @@ pipeline:
   names:
   - cal_ch2_delay
   type: Filter
-schema: tspi-calibration-camilladsp/v1
+schema: khaen-calibration-camilladsp/v1

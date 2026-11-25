@@ -3,13 +3,13 @@
 //! 运行（integrator 注册前）：rustc --test 手工编译执行，见 evidence/T10/manifest。
 //! Lead 2026-11-17 裁决 A（HP 判据 5 镜像 + 整段阻带峰值 < −A_s）已在本文件断言中体现。
 
-use tspi_fir_designer::linear::{
+use khaen_designer::linear::{
     design, design_checked_with, verify_linear, verify_linear_with, AnalysisOptions, LinearSpec,
     Symmetry, WindowKind, GROUP_DELAY_TOLERANCE_SAMPLES, PASSBAND_RIPPLE_MARGIN_DB,
     STOPBAND_MARGIN_DB,
 };
 
-fn print_verification(tag: &str, v: &tspi_fir_designer::linear::LinearVerification) {
+fn print_verification(tag: &str, v: &khaen_designer::linear::LinearVerification) {
     println!(
         "[T10 {tag}] fs={} taps={} D={} ms={:.6} grid={} sym_err={:.3e} pass_ripple={:.6}dB \
          stop_max={:.3}dB gd=[{:.9},{:.9}] gd1k={:.9} trans_edge={:?} ref={:.9}dB nyq={:.3}dB \

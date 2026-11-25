@@ -13,7 +13,7 @@
 
 use crate::peq_fit::{FIT_FREQ_MIN_HZ, REFERENCE_FREQ_HZ, REPORT_GRID_OCTAVE};
 use crate::peq_plan::PeqBiquad;
-use tspi_dsp_core::abi::{
+use khaen_core::abi::{
     PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES, PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1,
     TSPI_PLAN_ABI_V2,
 };
@@ -36,8 +36,8 @@ fn section_coeffs(section: &PeqBiquad) -> [f64; PLAN_IIR_SECTION_COEFFS] {
     ]
 }
 
-fn band_json(section: &PeqBiquad) -> tspi_dsp_compat::ws::JsonValue {
-    use tspi_dsp_compat::ws::{json_object, JsonValue};
+fn band_json(section: &PeqBiquad) -> khaen_compat::ws::JsonValue {
+    use khaen_compat::ws::{json_object, JsonValue};
     let coeffs = section_coeffs(section);
     json_object(vec![
         (
@@ -68,9 +68,9 @@ fn peq_sum_db(sections: &[PeqBiquad], freq_hz: f64) -> f64 {
 
 /// 测得链路（P FIR ⊛ PEQ 级联）相对 1 kHz 的链峰值增益（= T64 peq_fit 的 D7 口径）。
 fn combined_chain_peak_gain_db(p_fir: &[f64], sections: &[PeqBiquad]) -> f64 {
-    let grid = tspi_fir_designer::modal_peq::log_frequency_grid(
+    let grid = khaen_designer::modal_peq::log_frequency_grid(
         FIT_FREQ_MIN_HZ,
-        tspi_fir_designer::modal_peq::freq_upper_hz(FS as f64),
+        khaen_designer::modal_peq::freq_upper_hz(FS as f64),
         REPORT_GRID_OCTAVE,
     );
     let response: Vec<f64> = grid
@@ -86,9 +86,9 @@ fn combined_chain_peak_gain_db(p_fir: &[f64], sections: &[PeqBiquad]) -> f64 {
 
 /// 单段 PEQ 的绝对幅度正峰（dB；T64 单段 boost 帽口径）。
 fn section_abs_peak_db(section: &PeqBiquad) -> f64 {
-    let grid = tspi_fir_designer::modal_peq::log_frequency_grid(
+    let grid = khaen_designer::modal_peq::log_frequency_grid(
         FIT_FREQ_MIN_HZ,
-        tspi_fir_designer::modal_peq::freq_upper_hz(FS as f64),
+        khaen_designer::modal_peq::freq_upper_hz(FS as f64),
         REPORT_GRID_OCTAVE,
     );
     grid.iter()
@@ -102,8 +102,8 @@ fn peq_report_channel(
     p_fir: &[f64],
     sections: &[PeqBiquad],
     program_peak_dbfs: f64,
-) -> tspi_dsp_compat::ws::JsonValue {
-    use tspi_dsp_compat::ws::{json_object, JsonValue};
+) -> khaen_compat::ws::JsonValue {
+    use khaen_compat::ws::{json_object, JsonValue};
     let gain_db = combined_chain_peak_gain_db(p_fir, sections);
     let max_positive_db = super::p_row_max_positive_db(p_fir, FS as f64).max(0.0);
     let single_boost_db = sections
@@ -155,7 +155,7 @@ fn peq_report_channel(
 }
 
 fn t64_report_bytes_peq(channels: &[(&str, &[f64], &[PeqBiquad], f64)]) -> Vec<u8> {
-    use tspi_dsp_compat::ws::{json_encode, json_object, JsonValue};
+    use khaen_compat::ws::{json_encode, json_object, JsonValue};
     let document = json_object(vec![
         ("schema", JsonValue::String(PEQ_FIT_SCHEMA.to_string())),
         (
@@ -373,7 +373,7 @@ fn t66_peq_t64_sections_written_as_plan_abi_v2_iir_and_host_parsed() {
 
     // host 消费（真实 T20 plan-arena 解析/准入路径，离线静音）：接受 ABI v2 并暴露 IIR 表。
     let mut registry = PlanRegistry::new();
-    let mut memory = tspi_rt_host::admission::MockMemory::new();
+    let mut memory = khaen_rt_host::admission::MockMemory::new();
     let version = registry
         .admit_with(plan.token(), &env_4w(), &mut memory)
         .expect("T20 plan-arena 必须接受 T66 ABI v2 plan");

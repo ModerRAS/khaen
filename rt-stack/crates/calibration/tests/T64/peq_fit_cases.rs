@@ -8,9 +8,9 @@ use super::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tspi_modal_design::timebase::CommonD0;
+use khaen_modal_design::timebase::CommonD0;
 
-use tspi_fir_designer::targets::{import_json_bytes, ImportOptions};
+use khaen_designer::targets::{import_json_bytes, ImportOptions};
 
 use crate::positions::{
     MultipointPlan, MultipointPosition, PositionQualityReport, QualityScope, RepeatPolicy,

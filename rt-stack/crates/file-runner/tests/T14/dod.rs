@@ -1,9 +1,9 @@
 //! T14 DoD 汇总：交付契约（完整图版本/固定精度/identity 保护/元数据/NOT_RUN）端到端。
 
-use tspi_file_runner::graph::GraphKind;
-use tspi_file_runner::json::Json;
-use tspi_file_runner::runner::{self, RunOptions};
-use tspi_file_runner::{
+use khaen_file_runner::graph::GraphKind;
+use khaen_file_runner::json::Json;
+use khaen_file_runner::runner::{self, RunOptions};
+use khaen_file_runner::{
     E_FILE_EXEC, FALLBACK_MUTE, GRAPH_HASH_ALGO, GRAPH_HASH_DOMAIN, NOT_VERIFIED, PRECISION_LOCK,
     REPORT_SCHEMA, ROUTE_TAPS_EXTENDED_MAX, ROUTE_TAPS_REGULAR_MAX, RUNNER_NAME, RUNNER_VERSION,
     SESSION_SCHEMA, TRIGGER_COMPILE_REJECT, TRIGGER_GRAPH_HASH_MISMATCH, TRIGGER_IR_ABSENT,
@@ -18,12 +18,12 @@ const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000
 
 #[test]
 fn dod_root_contract_constants() {
-    assert_eq!(SESSION_SCHEMA, "tspi-file-runner/v1");
-    assert_eq!(REPORT_SCHEMA, "tspi-file-runner-report/v1");
+    assert_eq!(SESSION_SCHEMA, "khaen-file-runner/v1");
+    assert_eq!(REPORT_SCHEMA, "khaen-file-runner-report/v1");
     assert_eq!(PRECISION_LOCK, "f32-strict");
     assert_eq!(GRAPH_HASH_ALGO, "sha256-canonical-v1");
     assert!(GRAPH_HASH_DOMAIN.starts_with("TSPI-FILE-RUNNER-GRAPH"));
-    assert_eq!(RUNNER_NAME, "tspi-file-runner");
+    assert_eq!(RUNNER_NAME, "khaen-file-runner");
     assert!(!RUNNER_VERSION.is_empty());
     assert_eq!(ROUTE_TAPS_REGULAR_MAX, 4_096);
     assert_eq!(ROUTE_TAPS_EXTENDED_MAX, 16_384);
@@ -163,10 +163,10 @@ fn dod_precision_lock_and_f32_execution() {
     crate::common::map_mut(&mut bad)
         .insert("precision".to_string(), Json::String("f64".to_string()));
     assert_eq!(
-        tspi_file_runner::session::parse_session_json(&bad)
+        khaen_file_runner::session::parse_session_json(&bad)
             .expect_err("precision")
             .code(),
-        tspi_file_runner::E_FILE_PRECISION
+        khaen_file_runner::E_FILE_PRECISION
     );
     // 执行全程 f32：identity 图输出 = 输入 f32 位（fixed precision）。
     let fixture = Fixture::identity(64);
@@ -303,7 +303,7 @@ fn dod_metadata_is_deterministic_and_recomputable() {
     }
     assert_eq!(
         report_str(&report, &["output", "sha256"]),
-        tspi_file_runner::sha256::sha256_hex(&bits)
+        khaen_file_runner::sha256::sha256_hex(&bits)
     );
     // IR 绑定 hash 进入图版本：IR 内容 hash 改变 -> graph_id 改变。
     let mut with_ir = Fixture::identity(150);

@@ -10,7 +10,7 @@
 ## 0. 60 秒总览（一条命令看结论）
 
 ```bash
-systemctl is-active tspi-irq-affinity.service tspi-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target
+systemctl is-active tspi-irq-affinity.service khaen-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target
 cat /proc/irq/58/smp_affinity_list /proc/irq/56/smp_affinity_list /proc/irq/57/smp_affinity_list   # 期望 1 2 3
 curl -sS -o /dev/null -w 'healthz=%{http_code}\n' http://127.0.0.1:80/healthz                         # 期望 200（daemon 在 :80；8090 仅 127.0.0.1 probe）
 ```
@@ -30,7 +30,7 @@ journalctl -b -u tspi-irq-affinity.service --no-pager | tail -n 50
 - **v11 legacy（live-only drop-in）**：日志来自 `timeout 60 /bin/sh -c until …`，语义相同；若同一 unit 同时有
   `ExecStartPre`（unit 内置）与 legacy drop-in 两条等待，说明 drop-in 未清理（重跑 04 会自动迁移/删除）。
 - **FAIL（重启后 host 不启动）**：日志出现 `FAIL 依赖 IRQ 的 /proc/irq 节点在 60s 内未就绪: IRQ56 IRQ57` →
-  进入 §8 判定表（IRQ 号变化/设备未枚举，**不要**用 `systemctl start tspi-rt-host.service` 绕过钉核前置）。
+  进入 §8 判定表（IRQ 号变化/设备未枚举，**不要**用 `systemctl start khaen-rt-host.service` 绕过钉核前置）。
 
 ## 2. IRQ 钉核 + B1 前置是否真的装到板上
 
@@ -49,9 +49,9 @@ systemctl cat tspi-irq-affinity.service | grep -E 'ExecStartPre|TimeoutStartSec'
 
 ```bash
 systemctl is-enabled tspi-rt-stack.target
-systemctl is-active tspi-rt-stack.target tspi-rt-host.service tspi-rt-daemon.service
-systemctl show -p NRestarts --value tspi-rt-host.service                      # 期望 0（启动即崩会 >0）
-journalctl -b -u tspi-rt-host.service --no-pager | grep -E 'kernel_applied|scheduler|SAFE_MODE|healthz' | tail -n 20
+systemctl is-active tspi-rt-stack.target khaen-rt-host.service tspi-rt-daemon.service
+systemctl show -p NRestarts --value khaen-rt-host.service                      # 期望 0（启动即崩会 >0）
+journalctl -b -u khaen-rt-host.service --no-pager | grep -E 'kernel_applied|scheduler|SAFE_MODE|healthz' | tail -n 20
 journalctl -b -u tspi-rt-daemon.service --no-pager | tail -n 20
 ```
 
@@ -62,7 +62,7 @@ daemon 日志无 panic/重启循环。
 
 ```bash
 curl -sS -D- -o /dev/null http://127.0.0.1:80/healthz | head -n 1        # 期望 HTTP/1.1 200 OK（daemon 在 :80；8090 是 rt-host 的 loopback probe 口，外部不通）
-journalctl -b -u tspi-rt-host.service --no-pager | grep -Ei 'rate|48000|44100|96000|192000' | tail -n 10
+journalctl -b -u khaen-rt-host.service --no-pager | grep -Ei 'rate|48000|44100|96000|192000' | tail -n 10
 ```
 
 期望 200；采样率保持 48k，**不得出现 192000/176400**（用户硬禁令）。
@@ -70,7 +70,7 @@ journalctl -b -u tspi-rt-host.service --no-pager | grep -Ei 'rate|48000|44100|96
 ## 5. 无旧 C（G-no-C）
 
 ```bash
-systemctl is-enabled tspi-camilladsp.service tspi-upmix-autodetect.service tspi-audio-web.service 2>/dev/null
+systemctl is-enabled tspi-camilladsp.service tspi-upmix-autodetect.service khaen-audio-web.service 2>/dev/null
 pgrep -af 'camilladsp|tspi-upmix' || echo 'no C process (good)'
 ls -l /run/tspi/camilladsp.yml /run/tspi/camilladsp.env /etc/tspi/last-mode 2>/dev/null || echo 'no C entry files (good)'
 ```
@@ -105,7 +105,7 @@ echo "verify_rc=$?"; python3 -m json.tool "$EV/verify-report.json" | tail -n 20
 | 症状 | 首查 | 处置（窗口内） |
 | --- | --- | --- |
 | host inactive，irq-affinity **failed**，日志 wait 超时 FAIL IRQ56/57 | `journalctl -b -u tspi-irq-affinity` | IRQ 号变化/设备未枚举：改 `/etc/tspi-rt-stack/irq-affinity.env` 的 pins 或加大 `TSPI_IRQ_WAIT_SECS` 后 `systemctl restart tspi-irq-affinity.service` **[WRITE]**；**不要**绕过 Requires= |
-| irq-affinity active 但 host inactive | `journalctl -b -u tspi-rt-host`、`06 tarball` | 缺 toml/env、ALSA 被占、RT 门槛失败 → 按 01/06 门修配置；仍不行则 `08 --to-last-good` |
+| irq-affinity active 但 host inactive | `journalctl -b -u khaen-rt-host`、`06 tarball` | 缺 toml/env、ALSA 被占、RT 门槛失败 → 按 01/06 门修配置；仍不行则 `08 --to-last-good` |
 | target active、**daemon inactive、healthz 000** | B2 已知（`08 --mute` 只拉 host） | `systemctl start tspi-rt-stack.target` **[WRITE]**（host 已 mute，仅补 daemon）；终验 19/19 |
 | IRQ 回到 7/3/5 | `systemctl is-enabled/ is-active irqbalance` | irqbalance 被 enable → `systemctl disable --now irqbalance` **[WRITE]** + `systemctl restart tspi-irq-affinity.service` |
 | 发现 legacy `10-wait-irq.conf` | `§2` 命令 | 重跑 04（自动迁移到 evidence/migrated-dropins/）或删除后 `daemon-reload` **[WRITE]** |
@@ -117,12 +117,12 @@ echo "verify_rc=$?"; python3 -m json.tool "$EV/verify-report.json" | tail -n 20
 TS=$(date +%Y%m%dT%H%M%S); OUT=/var/tmp/tspi-bootdiag-$TS; mkdir -p "$OUT"
 {
   date; uname -a; uptime
-  systemctl status tspi-irq-affinity.service tspi-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target --no-pager -l
+  systemctl status tspi-irq-affinity.service khaen-rt-host.service tspi-rt-daemon.service tspi-rt-stack.target --no-pager -l
   systemctl cat tspi-irq-affinity.service
   ls -la /etc/systemd/system/tspi-irq-affinity.service.d/ 2>/dev/null
   for i in 58 56 57; do printf 'IRQ%s=' "$i"; cat /proc/irq/$i/smp_affinity_list 2>&1; done
   systemctl is-enabled irqbalance; systemctl is-active irqbalance
-  journalctl -b -u tspi-irq-affinity.service -u tspi-rt-host.service --no-pager | tail -n 400
+  journalctl -b -u tspi-irq-affinity.service -u khaen-rt-host.service --no-pager | tail -n 400
   cat /var/lib/tspi-rt-stack/last-good.json 2>/dev/null
 } > "$OUT/bootdiag.txt" 2>&1
 tar czf "/var/tmp/tspi-bootdiag-$TS.tgz" -C /var/tmp "tspi-bootdiag-$TS"

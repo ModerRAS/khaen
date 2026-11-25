@@ -1,7 +1,7 @@
 # 2026-11-23 从 dsp-host 只读抄下的 /etc/tspi-rt-stack/rt-host-nsp16.toml。
 # 16 声道播放仍用这份。通用模板 rt-host.toml.example 没有这些播放项。
-# 服务名下次安装用 tspi-rt-host；这份配置文件名先保持 nsp16，避免把正在播的链换成通用立体声模板。
-# tspi-rt-host 16ch AES67 (NSP 16ch = 2x8 flow, H16 container 8+8) -> plan-arena -> MOTU
+# 服务名下次安装用 khaen-rt-host；这份配置文件名先保持 nsp16，避免把正在播的链换成通用立体声模板。
+# khaen-rt-host 16ch AES67 (NSP 16ch = 2x8 flow, H16 container 8+8) -> plan-arena -> MOTU
 [host]
 block_size = 128
 sample_rate = 48000

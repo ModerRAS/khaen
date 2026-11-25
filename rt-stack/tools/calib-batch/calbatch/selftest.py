@@ -60,7 +60,7 @@ def _base_config(repo_root: str, with_commands: bool = True) -> dict:
     if with_commands:
         cfg["commands"] = {
             "preflight": {"argv": ["bash", "{prep_dir}/preflight.sh"], "timeout_s": 60},
-            "measure": {"argv": ["tspi-calibrate", "measure-multi"], "timeout_s": 60},
+            "measure": {"argv": ["khaen-calibrate", "measure-multi"], "timeout_s": 60},
             "apply": {"argv": ["bash", "{prep_dir}/apply.sh"], "timeout_s": 60},
         }
     return cfg

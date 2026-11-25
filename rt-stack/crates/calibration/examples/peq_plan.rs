@@ -3,12 +3,12 @@
 //! 用法：peq_plan [--out DIR] [--f0 HZ] [--gain-db DB] [--q Q]
 //! 产物：DIR/plan.bin（T66 compile/plan.bin 同布局）、DIR/peq-report.json（解析响应/校验）。
 //!
-//! 生成 factorized identity A/G/P + 单 role PEQ 的 plan ABI v2 字节，供 tspi-rt-host
+//! 生成 factorized identity A/G/P + 单 role PEQ 的 plan ABI v2 字节，供 khaen-rt-host
 //! graph=plan-arena（backend=fake，[sink]/[capture] 离线）做数字域验证。不打开设备、不出声。
 
 use std::process::ExitCode;
 
-use tspi_calibration::peq_plan::{
+use khaen_calibration::peq_plan::{
     compile_peq_plan, PeqBiquad, PeqPlanRequest, PeqRolePlanInput, PEQ_PLAN_SCHEMA,
 };
 

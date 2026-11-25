@@ -1,12 +1,12 @@
-//! runner 执行：core block DAG、IR/flush、identity 保护、确定性 `tspi-file-runner-report/v1` 元数据。
+//! runner 执行：core block DAG、IR/flush、identity 保护、确定性 `khaen-file-runner-report/v1` 元数据。
 
-use tspi_file_runner::graph::GraphKind;
-use tspi_file_runner::json::Json;
-use tspi_file_runner::runner::{self, RunOptions};
-use tspi_file_runner::session::SourceProvider;
-use tspi_file_runner::sha256::sha256_hex;
-use tspi_file_runner::wav::{decode_wav, encode_wav_f32};
-use tspi_file_runner::{E_FILE_EXEC, FALLBACK_MUTE, REPORT_SCHEMA, TRIGGER_GRAPH_HASH_MISMATCH};
+use khaen_file_runner::graph::GraphKind;
+use khaen_file_runner::json::Json;
+use khaen_file_runner::runner::{self, RunOptions};
+use khaen_file_runner::session::SourceProvider;
+use khaen_file_runner::sha256::sha256_hex;
+use khaen_file_runner::wav::{decode_wav, encode_wav_f32};
+use khaen_file_runner::{E_FILE_EXEC, FALLBACK_MUTE, REPORT_SCHEMA, TRIGGER_GRAPH_HASH_MISMATCH};
 
 use crate::common::{
     ir_role_metadata, pcm16, protection, report_json, report_num, report_str, wav_container,
@@ -116,7 +116,7 @@ fn runner_report_is_deterministic_canonical_metadata() {
         "sha256-canonical-v1"
     );
     assert_eq!(report_str(&report, &["graph_kind"]), "normal");
-    assert_eq!(report_str(&report, &["runner", "name"]), "tspi-file-runner");
+    assert_eq!(report_str(&report, &["runner", "name"]), "khaen-file-runner");
     assert_eq!(report_num(&report, &["engine", "abi_version"]), 1.0);
     assert_eq!(report_num(&report, &["engine", "plan_version"]), 1.0);
     assert_eq!(report_num(&report, &["engine", "block_size"]), 128.0);
@@ -135,7 +135,7 @@ fn runner_report_is_deterministic_canonical_metadata() {
         Some(Json::Array(entries)) => entries.clone(),
         other => panic!("not_verified: {:?}", other),
     };
-    assert_eq!(not_verified.len(), tspi_file_runner::NOT_VERIFIED.len());
+    assert_eq!(not_verified.len(), khaen_file_runner::NOT_VERIFIED.len());
     let texts = not_verified
         .iter()
         .map(|entry| entry.as_str().expect("string").to_string())
@@ -428,8 +428,8 @@ fn runner_fixed_precision_pcm_input_bit_exact() {
     for name in ["a0.raw", "p_FL.raw", "p_FR.raw"] {
         source.insert(name, built.load(name).expect("blob"));
     }
-    let session = tspi_file_runner::session::parse_session(&text).expect("session");
-    let prepared = tspi_file_runner::graph::prepare(session, &source).expect("prepare");
+    let session = khaen_file_runner::session::parse_session(&text).expect("session");
+    let prepared = khaen_file_runner::graph::prepare(session, &source).expect("prepare");
     let result = runner::run(&prepared, &RunOptions::default()).expect("run");
     // 解码后的 f32 位与输出位逐位一致（无隐式 dither/clip/归一化/格式转换）。
     let expected: Vec<f32> = samples

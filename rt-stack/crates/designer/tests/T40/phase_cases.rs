@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/designer/src/phase.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （cargo 不自动发现 tests/<Txx>/ 子目录；public_registration.rs 属 integrator，不改）。
-// 运行：cargo test -p tspi-fir-designer phase
+// 运行：cargo test -p khaen-designer phase
 //
 // 覆盖：§4.2 整数/分数 delay、taps 支撑、极性、输入/输出方向、因果、独立解析向量（V11 等）、
 // 测量网格/端点/振铃/参考归一化、预算事实、失败码、确定性。use super::* 由外层提供。

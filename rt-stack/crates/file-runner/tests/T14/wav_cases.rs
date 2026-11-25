@@ -1,10 +1,10 @@
 //! 自有 RIFF/WAVE 解析/解包/写回契约（T14 “自有 file 解析/解包” + 固定 f32 精度）。
 
-use tspi_file_runner::wav::{
+use khaen_file_runner::wav::{
     decode_float32_samples, decode_wav, encode_wav_f32, file_sha256, info_json, parse_wav,
     WavFormat,
 };
-use tspi_file_runner::{E_FILE_CHANNELS, E_FILE_FORMAT, E_FILE_FRAMES, E_FILE_RATE, E_FILE_WAV};
+use khaen_file_runner::{E_FILE_CHANNELS, E_FILE_FORMAT, E_FILE_FRAMES, E_FILE_RATE, E_FILE_WAV};
 
 use crate::common::{pcm16, subformat, wav_container, wav_extensible};
 
@@ -224,7 +224,7 @@ fn wav_decode_float32_samples_rejects_pcm_and_keeps_out_of_range() {
 fn wav_file_sha256_is_content_hash() {
     let a = encode_wav_f32(&[0.0, 0.25], 1, 48_000).expect("encode");
     let b = encode_wav_f32(&[0.0, 0.5], 1, 48_000).expect("encode");
-    assert_eq!(file_sha256(&a), tspi_file_runner::sha256::sha256_hex(&a));
+    assert_eq!(file_sha256(&a), khaen_file_runner::sha256::sha256_hex(&a));
     assert_ne!(file_sha256(&a), file_sha256(&b));
     assert_eq!(file_sha256(&a).len(), 64);
 }

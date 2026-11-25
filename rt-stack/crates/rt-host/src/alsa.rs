@@ -71,9 +71,9 @@
 //! DSP-HOST-DECISION.md` §5/§6；`evidence/baseline/board-evidence/E1-DIGITAL-INPUT.md`
 //! 与 `e1-duplex-probe-20261116-220517.txt`（MOTU 实测 actual 参数）。
 
-use tspi_dsp_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
-use tspi_dsp_core::events::EV_DEVICE_OWNER_CHANGE;
-use tspi_dsp_core::rt::{
+use khaen_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
+use khaen_core::events::EV_DEVICE_OWNER_CHANGE;
+use khaen_core::rt::{
     RtStatus, BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ,
 };
 

@@ -1,4 +1,4 @@
-//! [NONRT] 执行 + `tspi-file-runner-report/v1` 元数据（离线 file runner 的 run 阶段）。
+//! [NONRT] 执行 + `khaen-file-runner-report/v1` 元数据（离线 file runner 的 run 阶段）。
 //!
 //! 执行语义（对齐 T03 SPEC §3.2/§3.3 与 core-v1 §6.3）：
 //!
@@ -12,15 +12,15 @@
 //! identity 保护（prepare 阶段已决定，见 `crate::graph`）：`GraphKind::ProtectionIdentityPPost` 时执行
 //! G=I 但保留 P_post 的 fallback 图；`ProtectionMute` 时输出全零（长度 = 输入帧数，无尾）。
 //!
-//! 元数据（`tspi-file-runner-report/v1`）是**确定性** canonical JSON：不含时间戳/耗时，同输入同图
+//! 元数据（`khaen-file-runner-report/v1`）是**确定性** canonical JSON：不含时间戳/耗时，同输入同图
 //! 两次运行逐字节一致；包含 input/output SHA-256、graph_id/plan_version/abi_version/precision、
 //! compile 摘要、fused 设计摘要、FIR/IR 绑定、identity 保护记录、flush/block/worker 计数、
 //! decode 统计与 NOT_RUN 清单（禁止把未测项说成已验证）。
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use tspi_dsp_core::abi::{TspiBlockAckV1, ABI_VERSION};
-use tspi_dsp_core::workers::{
+use khaen_core::abi::{TspiBlockAckV1, ABI_VERSION};
+use khaen_core::workers::{
     execute_block_scheduled, WorkerPartials, WorkerScheduleStats, WORKER_ACK_FLAG_VALID,
 };
 
@@ -89,7 +89,7 @@ pub struct RunResult {
     pub exec_error: Option<String>,
     /// 运行状态：`ok`/`protected`/`muted`。
     pub status: String,
-    /// 元数据 canonical JSON（`tspi-file-runner-report/v1`）。
+    /// 元数据 canonical JSON（`khaen-file-runner-report/v1`）。
     pub metadata_json: String,
 }
 

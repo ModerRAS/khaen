@@ -6,7 +6,7 @@
 
 ## 1. 它解决什么
 
-旧工具 `tspi-calibrate measure-multi` 每个话筒位置产出一组
+旧工具 `khaen-calibrate measure-multi` 每个话筒位置产出一组
 `<CH>-chNN.analysis.json` / `<CH>-chNN.diag.json`；新栈 `tspi-cal` 的 measured 设计输入是
 spec v2（`tspi-cal-measured-design/v2`，见 `rt-stack/spec/measured-design-v2.md`）。
 本工具把“按位置命名的 analysis 目录”转成 spec v2 + sha256 manifest，并在生成前做 fail-closed

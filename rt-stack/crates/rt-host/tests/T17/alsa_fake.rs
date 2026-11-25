@@ -2,13 +2,13 @@
 //
 // 本文件经 src/alsa.rs 末尾的 cfg(test) mod alsa_fake_tests { include!(...) } 进入单测
 // 构建（cargo 不自动发现 tests/<子目录>；公共注册属 integrator）。运行：
-//   cargo test -p tspi-rt-host alsa_fake
+//   cargo test -p khaen-rt-host alsa_fake
 // 全部测试名 t17_ 前缀；模块路径含 alsa_fake_tests，可按 alsa_fake 过滤。
 // 离线：只用 FakeBackend，不打开 /dev/snd，不需要声卡。
 
 use super::*;
-use tspi_dsp_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
-use tspi_dsp_core::rt::RtStatus;
+use khaen_core::abi::{sample_format, TspiHwParamsV1, ABI_VERSION};
+use khaen_core::rt::RtStatus;
 
 const S24: u16 = sample_format::S24_3LE_INTERLEAVED;
 const S32: u16 = sample_format::S32_LE_INTERLEAVED;

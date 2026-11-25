@@ -37,7 +37,7 @@
 - _需求: 6, 7, 8_
 
 - [x] 7. 测试、证据、总结
-- `TEMP`/`TMP` 指向 `C:/WorkSpace/Claw/scratch/lead/testtmp`，跑 `cargo test -p tspi-rt-host` 及相关 web 测试。新增用例覆盖布局、折叠、plan 下标、捕获分流、错误 plan 拒启、`upmix` 拒启、草稿拒绝。
+- `TEMP`/`TMP` 指向 `C:/WorkSpace/Claw/scratch/lead/testtmp`，跑 `cargo test -p khaen-rt-host` 及相关 web 测试。新增用例覆盖布局、折叠、plan 下标、捕获分流、错误 plan 拒启、`upmix` 拒启、草稿拒绝。
 - 证据放 `rt-stack/evidence/2026-11-22-centerdownmix-512/`：通道表、系数差异、策略表、测试日志。未跑的写 NOT_RUN。
 - 一页总结：接口在 `content_map` 加按角色编译的 plan；task-200 复用；上混和其它下混只留策略名；离 NSP 切 `outputLayout: 5.1.2` 还缺的步骤。
 - 新分支本地提交，不 push，不部署，不碰 NSP 与生产主机。

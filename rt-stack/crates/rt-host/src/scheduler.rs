@@ -50,8 +50,8 @@
 
 use core::mem::{align_of, needs_drop, size_of};
 
-use tspi_dsp_core::rt::{RtStatus, RT_WORKERS, RT_WORKERS_FALLBACK};
-use tspi_dsp_core::workers::{
+use khaen_core::rt::{RtStatus, RT_WORKERS, RT_WORKERS_FALLBACK};
+use khaen_core::workers::{
     ack_mask, WORKER_DEFAULT_CUTOFF_DRAIN_ITERS, WORKER_DEFAULT_SPIN_MAX_ITERS,
 };
 

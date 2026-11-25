@@ -1,7 +1,7 @@
 # 与 calibration-v11-highshelf.example.yml 对应的片段。
 # shelf 用 Slope 型：slope = 12 * q = 8.4。FR 延迟 8/48000 s = 1/6 ms。
 # channelmap_roles 只是提示；pipeline 里已经有 Gain inverted。两条路二选一。
-schema: tspi-calibration-camilladsp/v1
+schema: khaen-calibration-camilladsp/v1
 note: "filters/pipeline 可直接合并进渲染后的 CamillaDSP config（极性已由 Gain inverted 实现）；channelmap_roles 仅 advisory，两条路径二选一，勿同时应用以免双反相"
 filters:
   cal_ch0_peq0:

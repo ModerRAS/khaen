@@ -1,10 +1,10 @@
-//! daemon 把校准 REST 收成对 `tspi-rt-host` 的一行 Unix socket 请求。
+//! daemon 把校准 REST 收成对 `khaen-rt-host` 的一行 Unix socket 请求。
 //!
 //! daemon 不打开声卡。socket 不在时返回 503，不造一条测量记录。
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tspi_dsp_core::rt::RtStatus;
+use khaen_core::rt::RtStatus;
 
 use crate::rest::calibration_contract::host_stage_request;
 use crate::rest::{
@@ -24,7 +24,7 @@ impl HostSocketPort {
     pub fn new(sock: impl Into<String>) -> Self {
         Self {
             sock: sock.into(),
-            exchange_fn: tspi_rt_host::cal_control::exchange,
+            exchange_fn: khaen_rt_host::cal_control::exchange,
             job: None,
         }
     }
@@ -200,7 +200,7 @@ impl CalibrationPort for HostSocketPort {
             synthetic: true,
             backend: "unix-socket",
             real_audio: false,
-            note: "requests go to tspi-rt-host; synthetic stays true until a recorded room measurement exists",
+            note: "requests go to khaen-rt-host; synthetic stays true until a recorded room measurement exists",
         }
     }
 }

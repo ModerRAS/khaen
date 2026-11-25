@@ -1,4 +1,4 @@
-//! TSPI RT-first DSP 自研 host 入口（WBS **T26**；crate `tspi-rt-host` bin）。
+//! TSPI RT-first DSP 自研 host 入口（WBS **T26**；crate `khaen-rt-host` bin）。
 //!
 //! 本文件只做**串行入口集成**：把已完成的 leaf 模块接到一个 host 进程里，不代替它们、
 //! 不重写 kernel/调度/协议。默认 `backend=fake` 不打开真实 ALSA 设备；`backend=alsa`
@@ -20,7 +20,7 @@
 //! 真实板端网卡/IGMP/PTP、电平/听音 NOT_RUN（evidence/aes67-host-wire/）。
 //!
 //! **T203/T210 中置下混内容适配**：graph=plan-arena 播放链在 capture 帧进图之前接入
-//! `tspi_rt_host::content_map`（**host 自持**；task-210 把该适配从 compat 依赖移入 rt-host，
+//! `khaen_rt_host::content_map`（**host 自持**；task-210 把该适配从 compat 依赖移入 rt-host，
 //! rt-host 不再依赖/调用 compat 的 S1 兼容层）——[content] 声明 T57 输入/输出布局后，
 //! 缺中置输出布局（如 4.1.2，无 C 角色）把 5.1 内容的 C 以 −3 dB 预混进 FL/FR 并把 C 源
 //! 置零（D7 headroom 超门时全局 trim）；有中置（布局含 C）或无中置内容时逐位 passthrough；
@@ -82,39 +82,39 @@ use std::marker::PhantomData;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-use tspi_dsp_core::abi::{
+use khaen_core::abi::{
     plan_abi_supported, sample_format, TspiBlockAckV1, TspiBlockDescV1, TspiHwParamsV1,
     TspiPlanHeaderV1, TspiRoleIirV2, ABI_VERSION, PLAN_IIR_ENTRY_BYTES, PLAN_IIR_HEADER_BYTES,
     PLAN_IIR_SECTION_COEFFS, TSPI_PLAN_ABI_V1, TSPI_PLAN_ABI_V2, TSPI_PLAN_MAGIC,
 };
-use tspi_dsp_core::direct::{
+use khaen_core::direct::{
     direct_block_f32, DirectCoeffsF32, DirectLayout, DirectTopology, DIRECT_MAX_PARTICIPANTS,
     DIRECT_MAX_ROLES, DIRECT_NO_SOURCE,
 };
-use tspi_dsp_core::partitioned::{
+use khaen_core::partitioned::{
     partitioned_block_f32, PartitionedLayout, PartitionedPlan, PARTITIONED_MAX_TAPS_EXTENDED,
 };
-use tspi_dsp_core::rt::{PlanView, RtStatus};
-use tspi_dsp_core::workers::{
+use khaen_core::rt::{PlanView, RtStatus};
+use khaen_core::workers::{
     ack_mask, worker_phase_b1, worker_phase_b2, worker_phase_b3, WorkerDagPlan, WorkerPartials,
     WORKER_REDUCE_LANES,
 };
-use tspi_rt_host::admission::AdmissionEnv;
-use tspi_rt_host::aoip::{self, H16Role, RoleSelection};
-use tspi_rt_host::clock::{self, LockState, TickBudget};
-use tspi_rt_host::content_map::{
+use khaen_rt_host::admission::AdmissionEnv;
+use khaen_rt_host::aoip::{self, H16Role, RoleSelection};
+use khaen_rt_host::clock::{self, LockState, TickBudget};
+use khaen_rt_host::content_map::{
     CenterDownmixConfig, CenterDownmixPlan, CenterDownmixSource, CenterDownmixTarget,
     CenterSpeakerState, LayoutPresets, CENTER_DOWNMIX_DEFAULT_PROGRAM_PEAK_DBFS,
 };
-use tspi_rt_host::format::{self, DitherCfg, FormatConfig};
-use tspi_rt_host::scheduler::{SchedPlan, CPU_UNUSED, DSP_CPU_MAX};
-use tspi_rt_host::spsc::{
+use khaen_rt_host::format::{self, DitherCfg, FormatConfig};
+use khaen_rt_host::scheduler::{SchedPlan, CPU_UNUSED, DSP_CPU_MAX};
+use khaen_rt_host::spsc::{
     validate_block_desc, Consumer, DescSlot, Producer, FLAG_EPOCH_FIRST, FLAG_VALID, SPSC_CAPACITY,
     SPSC_ENTRY_BYTES,
 };
 // task-320：AES67/组播监听面（接口列表/组白名单/来源白名单；启动期解析与 fail-closed 校验）。
-use tspi_aoip_aes67::iface::IfaceLookupError;
-use tspi_aoip_aes67::listen::{GroupAllow, Ipv4Cidr, ReceiverInterfaces, SourceAllow};
+use khaen_aoip_aes67::iface::IfaceLookupError;
+use khaen_aoip_aes67::listen::{GroupAllow, Ipv4Cidr, ReceiverInterfaces, SourceAllow};
 
 // F6/task-216：启动期真实 RT 内核应用（mlockall/SCHED_FIFO/亲和；NONRT，块循环内不再调用）。
 mod rt_apply;
@@ -988,14 +988,14 @@ fn direct_stream(
 
 /// 一个固定容量 T16 SPSC 环（header + desc 槽分开堆分配，地址稳定）。
 struct FakeRing {
-    header: Box<tspi_dsp_core::abi::TspiSpscHeaderV1>,
+    header: Box<khaen_core::abi::TspiSpscHeaderV1>,
     slots: Box<[DescSlot]>,
 }
 
 impl FakeRing {
     fn new() -> Self {
         Self {
-            header: Box::new(tspi_dsp_core::abi::TspiSpscHeaderV1::new(
+            header: Box::new(khaen_core::abi::TspiSpscHeaderV1::new(
                 SPSC_CAPACITY as u32,
                 SPSC_ENTRY_BYTES,
             )),
@@ -1087,7 +1087,7 @@ fn fake_io(blocks: u64) -> Result<FakeIoStats, RtStatus> {
     let mut pb_prod = unsafe { Producer::new(&ring_playback.header, &ring_playback.slots[..]) }?;
     let mut pb_cons = unsafe { Consumer::new(&ring_playback.header, &ring_playback.slots[..]) }?;
 
-    let mut ctl = tspi_dsp_core::workers::TspiRtControlV1::new();
+    let mut ctl = khaen_core::workers::TspiRtControlV1::new();
     ctl.tick_freq_hz = 1_000_000_000;
     ctl.tick_read_budget = TICK_BUDGET;
     let mut budget = TickBudget::new(TICK_BUDGET);
@@ -1113,7 +1113,7 @@ fn fake_io(blocks: u64) -> Result<FakeIoStats, RtStatus> {
         b2_threads: 0,
         output_sha_prefix: String::new(),
     };
-    let mut hasher = tspi_rt_host_sha();
+    let mut hasher = khaen_rt_host_sha();
     let mut index = 0u64;
     while index < blocks {
         synth_input_into(index as usize, &mut input, stride, block);
@@ -1338,7 +1338,7 @@ impl Sha256 {
     }
 }
 
-fn tspi_rt_host_sha() -> Sha256 {
+fn khaen_rt_host_sha() -> Sha256 {
     Sha256::new()
 }
 
@@ -1404,7 +1404,7 @@ fn admission_check() -> Result<(), RtStatus> {
     env.actual_cpu = [0, 1, 2, 3];
     env.expected_workers = WORKERS;
     env.sched_priority = [70, 70, 70, 70];
-    let _memory = tspi_rt_host::admission::plan_memory(&view, &env)?;
+    let _memory = khaen_rt_host::admission::plan_memory(&view, &env)?;
     let cfg = device_config();
     format::validate(&cfg)?;
     Ok(())
@@ -1559,8 +1559,8 @@ fn admission_json() -> Result<String, RtStatus> {
 // swap(T20) / fault(T21) / scheduler affinity(T45) / Web 控制面 / 优雅退出）
 // ---------------------------------------------------------------------------
 
-/// host 运行时配置 schema（rt-host.toml；T155 冻结为 tspi-rt-host/v1）。
-const HOST_CONFIG_SCHEMA: &str = "tspi-rt-host/v1";
+/// host 运行时配置 schema（rt-host.toml；T155 冻结为 khaen-rt-host/v1）。
+const HOST_CONFIG_SCHEMA: &str = "khaen-rt-host/v1";
 
 /// host 配置（rt-host.toml + TSPI_HOST_* 环境变量覆盖）。
 #[derive(Clone, Debug)]
@@ -1770,7 +1770,7 @@ impl Default for HostRunConfig {
             duration_ms: 0,
             apply_affinity: false,
             rt_mlockall: true,
-            rt_io_cpu: tspi_rt_host::scheduler::CPU_UNUSED,
+            rt_io_cpu: khaen_rt_host::scheduler::CPU_UNUSED,
             sink_out: String::new(),
             sink_out_format: "s24_3le".to_string(),
             capture_tee: String::new(),
@@ -1802,12 +1802,12 @@ fn config_unquote(value: &str) -> String {
 fn parse_rt_io_cpu(value: &str) -> Result<u16, String> {
     let value = value.trim();
     if value.is_empty() || value.eq_ignore_ascii_case("auto") {
-        return Ok(tspi_rt_host::scheduler::CPU_UNUSED);
+        return Ok(khaen_rt_host::scheduler::CPU_UNUSED);
     }
     let cpu: u16 = value
         .parse()
         .map_err(|_| format!("bad [rt] io_cpu: {value}（整数或 auto）"))?;
-    if cpu as usize >= tspi_rt_host::scheduler::MAX_CPU {
+    if cpu as usize >= khaen_rt_host::scheduler::MAX_CPU {
         return Err(format!("[rt] io_cpu {cpu} out of range 0..64"));
     }
     Ok(cpu)
@@ -2219,12 +2219,12 @@ fn build_sched_plan(
     config: &HostRunConfig,
 ) -> Result<
     (
-        tspi_rt_host::scheduler::SchedPlan,
-        tspi_rt_host::scheduler::TopologySnapshot,
+        khaen_rt_host::scheduler::SchedPlan,
+        khaen_rt_host::scheduler::TopologySnapshot,
     ),
     String,
 > {
-    use tspi_rt_host::scheduler::{
+    use khaen_rt_host::scheduler::{
         plan as sched_plan, SchedRequest, TopologySnapshot, CPU_UNKNOWN_CORE, MAX_CPU,
     };
     let cpus = parse_cpu_list(&config.dsp_cpus, config.workers as usize)?;
@@ -2246,8 +2246,8 @@ fn build_sched_plan(
         .with_priorities(config.dsp_priority, config.io_priority, config.irq_priority)
         .with_tick(config.tick_freq_hz, TICK_BUDGET)
         .with_calibration(
-            tspi_dsp_core::workers::WORKER_DEFAULT_SPIN_MAX_ITERS,
-            tspi_dsp_core::workers::WORKER_DEFAULT_CUTOFF_DRAIN_ITERS,
+            khaen_core::workers::WORKER_DEFAULT_SPIN_MAX_ITERS,
+            khaen_core::workers::WORKER_DEFAULT_CUTOFF_DRAIN_ITERS,
         );
     let mut index = 0usize;
     while index < config.workers as usize {
@@ -2365,7 +2365,7 @@ impl RtRuntime {
             .map_err(|error| rt_apply_error("读取 Cpus_allowed 集合", &error))?;
         let cpu = sched.affinity[0].cpu_index;
         if cpu == CPU_UNUSED
-            || cpu as usize >= tspi_rt_host::scheduler::MAX_CPU
+            || cpu as usize >= khaen_rt_host::scheduler::MAX_CPU
             || allowed & (1u64 << cpu) == 0
         {
             return Err(format!(
@@ -2579,7 +2579,7 @@ fn parse_alsa_device(text: &str) -> Result<AlsaDeviceSpec, String> {
 /// period ∈ {64,128}；backend=alsa 额外要求 block_size == period_frames、buffer 为
 /// period 整数倍、通道/设备串/io_mode 合法。真实设备打开/板端验证 NOT_RUN。
 fn validate_backend_config(config: &HostRunConfig) -> Result<(), String> {
-    use tspi_dsp_core::abi::sample_format as sf;
+    use khaen_core::abi::sample_format as sf;
     match config.backend.as_str() {
         "fake" | "alsa" => {}
         other => {
@@ -2588,7 +2588,7 @@ fn validate_backend_config(config: &HostRunConfig) -> Result<(), String> {
             ))
         }
     }
-    if !tspi_rt_host::alsa::is_runtime_rate(config.sample_rate) {
+    if !khaen_rt_host::alsa::is_runtime_rate(config.sample_rate) {
         if config.sample_rate == 192_000 {
             return Err(
                 "bad sample_rate 192000：192k 禁用（白名单 48000/96000；MOTU/overlay 固定 48k）"
@@ -2601,17 +2601,17 @@ fn validate_backend_config(config: &HostRunConfig) -> Result<(), String> {
         ));
     }
     debug_assert!(ALSA_ALLOWED_RATES.contains(&config.sample_rate));
-    if !tspi_rt_host::alsa::is_runtime_period(config.period_frames) {
+    if !khaen_rt_host::alsa::is_runtime_period(config.period_frames) {
         return Err(format!(
             "bad period_frames {}（allowed: 64/128）",
             config.period_frames
         ));
     }
-    if !tspi_rt_host::alsa::device_format_allowed(sf::S24_3LE_INTERLEAVED, false) {
+    if !khaen_rt_host::alsa::device_format_allowed(sf::S24_3LE_INTERLEAVED, false) {
         return Err("S24_3LE not allowed for this backend".to_string());
     }
     if config.backend == "alsa" {
-        if !tspi_rt_host::alsa::is_runtime_period(config.block_size as u32) {
+        if !khaen_rt_host::alsa::is_runtime_period(config.block_size as u32) {
             return Err(format!(
                 "bad block_size {}（allowed: 64/128）",
                 config.block_size
@@ -2631,8 +2631,8 @@ fn validate_backend_config(config: &HostRunConfig) -> Result<(), String> {
                 config.buffer_frames
             ));
         }
-        let max_in = tspi_dsp_core::rt::MAX_INPUT_CHANNELS as u16;
-        let max_out = tspi_dsp_core::rt::MAX_OUTPUT_CHANNELS as u16;
+        let max_in = khaen_core::rt::MAX_INPUT_CHANNELS as u16;
+        let max_out = khaen_core::rt::MAX_OUTPUT_CHANNELS as u16;
         if config.capture_channels == 0 || config.capture_channels > max_in {
             return Err(format!(
                 "bad capture_channels {}（allowed 1..={max_in}）",
@@ -2665,17 +2665,17 @@ fn validate_backend_config(config: &HostRunConfig) -> Result<(), String> {
 ///
 /// 输出字段/顺序与 final-wiring 冻结证据逐字节一致（backend=fake 契约不变）。
 fn fake_alsa_contract_json(config: &HostRunConfig) -> Result<String, String> {
-    use tspi_dsp_core::abi::sample_format as sf;
-    if !tspi_rt_host::alsa::is_runtime_rate(config.sample_rate) {
+    use khaen_core::abi::sample_format as sf;
+    if !khaen_rt_host::alsa::is_runtime_rate(config.sample_rate) {
         return Err(format!("bad sample_rate {}", config.sample_rate));
     }
-    if !tspi_rt_host::alsa::is_runtime_period(config.period_frames) {
+    if !khaen_rt_host::alsa::is_runtime_period(config.period_frames) {
         return Err(format!("bad period_frames {}", config.period_frames));
     }
-    if !tspi_rt_host::alsa::device_format_allowed(sf::S24_3LE_INTERLEAVED, false) {
+    if !khaen_rt_host::alsa::device_format_allowed(sf::S24_3LE_INTERLEAVED, false) {
         return Err("S24_3LE not allowed for this backend".to_string());
     }
-    let sample_bytes = tspi_rt_host::alsa::sample_bytes(sf::S24_3LE_INTERLEAVED)
+    let sample_bytes = khaen_rt_host::alsa::sample_bytes(sf::S24_3LE_INTERLEAVED)
         .ok_or_else(|| "sample_bytes(S24_3LE) failed".to_string())?;
     let hw = TspiHwParamsV1 {
         abi_version: ABI_VERSION,
@@ -2690,7 +2690,7 @@ fn fake_alsa_contract_json(config: &HostRunConfig) -> Result<String, String> {
         flags: 0,
         reserved: [0; 4],
     };
-    let hash = tspi_rt_host::alsa::hwparams_hash(&hw);
+    let hash = khaen_rt_host::alsa::hwparams_hash(&hw);
     Ok(format!(
         "{{\"backend\":\"fake\",\"device\":\"{}\",\"owner\":\"host\",\"sample_format\":\"S24_3LE\",\"period_frames\":{},\"buffer_frames\":{},\"capture_channels\":{},\"playback_channels\":{},\"hwparams_hash\":{}}}",
         json_escape_text(&config.device),
@@ -2744,7 +2744,7 @@ const CAPTURE_PTP_UNLOCKED: &str = "unlocked";
 const CAPTURE_AES67_TRANSPORT_RAVENNA: &str = "ravenna";
 const CAPTURE_AES67_TRANSPORT_USERSPACE: &str = "userspace";
 /// T239：userspace 传输的 capture 块长（任务卡/原型固定 128 帧 @48k = 2.667 ms）。
-const AES67_USER_BLOCK_FRAMES: usize = tspi_rt_host::aes67_rx::AES67_RX_BLOCK_FRAMES;
+const AES67_USER_BLOCK_FRAMES: usize = khaen_rt_host::aes67_rx::AES67_RX_BLOCK_FRAMES;
 /// T239：userspace 传输的媒体采样率（AES67 profile 48k）。
 const AES67_USER_RATE_HZ: u32 = aoip::AES67_RATE_HZ;
 
@@ -3460,7 +3460,7 @@ fn capture_mode_for_source(source: CaptureSource) -> CaptureMode {
 enum Aes67Transport {
     /// 既有 aes67-daemon + MergingRavennaALSA 内核卡（T43/T74 路径；默认，向后兼容）。
     Ravenna,
-    /// 自研用户态 RTP 接收端（tspi-aoip-aes67；本任务 T239；不依赖 daemon/LKM）。
+    /// 自研用户态 RTP 接收端（khaen-aoip-aes67；本任务 T239；不依赖 daemon/LKM）。
     Userspace,
 }
 
@@ -3595,7 +3595,7 @@ where
 
 /// [capture] aes67_iface → 接口集合（真实系统网卡名解析；空 = 0.0.0.0 旧行为）。
 fn parse_aes67_iface(text: &str) -> Result<ReceiverInterfaces, String> {
-    parse_aes67_iface_with(text, tspi_aoip_aes67::iface::resolve_interface_name)
+    parse_aes67_iface_with(text, khaen_aoip_aes67::iface::resolve_interface_name)
 }
 
 /// [capture] aes67_group_allow → 组播组白名单（空 = 旧行为）。
@@ -3691,7 +3691,7 @@ fn aes67_multicast_listen_warning(config: &HostRunConfig) -> Option<String> {
     if !config.capture_aes67_iface.trim().is_empty() {
         return None;
     }
-    let non_loopback = tspi_aoip_aes67::iface::non_loopback_ipv4_interface_count().ok()?;
+    let non_loopback = khaen_aoip_aes67::iface::non_loopback_ipv4_interface_count().ok()?;
     aes67_multicast_listen_warning_with(config, non_loopback)
 }
 
@@ -4641,7 +4641,7 @@ fn build_aes67_capture_plan(
 
 /// 拆分 AES67 SDP 文件里的多条会话文本（每条以 `v=0` 开始；H16 每 flow 一个 SDP）。
 ///
-/// T239：ravenna（T43 aoip 解析）与 userspace（tspi-aoip-aes67 解析）共用同一拆分语义，
+/// T239：ravenna（T43 aoip 解析）与 userspace（khaen-aoip-aes67 解析）共用同一拆分语义，
 /// 保证两条传输对同一 SDP 文件的 flow 数/边界判断一致。
 fn split_aes67_sdp_session_texts(text: &str) -> Result<Vec<&str>, String> {
     let mut sessions: Vec<&str> = Vec::new();
@@ -5091,7 +5091,7 @@ fn open_aoip_period_source(plan: &AoipCapturePlan) -> Result<Box<dyn AoipPeriodS
 /// ALSA errno -> host 稳定错误文本（Linux only；复用 T17 errno 映射）。
 #[cfg(target_os = "linux")]
 fn aoip_alsa_error(context: &str, error: alsa::Error) -> String {
-    let mapped = tspi_rt_host::alsa::alsa_errno_to_error(error.errno());
+    let mapped = khaen_rt_host::alsa::alsa_errno_to_error(error.errno());
     capture_error(
         aoip::AoipError::from(mapped).name(),
         format!("{context}（ALSA errno {}）", error.errno()),
@@ -5266,8 +5266,8 @@ impl AoipPeriodSource for AoipAlsaReader {
                 if error.errno() == 11 {
                     return Ok(AoipPeriodRead::Stalled);
                 }
-                let mapped = tspi_rt_host::alsa::alsa_errno_to_error(error.errno());
-                if mapped == tspi_rt_host::alsa::AlsaError::Xrun {
+                let mapped = khaen_rt_host::alsa::alsa_errno_to_error(error.errno());
+                if mapped == khaen_rt_host::alsa::AlsaError::Xrun {
                     let _ = self.pcm.prepare();
                     self.xruns = self.xruns.saturating_add(1);
                     return Ok(AoipPeriodRead::Stalled);
@@ -5328,7 +5328,7 @@ fn aoip_input_phase(
 // 与 T74/T43 的 aes67（aes67-daemon + RAVENNA ALSA 内核卡）同 source/mode，由
 // [capture] aes67_transport=ravenna|userspace 二选一（互斥）：
 // - ravenna   = 既有 ALSA 端点路径（不复用本段）；
-// - userspace = 本段：SDP 文件 → tspi-aoip-aes67（UDP 组播/单播、RTP L24/48k、抖动缓冲）
+// - userspace = 本段：SDP 文件 → khaen-aoip-aes67（UDP 组播/单播、RTP L24/48k、抖动缓冲）
 //               → 每 flow 128 帧整块 → H16 容器/角色显式映射 → planar f32 图输入。
 //
 // 语义与 motu/inferno 对齐（T43）：
@@ -5348,11 +5348,11 @@ fn aoip_input_phase(
 // ts-refclk/ptp domain 只记录不接线）、真实 H16 源、板端电平/听音。
 // ---------------------------------------------------------------------------
 
-use tspi_aoip_aes67::clock::{MediaClock as _, UsrvClock};
-use tspi_aoip_aes67::jitter::BlockStatus;
-use tspi_aoip_aes67::receiver::{ReceiverConfig, ReceiverError};
-use tspi_aoip_aes67::sdp::{SdpDocument, SdpError};
-use tspi_rt_host::aes67_rx::{
+use khaen_aoip_aes67::clock::{MediaClock as _, UsrvClock};
+use khaen_aoip_aes67::jitter::BlockStatus;
+use khaen_aoip_aes67::receiver::{ReceiverConfig, ReceiverError};
+use khaen_aoip_aes67::sdp::{SdpDocument, SdpError};
+use khaen_rt_host::aes67_rx::{
     Aes67RxAdapter, Aes67RxCapture, Aes67RxFlowPlan, AES67_RX_BLOCK_FRAMES,
     AES67_RX_LAYOUT_512_CONTENT,
 };
@@ -5645,7 +5645,7 @@ fn plan_aes67_user_capture(
         if config.capture_aes67_jitter_latency_us != 0
             || config.capture_aes67_jitter_ring_frames != 0
         {
-            use tspi_aoip_aes67::jitter::{
+            use khaen_aoip_aes67::jitter::{
                 JitterConfig, DEFAULT_LATENCY_US, DEFAULT_RING_CAPACITY_FRAMES,
             };
             let latency_us = if config.capture_aes67_jitter_latency_us == 0 {
@@ -6155,7 +6155,7 @@ impl Aes67UserCapture {
         let _ = write!(
             json,
             "{{\"source\":\"aes67\",\"mode\":\"aes67\",\"transport\":\"{}\",\
-\"reader\":\"tspi-aoip-aes67\",\"sdp\":\"{}\",\"interface\":\"{}\",\
+\"reader\":\"khaen-aoip-aes67\",\"sdp\":\"{}\",\"interface\":\"{}\",\
 \"interfaces\":[{}],\"group_allow\":[{}],\"source_allow\":[{}],\"sample_rate\":{},\
 \"period_frames\":{},\"flow_count\":{},\"container_channels\":{},\"graph_input_channels\":{},\
 \"layout\":\"{}\",\"flow_layout\":\"{}\",\"jitter_latency_us\":{},\"jitter_ring_frames\":{},\
@@ -6450,22 +6450,22 @@ fn capture_input_phase(
 // 真实设备读写/xrun/恢复的板端验证 NOT_RUN（证据 cursor-fix-alsa-backend/）。
 // ---------------------------------------------------------------------------
 
-use tspi_dsp_core::events::{
+use khaen_core::events::{
     EV_EPOCH_START, EV_INPUT_OVERRUN, EV_OUTPUT_UNDERRUN, EV_SAFETY_MUTE_ENTER, LANE_CAPTURE,
     LANE_CONTROL, LANE_PLAYBACK, SEVERITY_ERROR, SEVERITY_FATAL, SEVERITY_INFO,
 };
-use tspi_rt_host::alsa::{
+use khaen_rt_host::alsa::{
     AlsaError, DuplexActual, DuplexSession, DuplexState, PcmDuplexBackend, RecoveryAction,
     StreamDirection,
 };
-use tspi_rt_host::fault::{EventLanes, FaultCounters};
+use khaen_rt_host::fault::{EventLanes, FaultCounters};
 
 /// 本 target 的真实 ALSA backend 类型：Linux = `LinuxAlsaBackend`；其它 = 无硬件占位
 /// `NoHwBackend`（open_alsa_sink 在非 Linux 直接返回错误，不会构造该类型）。
 #[cfg(target_os = "linux")]
-type HostAlsaBackend = tspi_rt_host::alsa::LinuxAlsaBackend;
+type HostAlsaBackend = khaen_rt_host::alsa::LinuxAlsaBackend;
 #[cfg(not(target_os = "linux"))]
-type HostAlsaBackend = tspi_rt_host::alsa::NoHwBackend;
+type HostAlsaBackend = khaen_rt_host::alsa::NoHwBackend;
 
 /// 一次 IO 动作上报给 host 事件环（T21 lane/kind；host 负责 event_record 序号）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7233,7 +7233,7 @@ struct FileSink {
 
 impl FileSink {
     fn create(config: &HostRunConfig, containers: usize) -> Result<Self, String> {
-        if containers == 0 || containers > tspi_dsp_core::rt::MAX_OUTPUT_CHANNELS {
+        if containers == 0 || containers > khaen_core::rt::MAX_OUTPUT_CHANNELS {
             return Err(format!(
                 "[sink] out: graph container 声道数 {containers} 超出 1..=MAX_OUTPUT_CHANNELS"
             ));
@@ -7441,7 +7441,7 @@ fn open_alsa_sink(
     containers: usize,
     mode: AlsaIoMode,
 ) -> Result<PcmPlaybackSink<HostAlsaBackend>, String> {
-    use tspi_rt_host::alsa::{
+    use khaen_rt_host::alsa::{
         parse_card_entry, DeviceSelector, DuplexRequest, HwOpenGate, LinuxAlsaBackend,
         RecoveryPolicy, RequiredDeviceWidth,
     };
@@ -7754,8 +7754,8 @@ fn event_record(
     severity: u8,
     value_a: u32,
     value_b: u32,
-) -> tspi_dsp_core::abi::TspiEventV1 {
-    tspi_dsp_core::abi::TspiEventV1 {
+) -> khaen_core::abi::TspiEventV1 {
+    khaen_core::abi::TspiEventV1 {
         seq,
         mono_ns: clock::mono_now_ns(),
         epoch_id: EPOCH_ID,
@@ -8112,11 +8112,11 @@ const PLAN_PATH_FLAG_FUSED: u8 = 1 << 1;
 const PLAN_ROLE_FLAG_ENABLED: u16 = 1 << 0;
 const PLAN_ROLE_FLAG_ZERO_FILL: u16 = 1 << 1;
 
-use tspi_dsp_core::direct::{DIRECT_MAX_CONTAINERS, DIRECT_MAX_SOURCES};
-use tspi_dsp_core::plan::{PlanBuf, PlanToken};
-use tspi_dsp_core::workers::TspiRtControlV1;
-use tspi_rt_host::admission::MockMemory;
-use tspi_rt_host::swap::{commit_swap_at_block_boundary, PlanRegistry, TspiSwapAckV1};
+use khaen_core::direct::{DIRECT_MAX_CONTAINERS, DIRECT_MAX_SOURCES};
+use khaen_core::plan::{PlanBuf, PlanToken};
+use khaen_core::workers::TspiRtControlV1;
+use khaen_rt_host::admission::MockMemory;
+use khaen_rt_host::swap::{commit_swap_at_block_boundary, PlanRegistry, TspiSwapAckV1};
 
 /// 读 plan header（128 B；repr(C) POD，无指针/Drop；read_unaligned 不要求对齐）。
 fn read_plan_header(bytes: &[u8]) -> Result<TspiPlanHeaderV1, String> {
@@ -8194,10 +8194,10 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
                         && offset % 8 == 0
                         && end <= bytes.len() =>
                 {
-                    let iir_header: tspi_dsp_core::abi::TspiPlanIirHeaderV2 =
+                    let iir_header: khaen_core::abi::TspiPlanIirHeaderV2 =
                         unsafe { std::ptr::read_unaligned(bytes[offset..].as_ptr() as *const _) };
-                    if iir_header.magic != tspi_dsp_core::abi::TSPI_PLAN_IIR_MAGIC
-                        || iir_header.version != tspi_dsp_core::abi::TSPI_PLAN_IIR_VERSION
+                    if iir_header.magic != khaen_core::abi::TSPI_PLAN_IIR_MAGIC
+                        || iir_header.version != khaen_core::abi::TSPI_PLAN_IIR_VERSION
                         || iir_header.entry_bytes as usize != PLAN_IIR_ENTRY_BYTES
                         || iir_header.entry_count as usize != count
                         || iir_header.reserved0 != 0
@@ -8215,13 +8215,13 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
             }
         }
     }
-    if !tspi_dsp_core::rt::SAMPLE_RATES_HZ.contains(&header.sample_rate) {
+    if !khaen_core::rt::SAMPLE_RATES_HZ.contains(&header.sample_rate) {
         return Err(format!(
             "plan header.sample_rate={} 不在白名单 48000/96000（拒绝启动）",
             header.sample_rate
         ));
     }
-    if !tspi_dsp_core::rt::BLOCK_SIZES.contains(&header.block_size) {
+    if !khaen_core::rt::BLOCK_SIZES.contains(&header.block_size) {
         return Err(format!(
             "plan header.block_size={} 不在 64/128（拒绝启动）",
             header.block_size
@@ -8233,18 +8233,18 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
             header.workers
         ));
     }
-    if header.n_in == 0 || header.n_in as usize > tspi_dsp_core::rt::MAX_INPUT_CHANNELS {
+    if header.n_in == 0 || header.n_in as usize > khaen_core::rt::MAX_INPUT_CHANNELS {
         return Err(format!(
             "plan header.n_in={} 超出 1..={}（拒绝启动）",
             header.n_in,
-            tspi_dsp_core::rt::MAX_INPUT_CHANNELS
+            khaen_core::rt::MAX_INPUT_CHANNELS
         ));
     }
-    if header.n_out == 0 || header.n_out as usize > tspi_dsp_core::rt::MAX_OUTPUT_CHANNELS {
+    if header.n_out == 0 || header.n_out as usize > khaen_core::rt::MAX_OUTPUT_CHANNELS {
         return Err(format!(
             "plan header.n_out={} 超出 1..={}（拒绝启动）",
             header.n_out,
-            tspi_dsp_core::rt::MAX_OUTPUT_CHANNELS
+            khaen_core::rt::MAX_OUTPUT_CHANNELS
         ));
     }
     if header.total_coeff_bytes as usize > bytes.len() {
@@ -8258,7 +8258,7 @@ fn verify_plan_header(bytes: &[u8], header: &TspiPlanHeaderV1) -> Result<(), Str
     let mut crc_input = [0u8; 128];
     crc_input.copy_from_slice(&bytes[..128]);
     crc_input[124..128].fill(0);
-    let crc = tspi_dsp_core::nodes::crc32c(&crc_input);
+    let crc = khaen_core::nodes::crc32c(&crc_input);
     if crc != header.header_crc32c {
         return Err(format!(
             "plan header_crc32c 校验失败：文件写 {:#010x}，按 header 计算 {:#010x}（plan 损坏/被篡改，拒绝启动）",
@@ -8386,7 +8386,7 @@ const NSP512_TO_412_PATHS: [(u16, u16); 7] = [
     (7, 3),
 ];
 
-fn validate_nsp512_to_412_paths(paths: &[tspi_dsp_core::abi::TspiPathV1]) -> Result<(), String> {
+fn validate_nsp512_to_412_paths(paths: &[khaen_core::abi::TspiPathV1]) -> Result<(), String> {
     let mut got: Vec<(u16, u16)> = paths
         .iter()
         .map(|path| (path.out_index, path.in_index))
@@ -9321,7 +9321,7 @@ fn prepare_mimo12k_branch(
     config: &HostRunConfig,
     graph: &Graph,
     block: usize,
-) -> Result<Option<tspi_rt_host::mimo12k::Mimo12kBranch>, String> {
+) -> Result<Option<khaen_rt_host::mimo12k::Mimo12kBranch>, String> {
     let path = config.mimo12k_artifact.trim();
     if path.is_empty() {
         return Ok(None);
@@ -9345,7 +9345,7 @@ fn prepare_mimo12k_branch(
                 .to_string(),
         );
     }
-    let artifact = tspi_rt_host::mimo12k::load_artifact(std::path::Path::new(path))?;
+    let artifact = khaen_rt_host::mimo12k::load_artifact(std::path::Path::new(path))?;
     let m = artifact.params.participants.len();
     if m != topo.n_role as usize {
         return Err(format!(
@@ -9375,7 +9375,7 @@ fn prepare_mimo12k_branch(
         }
         mapping.push((role, src as usize, topo.scatter[role] as usize));
     }
-    let branch = tspi_rt_host::mimo12k::Mimo12kBranch::prepare(artifact, mapping, block)?;
+    let branch = khaen_rt_host::mimo12k::Mimo12kBranch::prepare(artifact, mapping, block)?;
     Ok(Some(branch))
 }
 
@@ -9393,13 +9393,13 @@ fn run_plan_arena_command(
     mut warnings: Vec<String>,
 ) -> Result<String, String> {
     use std::fmt::Write as _;
-    use tspi_dsp_core::events::{
+    use khaen_core::events::{
         EV_DEADLINE_MISS, EV_RUNNING, EV_SAFETY_MUTE_ENTER, EV_STARTING, EV_STOPPED, LANE_CONTROL,
         LANE_WATCHDOG, SEVERITY_INFO, SEVERITY_WARNING,
     };
-    use tspi_dsp_core::rt::gate_ns_floor;
-    use tspi_rt_host::fault::{EventLaneReader, EventLanes, Watchdog, WatchdogAction};
-    use tspi_rt_host::scheduler::SchedGate;
+    use khaen_core::rt::gate_ns_floor;
+    use khaen_rt_host::fault::{EventLaneReader, EventLanes, Watchdog, WatchdogAction};
+    use khaen_rt_host::scheduler::SchedGate;
 
     validate_backend_config(config)?;
     // 1) plan 加载 + T20 parse/admit/apply（primary；失败且配置 last-good 时回退）。
@@ -9681,7 +9681,7 @@ fn run_plan_arena_command(
             clock::mono_now_ns(),
         )?;
         // 校准模式：节目样本已经取走，这里换成虚拟输入。播放模式立即返回，不改缓冲。
-        tspi_rt_host::cal_control::overlay_live(&mut input, stride, block);
+        khaen_rt_host::cal_control::overlay_live(&mut input, stride, block);
         // T203：capture 帧进图之前做中置缺失内容适配（C −3 dB 预混进 FL/FR、C 源置零；
         // 有中置/无中置内容 = 逐位 passthrough）。仅 !mute 块应用（mute 块不消费输入）。
         if !mute_this_block {
@@ -9744,8 +9744,8 @@ fn run_plan_arena_command(
                     })?;
                 mimo12k_blocks += 1;
             }
-            tspi_rt_host::cal_control::apply_live(&input, stride, &mut output, stride, block);
-            tspi_rt_host::cal_control::note_chain_block();
+            khaen_rt_host::cal_control::apply_live(&input, stride, &mut output, stride, block);
+            khaen_rt_host::cal_control::note_chain_block();
         } else {
             safety_mute_blocks += 1;
         }
@@ -9984,7 +9984,7 @@ fn run_plan_arena_command(
     );
     let content_json = content_report_json(content_adapter.as_ref(), content_applied_blocks);
     let mut report = String::with_capacity(2048);
-    report.push_str("{\"status\":\"ok\",\"mode\":\"tspi-rt-host-run\"");
+    report.push_str("{\"status\":\"ok\",\"mode\":\"khaen-rt-host-run\"");
     let _ = write!(report, ",\"schema\":\"{}\"", HOST_CONFIG_SCHEMA);
     let _ = write!(report, ",\"config\":\"{}\"", json_escape_text(config_path));
     report.push_str(",\"graph\":\"plan-arena\"");
@@ -10063,7 +10063,7 @@ fn run_plan_arena_command(
 #[cfg(test)]
 mod plan_arena_tests {
     use super::*;
-    use tspi_dsp_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
+    use khaen_core::abi::{TspiDiagFirV1, TspiPathV1, TspiRoleV1};
 
     const T_RATE: u32 = 48_000;
     const T_BLOCK: u16 = 128;
@@ -10420,7 +10420,7 @@ mod plan_arena_tests {
         bytes
     }
 
-    fn iir_header_bytes(header: &tspi_dsp_core::abi::TspiPlanIirHeaderV2) -> [u8; 16] {
+    fn iir_header_bytes(header: &khaen_core::abi::TspiPlanIirHeaderV2) -> [u8; 16] {
         let mut out = [0u8; 16];
         out[0..4].copy_from_slice(&header.magic.to_le_bytes());
         out[4..6].copy_from_slice(&header.version.to_le_bytes());
@@ -10562,10 +10562,10 @@ mod plan_arena_tests {
                     reserved2: 0,
                 });
             }
-            let header_bytes = core::mem::size_of::<tspi_dsp_core::abi::TspiPlanIirHeaderV2>();
-            let crc_header = tspi_dsp_core::abi::TspiPlanIirHeaderV2 {
-                magic: tspi_dsp_core::abi::TSPI_PLAN_IIR_MAGIC,
-                version: tspi_dsp_core::abi::TSPI_PLAN_IIR_VERSION,
+            let header_bytes = core::mem::size_of::<khaen_core::abi::TspiPlanIirHeaderV2>();
+            let crc_header = khaen_core::abi::TspiPlanIirHeaderV2 {
+                magic: khaen_core::abi::TSPI_PLAN_IIR_MAGIC,
+                version: khaen_core::abi::TSPI_PLAN_IIR_VERSION,
                 entry_bytes: 32,
                 entry_count: iir_entries.len() as u16,
                 reserved0: 0,
@@ -10583,10 +10583,10 @@ mod plan_arena_tests {
                     }
                 }
             }
-            let table_crc32c = tspi_dsp_core::nodes::crc32c(&crc_input);
-            let table_header = tspi_dsp_core::abi::TspiPlanIirHeaderV2 {
-                magic: tspi_dsp_core::abi::TSPI_PLAN_IIR_MAGIC,
-                version: tspi_dsp_core::abi::TSPI_PLAN_IIR_VERSION,
+            let table_crc32c = khaen_core::nodes::crc32c(&crc_input);
+            let table_header = khaen_core::abi::TspiPlanIirHeaderV2 {
+                magic: khaen_core::abi::TSPI_PLAN_IIR_MAGIC,
+                version: khaen_core::abi::TSPI_PLAN_IIR_VERSION,
                 entry_bytes: 32,
                 entry_count: iir_entries.len() as u16,
                 reserved0: 0,
@@ -10643,7 +10643,7 @@ mod plan_arena_tests {
         let (mut header, paths, diags, roles, _iir_entries, iir_table, region) = plan_parts(plan);
         let mut header_bytes = header_raw(&header);
         header_bytes[124..128].fill(0);
-        header.header_crc32c = tspi_dsp_core::nodes::crc32c(&header_bytes);
+        header.header_crc32c = khaen_core::nodes::crc32c(&header_bytes);
         let mut out = header_raw(&header).to_vec();
         for path in &paths {
             out.extend_from_slice(&path_bytes(path));
@@ -11045,7 +11045,7 @@ mod plan_arena_tests {
             .parent()
             .expect("test exe dir")
             .join(format!(
-                "tspi-rt-host-t185-{}-{}-{}.bin",
+                "khaen-rt-host-t185-{}-{}-{}.bin",
                 std::process::id(),
                 unique,
                 prefix
@@ -12061,7 +12061,7 @@ mod plan_arena_tests {
 #[cfg(test)]
 mod center_downmix_host_tests {
     use super::*;
-    use tspi_rt_host::content_map::{
+    use khaen_rt_host::content_map::{
         center_downmix_worst_case_added_db, CenterDownmixHeadroom, CenterDownmixStatus,
         CENTER_DOWNMIX_GAIN_LINEAR,
     };
@@ -12486,18 +12486,18 @@ fn run_command_with_sink(
     duration_override: Option<u64>,
     injected_sink: Option<Box<dyn PlaybackSink>>,
 ) -> Result<String, String> {
-    use tspi_dsp_core::events::{
+    use khaen_core::events::{
         EV_DEADLINE_MISS, EV_RUNNING, EV_SAFETY_MUTE_ENTER, EV_STARTING, EV_STOPPED, LANE_CONTROL,
         LANE_WATCHDOG, SEVERITY_INFO, SEVERITY_WARNING,
     };
-    use tspi_rt_host::fault::{EventLaneReader, EventLanes, Watchdog, WatchdogAction};
-    use tspi_rt_host::scheduler::SchedGate;
-    use tspi_rt_host::swap::{
+    use khaen_rt_host::fault::{EventLaneReader, EventLanes, Watchdog, WatchdogAction};
+    use khaen_rt_host::scheduler::SchedGate;
+    use khaen_rt_host::swap::{
         commit_swap_at_block_boundary, note_block_switched, GraphQuarantine, TspiSwapAckV1,
     };
 
     let (config, mut warnings) = load_host_config(config_path)?;
-    if let Err(error) = tspi_rt_host::cal_control::spawn_server() {
+    if let Err(error) = khaen_rt_host::cal_control::spawn_server() {
         warnings.push(format!("校准 socket 未监听：{error}"));
     }
     let max_blocks = blocks_override.unwrap_or(config.max_blocks);
@@ -12571,7 +12571,7 @@ fn run_command_with_sink(
     let mut event_seq = 0u64;
     let mut watchdog = Watchdog::new();
     let mut watchdog_actions = 0u32;
-    let ctl = tspi_dsp_core::workers::TspiRtControlV1::new();
+    let ctl = khaen_core::workers::TspiRtControlV1::new();
     ctl.current_plan_version.store(1u32, Ordering::Release);
     // INV-L1：master 首个 block 之前 current_plan_ptr 指向生效图（之后只由 block 边界 commit 替换）。
     ctl.current_plan_ptr.store(plan_v1_ptr, Ordering::Release);
@@ -12710,7 +12710,7 @@ fn run_command_with_sink(
             mute_this_block,
             clock::mono_now_ns(),
         )?;
-        tspi_rt_host::cal_control::overlay_live(&mut input, stride, block);
+        khaen_rt_host::cal_control::overlay_live(&mut input, stride, block);
         output.iter_mut().for_each(|sample| *sample = 0.0);
         budget.reset();
         let tick_entry = budget
@@ -12720,8 +12720,8 @@ fn run_command_with_sink(
             workers
                 .run_block_4thread(&mut state, &input, stride, &mut output, stride, block)
                 .map_err(|status| format!("run block {}: {}", blocks, status.code()))?;
-            tspi_rt_host::cal_control::apply_live(&input, stride, &mut output, stride, block);
-            tspi_rt_host::cal_control::note_chain_block();
+            khaen_rt_host::cal_control::apply_live(&input, stride, &mut output, stride, block);
+            khaen_rt_host::cal_control::note_chain_block();
         } else {
             safety_mute_blocks += 1;
         }
@@ -12777,7 +12777,7 @@ fn run_command_with_sink(
         } else {
             compute.saturating_mul(1_000_000_000) / config.tick_freq_hz as u64
         };
-        let deadline_ns = tspi_dsp_core::rt::gate_ns_floor(config.sample_rate, config.block_size);
+        let deadline_ns = khaen_core::rt::gate_ns_floor(config.sample_rate, config.block_size);
         if gate_ns > deadline_ns {
             deadline_misses += 1;
             lanes.push(&event_record(
@@ -12817,7 +12817,7 @@ fn run_command_with_sink(
             ctl.pending_plan_version.store(2, Ordering::Relaxed);
             ctl.pending_plan_ptr.store(plan_v2_ptr, Ordering::Relaxed);
             ctl.switch_state
-                .store(tspi_dsp_core::rt::SWITCH_ARMED, Ordering::Release);
+                .store(khaen_core::rt::SWITCH_ARMED, Ordering::Release);
             let committed = commit_swap_at_block_boundary(&ctl)
                 .map_err(|status| format!("commit swap v2: {}", status.code()))?;
             workers
@@ -12939,7 +12939,7 @@ fn run_command_with_sink(
         exit_reason,
     );
     Ok(format!(
-        "{{\"status\":\"ok\",\"mode\":\"tspi-rt-host-run\",\"schema\":\"{}\",\"config\":\"{}\",\"graph\":\"{}\",\"block_size\":{},\"sample_rate\":{},\"workers\":{},\"blocks\":{},\"frames\":{},\"safe_mode\":\"{}\",\"graceful\":{},\"capture\":{},\"alsa\":{},\"scheduler\":{},\"swap\":{{\"init_status\":{},\"acks\":{},\"switches\":{},\"retire_ready\":{},\"valid\":{},\"synthetic\":false,\"retire_ready_source\":\"{}\",\"all_ack_blocks\":{},\"plan_version\":{},\"quarantine_entered\":{},\"quarantine_released\":{},\"quarantine_remaining\":{}}},\"fault\":{{\"events_drained\":{},\"dropped\":{},\"by_kind\":{{{}}},\"watchdog_actions\":{},\"deadline_misses\":{},\"gate_rejects\":{},\"safety_mute_blocks\":{}}},\"web\":{{\"mode\":\"{}\",\"bind\":\"{}\",\"probe_status\":{},\"probe_body\":\"{}\",\"daemon_pid\":{},\"child_terminated\":{},\"note\":\"{}\"}},\"last_good\":{},\"warnings\":[{}]}}",
+        "{{\"status\":\"ok\",\"mode\":\"khaen-rt-host-run\",\"schema\":\"{}\",\"config\":\"{}\",\"graph\":\"{}\",\"block_size\":{},\"sample_rate\":{},\"workers\":{},\"blocks\":{},\"frames\":{},\"safe_mode\":\"{}\",\"graceful\":{},\"capture\":{},\"alsa\":{},\"scheduler\":{},\"swap\":{{\"init_status\":{},\"acks\":{},\"switches\":{},\"retire_ready\":{},\"valid\":{},\"synthetic\":false,\"retire_ready_source\":\"{}\",\"all_ack_blocks\":{},\"plan_version\":{},\"quarantine_entered\":{},\"quarantine_released\":{},\"quarantine_remaining\":{}}},\"fault\":{{\"events_drained\":{},\"dropped\":{},\"by_kind\":{{{}}},\"watchdog_actions\":{},\"deadline_misses\":{},\"gate_rejects\":{},\"safety_mute_blocks\":{}}},\"web\":{{\"mode\":\"{}\",\"bind\":\"{}\",\"probe_status\":{},\"probe_body\":\"{}\",\"daemon_pid\":{},\"child_terminated\":{},\"note\":\"{}\"}},\"last_good\":{},\"warnings\":[{}]}}",
         HOST_CONFIG_SCHEMA,
         json_escape_text(config_path),
         json_escape_text(&config.graph),
@@ -12990,8 +12990,8 @@ fn block_stats_failed() -> bool {
 
 fn usage_host_run() -> &'static str {
     concat!(
-        "tspi-rt-host run --config <rt-host.toml> [--blocks N] [--duration-ms N]\n",
-        "  config schema: tspi-rt-host/v1 (deploy/config/rt-host.toml.example)\n",
+        "khaen-rt-host run --config <rt-host.toml> [--blocks N] [--duration-ms N]\n",
+        "  config schema: khaen-rt-host/v1 (deploy/config/rt-host.toml.example)\n",
         "  backend: fake | alsa (alsa = Linux target only; real device/board NOT_RUN)\n",
         "  rate whitelist 48000/96000 (192k rejected); alsa.period_frames == block_size\n",
         "  graph: stereo_identity | 2x2_offdiag | plan-arena（T185：加载 T66 plan.bin 校准图）\n",
@@ -13015,12 +13015,12 @@ fn usage_host_run() -> &'static str {
 
 fn usage() -> &'static str {
     concat!(
-        "tspi-rt-host (T26 host entry)\n",
+        "khaen-rt-host (T26 host entry)\n",
         "usage:\n",
-        "  tspi-rt-host selftest\n",
-        "  tspi-rt-host fake-io [--blocks N]\n",
-        "  tspi-rt-host admission-check\n",
-        "  tspi-rt-host run --config <rt-host.toml> [--blocks N] [--duration-ms N]\n",
+        "  khaen-rt-host selftest\n",
+        "  khaen-rt-host fake-io [--blocks N]\n",
+        "  khaen-rt-host admission-check\n",
+        "  khaen-rt-host run --config <rt-host.toml> [--blocks N] [--duration-ms N]\n",
         "NOT_RUN: real ALSA device / board / RT/soak / control-plane REST-WS\n",
         "backend=alsa: Linux only; Windows/macOS returns ERR_BACKEND_UNAVAILABLE\n"
     )
@@ -13089,7 +13089,7 @@ fn main() -> ExitCode {
             }
             Err(err) => {
                 eprintln!(
-                    "{{\"status\":\"error\",\"mode\":\"tspi-rt-host-run\",\"error\":\"{}\"}}",
+                    "{{\"status\":\"error\",\"mode\":\"khaen-rt-host-run\",\"error\":\"{}\"}}",
                     json_escape_text(&err)
                 );
                 ExitCode::from(1)
@@ -13229,7 +13229,7 @@ mod file_input_test_support {
             .parent()
             .expect("test exe dir")
             .join(format!(
-                "tspi-rt-host-t74-{}-{}-{}",
+                "khaen-rt-host-t74-{}-{}-{}",
                 std::process::id(),
                 unique,
                 prefix
@@ -13354,8 +13354,8 @@ mod tests {
 
     #[test]
     fn nsp512_to_412_path_table_rejects_identity() {
-        fn path_io(out_index: u16, in_index: u16) -> tspi_dsp_core::abi::TspiPathV1 {
-            tspi_dsp_core::abi::TspiPathV1 {
+        fn path_io(out_index: u16, in_index: u16) -> khaen_core::abi::TspiPathV1 {
+            khaen_core::abi::TspiPathV1 {
                 in_index,
                 out_index,
                 taps: 2,
@@ -13551,8 +13551,8 @@ mod tests {
 
     #[test]
     fn t26_real_all_ack_sets_retire_ready_synthetic_rejected() {
-        use tspi_dsp_core::abi::TspiBlockAckV1;
-        use tspi_rt_host::swap::TspiSwapAckV1;
+        use khaen_core::abi::TspiBlockAckV1;
+        use khaen_rt_host::swap::TspiSwapAckV1;
 
         // 真实证据：completed_block_ack 只填「该块 4 worker 三 phase 全部完成」的事实。
         let ack = completed_block_ack(7, 1, 4);
@@ -13613,8 +13613,8 @@ mod tests {
 
     #[test]
     fn t26_real_switch_all_ack_releases_quarantine_only_after_ack() {
-        use tspi_dsp_core::abi::TspiBlockAckV1;
-        use tspi_rt_host::swap::{note_block_switched, GraphQuarantine, TspiSwapAckV1};
+        use khaen_core::abi::TspiBlockAckV1;
+        use khaen_rt_host::swap::{note_block_switched, GraphQuarantine, TspiSwapAckV1};
 
         let old_version = 1u32;
         let new_version = 2u32;
@@ -13738,7 +13738,7 @@ mod tests {
             .expect("current_exe")
             .parent()
             .expect("test exe dir")
-            .join(format!("tspi-rt-host-f26-swap-{}.toml", std::process::id()));
+            .join(format!("khaen-rt-host-f26-swap-{}.toml", std::process::id()));
         let config = concat!(
             "[host]\n",
             "block_size = 128\n",
@@ -13797,7 +13797,7 @@ mod tests {
     // T71 前置：backend=alsa 播放接线单测（mock ALSA 抽象；真实设备/板端 NOT_RUN）
     // ---------------------------------------------------------------------
 
-    use tspi_rt_host::alsa::{
+    use khaen_rt_host::alsa::{
         DeviceSelector, DuplexRequest, HwOpenGate, HwParamsPlan, RawActual, RecoverStage,
         RecoveryPolicy, ResolvedDevice, StreamActual, StreamCaps,
     };
@@ -13826,7 +13826,7 @@ mod tests {
 
     impl RecordingBackend {
         fn motu() -> Self {
-            let fake = tspi_rt_host::alsa::FakeBackend::motu_ultralite_mk5();
+            let fake = khaen_rt_host::alsa::FakeBackend::motu_ultralite_mk5();
             Self {
                 capture_caps: fake.capture_caps,
                 playback_caps: fake.playback_caps,
@@ -13862,7 +13862,7 @@ mod tests {
         }
     }
 
-    impl tspi_rt_host::alsa::PcmDuplexBackend for RecordingBackend {
+    impl khaen_rt_host::alsa::PcmDuplexBackend for RecordingBackend {
         fn open(&mut self, _device: &ResolvedDevice) -> Result<(), AlsaError> {
             self.opened = true;
             Ok(())
@@ -13870,11 +13870,11 @@ mod tests {
 
         fn stream_caps(
             &mut self,
-            direction: tspi_rt_host::alsa::StreamDirection,
+            direction: khaen_rt_host::alsa::StreamDirection,
         ) -> Result<StreamCaps, AlsaError> {
             Ok(match direction {
-                tspi_rt_host::alsa::StreamDirection::Capture => self.capture_caps,
-                tspi_rt_host::alsa::StreamDirection::Playback => self.playback_caps,
+                khaen_rt_host::alsa::StreamDirection::Capture => self.capture_caps,
+                khaen_rt_host::alsa::StreamDirection::Playback => self.playback_caps,
             })
         }
 
@@ -14007,7 +14007,7 @@ mod tests {
         let mut bytes = vec![
             0u8;
             actual
-                .period_bytes(tspi_rt_host::alsa::StreamDirection::Playback)
+                .period_bytes(khaen_rt_host::alsa::StreamDirection::Playback)
                 .unwrap()
         ];
         format::convert_playback(&cfg, &planar, &mut bytes).expect("reference convert_playback");
@@ -14021,7 +14021,7 @@ mod tests {
         assert_eq!(actual.hw.n_out, 22);
         assert_eq!(
             actual.hw.sample_format,
-            tspi_dsp_core::abi::sample_format::S24_3LE_INTERLEAVED
+            khaen_core::abi::sample_format::S24_3LE_INTERLEAVED
         );
         assert_eq!(actual.hw.sample_rate, 48_000);
         assert_eq!(actual.hw.period_frames, 128);
@@ -14127,10 +14127,10 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("recoverable xrun")
             .expect("underrun event");
-        assert_eq!(event.kind, tspi_dsp_core::events::EV_OUTPUT_UNDERRUN);
+        assert_eq!(event.kind, khaen_core::events::EV_OUTPUT_UNDERRUN);
         assert_eq!(
             sink.session.state(),
-            tspi_rt_host::alsa::DuplexState::Running
+            khaen_rt_host::alsa::DuplexState::Running
         );
         // 恢复后下一块：先重预填 6 period，再写 1 个真实 period。
         sink.write_block(&output, 128, 128, false)
@@ -14166,9 +14166,9 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("xrun recoverable")
             .expect("xrun event");
-        assert_eq!(event.kind, tspi_dsp_core::events::EV_OUTPUT_UNDERRUN);
+        assert_eq!(event.kind, khaen_core::events::EV_OUTPUT_UNDERRUN);
         // F2：§8.2 冻结表 severity=3 / value_a=consecutive / value_b=capacity。
-        assert_eq!(event.severity, tspi_dsp_core::events::SEVERITY_ERROR);
+        assert_eq!(event.severity, khaen_core::events::SEVERITY_ERROR);
         assert_eq!(event.value_a, 1, "连续 underrun 数");
         assert_eq!(event.value_b, 8, "设备缓冲容量（1024/128 period）");
         assert_eq!(sink.counters.xruns, 1);
@@ -14176,7 +14176,7 @@ mod tests {
         assert_eq!(sink.counters.recoveries, 1);
         assert_eq!(
             sink.session.state(),
-            tspi_rt_host::alsa::DuplexState::Running,
+            khaen_rt_host::alsa::DuplexState::Running,
             "xrun 恢复后必须回到 Running（新 epoch）"
         );
         assert_eq!(sink.session.backend().recover_calls, 3);
@@ -14186,7 +14186,7 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("write after recovery")
             .expect("epoch event");
-        assert_eq!(next.kind, tspi_dsp_core::events::EV_EPOCH_START);
+        assert_eq!(next.kind, khaen_core::events::EV_EPOCH_START);
         let backend = sink.session.backend();
         assert_eq!(backend.write_calls, 7, "6 period 预填 + 1 个真实块");
         assert_eq!(sink.counters.prime_blocks, 6, "恢复后必须重预填 6 period");
@@ -14207,10 +14207,10 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("exhausted is not fatal")
             .expect("xrun event");
-        assert_eq!(event.kind, tspi_dsp_core::events::EV_OUTPUT_UNDERRUN);
+        assert_eq!(event.kind, khaen_core::events::EV_OUTPUT_UNDERRUN);
         assert_eq!(
             sink.session.state(),
-            tspi_rt_host::alsa::DuplexState::Muted,
+            khaen_rt_host::alsa::DuplexState::Muted,
             "恢复重试耗尽必须进入 Muted"
         );
         assert!(sink.session.mute_required());
@@ -14224,12 +14224,12 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("muted silence write")
             .expect("safety mute event");
-        assert_eq!(second.kind, tspi_dsp_core::events::EV_SAFETY_MUTE_ENTER);
+        assert_eq!(second.kind, khaen_core::events::EV_SAFETY_MUTE_ENTER);
         // F2：§8.2 冻结表 severity=4 / value_a=原因码 / value_b=epoch_id。
-        assert_eq!(second.severity, tspi_dsp_core::events::SEVERITY_FATAL);
+        assert_eq!(second.severity, khaen_core::events::SEVERITY_FATAL);
         assert_eq!(
             second.value_a,
-            tspi_dsp_core::rt::RtStatus::RT_E_DEVICE_LOST.code(),
+            khaen_core::rt::RtStatus::RT_E_DEVICE_LOST.code(),
             "原因码 = T17 最后错误（设备丢失 407）"
         );
         assert_eq!(second.value_b, 1, "epoch_id（初始 epoch=1）");
@@ -14254,7 +14254,7 @@ mod tests {
         assert_eq!(sink.counters.faults, 1);
         assert_eq!(
             sink.session.state(),
-            tspi_rt_host::alsa::DuplexState::Faulted
+            khaen_rt_host::alsa::DuplexState::Faulted
         );
     }
 
@@ -14268,17 +14268,17 @@ mod tests {
         let output = tone_output(128);
         sink.write_block(&output, 128, 128, false)
             .expect("exhausted is not fatal");
-        assert_eq!(sink.session.state(), tspi_rt_host::alsa::DuplexState::Muted);
+        assert_eq!(sink.session.state(), khaen_rt_host::alsa::DuplexState::Muted);
         // 下一块：capture 阶段先遇到 Muted（旧实现在这里 Err）。
         let outcome = sink.read_capture().expect("Muted capture 不得失败");
         assert_eq!(
             outcome.safety_mute_reason(),
-            Some(tspi_dsp_core::rt::RtStatus::RT_E_DEVICE_LOST.code()),
+            Some(khaen_core::rt::RtStatus::RT_E_DEVICE_LOST.code()),
             "SafetyMute 必须带进入原因码"
         );
         let event = outcome.event().expect("进入静音的专用事件");
-        assert_eq!(event.kind, tspi_dsp_core::events::EV_SAFETY_MUTE_ENTER);
-        assert_eq!(event.severity, tspi_dsp_core::events::SEVERITY_FATAL);
+        assert_eq!(event.kind, khaen_core::events::EV_SAFETY_MUTE_ENTER);
+        assert_eq!(event.severity, khaen_core::events::SEVERITY_FATAL);
         assert!(sink.capture_planar.iter().all(|sample| *sample == 0.0));
         // 再下一块：不重复刷进入事件，但仍不失败。
         let next = sink.read_capture().expect("持续 Muted 不得失败");
@@ -14307,10 +14307,10 @@ mod tests {
         sink.session.backend_mut().next_read_error = Some(AlsaError::Xrun);
         let outcome = sink.read_capture().expect("recoverable capture xrun");
         let event = outcome.event().expect("overrun event");
-        assert_eq!(event.kind, tspi_dsp_core::events::EV_INPUT_OVERRUN);
+        assert_eq!(event.kind, khaen_core::events::EV_INPUT_OVERRUN);
         assert_eq!(
             sink.session.state(),
-            tspi_rt_host::alsa::DuplexState::Running
+            khaen_rt_host::alsa::DuplexState::Running
         );
         assert!(
             sink.capture_planar.iter().all(|sample| *sample == 0.0),
@@ -14339,8 +14339,8 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("recoverable xrun")
             .expect("underrun event");
-        assert_eq!(first.kind, tspi_dsp_core::events::EV_OUTPUT_UNDERRUN);
-        assert_eq!(first.severity, tspi_dsp_core::events::SEVERITY_ERROR);
+        assert_eq!(first.kind, khaen_core::events::EV_OUTPUT_UNDERRUN);
+        assert_eq!(first.severity, khaen_core::events::SEVERITY_ERROR);
         assert_eq!(first.value_a, 1, "第 1 次连续 underrun");
         assert_eq!(first.value_b, 8, "设备缓冲容量");
         // 第 2 次 xrun：本块先返回上一块顺延的 EV_EPOCH_START。
@@ -14351,7 +14351,7 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("recoverable xrun")
             .expect("epoch event");
-        assert_eq!(deferred.kind, tspi_dsp_core::events::EV_EPOCH_START);
+        assert_eq!(deferred.kind, khaen_core::events::EV_EPOCH_START);
         // 下一块（正常写）取回第 2 次 underrun：value_a 必须递增为 2。
         sink.prime_playback()
             .expect("re-prime after second recovery");
@@ -14359,8 +14359,8 @@ mod tests {
             .write_block(&output, 128, 128, false)
             .expect("clean write")
             .expect("underrun event");
-        assert_eq!(second.kind, tspi_dsp_core::events::EV_OUTPUT_UNDERRUN);
-        assert_eq!(second.severity, tspi_dsp_core::events::SEVERITY_ERROR);
+        assert_eq!(second.kind, khaen_core::events::EV_OUTPUT_UNDERRUN);
+        assert_eq!(second.severity, khaen_core::events::SEVERITY_ERROR);
         assert_eq!(second.value_a, 2, "连续第 2 次 underrun");
         // 成功写后归零：再触发一次 xrun，value_a 回到 1。
         sink.session.backend_mut().next_write_error = Some(AlsaError::Xrun);
@@ -14383,7 +14383,7 @@ mod tests {
         assert!(error.contains("不可恢复"), "{error}");
         assert_eq!(
             sink.session.state(),
-            tspi_rt_host::alsa::DuplexState::Faulted
+            khaen_rt_host::alsa::DuplexState::Faulted
         );
         let error = sink
             .read_capture()
@@ -14421,7 +14421,7 @@ mod tests {
             .parent()
             .expect("test exe dir")
             .join(format!(
-                "tspi-rt-host-t71-muted-{}.toml",
+                "khaen-rt-host-t71-muted-{}.toml",
                 std::process::id()
             ));
         let config = concat!(
@@ -14609,7 +14609,7 @@ mod tests {
             .parent()
             .expect("test exe dir")
             .join(format!(
-                "tspi-rt-host-t71-{tag}-{}.toml",
+                "khaen-rt-host-t71-{tag}-{}.toml",
                 std::process::id()
             ));
         let config = format!(
@@ -14769,9 +14769,9 @@ mod tests {
             "xrun 恢复成功不是 SafetyMute"
         );
         let event = outcome.event().expect("overrun event");
-        assert_eq!(event.kind, tspi_dsp_core::events::EV_INPUT_OVERRUN);
+        assert_eq!(event.kind, khaen_core::events::EV_INPUT_OVERRUN);
         // F2：§8.2 冻结表 severity=3 / consecutive / capacity。
-        assert_eq!(event.severity, tspi_dsp_core::events::SEVERITY_ERROR);
+        assert_eq!(event.severity, khaen_core::events::SEVERITY_ERROR);
         assert_eq!(event.value_a, 1, "连续 overrun 数");
         assert_eq!(event.value_b, 8, "设备缓冲容量（1024/128 period）");
         assert_eq!(sink.counters.xruns, 1);
@@ -14782,14 +14782,14 @@ mod tests {
             .expect("read after recovery")
             .event()
             .expect("epoch event");
-        assert_eq!(next.kind, tspi_dsp_core::events::EV_EPOCH_START);
+        assert_eq!(next.kind, khaen_core::events::EV_EPOCH_START);
     }
 
     #[test]
     fn t71_alsa_sink_short_read_pads_silence() {
         let (mut sink, actual) = sink_with(RecordingBackend::motu(), AlsaIoMode::Synth);
         let period_bytes = actual
-            .period_bytes(tspi_rt_host::alsa::StreamDirection::Capture)
+            .period_bytes(khaen_rt_host::alsa::StreamDirection::Capture)
             .unwrap();
         sink.session.backend_mut().short_read = Some(period_bytes / 2);
         sink.read_capture().expect("short read is not fatal");
@@ -16335,7 +16335,7 @@ mod tests {
     fn t45apply_parse_rt_io_cpu_accepts_auto_or_index() {
         assert_eq!(
             parse_rt_io_cpu("auto").expect("auto"),
-            tspi_rt_host::scheduler::CPU_UNUSED
+            khaen_rt_host::scheduler::CPU_UNUSED
         );
         assert_eq!(parse_rt_io_cpu("0").expect("cpu0"), 0);
         assert_eq!(parse_rt_io_cpu("7").expect("cpu7"), 7);
@@ -16432,16 +16432,16 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // T239：capture source=aes67 的 userspace 传输（自研接收端 tspi-aoip-aes67 → host）
+    // T239：capture source=aes67 的 userspace 传输（自研接收端 khaen-aoip-aes67 → host）
     // 离线：UDP 仅 127.0.0.1 单播；不打开 ALSA/设备/板端；PTP/PHC NOT_RUN。
     // -----------------------------------------------------------------------
 
     use std::net::{Ipv4Addr as T239Ipv4Addr, SocketAddr as T239SocketAddr};
 
-    use tspi_aoip_aes67::clock::frames_to_ns_ceil as t239_frames_to_ns_ceil;
-    use tspi_aoip_aes67::jitter::{self as t239_jitter, JitterConfig as T239JitterConfig};
-    use tspi_aoip_aes67::rtp::Header as T239RtpHeader;
-    use tspi_aoip_aes67::sender::{Aes67RtpSender as T239Sender, SenderConfig as T239SenderConfig};
+    use khaen_aoip_aes67::clock::frames_to_ns_ceil as t239_frames_to_ns_ceil;
+    use khaen_aoip_aes67::jitter::{self as t239_jitter, JitterConfig as T239JitterConfig};
+    use khaen_aoip_aes67::rtp::Header as T239RtpHeader;
+    use khaen_aoip_aes67::sender::{Aes67RtpSender as T239Sender, SenderConfig as T239SenderConfig};
 
     /// 单条 userspace test SDP（单播 127.0.0.1，L24/48k/<ch>，PTPv2 参考钟声明）。
     fn t239_sdp_unicast(port: u16, channels: u16) -> String {
@@ -16701,7 +16701,7 @@ a=mediaclk:direct=0\n",
         .expect("网卡名 + IPv4");
         assert_eq!(mixed.len(), 2);
         let unknown = parse_aes67_iface_with("badnic", |name| {
-            Err(tspi_aoip_aes67::iface::IfaceLookupError::NoSuchName {
+            Err(khaen_aoip_aes67::iface::IfaceLookupError::NoSuchName {
                 name: name.to_string(),
                 available: vec!["eth0".to_string()],
             })
@@ -17210,7 +17210,7 @@ a=comment:channel-labels=L,R,Ls,Rs,Ltf,Rtf,LFE\n";
         assert!(report.contains("\"source\":\"aes67\""), "{report}");
         assert!(report.contains("\"transport\":\"userspace\""), "{report}");
         assert!(
-            report.contains("\"reader\":\"tspi-aoip-aes67\""),
+            report.contains("\"reader\":\"khaen-aoip-aes67\""),
             "{report}"
         );
         assert!(report.contains("\"layout\":\"2.0-strict\""), "{report}");

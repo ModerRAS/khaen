@@ -22,7 +22,7 @@
 
 ## 0.1 部署
 ```bash
-scp target/release/tspi-calibrate lckfb@192.0.2.215:/tmp/ && ssh lckfb@192.0.2.215 'chmod +x /tmp/tspi-calibrate'
+scp target/release/khaen-calibrate lckfb@192.0.2.215:/tmp/ && ssh lckfb@192.0.2.215 'chmod +x /tmp/khaen-calibrate'
 sudo mkdir -p /var/lib/tspi-calib/{t1,t2,t4,t6,t5}
 ```
 
@@ -64,12 +64,12 @@ sudo mkdir -p /var/lib/tspi-calib/{t1,t2,t4,t6,t5}
 ```bash
 arecord -D hw:4,0 --dump-hw-params /dev/null   # 按实测填 capture 通道数（当前 MOTU=20ch）
 # 先测无激励噪声底（3 s 静音），写进报告
-/tmp/tspi-calibrate measure-multi --out-dir /var/lib/tspi-calib/t1 --out-prefix /var/lib/tspi-calib/t1/t1-noise \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t1 --out-prefix /var/lib/tspi-calib/t1/t1-noise \
   --loopback-map 9:7 --names NOISE \
   --playback hw:4,0 --playback-channels 22 --capture hw:4,0 --capture-channels 20 \
   --rate 48000 --seconds 3 --level-db -120 --pre-seconds 0.5 --post-seconds 0.5 \
   --period-size 128 --buffer-size 512
-/tmp/tspi-calibrate measure-multi --out-dir /var/lib/tspi-calib/t1 --out-prefix /var/lib/tspi-calib/t1/t1 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t1 --out-prefix /var/lib/tspi-calib/t1/t1 \
   --loopback-map 9:7 --names OUT9_IN7 \
   --playback hw:4,0 --playback-channels 22 --capture hw:4,0 --capture-channels 20 \
   --rate 48000 --seconds 5 --level-db -12 --pre-seconds 1.5 --post-seconds 1.5 \
@@ -91,7 +91,7 @@ arecord -D hw:4,0 --dump-hw-params /dev/null   # 按实测填 capture 通道数�
 ```bash
 # kMainTrim=0；麦 90° 校准、麦轴朝天花板；记录 cal 文件 sha256
 for i in 1 2 3; do
-  /tmp/tspi-calibrate measure-multi --out-dir /var/lib/tspi-calib/t2/run$i --out-prefix /var/lib/tspi-calib/t2/run$i \
+  /tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t2/run$i --out-prefix /var/lib/tspi-calib/t2/run$i \
     --channels 0,1 --names FL,FR --playback hw:4,0 --playback-channels 22 \
     --capture hw:3,0 --capture-channels 1 --rate 48000 --seconds 5 --level-db -30 \
     --pre-seconds 1.5 --post-seconds 1.5 --period-size 128 --buffer-size 512 --mic umik
@@ -119,13 +119,13 @@ T2 数值阈值是 engineering default、待 pilot（先用现有 3 次 + 加测
 ```bash
 arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 # 4.1.2 播放通道 = 0,1,2,3,4,5,7（7 路角色；22ch 设备域）
-/tmp/tspi-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4 --out-prefix /var/lib/tspi-calib/t4/t4 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4 --out-prefix /var/lib/tspi-calib/t4/t4 \
   --channels 0,1,2,3,4,5,7 --names FL,FR,SL,SR,HFL,HFR,SUB1 \
   --playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 1 \
   --rate 48000 --seconds 5 --level-db -30 --pre-seconds 1.5 --post-seconds 1.5 \
   --period-size 128 --buffer-size 512 --mic umik --polarity-offset normal
 # 合并；分频点/对必须与 profile 一致（FL/FR HP80 + SUB1 LP80）
-/tmp/tspi-calibrate merge --dir /var/lib/tspi-calib/t4 --out /var/lib/tspi-calib/t4/calibration.yml \
+/tmp/khaen-calibrate merge --dir /var/lib/tspi-calib/t4 --out /var/lib/tspi-calib/t4/calibration.yml \
   --names FL,FR,SL,SR,HFL,HFR,SUB1 --layout 4.1.2 --crossovers 80 \
   --pairs FL:SUB1:80,FR:SUB1:80 --chunksize 128 --boost-cap-db 3 \
   --negative-controls /var/lib/tspi-calib/t4/negative-controls.json
@@ -141,13 +141,13 @@ arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 ### T4-B 5.3.2（**NEEDS_HW**：十只单元/三 SUB 接好后才验收）
 ```bash
 # FL0 FR1 C2 SL3 SR4 SUB1=5 SUB2=6 SUB3=7 HFL8 HFR9
-/tmp/tspi-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4-532 --out-prefix /var/lib/tspi-calib/t4-532/t4 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4-532 --out-prefix /var/lib/tspi-calib/t4-532/t4 \
   --channels 0,1,2,3,4,5,6,7,8,9 --names FL,FR,C,SL,SR,SUB1,SUB2,SUB3,HFL,HFR \
   --playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 1 \
   --rate 48000 --seconds 5 --level-db -30 --pre-seconds 1.5 --post-seconds 1.5 \
   --period-size 128 --buffer-size 512 --mic umik --polarity-offset normal
 # 三 SUB 先做 §6.2 组检查，再用“SUB 组等效”与 FL/FR 成对；中置按 D3 全频设计、当前无中置，C 不参与 pair
-/tmp/tspi-calibrate merge --dir /var/lib/tspi-calib/t4-532 --out /var/lib/tspi-calib/t4-532/calibration.yml \
+/tmp/khaen-calibrate merge --dir /var/lib/tspi-calib/t4-532 --out /var/lib/tspi-calib/t4-532/calibration.yml \
   --names FL,FR,C,SL,SR,SUB1,SUB2,SUB3,HFL,HFR --layout 5.3.2 --crossovers 80 \
   --pairs FL:SUB1:80,FR:SUB1:80 --chunksize 128 --boost-cap-db 3
 ```
@@ -159,7 +159,7 @@ arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 ```bash
 # 在甜点附近取 1–3 个 holdout 点（如 ±0.3 m 左右/前后，或不同麦高），这些点不参与 merge 拟合
 # 应用校准后，按 T3 流程在每个 holdout 点重测（同电平同麦方向）
-/tmp/tspi-calibrate measure-multi --out-dir /var/lib/tspi-calib/t6/holdout1 --out-prefix /var/lib/tspi-calib/t6/holdout1 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t6/holdout1 --out-prefix /var/lib/tspi-calib/t6/holdout1 \
   --channels 0,1,2,3,4,5,7 --names FL,FR,SL,SR,HFL,HFR,SUB1 \
   --playback hw:4,0 --playback-channels 22 --capture hw:3,0 --capture-channels 1 \
   --rate 48000 --seconds 5 --level-db -30 --pre-seconds 1.5 --post-seconds 1.5 \
@@ -175,7 +175,7 @@ arecord -D hw:3,0 --dump-hw-params /dev/null   # UMIK 常见 1ch；2ch 再用 2
 两边不一致时 `polarity_confidence=low`，两份结果都留在 JSON 里。SUB 不要用听音位符号，除非麦贴在低音炮上并加 `--sub-reference-nearfield`。
 
 ```bash
-/tmp/tspi-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4r --out-prefix /var/lib/tspi-calib/t4r/t4 \
+/tmp/khaen-calibrate measure-multi --out-dir /var/lib/tspi-calib/t4r --out-prefix /var/lib/tspi-calib/t4r/t4 \
   --channels 0,1,2,3,4,5,7 --names FL,FR,SL,SR,HFL,HFR,SUB1 \
   --playback hw:4,0 --playback-channels 22 \
   --capture hw:3,0 --capture-channels 1 \

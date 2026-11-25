@@ -7,7 +7,7 @@
 - 运行（在 `rt-stack/` 下）：
 
 `@
-cargo test -p tspi-rt-host alsa_fake
+cargo test -p khaen-rt-host alsa_fake
 `@
 
 - 期望：`running 88 tests ... 88 passed; 0 failed`（executed test_count = 88 > 0，WBS 非空测试门）。
@@ -28,7 +28,7 @@ mod alsa_fake_tests {
 }
 `@
 
-本文件因此参与 lib 的单测构建，真实被 `cargo test -p tspi-rt-host alsa_fake` 执行
+本文件因此参与 lib 的单测构建，真实被 `cargo test -p khaen-rt-host alsa_fake` 执行
 （executed = 82；测试路径 `alsa::alsa_fake_tests::t17_*` 含 alsa_fake）。
 **integrator 不要**再把它加到 `public_registration.rs`（会重复注册/编译失败）。
 

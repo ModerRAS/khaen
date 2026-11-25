@@ -66,7 +66,7 @@
 //!   交叉渐变由宿主 ramp 完成（S1 `ramp_time=200 ms`）；
 //! - 不解析 layout-presets YAML（T57 roles 负责）；本模块内置的 `h16-7.1.4` role→index 表
 //!   是 S1 daemon 既有默认输入布局的冻结副本，只用于 S1 兼容模拟，不作为 P1 的映射真相；
-//! - 不新增依赖（纯 std + `tspi-dsp-core`；JSON 复用同 crate `crate::ws` 的编解码）。
+//! - 不新增依赖（纯 std + `khaen-core`；JSON 复用同 crate `crate::ws` 的编解码）。
 //!
 //! # 与 S1 实现的显式偏差（记录于 evidence/T25/MANIFEST.md）
 //! - D-1：manual override / startup freeze 期间清空 pending 候选计时。S1 `cmd_autodetect`

@@ -458,7 +458,7 @@ def read_wav(path: str):
 
 
 def read_raw_s24(path: str, channels: int = 1):
-    """读板端 S24_3LE 裸流（tspi-calibrate 的 capture.raw 格式）。"""
+    """读板端 S24_3LE 裸流（khaen-calibrate 的 capture.raw 格式）。"""
     with open(path, "rb") as fh:
         raw = fh.read()
     if len(raw) % 3 != 0:

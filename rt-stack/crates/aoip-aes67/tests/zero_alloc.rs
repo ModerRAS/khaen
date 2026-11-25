@@ -5,15 +5,15 @@
 //! - \`JitterWriter::push_packet\`（RTP 头已知 + 预编码 L24 payload，直接写环）；
 //! - \`JitterReader::read_block\` / \`CaptureBlockSource::read_block\`（整块输出）。
 //!
-//! 运行：\`cargo test -p tspi-aoip-aes67 --test zero_alloc -- --test-threads=1\`
+//! 运行：\`cargo test -p khaen-aoip-aes67 --test zero_alloc -- --test-threads=1\`
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tspi_aoip_aes67::capture::CaptureBlockSource;
-use tspi_aoip_aes67::clock::{frames_to_ns_ceil, MediaClock, MockClock};
-use tspi_aoip_aes67::jitter::{self, JitterConfig};
-use tspi_aoip_aes67::rtp::{self, Header};
+use khaen_aoip_aes67::capture::CaptureBlockSource;
+use khaen_aoip_aes67::clock::{frames_to_ns_ceil, MediaClock, MockClock};
+use khaen_aoip_aes67::jitter::{self, JitterConfig};
+use khaen_aoip_aes67::rtp::{self, Header};
 
 struct CountingAllocator;
 

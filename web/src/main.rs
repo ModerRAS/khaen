@@ -1,10 +1,10 @@
-//! tspi-audio-web 入口：参数解析、配置加载/首次生成 token、后端装配、HTTP 服务。
+//! khaen-audio-web 入口：参数解析、配置加载/首次生成 token、后端装配、HTTP 服务。
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use tspi_audio_web::config::{self, LoadReport};
-use tspi_audio_web::{build_router, AppConfig, AppState, VERSION};
+use khaen_audio_web::config::{self, LoadReport};
+use khaen_audio_web::{build_router, AppConfig, AppState, VERSION};
 
 #[derive(Debug, Default)]
 struct Args {
@@ -15,12 +15,12 @@ struct Args {
 }
 
 const USAGE: &str = "\
-tspi-audio-web —— 泰山派3M 音频 DSP 设备 Web 管理服务
+khaen-audio-web —— 泰山派3M 音频 DSP 设备 Web 管理服务
 
-用法: tspi-audio-web [选项]
+用法: khaen-audio-web [选项]
 
 选项:
-  -c, --config <路径>   配置文件路径（默认 Linux: /etc/tspi-audio-web/config.toml；
+  -c, --config <路径>   配置文件路径（默认 Linux: /etc/khaen-audio-web/config.toml；
                         Windows 开发: ./config.toml）
   -l, --listen <地址>   监听地址，例如 0.0.0.0:80（默认；被占用时回退 0.0.0.0:8088）
       --mock            内存 mock 模式（等价于 TSPI_MOCK=1，不执行任何系统命令）
@@ -57,7 +57,7 @@ fn parse_args() -> Result<Args, String> {
             "--mock" => args.mock = true,
             "--print-token" => args.print_token = true,
             "-V" | "--version" => {
-                println!("tspi-audio-web {VERSION}");
+                println!("khaen-audio-web {VERSION}");
                 std::process::exit(0);
             }
             "-h" | "--help" => {
@@ -85,10 +85,10 @@ fn print_banner(config: &AppConfig, report: &LoadReport) {
         eprintln!("  已生成新的访问 token（请妥善保存）:");
         eprintln!("    {}", config.token);
         eprintln!(
-            "  查看: tspi-audio-web --config {} --print-token",
+            "  查看: khaen-audio-web --config {} --print-token",
             report.path.display()
         );
-        eprintln!("  修改: 编辑配置文件 token 后 systemctl restart tspi-audio-web");
+        eprintln!("  修改: 编辑配置文件 token 后 systemctl restart khaen-audio-web");
         eprintln!("************************************************************");
         eprintln!();
     }
@@ -119,7 +119,7 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
-    eprintln!("收到退出信号，正在停止 tspi-audio-web …");
+    eprintln!("收到退出信号，正在停止 khaen-audio-web …");
 }
 
 #[tokio::main]

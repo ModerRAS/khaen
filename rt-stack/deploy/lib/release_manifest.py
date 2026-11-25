@@ -3,7 +3,7 @@
 
 bundle 结构（schema tspi-rt-stack/release/v1）：
   <bundle>/manifest.json
-  <bundle>/bin/<name>            # 可执行（tspi-rt-host, tspi-rt-daemon）
+  <bundle>/bin/<name>            # 可执行（khaen-rt-host, tspi-rt-daemon）
   <bundle>/units/*.service|*.target
   <bundle>/etc/*.example         # env/config 模板（可选）
   <bundle>/README.deploy.md

@@ -2,7 +2,7 @@
 //
 // 经 src/compile_apply.rs 末尾 #[cfg(test)] mod t68_experiment_tests { include!(...) } 进入 lib 单测构建
 //（cargo 不自动发现 tests/<Txx>/ 子目录；公共注册属 integrator，勿写入 public_registration.rs）。
-// 全部测试名 t68_ 前缀。运行：cargo test -p tspi-calibration t68_
+// 全部测试名 t68_ 前缀。运行：cargo test -p khaen-calibration t68_
 //
 // 覆盖（对应任务 §4 四个单测）：
 //   ① t68_measured_412_five_actuators_builds_only_under_experiment
@@ -17,8 +17,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_dsp_compat::ws::{json_object, JsonValue};
-use tspi_modal_design::artifact::ArtifactStatus;
+use khaen_compat::ws::{json_object, JsonValue};
+use khaen_modal_design::artifact::ArtifactStatus;
 
 use crate::fit_wiring::CompileWiringConfig;
 use crate::measured_design::{
@@ -256,7 +256,7 @@ fn t68_g_paths_file(dir: &Path, l_g: u32) -> InjectedGPaths {
         ),
         ("paths", JsonValue::Array(entries)),
     ]);
-    let text = tspi_dsp_compat::ws::json_encode(&document).expect("encode g paths");
+    let text = khaen_compat::ws::json_encode(&document).expect("encode g paths");
     let path = t68_write(dir, "g-paths.json", &text);
     load_g_paths_file(&path).expect("load g paths")
 }
@@ -417,7 +417,7 @@ fn t68_headroom(roles: &[RoleCompileInput]) -> HeadroomEvidence {
         ("schema", JsonValue::String(PEQ_FIT_SCHEMA.to_string())),
         ("channels", JsonValue::Array(specs)),
     ]);
-    let report_bytes = tspi_dsp_compat::ws::json_encode(&document)
+    let report_bytes = khaen_compat::ws::json_encode(&document)
         .expect("encode T64 report fixture")
         .into_bytes();
     let report_sha256 = sha256_hex(&report_bytes);
@@ -601,7 +601,7 @@ fn t68_experiment_g_injection_plan_paths_match_declared_g() {
 
     // envelope：plan sha / graph id / l_g / path 数与 plan 一致。
     let envelope = compiled.experiment_envelope_json();
-    let document = tspi_dsp_compat::ws::json_parse(&envelope).expect("envelope JSON");
+    let document = khaen_compat::ws::json_parse(&envelope).expect("envelope JSON");
     assert_eq!(
         document.get("plan").and_then(|value| value.get("l_g")).and_then(|value| value.as_u64()),
         Some(T68_L_G as u64)
@@ -672,7 +672,7 @@ fn t68_experiment_artifacts_carry_experiment_non_acceptable_markers() {
 
     // compile-report.json 明确字段。
     let report = compiled.report_json();
-    let document = tspi_dsp_compat::ws::json_parse(&report).expect("report JSON");
+    let document = khaen_compat::ws::json_parse(&report).expect("report JSON");
     let experiment = document
         .get("experiment")
         .expect("report must carry experiment block");

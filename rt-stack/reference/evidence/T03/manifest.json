@@ -42,7 +42,7 @@
     },
     {
       "path": "calibration-spec/CONTRACT.md",
-      "role": "context: tspi-calibration/v1 delay/polarity/PEQ semantics",
+      "role": "context: khaen-calibration/v1 delay/polarity/PEQ semantics",
       "bytes": 22329,
       "sha256": "1664028e34823a08500c46416941aae584ba8ac8edc2cf0dbf99e205bd02726b"
     },

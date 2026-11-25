@@ -1,7 +1,7 @@
 //! T13 calibration 私有集成测试（WBS T13；写域 crates/compat/tests/T13/）。
 //!
 //! 覆盖 WBS T13 DoD：
-//! - 既有 tspi-calibration v1/v1.1 只读接受（CONTRACT §2/§3/§5/§10；未知 schema/type/枚举拒收）；
+//! - 既有 khaen-calibration v1/v1.1 只读接受（CONTRACT §2/§3/§5/§10；未知 schema/type/枚举拒收）；
 //! - 未知扩展字段 warning（不参与应用）；v1.1 shelf q=RBJ slope S、peaking q 无上限；
 //! - 校准 -> 渲染基线合并（delay 相加 / polarity XOR / gain 相加 / PEQ 追加、type 不降级、
 //!   二次应用拒收、跨布局拒收）；
@@ -12,12 +12,12 @@
 //! - 与 T12 compile 接口（design_delay_to_plan / StagePlan / CompileOptions / CompileInput+compile）。
 //!
 //! Cargo 自动把 tests/T13/main.rs 发现为集成测试 target；DoD 命令：
-//! `cargo test -p tspi-dsp-compat calibration`（测试名统一 calibration_ 前缀）。
+//! `cargo test -p khaen-compat calibration`（测试名统一 calibration_ 前缀）。
 //! 只读输入：calibration-spec/examples/*.yml 经 include_str! 绑定；不改任何校准文件。
 //! 本文件不写临时文件（%TEMP% 在内存盘 R: 上可能 PermissionDenied），全部内存夹具。
 
-use tspi_dsp_compat::calibration::*;
-use tspi_dsp_core::compile::{compile, CompileInput, CompileOptions};
+use khaen_compat::calibration::*;
+use khaen_core::compile::{compile, CompileInput, CompileOptions};
 
 const EXAMPLE_412: &str =
     include_str!("../../../../../calibration-spec/examples/calibration-4.1.2.example.yml");
@@ -269,13 +269,13 @@ fn has_warning(document: &CalibrationDocument, code: CalibrationWarningCode) -> 
 
 fn minimal_v1(body: &str) -> String {
     format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n{body}"
     )
 }
 
 fn minimal_v11(body: &str) -> String {
     format!(
-        "schema: tspi-calibration/v1.1\nsample_rate: 48000\nreference_index: 0\nchannels:\n{body}"
+        "schema: khaen-calibration/v1.1\nsample_rate: 48000\nreference_index: 0\nchannels:\n{body}"
     )
 }
 
@@ -293,7 +293,7 @@ fn channel_line(name: &str, index: u32, delay: u32, polarity: &str, filters: &st
 fn calibration_example_v1_files_parse() {
     let doc = doc_412();
     assert_eq!(doc.schema, CalibrationSchema::V1);
-    assert_eq!(doc.schema_string, "tspi-calibration/v1");
+    assert_eq!(doc.schema_string, "khaen-calibration/v1");
     assert_eq!(doc.sample_rate, 48_000);
     assert_eq!(doc.reference_index, 0);
     assert_eq!(doc.layout.as_deref(), Some("4.1.2"));
@@ -331,7 +331,7 @@ fn calibration_v11_shelf_types_preserved() {
     let doc = parse_calibration_yaml_with_layout(EXAMPLE_V11.as_bytes(), Some(&layout_412()))
         .expect("v1.1 example");
     assert_eq!(doc.schema, CalibrationSchema::V11);
-    assert_eq!(doc.schema_string, "tspi-calibration/v1.1");
+    assert_eq!(doc.schema_string, "khaen-calibration/v1.1");
     let fl = doc.channel("FL").expect("FL");
     assert_eq!(fl.filters.len(), 1);
     assert_eq!(fl.filters[0].band.filter_type, PeqType::HighShelf);
@@ -434,7 +434,7 @@ fn calibration_unknown_filter_type_rejected() {
 fn calibration_unknown_schema_rejected() {
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v2\nsample_rate: 48000\nreference_index: 0\nchannels: []\n",
+            b"schema: khaen-calibration/v2\nsample_rate: 48000\nreference_index: 0\nchannels: []\n",
         ),
         CalibrationErrorCode::Schema,
     );
@@ -451,7 +451,7 @@ fn calibration_unknown_schema_rejected() {
 #[test]
 fn calibration_unknown_fields_warn_but_accept() {
     let yaml = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nvendor_block: {{a: 1}}\nchannels:\n{}{}",
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nvendor_block: {{a: 1}}\nchannels:\n{}{}",
         channel_line(
             "FL",
             0,
@@ -477,7 +477,7 @@ fn calibration_unknown_fields_warn_but_accept() {
 
 #[test]
 fn calibration_duplicate_field_warns_last_wins() {
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 48000\nsample_rate: 96000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 48000\nsample_rate: 96000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n";
     let doc = parse_calibration_yaml(yaml.as_bytes()).expect("duplicate warning");
     assert_eq!(doc.sample_rate, 96_000);
     assert!(doc
@@ -490,19 +490,19 @@ fn calibration_duplicate_field_warns_last_wins() {
 fn calibration_sample_rate_rules() {
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: 48000.0\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
+            b"schema: khaen-calibration/v1\nsample_rate: 48000.0\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
         ),
         CalibrationErrorCode::SampleRate,
     );
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: -1\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
+            b"schema: khaen-calibration/v1\nsample_rate: -1\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
         ),
         CalibrationErrorCode::SampleRate,
     );
     let body = channel_line("FL", 0, 0, "normal", "[]");
     let yaml = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 44100\nreference_index: 0\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 44100\nreference_index: 0\nchannels:\n{body}"
     );
     let doc = parse_calibration_yaml(yaml.as_bytes()).expect("44.1k 声明集合内");
     assert_eq!(doc.sample_rate, 44_100);
@@ -511,7 +511,7 @@ fn calibration_sample_rate_rules() {
         CalibrationWarningCode::SampleRateNonDeclared
     ));
     let yaml32 = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 32000\nreference_index: 0\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 32000\nreference_index: 0\nchannels:\n{body}"
     );
     let doc32 = parse_calibration_yaml(yaml32.as_bytes()).expect("32k 仅 warning");
     assert!(has_warning(
@@ -524,13 +524,13 @@ fn calibration_sample_rate_rules() {
 fn calibration_reference_index_rules() {
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: 48000\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
+            b"schema: khaen-calibration/v1\nsample_rate: 48000\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
         ),
         CalibrationErrorCode::MissingField,
     );
     let body = channel_line("FL", 0, 0, "normal", "[]");
     let bad_ref = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 9\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 9\nchannels:\n{body}"
     );
     expect_error(
         parse_calibration_yaml(bad_ref.as_bytes()),
@@ -543,7 +543,7 @@ fn calibration_reference_index_rules() {
         channel_line("FR", 1, 3, "normal", "[]")
     );
     let yaml = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 1\nchannels:\n{body2}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 1\nchannels:\n{body2}"
     );
     let doc = parse_calibration_yaml(yaml.as_bytes()).expect("reference nonzero warning");
     assert!(has_warning(
@@ -617,7 +617,7 @@ fn calibration_polarity_rules() {
         CalibrationErrorCode::Polarity,
     );
     // 缺省 polarity -> warning + normal。
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, filters: []}\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, filters: []}\n";
     let doc = parse_calibration_yaml(yaml.as_bytes()).expect("polarity default");
     assert_eq!(doc.channels[0].polarity, Polarity::Normal);
     assert!(has_warning(&doc, CalibrationWarningCode::PolarityDefault));
@@ -651,13 +651,13 @@ fn calibration_gain_rules() {
 fn calibration_channels_rules() {
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels: []\n",
+            b"schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels: []\n",
         ),
         CalibrationErrorCode::Channels,
     );
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\n",
+            b"schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\n",
         ),
         CalibrationErrorCode::MissingField,
     );
@@ -693,7 +693,7 @@ fn calibration_channels_rules() {
         parse_calibration_yaml(minimal_v1(&body).as_bytes()),
         CalibrationErrorCode::ChannelName,
     );
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - [1, 2]\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - [1, 2]\n";
     expect_error(
         parse_calibration_yaml(yaml.as_bytes()),
         CalibrationErrorCode::FieldType,
@@ -702,7 +702,7 @@ fn calibration_channels_rules() {
 
 #[test]
 fn calibration_filters_required_and_count() {
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal}\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal}\n";
     expect_error(
         parse_calibration_yaml(yaml.as_bytes()),
         CalibrationErrorCode::Filters,
@@ -836,7 +836,7 @@ fn calibration_positive_boost_rules() {
 fn calibration_playback_channels_bound() {
     let body = channel_line("FL", 0, 0, "normal", "[]");
     let yaml = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  playback: {{device: \"hw:motu,0\", channels: 4}}\nchannels:\n{}{}",
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  playback: {{device: \"hw:motu,0\", channels: 4}}\nchannels:\n{}{}",
         body,
         channel_line("SUB1", 7, 0, "normal", "[]")
     );
@@ -850,21 +850,21 @@ fn calibration_playback_channels_bound() {
 fn calibration_measurement_rules() {
     let body = channel_line("FL", 0, 0, "normal", "[]");
     let bad_mode = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mode: magic\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mode: magic\nchannels:\n{body}"
     );
     expect_error(
         parse_calibration_yaml(bad_mode.as_bytes()),
         CalibrationErrorCode::Measurement,
     );
     let through_no_offsets = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mode: through_render\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mode: through_render\nchannels:\n{body}"
     );
     expect_error(
         parse_calibration_yaml(through_no_offsets.as_bytes()),
         CalibrationErrorCode::Measurement,
     );
     let offsets_unknown_name = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mode: through_render\n  render_offsets:\n    - {{name: ZZ, delay_samples: 1, polarity: normal}}\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mode: through_render\n  render_offsets:\n    - {{name: ZZ, delay_samples: 1, polarity: normal}}\nchannels:\n{body}"
     );
     let doc = parse_calibration_yaml(offsets_unknown_name.as_bytes()).expect("offset warning");
     assert!(has_warning(
@@ -872,7 +872,7 @@ fn calibration_measurement_rules() {
         CalibrationWarningCode::UnknownMeasurementField
     ));
     let unknown_meas_field = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mic_position: xyz\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nmeasurement:\n  mic_position: xyz\nchannels:\n{body}"
     );
     let doc = parse_calibration_yaml(unknown_meas_field.as_bytes()).expect("meas unknown warning");
     assert!(has_warning(
@@ -885,20 +885,20 @@ fn calibration_measurement_rules() {
 fn calibration_metadata_rules() {
     let body = channel_line("FL", 0, 0, "normal", "[]");
     let tool_string = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\ntool: tspi-calibrate\nversion: \"0.1.0\"\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\ntool: khaen-calibrate\nversion: \"0.1.0\"\nchannels:\n{body}"
     );
     let doc = parse_calibration_yaml(tool_string.as_bytes()).expect("tool string");
-    assert_eq!(doc.tool.as_ref().unwrap().name, "tspi-calibrate");
+    assert_eq!(doc.tool.as_ref().unwrap().name, "khaen-calibrate");
     assert_eq!(doc.tool_version.as_deref(), Some("0.1.0"));
     let tool_bad = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\ntool: {{version: \"0.1.0\"}}\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\ntool: {{version: \"0.1.0\"}}\nchannels:\n{body}"
     );
     expect_error(
         parse_calibration_yaml(tool_bad.as_bytes()),
         CalibrationErrorCode::Metadata,
     );
     let created_bad = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\ncreated_unix: -5\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\ncreated_unix: -5\nchannels:\n{body}"
     );
     expect_error(
         parse_calibration_yaml(created_bad.as_bytes()),
@@ -906,7 +906,7 @@ fn calibration_metadata_rules() {
     );
     let long_note = "n".repeat(501);
     let note_yaml = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: \"{long_note}\"\nchannels:\n{body}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: \"{long_note}\"\nchannels:\n{body}"
     );
     let doc = parse_calibration_yaml(note_yaml.as_bytes()).expect("long note warning");
     assert!(has_warning(&doc, CalibrationWarningCode::NoteTooLong));
@@ -917,16 +917,16 @@ fn calibration_yaml_syntax_and_unsupported_features() {
     // TAB 缩进：不支持。
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n\t- {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
+            b"schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n\t- {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n",
         ),
         CalibrationErrorCode::YamlUnsupported,
     );
     // anchor/tag/block scalar/multi-doc：明确不支持。
     for text in [
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: &a hello\nchannels: []\n",
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: !tag hello\nchannels: []\n",
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: |\n  hello\nchannels: []\n",
-        "---\nschema: tspi-calibration/v1\n---\nschema: spi\n",
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: &a hello\nchannels: []\n",
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: !tag hello\nchannels: []\n",
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: |\n  hello\nchannels: []\n",
+        "---\nschema: khaen-calibration/v1\n---\nschema: spi\n",
     ] {
         expect_error(
             parse_calibration_yaml(text.as_bytes()),
@@ -936,7 +936,7 @@ fn calibration_yaml_syntax_and_unsupported_features() {
     // 未闭合引号：不支持（多行字符串）。
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: \"abc\nchannels: []\n",
+            b"schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nnote: \"abc\nchannels: []\n",
         ),
         CalibrationErrorCode::YamlUnsupported,
     );
@@ -953,7 +953,7 @@ fn calibration_yaml_syntax_and_unsupported_features() {
     // 非法缩进（mapping 中缩进变深却不属于上一键）。
     expect_error(
         parse_calibration_yaml(
-            b"schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n   extra: 1\n",
+            b"schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n   extra: 1\n",
         ),
         CalibrationErrorCode::YamlSyntax,
     );
@@ -961,7 +961,7 @@ fn calibration_yaml_syntax_and_unsupported_features() {
 
 #[test]
 fn calibration_yaml_flow_and_quoted_scalars() {
-    let yaml = "schema: \"tspi-calibration/v1\"\nsample_rate: 48000\nreference_index: 0\nlayout: \"4.1.2\"\nnote: \"a: b, c # not comment\"  # real comment\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: [{freq: 100.0, q: 1.0, gain_db: -1.0}]}\n  - name: SUB1\n    index: 7\n    delay_samples: 12\n    polarity: invert\n    filters: []\n";
+    let yaml = "schema: \"khaen-calibration/v1\"\nsample_rate: 48000\nreference_index: 0\nlayout: \"4.1.2\"\nnote: \"a: b, c # not comment\"  # real comment\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: [{freq: 100.0, q: 1.0, gain_db: -1.0}]}\n  - name: SUB1\n    index: 7\n    delay_samples: 12\n    polarity: invert\n    filters: []\n";
     let doc = parse_calibration_yaml_with_layout(yaml.as_bytes(), Some(&layout_412()))
         .expect("flow+block mixed");
     assert_eq!(doc.layout.as_deref(), Some("4.1.2"));
@@ -999,7 +999,7 @@ fn calibration_layout_cross_check_rules() {
         channel_line("C", 2, 0, "normal", "[]")
     );
     let yaml = format!(
-        "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nlayout: \"4.1.2\"\nchannels:\n{bad_role}"
+        "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nlayout: \"4.1.2\"\nchannels:\n{bad_role}"
     );
     expect_error(
         parse_calibration_yaml_with_layout(yaml.as_bytes(), Some(&layout_412())),
@@ -1116,7 +1116,7 @@ fn calibration_merge_polarity_xor_invert() {
 
 #[test]
 fn calibration_merge_preserves_peq_types_and_order() {
-    let yaml = "schema: tspi-calibration/v1.1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: [{freq: 4000.0, q: 0.7, gain_db: -2.0, type: high_shelf}]}\n";
+    let yaml = "schema: khaen-calibration/v1.1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: [{freq: 4000.0, q: 0.7, gain_db: -2.0, type: high_shelf}]}\n";
     let doc = parse_calibration_yaml(yaml.as_bytes()).expect("v1.1");
     let mut base = vec![RenderRoleBase::uncalibrated("FL", 0)];
     base[0].peq = vec![
@@ -1189,7 +1189,7 @@ fn calibration_merge_limits() {
     let mut base = base_roles_412();
     let fl = base.iter_mut().find(|role| role.name == "FL").unwrap();
     fl.gain_db = 11.0;
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, gain_db: 4.0, filters: []}\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, gain_db: 4.0, filters: []}\n";
     let doc_gain = parse_calibration_yaml(yaml.as_bytes()).expect("parse trim");
     expect_error(
         merge_calibration(&doc_gain, None, &base, 48_000),
@@ -1227,7 +1227,7 @@ fn calibration_merge_partial_coverage_warning() {
         CalibrationErrorCode::RoleNotFound,
     );
     // 只校准 FL 的小文件 + base 两角色 -> 未覆盖 FR warning。
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n";
     let small = parse_calibration_yaml(yaml.as_bytes()).expect("small");
     let merged = merge_calibration(&small, None, &base, 48_000).expect("partial");
     assert!(merged
@@ -1249,7 +1249,7 @@ fn calibration_ir_build_basic() {
     assert_eq!(ir.ir_hash().len(), 64);
     assert_eq!(ir.created_unix(), 1_800_000_000);
     assert_eq!(ir.source().schema, CalibrationSchema::V1);
-    assert_eq!(ir.source().schema_string, "tspi-calibration/v1");
+    assert_eq!(ir.source().schema_string, "khaen-calibration/v1");
     assert_eq!(ir.source().sample_rate, 48_000);
     assert!(ir.source().legacy_v1);
     assert_eq!(
@@ -1409,7 +1409,7 @@ fn calibration_ir_profile_and_stereo_mask_rules() {
 
 #[test]
 fn calibration_ir_rate_unsupported_rejected() {
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 44100\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 44100\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n";
     let doc = parse_calibration_yaml(yaml.as_bytes()).expect("44.1k parse ok");
     let base = vec![RenderRoleBase::uncalibrated("FL", 0)];
     let merged = merge_calibration(&doc, None, &base, 44_100).expect("merge 44.1k");
@@ -1763,7 +1763,7 @@ fn simulate_delta(
 #[test]
 fn calibration_p_stage_budget_and_compile_options() {
     // 200 ms 上限 delay（9600）导致 P FIR 9601 taps > 常规 4096 -> INFEASIBLE，不截尾。
-    let yaml = "schema: tspi-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n  - {name: SUB1, index: 7, delay_samples: 9600, polarity: normal, filters: []}\n";
+    let yaml = "schema: khaen-calibration/v1\nsample_rate: 48000\nreference_index: 0\nchannels:\n  - {name: FL, index: 0, delay_samples: 0, polarity: normal, filters: []}\n  - {name: SUB1, index: 7, delay_samples: 9600, polarity: normal, filters: []}\n";
     let doc = parse_calibration_yaml(yaml.as_bytes()).expect("doc");
     let base = vec![
         RenderRoleBase::uncalibrated("FL", 0),
@@ -1870,7 +1870,7 @@ fn calibration_t12_compile_integration() {
     }
     // T12 design_delay_to_plan 对整数校准 delay 给出 q16=0。
     for role in ir.post() {
-        let plan = tspi_dsp_core::compile::design_delay_to_plan(role.delay_samples as f64)
+        let plan = khaen_core::compile::design_delay_to_plan(role.delay_samples as f64)
             .expect("delay plan");
         assert_eq!(plan.delay_samples, role.delay_samples);
         assert_eq!(plan.delay_q16, 0);

@@ -2,7 +2,7 @@
 # T28 03-retire-c.sh —— 停用/禁用/防激活旧 CamillaDSP 进程链（**不可回退到 C**）
 #
 # 动作顺序（依据 DSP-HOST-DECISION §7 G-no-C、spec/compat-matrix C07/K13/Q38/Q04/A11）：
-#   S1 旧 Web/WS shim（tspi-audio-web）stop → disable → mask
+#   S1 旧 Web/WS shim（khaen-audio-web）stop → disable → mask
 #   S2 旧编排/开机恢复入口（tspi-boot-mode / tspi-audio.target）stop → disable（target 不 mask）
 #   S3 旧 C 依赖 daemon（tspi-upmix-autodetect）stop → disable → mask
 #   S4 旧 C 引擎（tspi-camilladsp）stop → disable → mask
@@ -49,7 +49,7 @@ if [ "$DRY_RUN" = "0" ]; then
   for u in "${ALL_OLD_AUDIO_UNITS[@]}"; do
     printf '%s\t%s\t%s\n' "$u" "$("$TSPI_SYSTEMCTL" is-active "$u" 2>/dev/null || true)" "$(sunit_enabled_state "$u")" >> "$EVIDENCE_DIR/pre-units.tsv"
   done
-  pgrep -a -f 'camilladsp|tspi-upmix|tspi-audio-web' 2>/dev/null > "$EVIDENCE_DIR/pre-procs.txt" || true
+  pgrep -a -f 'camilladsp|tspi-upmix|khaen-audio-web' 2>/dev/null > "$EVIDENCE_DIR/pre-procs.txt" || true
   for f in "${C_ENTRY_FILES[@]}"; do
     [ -e "$(p "$f")" ] && printf '%s\t%s\n' "$f" "$(sha256_of "$(p "$f")")" >> "$EVIDENCE_DIR/pre-entry-files.tsv"
   done
@@ -57,7 +57,7 @@ fi
 
 # F2（2026-11-18）：旧栈 overlay 把 unit 安装为 /etc/systemd/system 下的**普通文件**；
 # systemctl mask 需要在该路径创建 /dev/null 符号链接，无法覆盖既有文件（板端实测
-# "Failed to mask unit: File /etc/systemd/system/tspi-audio-web.service already exists."）。
+# "Failed to mask unit: File /etc/systemd/system/khaen-audio-web.service already exists."）。
 # 因此 mask 前：普通文件 → 备份到 evidence/retired-unit-files/ + 移走（记录 sha256），再 mask。
 # 已 masked（/dev/null 符号链接）或不存在 → 不动；目录等异常形态 → FAIL（不绕过）。
 unit_file_move_before_mask() {  # unit

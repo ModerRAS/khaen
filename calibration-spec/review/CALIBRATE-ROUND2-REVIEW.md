@@ -1,6 +1,6 @@
 # calibrate/ 复审 Round 2（P0 修复核验，2026-11-15）
 
-> 对象：audio-stack 修复后的 calibrate/（release 构建 @target/release/tspi-calibrate.exe@，
+> 对象：audio-stack 修复后的 calibrate/（release 构建 @target/release/khaen-calibrate.exe@，
 > 本地实测 sha256=@10b237528ba8d6cfb8eb488fc7462ff50b244a03b35698273ca3e10dbce8be63@，2026-11-15 18:03:55；源码 main.rs 18:02:54）。
 > 方法：只读 review + 用 release 二进制复现 + 契约校验器交叉检查；未改 calibrate/。
 > 上轮 review：@CALIBRATE-DRAFT-REVIEW.md@；契约/验收：@../CONTRACT.md@ / @../ACCEPTANCE.md@。
@@ -33,7 +33,7 @@ UMIK 48k 限制），cargo test 11/11 通过，新示例 YAML 通过 validator�
 - @main.rs:222@ @phase_sum_margin@ 仍把 raw delay 与归一化 delay 相加（@dly = delays[i] + m.delay_samples@）；修复极性时一并改成“只加校准修正后的总延迟”。
 - @main.rs:514-566@ pair 检查：ripple 用 5 点滑动（≈0.2 oct）而非 1/3 oct；@level_diff_db@ ≤3dB 是额外的硬 FAIL 条件（ACCEPTANCE 未要求），可能造成交叉点两侧设计电平不同的误报；@target_dev@ 与 ripple 语义重复。建议：ripple 按 1/3 oct，level_diff 降为 warning 或做成可选阈值。
 - @dsp.rs:171-173@ SNR 仍是 IR 尾部粗估，未做 200 Hz–8 kHz 带限、未做 ≥3 次重复/中位数；T2 要求 SNR≥25 dB 时拒绝该次测量。
-- @main.rs:374-383@ 报告仍是 @tspi-calibration-validation/v1@，与 ACCEPTANCE §8 的 @tspi-calibration-report/v1@（pairs/负向用例/环境/文件 sha256）不一致。
+- @main.rs:374-383@ 报告仍是 @khaen-calibration-validation/v1@，与 ACCEPTANCE §8 的 @khaen-calibration-report/v1@（pairs/负向用例/环境/文件 sha256）不一致。
 - @raw.rs:91-127@ 测量仍是“sleep 350ms 后播”的开环同步；无 capture 实际起点记录，建议至少把 arecord/aplay 的 period/buffer/启动时间写进分析 JSON。
 - @main.rs:130-149@ 单通道 measure 只建议仅用于 T1；README 已写，OK。
 

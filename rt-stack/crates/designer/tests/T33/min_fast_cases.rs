@@ -3,7 +3,7 @@
 // 归属：WBS T33 / task-62，owner rt-fir-minfast；写域 leaf + tests/T33 + evidence/T33。
 // 本文件通过 src/min_fast.rs 末尾的 include! 进入 #[cfg(test)] 子模块执行：
 //
-//     cargo test -p tspi-fir-designer min_fast
+//     cargo test -p khaen-designer min_fast
 //
 // 测试覆盖（对应 spec fir-toolbox.md v1.2 §3.2 判据 1–5、§3.1 判据 3–6、§1.3/§1.4/§1.5/§2.4）：
 // - 原语自检：FFT 往返/Parseval、Bessel I0、Kaiser 窗（独立于设计路径）；

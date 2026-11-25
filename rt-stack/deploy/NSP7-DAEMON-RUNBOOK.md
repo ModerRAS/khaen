@@ -8,16 +8,16 @@
 
 | 组件 | 仓库源 | 板上安装位置 |
 |---|---|---|
-| systemd unit | `deploy/config/tspi-rt-host-nsp7.service` | `/etc/systemd/system/tspi-rt-host-nsp7.service` |
+| systemd unit | `deploy/config/khaen-rt-host-nsp7.service` | `/etc/systemd/system/khaen-rt-host-nsp7.service` |
 | host 配置 | `deploy/config/rt-host-nsp7.toml.example` | `/etc/tspi-rt-stack/rt-host-nsp7.toml` |
 | NSP-first 闸门 | `deploy/config/nsp7-wait-stream.sh` | `/usr/local/lib/tspi-rt-stack/nsp7-wait-stream.sh` |
-| host 二进制 | 板端 `/root/candidate/day-window/bin/tspi-rt-host`（sha f510ed64…） | `/usr/local/lib/tspi-rt-stack/f510ed64/tspi-rt-host` |
+| host 二进制 | 板端 `/root/candidate/day-window/bin/khaen-rt-host`（sha f510ed64…） | `/usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host` |
 | NSP SDP | NSP `observed/aes67.sdp` 副本（sha 731ea83c…） | `/var/lib/tspi-rt-stack/nsp-aes67.sdp` |
 | plan | 8-in/7-role identity ABI v1（sha 52f2f3ad…） | `/var/lib/tspi-rt-stack/plans/plan-412-identity.bin` |
 | 操作脚本 | `deploy/tools/nsp7-*.sh` | `/root/aes67-rx-work/tools/` |
 
 /opt 生产二进制 **不复用也不替换**：`775bdb23…` 构建早于 userspace AES67 路径。unit 的 ExecStart 指向
-`/usr/local/lib/…/f510ed64/tspi-rt-host`。
+`/usr/local/lib/…/f510ed64/khaen-rt-host`。
 
 ## 2. 安装/升级步骤（静音窗口，操作员执行）
 
@@ -25,28 +25,28 @@
 # 0) 静音确认（fresh 回读）：koTrim[0..11]=100, kMainTrim=100；UMIK 基线
 # 1) 二进制与数据
 install -d -m 0755 /usr/local/lib/tspi-rt-stack/f510ed64
-install -m 0755 /root/candidate/day-window/bin/tspi-rt-host /usr/local/lib/tspi-rt-stack/f510ed64/tspi-rt-host
+install -m 0755 /root/candidate/day-window/bin/khaen-rt-host /usr/local/lib/tspi-rt-stack/f510ed64/khaen-rt-host
 install -m 0755 nsp7-wait-stream.sh /usr/local/lib/tspi-rt-stack/nsp7-wait-stream.sh
 install -d -m 0755 /var/lib/tspi-rt-stack/plans
 cp /root/aes67-rx-work/chain/plan-412-identity.bin /var/lib/tspi-rt-stack/plans/
 cp /root/aes67-rx-work/chain/nsp-aes67.sdp     /var/lib/tspi-rt-stack/
 # 2) 配置/unit
 install -m 0644 rt-host-nsp7.toml.example /etc/tspi-rt-stack/rt-host-nsp7.toml
-install -m 0644 tspi-rt-host-nsp7.service  /etc/systemd/system/tspi-rt-host-nsp7.service
+install -m 0644 khaen-rt-host-nsp7.service  /etc/systemd/system/khaen-rt-host-nsp7.service
 cp -a /etc/systemd/system/tspi-rt-stack.target /etc/systemd/system/tspi-rt-stack.target.bak-nsp7-$(date +%Y%m%d)
-# 3) 启动关系：target Wants/After 的 tspi-rt-host.service -> tspi-rt-host-nsp7.service（手工编辑或用 evidence installed/ 里的样例）
+# 3) 启动关系：target Wants/After 的 khaen-rt-host.service -> khaen-rt-host-nsp7.service（手工编辑或用 evidence installed/ 里的样例）
 # 4) 停旧 standalone rx（释放 5004 + ALSA），再 enable/start
 bash /root/aes67-rx-work/tools/stop-rx.sh
 systemctl daemon-reload
-systemctl enable tspi-rt-host-nsp7
-systemctl disable tspi-rt-host.service      # 旧 unit 保留文件、可回滚
-systemctl start tspi-rt-host-nsp7            # wrapper 等 NSP RTP 后再 exec host
+systemctl enable khaen-rt-host-nsp7
+systemctl disable khaen-rt-host.service      # 旧 unit 保留文件、可回滚
+systemctl start khaen-rt-host-nsp7            # wrapper 等 NSP RTP 后再 exec host
 ```
 
 ## 3. 启动顺序（NSP-first，硬要求）
 
 ```
-CueMix 静音 → NSP 已在发流（sender-host → 192.0.2.222:5004，7ch L24/48k）→ systemctl start tspi-rt-host-nsp7
+CueMix 静音 → NSP 已在发流（sender-host → 192.0.2.222:5004，7ch L24/48k）→ systemctl start khaen-rt-host-nsp7
 ```
 host 的 `aes67_stall_blocks=400`（≈1.07 s，2× 后 fail-closed）等不到 NSP 会话 6–10 s 启动；
 unit 的 ExecStart 是 `nsp7-wait-stream.sh`，用 `tcpdump 'udp dst port 5004'` 等到 RTP 才 exec host。
@@ -56,10 +56,10 @@ NSP 中断 >2.1 s → host fail-closed → systemd 2 s 重启 → wrapper 重新
 
 ```bash
 bash /root/aes67-rx-work/tools/nsp7-status.sh
-systemctl is-active tspi-rt-host-nsp7
+systemctl is-active khaen-rt-host-nsp7
 tail -n 3 /var/log/tspi-rt-stack/host-nsp7-run.err      # 期望空
 ```
-判据：unit active、唯一 1 个 tspi-rt-host、5004 仅 host 持有、card1 pcm0p RUNNING owner=host；
+判据：unit active、唯一 1 个 khaen-rt-host、5004 仅 host 持有、card1 pcm0p RUNNING owner=host；
 host 退出报告 `status=ok`、`flow_layout=4.1.2-7ch-sMPTE2110(41,2)`、`jitter_latency_us=64000`、
 `loss_events=0`、`stall_events=0`、`alsa.xruns=0`；CPU 34–37 %（4C）、RSS ≈17.6 MB、xruns=0；
 UMIK 基线（−73…−74 dBFS RMS）。之后每次 host 退出会在
@@ -71,10 +71,10 @@ UMIK 基线（−73…−74 dBFS RMS）。之后每次 host 退出会在
 # 一键（本会话）：停 nsp7 → 启 standalone rx supervisor
 bash /root/aes67-rx-work/tools/rollback-to-rx.sh
 # 永久：恢复旧 unit/启动关系
-systemctl disable --now tspi-rt-host-nsp7
+systemctl disable --now khaen-rt-host-nsp7
 cp /etc/systemd/system/tspi-rt-stack.target.bak-nsp7-20261122 /etc/systemd/system/tspi-rt-stack.target
 systemctl daemon-reload
-systemctl enable tspi-rt-host.service
+systemctl enable khaen-rt-host.service
 bash /root/aes67-rx-work/tools/start-rx.sh
 ```
 回滚后复核 CueMix 仍静音、5004/ALSA 只有预期 owner。CueMix 恢复音量只在授权出声窗口：
@@ -97,7 +97,7 @@ bash /root/aes67-rx-work/tools/start-rx.sh
 # 用户切到出声试听（如游戏 NSP）：CueMix 从夜间 mute 恢复到低电平（kMainTrim=21）
 bash /root/aes67-rx-work/tools/nsp7-restore-cuemix-low.sh
 # 给其他 owner（MIMO A/B 等）让出 card1：优雅停止，不 disable
-systemctl stop tspi-rt-host-nsp7          # card1 closed + 5004 释放；CueMix 不动
+systemctl stop khaen-rt-host-nsp7          # card1 closed + 5004 释放；CueMix 不动
 # 对方确认释放后：重启同一 host 并 30 s 观测
 bash /root/aes67-rx-work/tools/nsp7-restart-after-mimo.sh
 ```

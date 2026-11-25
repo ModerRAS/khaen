@@ -56,9 +56,9 @@
 use std::fmt;
 use std::fmt::Write as _;
 
-use tspi_dsp_core::rt::{MAX_LOW_BAND_PARTICIPANTS, SAMPLE_RATES_HZ};
-use tspi_modal_design::ingest::PositionRole;
-use tspi_modal_design::timebase::{CommonD0, PhaseBasis};
+use khaen_core::rt::{MAX_LOW_BAND_PARTICIPANTS, SAMPLE_RATES_HZ};
+use khaen_modal_design::ingest::PositionRole;
+use khaen_modal_design::timebase::{CommonD0, PhaseBasis};
 
 use crate::capture::UMIK_ORIENTATION_VERTICAL;
 use crate::job::{sha256_hex, ArtifactKind, ArtifactRecord, StageCtx, StageFailure};
@@ -68,9 +68,9 @@ use crate::job::{sha256_hex, ArtifactKind, ArtifactRecord, StageCtx, StageFailur
 // ---------------------------------------------------------------------------
 
 /// 测点计划 artifact schema（positions/plan.json；T6 冻结清单 positions 段的机读来源）。
-pub const POSITION_PLAN_SCHEMA: &str = "tspi-calibration-positions/v1";
+pub const POSITION_PLAN_SCHEMA: &str = "khaen-calibration-positions/v1";
 /// 测点质量报告 schema（positions/quality-<scope>.json）。
-pub const POSITION_QUALITY_SCHEMA: &str = "tspi-calibration-position-quality/v1";
+pub const POSITION_QUALITY_SCHEMA: &str = "khaen-calibration-position-quality/v1";
 
 /// plan artifact 相对 job artifacts 目录的路径。
 pub const PLAN_ARTIFACT_PATH: &str = "positions/plan.json";
@@ -1380,7 +1380,7 @@ impl MultipointPlan {
         sha256_hex(self.json_without_hash().as_bytes())
     }
 
-    /// 确定性 JSON（tspi-calibration-positions/v1；含 plan_sha256 自 hash）。
+    /// 确定性 JSON（khaen-calibration-positions/v1；含 plan_sha256 自 hash）。
     pub fn to_json(&self) -> String {
         let mut out = String::with_capacity(2048);
         self.write_json(&mut out, true);
@@ -1860,7 +1860,7 @@ pub struct PositionQuality {
     pub measurements: Vec<MeasurementQuality>,
 }
 
-/// 一次 scope 的 quality 报告（tspi-calibration-position-quality/v1；job artifact）。
+/// 一次 scope 的 quality 报告（khaen-calibration-position-quality/v1；job artifact）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PositionQualityReport {
     /// schema。

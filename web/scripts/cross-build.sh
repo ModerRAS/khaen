@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 交叉编译 tspi-audio-web 到 aarch64（Debian 12 / RK3576）。
+# 交叉编译 khaen-audio-web 到 aarch64（Debian 12 / RK3576）。
 #
 # 在 Linux 构建机（x86_64）上执行：
 #   sudo apt install -y gcc-aarch64-linux-gnu
@@ -50,7 +50,7 @@ fi
 echo "==> cargo build --locked --target $TARGET --profile $PROFILE"
 cargo build --locked --target "$TARGET" --profile "$PROFILE"
 
-BIN="$ROOT/target/$TARGET/$PROFILE/tspi-audio-web"
+BIN="$ROOT/target/$TARGET/$PROFILE/khaen-audio-web"
 if [ ! -f "$BIN" ]; then
   echo "error: 构建产物不存在: $BIN" >&2
   exit 1

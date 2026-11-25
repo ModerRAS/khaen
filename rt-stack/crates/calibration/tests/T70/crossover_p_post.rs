@@ -4,7 +4,7 @@
 // 单测构建（cargo 不自动发现 tests/<Txx>/ 子目录；公共注册属 integrator，勿写入
 // public_registration.rs）。全部测试名 t70_ 前缀。
 //
-// 运行：cargo test -p tspi-calibration t70_ （TEMP/TMP 需可写目录；本机 R:\Temp 只读）
+// 运行：cargo test -p khaen-calibration t70_ （TEMP/TMP 需可写目录；本机 R:\Temp 只读）
 //
 // 覆盖：
 //   (1) spec 解析（缺省关闭 / LR4 显式配置 / 未知字段拒绝）
@@ -23,8 +23,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_dsp_compat::ws::{json_parse, JsonValue};
-use tspi_dsp_core::nodes::FirSegmentKind;
+use khaen_compat::ws::{json_parse, JsonValue};
+use khaen_core::nodes::FirSegmentKind;
 
 use crate::compile_apply::{
     compile_plan, CompileApplyRequest, CompiledPlan, DelayPolarityEncoding, ExperimentMode,
@@ -311,7 +311,7 @@ fn t70_crossover_spec_parse_default_off_and_lr4() {
         .unwrap();
     assert!((alias.fc_hz - 80.0).abs() < 1e-12);
     // 规范 JSON 可回读。
-    let encoded = tspi_dsp_compat::ws::json_encode(&config.to_json()).expect("encode");
+    let encoded = khaen_compat::ws::json_encode(&config.to_json()).expect("encode");
     let roundtrip =
         CrossoverSpecConfig::parse(&json_parse(&encoded).expect("json")).expect("parse");
     assert_eq!(roundtrip, config);
@@ -431,10 +431,10 @@ fn t70_crossover_lr4_coeffs_magnitude_and_merge_flat() {
     // 独立 DTFT 复算：合并和 |LP+HP| 在 [fc/2, 2fc] 平坦 <= 0.5 dB（T39 判据在系数上复算）。
     let lp = wiring
         .design
-        .coeffs(tspi_fir_designer::crossover::Branch::Lowpass);
+        .coeffs(khaen_designer::crossover::Branch::Lowpass);
     let hp = wiring
         .design
-        .coeffs(tspi_fir_designer::crossover::Branch::Highpass);
+        .coeffs(khaen_designer::crossover::Branch::Highpass);
     let mut max_deviation = 0.0_f64;
     for freq in t70_log_grid(40.0, 160.0, 96) {
         let (lp_re, lp_im) = t70_complex_response(lp, T70_FS as f64, freq);
@@ -491,7 +491,7 @@ fn t70_crossover_p_post_compose_order_and_length() {
     assert!(identity.segments.is_empty());
     assert_eq!(identity.kernel, vec![1.0]);
     // 段序非法（target 在 crossover 前）必须拒绝。
-    use tspi_dsp_core::nodes::FirSegment;
+    use khaen_core::nodes::FirSegment;
     let bad_order = vec![
         FirSegment::new(FirSegmentKind::Target, target.to_vec(), 0, 0),
         FirSegment::new(FirSegmentKind::Crossover, crossover.to_vec(), 0, 0),
@@ -860,7 +860,7 @@ fn t70_crossover_measured_412_target_fir_full_chain() {
     assert_eq!(design.crossover_required_taps().unwrap(), 2048 + 512 - 1);
     assert_eq!(design.compile.l_p, 2559);
     // 真实 rt-host plan-arena 只接受 factorized：实验路径显式 force。
-    design.compile.options.force_form = Some(tspi_dsp_core::compile::FusionForm::Factorized);
+    design.compile.options.force_form = Some(khaen_core::compile::FusionForm::Factorized);
     design
         .validate()
         .expect("design valid with composed budget");

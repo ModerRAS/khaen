@@ -1,17 +1,17 @@
 //! mimo-opt CLI（契约 §8）：RoomForge 仿真夹具 → 低频 MIMO 优化 → report.json / fir/*.csv / metrics.csv。
 //!
 //! 用法：
-//!   cargo run --release -p tspi-mimo-opt -- --fixtures <dir> --out <runs-dir> [--scene <id>] [--verify-fixtures]
+//!   cargo run --release -p khaen-mimo-opt -- --fixtures <dir> --out <runs-dir> [--scene <id>] [--verify-fixtures]
 //!
 //! SIMULATED / UNPROVEN：全部输出基于合成夹具，不是实测；predicted 不得写成 PASS。
 
 use std::path::{Path, PathBuf};
 
-use tspi_mimo_design::objective::{ObjectiveConfig, ObjectiveKind};
-use tspi_mimo_design::report::Json;
-use tspi_mimo_design::{run_scene, Cx, RunConfig, SceneInput};
-use tspi_room_sim::fixture::SceneFixture;
-use tspi_room_sim::sha256;
+use khaen_mimo_design::objective::{ObjectiveConfig, ObjectiveKind};
+use khaen_mimo_design::report::Json;
+use khaen_mimo_design::{run_scene, Cx, RunConfig, SceneInput};
+use khaen_room_sim::fixture::SceneFixture;
+use khaen_room_sim::sha256;
 
 #[derive(Default, Debug)]
 struct Args {
@@ -179,7 +179,7 @@ fn select_scenes(all: &[String], pick: &Option<String>) -> Result<Vec<String>, S
 /// 从 room-sim 夹具 + HMatrix 构造 mimo-design 的纯算法输入。
 fn build_input(
     fx: &SceneFixture,
-    hm: &tspi_room_sim::matrix::HMatrix,
+    hm: &khaen_room_sim::matrix::HMatrix,
     scene: &str,
     ground_truth_sha256: String,
 ) -> Result<SceneInput, String> {

@@ -6,7 +6,7 @@
 - 运行（在 `rt-stack/` 下）：
 
 ```
-cargo test -p tspi-rt-host spsc
+cargo test -p khaen-rt-host spsc
 ```
 
 - 期望：`running 38 tests ... 38 passed; 0 failed`（executed test_count = 38 > 0）。
@@ -25,7 +25,7 @@ mod spsc_tests {
 }
 ```
 
-本文件因此参与 lib 的单测构建，真实被 `cargo test -p tspi-rt-host spsc` 执行
+本文件因此参与 lib 的单测构建，真实被 `cargo test -p khaen-rt-host spsc` 执行
 （executed = 38，测试名过滤路径含 `spsc`）；**不需要 integrator 注册，也不要再把它加到
 public_registration.rs**（会重复注册/编译失败：文件按模块内联语义编写，依赖 `super::*` 作用域）。
 

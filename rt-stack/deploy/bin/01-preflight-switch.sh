@@ -96,11 +96,11 @@ else
   else
     if out="$(py "$DEPLOY_ROOT/lib/release_manifest.py" verify "$REL" --require-arch aarch64 2>&1)"; then
       pass "B release 校验 PASS: $(printf '%s' "$out" | py -c 'import json,sys;d=json.load(sys.stdin);print(d.get("release_id"),d.get("files_checked"),"files")' 2>/dev/null || printf '%s' "$out")"
-      HOST_BIN="$REL/bin/tspi-rt-host"
+      HOST_BIN="$REL/bin/khaen-rt-host"
       if py "$DEPLOY_ROOT/lib/check_elf.py" "$HOST_BIN" --require-arch aarch64 >/dev/null 2>&1; then
-        pass "B tspi-rt-host 是 ELF aarch64: $(py "$DEPLOY_ROOT/lib/check_elf.py" "$HOST_BIN" | py -c 'import json,sys;d=json.load(sys.stdin);print(d["size"],d["sha256"][:16])')"
+        pass "B khaen-rt-host 是 ELF aarch64: $(py "$DEPLOY_ROOT/lib/check_elf.py" "$HOST_BIN" | py -c 'import json,sys;d=json.load(sys.stdin);print(d["size"],d["sha256"][:16])')"
       else
-        fail "B tspi-rt-host 不是可部署的 ELF aarch64（见 evidence/deploy-artifacts）"
+        fail "B khaen-rt-host 不是可部署的 ELF aarch64（见 evidence/deploy-artifacts）"
       fi
     else
       fail "B release 校验失败: $out"
@@ -204,13 +204,13 @@ else
 fi
 # F-43：192k 硬失败必须覆盖新栈 toml（F-18 后 04 会安装它），并同时拒绝 176.4k。
 BAD192=""
-for f in /run/tspi/config.json /etc/tspi-audio/default.env /etc/tspi-audio-web/config.toml \
+for f in /run/tspi/config.json /etc/tspi-audio/default.env /etc/khaen-audio-web/config.toml \
          "$TSPI_ETC/rt-host.env" "$TSPI_ETC/rt-host.toml" "$TSPI_ETC/rt-daemon.toml"; do
   [ -f "$(p "$f")" ] || continue
   if grep -qE '192000|192_000|176400|176_400' "$(p "$f")" 2>/dev/null; then BAD192="$BAD192 $f"; fi
 done
 if [ -z "$BAD192" ]; then
-  pass "I 运行配置无 192000/176400（/run/tspi、tspi-audio、tspi-audio-web、rt-host.env/toml、rt-daemon.toml）"
+  pass "I 运行配置无 192000/176400（/run/tspi、tspi-audio、khaen-audio-web、rt-host.env/toml、rt-daemon.toml）"
 else
   fail "I 运行配置仍含 192000/176400:$BAD192（禁 176.4/192k；先改为 48000/96000）"
 fi
@@ -223,7 +223,7 @@ fi
 # F-07：已安装程序里的 '192000' 字面量不一定是支持路径——拒绝实现本身会在错误文本里写 192000
 # （overlay tspi-channelmap/tspi-upmix 的 E_CM_FS_192K_DISABLED / E_UP_FS_192K_DISABLED）。
 # 先认稳定拒绝码/禁用措辞，只有在没有拒绝证据时才记软警告。
-for f in /usr/local/bin/tspi-channelmap /usr/local/bin/tspi-upmix /usr/local/bin/tspi-audio-web; do
+for f in /usr/local/bin/tspi-channelmap /usr/local/bin/tspi-upmix /usr/local/bin/khaen-audio-web; do
   fp="$(p "$f")"; [ -f "$fp" ] || continue
   if grep -aqE 'E_UP_FS_192K_DISABLED|E_CM_FS_192K_DISABLED' "$fp"; then
     pass "I $f 已实现 176.4/192k 拒绝（稳定错误码；F-07）"
@@ -277,7 +277,7 @@ else
       pass "J $IRQ_BALANCE_UNIT 未安装（无自动均衡）"
     fi
     if sunit_exists tspi-irq-affinity.service; then
-      pass "J tspi-irq-affinity.service 已安装（Before=tspi-rt-host.service 钉核 oneshot）"
+      pass "J tspi-irq-affinity.service 已安装（Before=khaen-rt-host.service 钉核 oneshot）"
     else
       fail "J tspi-irq-affinity.service 未安装（旧 bundle？重新 make-release-bundle）"
     fi

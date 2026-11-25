@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/control/src/rest.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （见 tests/T42/README.md；不改 integrator 独占的 public_registration.rs）。
-// 运行：cargo test -p tspi-control rest
+// 运行：cargo test -p khaen-control rest
 //
 // 全部离线：不打开设备、不启服务、不跑真实 host；engine/calibration 用本 crate 的
 // MemoryEngine/MemoryCalibration 或测试内 ScriptedCalibration 替身。
@@ -367,7 +367,7 @@ fn t42_rest_auth_setup_validates_password_and_logs_in() {
     assert_error(&mismatch, 400, CODE_INVALID_FIELD);
     // 无效尝试不改状态：仍可首设成功。
     let (cookie, csrf) = setup_session(&service);
-    assert!(cookie.starts_with("tspi_session="));
+    assert!(cookie.starts_with("khaen_session="));
     assert_eq!(csrf.len(), 32);
     let status = service.handle(&RestRequest::get("/api/auth/status"));
     let body = json_body(&status);
@@ -2212,7 +2212,7 @@ fn t42_rest_mode_switch_failure_rolls_back_to_off_with_evidence() {
 fn t42_rest_mode_rolled_back_has_dedicated_rest_code() {
     // F-30：124（模式回滚）不得映射成 stale(119 语义)。
     let rolled_back = rt_status_to_error(RtStatus::from_code(
-        tspi_dsp_compat::ws::RT_STATUS_MODE_ROLLED_BACK,
+        khaen_compat::ws::RT_STATUS_MODE_ROLLED_BACK,
     ));
     assert_eq!(rolled_back.status, 409);
     assert_eq!(rolled_back.code, CODE_ROLLED_BACK);

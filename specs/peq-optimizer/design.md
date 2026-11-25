@@ -6,7 +6,7 @@
 
 ## 1. 架构
 
-生产者仍是现有的 `tspi-calibrate` 单二进制。优化器插在「已有频响」和「校准 YAML」之间。测量、延迟、极性沿用现在的 `analyze` / `merge`。
+生产者仍是现有的 `khaen-calibrate` 单二进制。优化器插在「已有频响」和「校准 YAML」之间。测量、延迟、极性沿用现在的 `analyze` / `merge`。
 
 ```mermaid
 flowchart LR
@@ -18,7 +18,7 @@ flowchart LR
   modal --> merge["按频率合并 ≤22 段"]
   wide --> merge
   merge --> pred["预测表 + 报告"]
-  merge --> yaml["tspi-calibration/v1.1"]
+  merge --> yaml["khaen-calibration/v1.1"]
   yaml --> val["校验器"]
   yaml --> frag["CamillaDSP 片段"]
   pairs["已声明的 pair"] --> chk["复数 pair 复检"]
@@ -35,8 +35,8 @@ flowchart LR
 | 语言与载体 | 只使用 `calibrate/` 的 Rust 二进制，不新增 crate，不新增、不调用 Python。 |
 | 滤波器 | Peaking、low_shelf、high_shelf。不引入 FIR，不调用 MIMO 引擎。 |
 | 目标曲线 | 独立 YAML（`tspi-target-curve/v1`），只进拟合和报告。 |
-| 契约 | 新文件写 `tspi-calibration/v1.1`。无 `type` 的旧文件仍按 Peaking 读取。 |
-| 校验 | `tspi-calibrate validate` 与 `check-pair`。公式放在独立模块 `check.rs`，拟合代码不能调用它来凑答案。 |
+| 契约 | 新文件写 `khaen-calibration/v1.1`。无 `type` 的旧文件仍按 Peaking 读取。 |
+| 校验 | `khaen-calibrate validate` 与 `check-pair`。公式放在独立模块 `check.rs`，拟合代码不能调用它来凑答案。 |
 | 渲染 | `calibrate` 的 CamillaDSP 片段按 type 映射。Web 本地校验同步放宽。仓库外的 Python 渲染器 `tspi-channelmap` 不在本方案中调用。 |
 
 CamillaDSP 映射：`type: Biquad`，`parameters.type` 为 `Peaking` / `Lowshelf` / `Highshelf`，字段 `freq`、`q`、`gain`。
@@ -52,7 +52,7 @@ CamillaDSP 映射：`type: Biquad`，`parameters.type` 为 `Peaking` / `Lowshelf
 | `calibrate/src/model.rs` | `Peq` 增加 `type`（缺省 `peaking`）。校准 `schema` 允许 v1.1。 |
 | `calibrate/src/main.rs` | `fit` / `merge` 改为校正。pair 检查把双二阶相位加进 `channel_h`。写出预测表和 `optimizer` 报告。 |
 | `calibrate/src/check.rs` | 独立实现契约校验与 RBJ 复数响应，供 `validate` / `check-pair` 和对拍测试。 |
-| `calibration-spec/CONTRACT.md` | 增加 v1.1，并写明校验命令是 `tspi-calibrate validate`。 |
+| `calibration-spec/CONTRACT.md` | 增加 v1.1，并写明校验命令是 `khaen-calibrate validate`。 |
 | `web/src/channelmap.rs` | `PeqBand` 增加可选 `type`；v1.1 时 Q 不再卡 10，type 只允许上述三种。 |
 
 `fit_synthetic_peaking` 现在断言滤波器复现实测，改为断言叠回实测后靠近目标。
@@ -123,14 +123,14 @@ Q 由 −3 dB 带宽反算，下限 0.1。不把 Q 夹到 10。带宽窄于该�
 
 在 `CONTRACT.md` 增加一节，不改 v1 已发布字段的含义。
 
-- `schema: tspi-calibration/v1.1`
+- `schema: khaen-calibration/v1.1`
 - `filters[].type`：`peaking`（缺省）、`low_shelf`、`high_shelf`。其他值整份拒绝。
 - `filters[].q`：有限且 ≥ 0.1。不再把 10 当作 v1.1 的上限。
 - 单段 gain 仍是 ±24 dB，每通道仍 ≤ 32 段，trim 仍是 −12..+6。
 - 只含 Peaking 且 Q ≤ 10 的 v1.1 文件，校验器同时注明「v1 消费方可读」。含 shelf 或 Q > 10 的文件，未升级的 v1 消费方整份拒绝。
 - 目标曲线不进入校准文件。
 
-本仓库内的消费方是 Web 本地校验和 `calibrate` 的片段，两者都是 Rust。契约里的校验步骤改为 `tspi-calibrate validate`。现有 `validate_calibration.py` 与 `check_pair_response.py` 不再作为本功能的验收入口。
+本仓库内的消费方是 Web 本地校验和 `calibrate` 的片段，两者都是 Rust。契约里的校验步骤改为 `khaen-calibrate validate`。现有 `validate_calibration.py` 与 `check_pair_response.py` 不再作为本功能的验收入口。
 
 ## 7. 测试
 
@@ -143,7 +143,7 @@ Q 由 −3 dB 带宽反算，下限 0.1。不把 Q 夹到 10。带宽窄于该�
 | 深谷且 boost cap = 0 | 无正增益段 |
 | `flat` 与一条非平直曲线 | 1/6 oct 残差 RMS ≤ 1 dB，段数不超预算 |
 | 声明 pair 且某段破坏 Δφ | 该段被回退 |
-| `tspi-calibrate validate` | v1 旧文件仍按旧规则；v1.1 shelf 与 Q>10 通过；未知 type 失败 |
+| `khaen-calibrate validate` | v1 旧文件仍按旧规则；v1.1 shelf 与 Q>10 通过；未知 type 失败 |
 | 求值对拍 | `peq.rs` 与独立的 `check.rs` 对同一组系数，幅度差 ≤ 0.1 dB。CamillaDSP 文件后端在本机有该二进制时再跑同一阈值 |
 
 ## 8. 安全与边界

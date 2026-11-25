@@ -1,23 +1,23 @@
 //! T06 ABI/类型/时限自证测试（executed，非 RT）。
 //!
 //! 对照 core-v1 §11 + 附录 B.4（size/align/offset）、§13.2（needs_drop == false）、
-//! §3.5/附录 B.1（gate/T_block）。命令：cargo test -p tspi-rt-host abi_layout
+//! §3.5/附录 B.1（gate/T_block）。命令：cargo test -p khaen-rt-host abi_layout
 
 use core::mem::{align_of, needs_drop, offset_of, size_of};
 
-use tspi_dsp_core::abi::{
+use khaen_core::abi::{
     TspiBlockAckV1, TspiBlockDescV1, TspiDiagFirV1, TspiEpochInfoV1, TspiEventV1, TspiHwParamsV1,
     TspiPathV1, TspiPlanHeaderV1, TspiRoleV1, TspiSpscHeaderV1, TspiWorkerAffinityV1,
     TspiWorkerStatsV1,
 };
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     gate_ns_floor, t_block_ns_ceil, BlockIo, PlanRef, PlanView, RtControl as CoreRtControl,
     RtStatus, WorkerRtCtx,
 };
-use tspi_rt_host::admission::{AdmissionEnv, AdmissionReport};
-use tspi_rt_host::fault::{EventRingLane, SafetyAction, WatchdogAction};
-use tspi_rt_host::format::FormatStats;
-use tspi_rt_host::swap::RtControl;
+use khaen_rt_host::admission::{AdmissionEnv, AdmissionReport};
+use khaen_rt_host::fault::{EventRingLane, SafetyAction, WatchdogAction};
+use khaen_rt_host::format::FormatStats;
+use khaen_rt_host::swap::RtControl;
 
 #[test]
 fn abi_layout_matches_core_v1_appendix_b() {

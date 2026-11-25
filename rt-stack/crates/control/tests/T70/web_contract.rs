@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/control/src/web.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （见 tests/T70/README.md；不改 integrator 独占的 public_registration.rs）。
-// 运行：cargo test -p tspi-control web
+// 运行：cargo test -p khaen-control web
 //
 // 全部离线：真实 TCP loopback + T42 MemoryEngine + 测试内 SimCalibration 假后端
 // （模拟 T60 JobState/JobStage 与 T66 apply/retest/rollback 回执）；不打开设备/不启服务。
@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use tspi_dsp_compat::ws;
-use tspi_dsp_core::rt::RtStatus;
+use khaen_compat::ws;
+use khaen_core::rt::RtStatus;
 
 use crate::rest::calibration_contract::{
     CalAppliedState, CalApplyRequest, CalBassResults, CalLaneResult, CalLaneResults, CAL_LANES,
@@ -2317,7 +2317,7 @@ fn t70_web_ws_session_cookie_auth_csrf_write() {
         .next()
         .expect("cookie pair")
         .to_string();
-    assert!(cookie.starts_with("tspi_session="));
+    assert!(cookie.starts_with("khaen_session="));
 
     let (handshake, client) = WsClient::connect(server.addr, &[("Cookie", cookie.as_str())]);
     assert_status(&handshake, 101);
@@ -2335,7 +2335,7 @@ fn t70_web_ws_session_cookie_auth_csrf_write() {
     );
     // 未认证升级：伪造/已失效 Cookie -> 401。
     let (unauthorized, client) =
-        WsClient::connect(server.addr, &[("Cookie", "tspi_session=deadbeef")]);
+        WsClient::connect(server.addr, &[("Cookie", "khaen_session=deadbeef")]);
     assert!(client.is_none());
     assert_status(&unauthorized, 401);
     let _ = csrf;

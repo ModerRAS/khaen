@@ -6,8 +6,8 @@
 - 运行（在 `rt-stack/` 下）：
 
 ```
-cargo test -p tspi-rt-host format     # WBS T22 DoD 原文命令（40 executed：36 t22_ + 4 个 T17 名字含 format 的用例）
-cargo test -p tspi-rt-host t22_       # 仅 T22 自身（36 executed）
+cargo test -p khaen-rt-host format     # WBS T22 DoD 原文命令（40 executed：36 t22_ + 4 个 T17 名字含 format 的用例）
+cargo test -p khaen-rt-host t22_       # 仅 T22 自身（36 executed）
 ```
 
 - 期望：`running 40 tests ... 40 passed; 0 failed` / `running 36 tests ... 36 passed; 0 failed`
@@ -29,7 +29,7 @@ mod format_tests {
 }
 ```
 
-本文件因此参与 lib 的单测构建，真实被 `cargo test -p tspi-rt-host format` 执行（executed = 36 t22_ 用例；
+本文件因此参与 lib 的单测构建，真实被 `cargo test -p khaen-rt-host format` 执行（executed = 36 t22_ 用例；
 测试路径 `format::format_tests::t22_*` 含 format）。**integrator 不要**再把它加到
 `public_registration.rs`（会重复注册/编译失败）。
 

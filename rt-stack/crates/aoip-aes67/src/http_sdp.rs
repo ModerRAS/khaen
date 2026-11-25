@@ -264,7 +264,7 @@ impl HttpSdpServerConfig {
         Self {
             bind,
             timeout: Duration::from_secs(5),
-            server_name: "tspi-aoip-aes67".to_string(),
+            server_name: "khaen-aoip-aes67".to_string(),
         }
     }
 }
@@ -536,7 +536,7 @@ pub fn http_get_sdp(url: &str, timeout: Duration) -> HttpResult<HttpSdpResponse>
         format!("{host}:{port}")
     };
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nAccept: application/sdp\r\nUser-Agent: tspi-aoip-aes67\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nAccept: application/sdp\r\nUser-Agent: khaen-aoip-aes67\r\nConnection: close\r\n\r\n"
     );
     stream
         .write_all(request.as_bytes())

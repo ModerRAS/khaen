@@ -79,12 +79,12 @@
 - _需求: 2.1, 2.4, 5.2_
 
 - [x] 9. 只读对照 nsp16
-- 读取板上 `/etc/systemd/system/tspi-rt-host-nsp16.service` 和 `/etc/tspi-rt-stack/rt-host-nsp16.toml`
-- 对照 `rt-stack/service/tspi-rt-host.service` 和现有 host 配置模板
-- 当前 16 声道播放仍依赖、通用模板里没有的项，写进 `tspi-rt-host` 的部署文件
-- 对照结果写入 `rt-stack/deploy/NSP16-FOLD.md`，列出收进来的项和故意不收的项。只改了服务名的行不收。`tspi-rt-host-nsp7.service` 保持原样
+- 读取板上 `/etc/systemd/system/khaen-rt-host-nsp16.service` 和 `/etc/tspi-rt-stack/rt-host-nsp16.toml`
+- 对照 `rt-stack/service/khaen-rt-host.service` 和现有 host 配置模板
+- 当前 16 声道播放仍依赖、通用模板里没有的项，写进 `khaen-rt-host` 的部署文件
+- 对照结果写入 `rt-stack/deploy/NSP16-FOLD.md`，列出收进来的项和故意不收的项。只改了服务名的行不收。`khaen-rt-host-nsp7.service` 保持原样
 - 板上的文件读不到就停在这一步，不凭记忆写 toml
-- 下次安装的服务名用 `tspi-rt-host`。二进制名保持 `tspi-rt-host`
+- 下次安装的服务名用 `khaen-rt-host`。二进制名保持 `khaen-rt-host`
 - _需求: 4.1, 4.2, 4.3_
 
 - [x] 10. 单测

@@ -1,4 +1,4 @@
-//! [NONRT] `tspi-file-runner/v1` session manifest：解析/校验/blob 源（自有格式）。
+//! [NONRT] `khaen-file-runner/v1` session manifest：解析/校验/blob 源（自有格式）。
 //!
 //! session 是 runner 的唯一输入描述：音频布局/引擎版本/role 映射/A-G-P 系数文件与 manifest 引用/
 //! 校准 IR 绑定/保护策略。它由 T26 host（或证据生成脚本）构造；runner 只读。
@@ -7,7 +7,7 @@
 //!
 //! ~~~text
 //! {
-//!   "schema": "tspi-file-runner/v1",
+//!   "schema": "khaen-file-runner/v1",
 //!   "precision": "f32-strict",
 //!   "audio": { "sample_rate_hz": 48000, "container_channels": 8, "input_channels": 2,
 //!              "layout_id": "4.1.2", "input": { "file": "input.wav", "sha256": "<可选>" },

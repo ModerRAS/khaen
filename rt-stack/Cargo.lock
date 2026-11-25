@@ -54,6 +54,131 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
+name = "khaen-aes67-rx"
+version = "0.1.0"
+dependencies = [
+ "alsa",
+ "khaen-aoip-aes67",
+ "libc",
+]
+
+[[package]]
+name = "khaen-aoip-aes67"
+version = "0.1.0"
+
+[[package]]
+name = "khaen-bench"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+ "khaen-rt-host",
+]
+
+[[package]]
+name = "khaen-cal-dsp"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+ "khaen-designer",
+ "khaen-modal-design",
+]
+
+[[package]]
+name = "khaen-calibration"
+version = "0.1.0"
+dependencies = [
+ "khaen-cal-dsp",
+ "khaen-compat",
+ "khaen-core",
+ "khaen-designer",
+ "khaen-modal-design",
+ "khaen-rt-host",
+]
+
+[[package]]
+name = "khaen-compat"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+]
+
+[[package]]
+name = "khaen-control"
+version = "0.1.0"
+dependencies = [
+ "khaen-calibration",
+ "khaen-compat",
+ "khaen-core",
+ "khaen-rt-host",
+]
+
+[[package]]
+name = "khaen-core"
+version = "0.1.0"
+
+[[package]]
+name = "khaen-designer"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+]
+
+[[package]]
+name = "khaen-file-runner"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+ "khaen-rt-host",
+]
+
+[[package]]
+name = "khaen-mimo-design"
+version = "0.1.0"
+dependencies = [
+ "khaen-room-sim",
+]
+
+[[package]]
+name = "khaen-mimo-opt"
+version = "0.1.0"
+dependencies = [
+ "khaen-mimo-design",
+ "khaen-room-sim",
+]
+
+[[package]]
+name = "khaen-modal-design"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+ "khaen-designer",
+]
+
+[[package]]
+name = "khaen-room-sim"
+version = "0.1.0"
+
+[[package]]
+name = "khaen-rt-check"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+ "khaen-file-runner",
+ "khaen-rt-host",
+]
+
+[[package]]
+name = "khaen-rt-host"
+version = "0.1.0"
+dependencies = [
+ "alsa",
+ "khaen-aoip-aes67",
+ "khaen-cal-dsp",
+ "khaen-core",
+ "khaen-mimo-design",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -70,128 +195,3 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
-
-[[package]]
-name = "tspi-aes67-rx"
-version = "0.1.0"
-dependencies = [
- "alsa",
- "libc",
- "tspi-aoip-aes67",
-]
-
-[[package]]
-name = "tspi-aoip-aes67"
-version = "0.1.0"
-
-[[package]]
-name = "tspi-bench"
-version = "0.1.0"
-dependencies = [
- "tspi-dsp-core",
- "tspi-rt-host",
-]
-
-[[package]]
-name = "tspi-cal-dsp"
-version = "0.1.0"
-dependencies = [
- "tspi-dsp-core",
- "tspi-fir-designer",
- "tspi-modal-design",
-]
-
-[[package]]
-name = "tspi-calibration"
-version = "0.1.0"
-dependencies = [
- "tspi-cal-dsp",
- "tspi-dsp-compat",
- "tspi-dsp-core",
- "tspi-fir-designer",
- "tspi-modal-design",
- "tspi-rt-host",
-]
-
-[[package]]
-name = "tspi-control"
-version = "0.1.0"
-dependencies = [
- "tspi-calibration",
- "tspi-dsp-compat",
- "tspi-dsp-core",
- "tspi-rt-host",
-]
-
-[[package]]
-name = "tspi-dsp-compat"
-version = "0.1.0"
-dependencies = [
- "tspi-dsp-core",
-]
-
-[[package]]
-name = "tspi-dsp-core"
-version = "0.1.0"
-
-[[package]]
-name = "tspi-file-runner"
-version = "0.1.0"
-dependencies = [
- "tspi-dsp-core",
- "tspi-rt-host",
-]
-
-[[package]]
-name = "tspi-fir-designer"
-version = "0.1.0"
-dependencies = [
- "tspi-dsp-core",
-]
-
-[[package]]
-name = "tspi-mimo-design"
-version = "0.1.0"
-dependencies = [
- "tspi-room-sim",
-]
-
-[[package]]
-name = "tspi-mimo-opt"
-version = "0.1.0"
-dependencies = [
- "tspi-mimo-design",
- "tspi-room-sim",
-]
-
-[[package]]
-name = "tspi-modal-design"
-version = "0.1.0"
-dependencies = [
- "tspi-dsp-core",
- "tspi-fir-designer",
-]
-
-[[package]]
-name = "tspi-room-sim"
-version = "0.1.0"
-
-[[package]]
-name = "tspi-rt-check"
-version = "0.1.0"
-dependencies = [
- "tspi-dsp-core",
- "tspi-file-runner",
- "tspi-rt-host",
-]
-
-[[package]]
-name = "tspi-rt-host"
-version = "0.1.0"
-dependencies = [
- "alsa",
- "tspi-aoip-aes67",
- "tspi-cal-dsp",
- "tspi-dsp-core",
- "tspi-mimo-design",
-]

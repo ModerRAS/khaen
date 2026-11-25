@@ -1,6 +1,6 @@
-//! T49 private integration tests — 公共时基/相位/ppm 重建（crate tspi-modal-design）.
+//! T49 private integration tests — 公共时基/相位/ppm 重建（crate khaen-modal-design）.
 //!
-//! 运行（在 rt-stack/ 下）：cargo test -p tspi-modal-design timebase
+//! 运行（在 rt-stack/ 下）：cargo test -p khaen-modal-design timebase
 //! 文件位置：crates/modal-design/tests/T49/main.rs（leaf 私有测试；Cargo 自动发现为
 //! integration test target T49；由 integrator 决定是否在 public_registration.rs 另注册）。
 //!
@@ -29,14 +29,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_modal_design::ingest::{
+use khaen_modal_design::ingest::{
     read_bundle, sha256_hex, AnalysisMeta, CaptureFile, CaptureInfo, DriftCorrection, FrPoint,
     IngestBundle, IngestMeasurement, IngestPosition, IngestSession, MicClock, MicInfo,
     PlaybackInfo, PositionMeta, PositionRole, ReferenceInfo, SampleFormat, SourceAnalysis,
     SpeakerInfo, StimulusInfo, TimebaseDiag, ToolInfo, CAPTURE_FILE, POSITION_FILE, REFERENCE_FILE,
     SESSION_FILE, SHA256SUMS_FILE,
 };
-use tspi_modal_design::timebase::{
+use khaen_modal_design::timebase::{
     de_phase_analysis, de_phase_reference, reconstruct_bundle, reconstruct_common_phase,
     reconstruct_position, ClockMethod, CommonD0, ComplexPoint, DelaySplit, PhaseBasis,
     PolaritySource, ResolvedPolarity, TimebaseError, TimebaseErrorKind, TimebaseSummary,
@@ -1846,7 +1846,7 @@ fn t49_timebase_known_fixture_json_evidence() {
 
 #[test]
 fn t49_timebase_static_guards_no_io_and_single_dephase_site() {
-    let source = tspi_modal_design::timebase::timebase_source_text_for_guards();
+    let source = khaen_modal_design::timebase::timebase_source_text_for_guards();
     for forbidden in [
         "std::fs",
         "File::open",
@@ -2018,7 +2018,7 @@ fn json_analysis(analysis: &SourceAnalysis) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"schema\":\"tspi-channel-measurement/v1\",\"channel\":{},\"delay_samples\":{},\"delay_ms\":{},\"delay_coarse_samples\":{},\"polarity\":{},\"peak_db\":{},\"phase_1k_deg\":{},\"snr_db\":{},\"phase_ref\":\"{}\",\"fr\":[{}],\"meta\":{{\"schema\":\"tspi-calibration-meta/v1\",\"sample_rate\":{},\"channels\":{},\"sweep_start_hz\":{},\"sweep_end_hz\":{},\"sweep_seconds\":{},\"level_db\":{},\"pre_seconds\":{},\"post_seconds\":{},\"playback_device\":\"{}\",\"playback_channels\":{},\"capture_device\":\"{}\",\"capture_channels\":{},\"created_unix\":{}}}}}",
+        "{{\"schema\":\"tspi-channel-measurement/v1\",\"channel\":{},\"delay_samples\":{},\"delay_ms\":{},\"delay_coarse_samples\":{},\"polarity\":{},\"peak_db\":{},\"phase_1k_deg\":{},\"snr_db\":{},\"phase_ref\":\"{}\",\"fr\":[{}],\"meta\":{{\"schema\":\"khaen-calibration-meta/v1\",\"sample_rate\":{},\"channels\":{},\"sweep_start_hz\":{},\"sweep_end_hz\":{},\"sweep_seconds\":{},\"level_db\":{},\"pre_seconds\":{},\"post_seconds\":{},\"playback_device\":\"{}\",\"playback_channels\":{},\"capture_device\":\"{}\",\"capture_channels\":{},\"created_unix\":{}}}}}",
         analysis.channel,
         analysis.delay_samples,
         analysis.delay_ms,

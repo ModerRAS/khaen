@@ -3,7 +3,7 @@
 //
 // 本文件由 crates/designer/src/targets.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （见 tests/T11/README.md；不改 integrator 独占的 public_registration.rs）。
-// 运行：cargo test -p tspi-fir-designer targets
+// 运行：cargo test -p khaen-designer targets
 //
 // 独立 oracle 说明：sha256 已知向量（""/"abc"）与规范点序列哈希由 Node.js crypto 独立复算
 // （见 evidence/T11/MANIFEST.md §5），不是用本实现自证。

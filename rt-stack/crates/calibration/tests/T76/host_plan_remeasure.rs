@@ -2,10 +2,10 @@
 //
 // 注册方式：crates/calibration/src/stage_backend.rs 末尾
 //   #[cfg(test)] mod t76_tests { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/T76/host_plan_remeasure.rs")); }
-// 运行：cargo test -p tspi-calibration t76_
+// 运行：cargo test -p khaen-calibration t76_
 //
 // 全部离线、不打开声卡：
-// - ToolsEngine 用 rustc 现场编译的 stub 可执行文件模拟 arecord/aplay/tspi-rt-host
+// - ToolsEngine 用 rustc 现场编译的 stub 可执行文件模拟 arecord/aplay/khaen-rt-host
 //   （Windows/Linux 通用：直接 spawn PE/ELF，不依赖 shell 解释器；stub 把 argv/config 写 witness 文件）；
 // - 端到端 job 用 FakeEngine + RecordingEngine（合成测量）验证 sweep=Aplay / 二次=HostPlan；
 // - 声学效果 NOT_RUN（需出声窗口 + 用户同意占用 MOTU）。
@@ -45,8 +45,8 @@ fn plan_bytes_for(
     workers: u8,
 ) -> Vec<u8> {
     let mut bytes = vec![0u8; 256];
-    bytes[0..4].copy_from_slice(&tspi_dsp_core::abi::TSPI_PLAN_MAGIC.to_le_bytes());
-    bytes[4..6].copy_from_slice(&tspi_dsp_core::abi::TSPI_PLAN_ABI_V2.to_le_bytes());
+    bytes[0..4].copy_from_slice(&khaen_core::abi::TSPI_PLAN_MAGIC.to_le_bytes());
+    bytes[4..6].copy_from_slice(&khaen_core::abi::TSPI_PLAN_ABI_V2.to_le_bytes());
     bytes[6..8].copy_from_slice(&128u16.to_le_bytes());
     bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
     bytes[12..16].copy_from_slice(&sample_rate.to_le_bytes());
@@ -83,7 +83,7 @@ fn write_compile_artifacts(
 
 fn default_host_config() -> RemeasureHostConfig {
     RemeasureHostConfig {
-        host_bin: PathBuf::from("tspi-rt-host"),
+        host_bin: PathBuf::from("khaen-rt-host"),
         ..RemeasureHostConfig::default()
     }
 }
@@ -99,7 +99,7 @@ fn device_config(playback_channels: u16) -> StageDeviceConfig {
         block_frames: 128,
         buffer_frames: 512,
         settle_ms: 10,
-        sample_format: tspi_dsp_core::abi::sample_format::S24_3LE_INTERLEAVED,
+        sample_format: khaen_core::abi::sample_format::S24_3LE_INTERLEAVED,
     }
 }
 
@@ -124,7 +124,7 @@ fn stage_config(playback_channels: u16) -> StageBackendConfig {
 }
 
 // ---------------------------------------------------------------------------
-// rustc 现场编译的 stub 可执行文件（arecord / aplay / tspi-rt-host）
+// rustc 现场编译的 stub 可执行文件（arecord / aplay / khaen-rt-host）
 // ---------------------------------------------------------------------------
 
 const STUB_SOURCE: &str = r#"
@@ -173,7 +173,7 @@ fn main() {
         let _ = std::io::stdin().read_to_end(&mut sink);
         std::process::exit(0);
     }
-    // tspi-rt-host stub：把 --config 原文抄到 exe.config，写 witness，按需注入失败。
+    // khaen-rt-host stub：把 --config 原文抄到 exe.config，写 witness，按需注入失败。
     if let Some(index) = args.iter().position(|value| value == "--config") {
         if let Some(config) = args.get(index + 1) {
             let _ = std::fs::copy(config, exe.with_extension("config"));
@@ -326,7 +326,7 @@ fn t76_aplay_mode_argv_is_unchanged() {
 }
 
 // ---------------------------------------------------------------------------
-// host-plan 模式：渲染 2ch WAV + 写 toml + 调用 tspi-rt-host（不碰 aplay）
+// host-plan 模式：渲染 2ch WAV + 写 toml + 调用 khaen-rt-host（不碰 aplay）
 // ---------------------------------------------------------------------------
 
 const T76_HOST_CONFIG_TEXT: &str = concat!(
@@ -660,7 +660,7 @@ fn t76_host_plan_config_text_is_plan_arena_file_source() {
     let devices = device_config(22);
     let geometry = geometry_2ch();
     let host = RemeasureHostConfig {
-        host_bin: PathBuf::from("tspi-rt-host"),
+        host_bin: PathBuf::from("khaen-rt-host"),
         backend: "alsa".to_string(),
         capture_channels: 20,
         plan_path: None,

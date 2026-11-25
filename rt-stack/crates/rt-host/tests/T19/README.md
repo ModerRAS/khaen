@@ -13,7 +13,7 @@ tests/public_registration.rs）。
 
 ~~~powershell
 cd C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack
-cargo test -p tspi-rt-host clock --offline
+cargo test -p khaen-rt-host clock --offline
 # 期望：60 passed; 0 failed（DoD executed test_count > 0）
 ~~~
 

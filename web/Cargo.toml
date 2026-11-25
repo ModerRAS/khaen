@@ -1,5 +1,5 @@
 ﻿[package]
-name = "tspi-audio-web"
+name = "khaen-audio-web"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
@@ -27,3 +27,7 @@ tempfile = "3"
 strip = true
 lto = "thin"
 codegen-units = 1
+
+[[bin]]
+name = "tspi-audio-web"
+path = "src/main.rs"

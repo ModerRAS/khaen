@@ -1,4 +1,4 @@
-# tspi-audio-web · 泰山派3M 音频 DSP 设备 Web 管理服务
+# khaen-audio-web · 泰山派3M 音频 DSP 设备 Web 管理服务
 
 面向泰山派3M（RK3576）+ Debian 12 + PREEMPT_RT 音频 DSP 设备的局域网 Web 管理服务：
 Rust + axum 单二进制，内置中文前端（无构建步骤、无外网 CDN），开机自启，通过 systemd /
@@ -14,14 +14,14 @@ CamillaDSP websocket / linuxptp / journalctl / ALSA 管理整台设备的音频�
 | `src/` | Rust 源码（config/auth/routes/backends/mode 控制器/内嵌资源） |
 | `assets/` | 前端静态文件与测试音（编译期内嵌进二进制） |
 | `tests/api.rs` | 路由/集成测试（tower `ServiceExt`，无需监听端口） |
-| `deploy/tspi-audio-web.service` | systemd unit |
+| `deploy/khaen-audio-web.service` | systemd unit |
 | `deploy/config.toml.example` | 配置模板（含全部注释；首启自动生成配置也用这份） |
 | `docs/API.md` | REST API 文档（与实现同步维护） |
 | `docs/MOTU-CUEMIX.md` | UltraLite-mk5 CueMix 协议与页面对应 |
 | `scripts/cross-build.sh` | aarch64-unknown-linux-gnu 交叉编译脚本 |
 | `scripts/install-device.sh` | 设备安装 / OEM rootfs 镜像预装脚本（支持 `--dry-run`） |
 | `deploy/OEM-HANDOFF.md` | OEM 预装交接说明（布局/权限/首启 token/验收命令） |
-| `dist/` | aarch64 构建产物：`tspi-audio-web`、`SHA256SUMS`、`INSTALL-MANIFEST.md`、构建/验证日志 |
+| `dist/` | aarch64 构建产物：`khaen-audio-web`、`SHA256SUMS`、`INSTALL-MANIFEST.md`、构建/验证日志 |
 
 ## 快速开始（Windows 本地 mock，无需设备）
 
@@ -60,7 +60,7 @@ cargo run
 
 | 平台 | 默认路径 |
 | --- | --- |
-| Linux（设备） | `/etc/tspi-audio-web/config.toml`（0600，root:root） |
+| Linux（设备） | `/etc/khaen-audio-web/config.toml`（0600，root:root） |
 | Windows（开发） | `.\\config.toml`（当前目录；可不存在，mock 下用内置默认值） |
 
 优先级：`--config <路径>` > 环境变量 `TSPI_CONFIG` > 默认路径。
@@ -68,13 +68,13 @@ cargo run
 ### 首次启动、管理密码与 token
 
 - **首次打开 Web**（`auth_file` 不存在）：显示“首次设置管理密码”页；设置至少 8 位（推荐 10+）密码后立即登录，
-  Argon2id 哈希写 `/etc/tspi-audio-web/auth.json`（0600）。已设置后不再允许 setup，直接显示登录页。
+  Argon2id 哈希写 `/etc/khaen-audio-web/auth.json`（0600）。已设置后不再允许 setup，直接显示登录页。
 - **密码登录**：登录页输入管理密码；会话 Cookie/CSRF 与旧流程一致。
 - **token 保留为恢复/CLI 兜底**：设置密码后 token 仍有效（登录页展开“忘记密码/使用 token”，或 `X-Auth-Token` / Bearer），
   不会因设置密码失效；适合排障/自动化。首次设置前也可继续用 token 登录（旧配置迁移不锁死）。
 - 配置文件不存在（非 mock）：自动按 `deploy/config.toml.example` 模板生成，随机生成 32 位十六进制 token，
   写入文件（0600）并**打印到 stdout/journald**（"已生成新的访问 token" 横幅）。
-- 查看 token：`sudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token`。
+- 查看 token：`sudo khaen-audio-web --config /etc/khaen-audio-web/config.toml --print-token`。
 - 限流/锁定：同一客户端密码/token 连续失败 5 次锁定 `login_lockout_secs`（默认 60s）。
 - 首设无认证是局域网便利与安全的折中：请仅在可信网络完成首次设置；暴露公网前务必先设置密码/加 HTTPS 反代。
 
@@ -86,7 +86,7 @@ cargo run
 | --- | --- | --- |
 | `listen` | `0.0.0.0:80` | 监听地址（默认 80：局域网直接 `http://<设备IP>/`，无需记端口；systemd 以 root 运行可绑定；8080 留给 AES67 daemon；如 80 被占用改 `0.0.0.0:8088` 回退） |
 | `token` | `CHANGE_ME`（首启轮换） | 恢复/CLI 兜底 token（32 hex）；启动时同步到 `TSPI_WEB_TOKEN_FILE`（默认 `/etc/tspi/web-token`） |
-| `auth_file` | `/etc/tspi-audio-web/auth.json` | Argon2id 管理密码哈希（0600）；不存在=首设密码页 |
+| `auth_file` | `/etc/khaen-audio-web/auth.json` | Argon2id 管理密码哈希（0600）；不存在=首设密码页 |
 | `session_ttl_secs` | 43200 | 浏览器会话有效期 |
 | `cookie_secure` | false | 经 HTTPS 反代时设 true |
 | `[camilladsp] ws_url` | `ws://127.0.0.1:1234` | CamillaDSP websocket 地址 |
@@ -113,7 +113,7 @@ cargo run
 | `TSPI_MOCK=1` | 全内存 mock 模式 |
 | `TSPI_LISTEN` | 监听地址，如 `0.0.0.0:80`（默认）或回退 `0.0.0.0:8088` |
 | `TSPI_TOKEN` | 临时覆盖 token（不改文件） |
-| `TSPI_AUTH_FILE` | 覆盖管理密码哈希文件路径（默认 `/etc/tspi-audio-web/auth.json`） |
+| `TSPI_AUTH_FILE` | 覆盖管理密码哈希文件路径（默认 `/etc/khaen-audio-web/auth.json`） |
 | `TSPI_ALLOW_REBOOT=1` / `TSPI_ALLOW_SHUTDOWN=1` | 开启电源按钮 |
 | `TSPI_MODE_SCRIPT` | 覆盖切换脚本路径 |
 | `TSPI_STATE_FILE` | 覆盖模式持久化文件 |
@@ -160,7 +160,7 @@ Inferno 上游无统一配置文件（`INFERNO_*` 环境变量 / ALSA 插件参�
 ### 运行模式（dante / aes67 / off）
 
 GET/PUT `/api/mode`；切换为异步任务，互斥（在途 409），失败自动回滚并持久化 last_error；
-当前模式写 `/etc/tspi-audio-web/state.json`。
+当前模式写 `/etc/khaen-audio-web/state.json`。
 
 - 优先调用 audio-stack 的 `/usr/local/bin/tspi-mode <mode> --json`，再用 `tspi-mode status --json` 读取契约状态，
   最后由 Web 独立复核（CamillaDSP Running / 声卡 / PTP）。
@@ -237,14 +237,14 @@ sudo apt install -y gcc-aarch64-linux-gnu
 rustup target add aarch64-unknown-linux-gnu
 cd projects/tspi-audio-dsp/web
 ./scripts/cross-build.sh
-# 产物：target/aarch64-unknown-linux-gnu/release/tspi-audio-web
+# 产物：target/aarch64-unknown-linux-gnu/release/khaen-audio-web
 ~~~
 
 也可以在 aarch64 板端/同架构容器中直接构建：
 
 ~~~bash
 cargo build --locked --release
-# 产物：target/release/tspi-audio-web
+# 产物：target/release/khaen-audio-web
 ~~~
 
 > 本工程是纯 Rust（无 C 依赖、无 OpenSSL/sqlite），目标 `aarch64-unknown-linux-gnu` 动态链接 glibc
@@ -254,22 +254,22 @@ cargo build --locked --release
 ### 2. 安装到设备
 
 ~~~bash
-sudo ./scripts/install-device.sh --binary target/aarch64-unknown-linux-gnu/release/tspi-audio-web
+sudo ./scripts/install-device.sh --binary target/aarch64-unknown-linux-gnu/release/khaen-audio-web
 # 等价手工步骤：
-#   install -m 0755 tspi-audio-web /usr/local/bin/
-#   install -d -m 0750 /etc/tspi-audio-web
-#   install -m 0600 deploy/config.toml.example /etc/tspi-audio-web/config.toml
-#   install -m 0644 deploy/tspi-audio-web.service /etc/systemd/system/
-#   systemctl daemon-reload && systemctl enable --now tspi-audio-web
+#   install -m 0755 khaen-audio-web /usr/local/bin/
+#   install -d -m 0750 /etc/khaen-audio-web
+#   install -m 0600 deploy/config.toml.example /etc/khaen-audio-web/config.toml
+#   install -m 0644 deploy/khaen-audio-web.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now khaen-audio-web
 ~~~
 
 安装后：
 
 ~~~bash
-sudo systemctl status tspi-audio-web --no-pager
-sudo journalctl -u tspi-audio-web -b -f          # 首次启动会打印生成的 token
+sudo systemctl status khaen-audio-web --no-pager
+sudo journalctl -u khaen-audio-web -b -f          # 首次启动会打印生成的 token
 # 或随时找回 token：
-sudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token
+sudo khaen-audio-web --config /etc/khaen-audio-web/config.toml --print-token
 # 浏览器：http://<设备IP>/（默认 80；如被占用回退 8088）
 ~~~
 
@@ -277,20 +277,20 @@ sudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token
 
 ~~~bash
 sudo ./scripts/install-device.sh \
-  --binary target/aarch64-unknown-linux-gnu/release/tspi-audio-web \
+  --binary target/aarch64-unknown-linux-gnu/release/khaen-audio-web \
   --rootfs /path/to/debian12-rootfs
 ~~~
 
 脚本会安装二进制/配置/unit，并在 rootfs 内创建
-`/etc/systemd/system/multi-user.target.wants/tspi-audio-web.service` symlink（不执行 systemctl），
+`/etc/systemd/system/multi-user.target.wants/khaen-audio-web.service` symlink（不执行 systemctl），
 首次开机由 systemd 启动并生成 token。
 
 ### 4. systemd
 
-unit 内容见 `deploy/tspi-audio-web.service`：
+unit 内容见 `deploy/khaen-audio-web.service`：
 
-- `tspi-audio-web.service`，`User=root`（需要 systemctl/journalctl 管理音频服务）；
-- `ExecStart=/usr/local/bin/tspi-audio-web --config /etc/tspi-audio-web/config.toml`；
+- `khaen-audio-web.service`，`User=root`（需要 systemctl/journalctl 管理音频服务）；
+- `ExecStart=/usr/local/bin/khaen-audio-web --config /etc/khaen-audio-web/config.toml`；
 - `After=network-online.target`，`WantedBy=multi-user.target`，`Restart=on-failure`；
 - 日志走 journald；Web 服务常开，不随音频模式起停；Web 启动不会自动启动音频（D4）。
 
@@ -332,7 +332,7 @@ bash scripts/cross-build.sh          # 52.73s（含 channelmap v2 对齐）
 
 | 项目 | 结果 |
 | --- | --- |
-| 产物 | `dist/tspi-audio-web`，4,539,776 bytes（4.33 MiB），stripped |
+| 产物 | `dist/khaen-audio-web`，4,539,776 bytes（4.33 MiB），stripped |
 | 架构 | ELF 64-bit LSB pie executable, ARM aarch64；interpreter `/lib/ld-linux-aarch64.so.1`；BuildID `0da04a74…` |
 | 依赖 | libgcc_s.so.1 / libm.so.6 / libc.so.6（Debian12 base 自带；最高 GLIBC 符号 2.34 ≤ 2.36） |
 | SHA256 | `83ee5da2e79630c4f302aa4999e5abe72f0eb2b2a97ddd3abd81b562f0a9a081`（含 4.1.2 = FL0/FR1/SL2/SR3/HFL4/HFR5/SUB1=7 与 presets 防漂移；上一版 `f2c02b1b…` 作废） |
@@ -342,13 +342,13 @@ bash scripts/cross-build.sh          # 52.73s（含 channelmap v2 对齐）
 
 > 上一版（2026-11-16 21:15 `f2c02b1b…`）已作废：早于 4.1.2 布局对齐与防漂移测试。
 > 更早（19:19 `3554eb2c…` / 17:32 `45dc0946…` / 11-15 `eba779b5…`）均已作废。
-> 板端 `/etc/tspi-audio-web/config.toml` 的 `listen="0.0.0.0:80"` 已由 Lead 先行验证；端口变化不影响 token/auth/cookie/CSRF。
+> 板端 `/etc/khaen-audio-web/config.toml` 的 `listen="0.0.0.0:80"` 已由 Lead 先行验证；端口变化不影响 token/auth/cookie/CSRF。
 > 板端 `tspi-channelmap`（Python）的 type/slope 支持由 audio-stack/upmix-dev 并行改，与本二进制配套发布。
 
 构建机上的交接路径：
 
-- 产物：`/home/builder/audio-build/release/bin/tspi-audio-web`
-- 交接包：`/home/builder/audio-build/proj/tspi-audio-web/`（二进制 + SHA256SUMS + unit + config 模板 + 安装脚本 + README/API + build/verify 日志）
+- 产物：`/home/builder/audio-build/release/bin/khaen-audio-web`
+- 交接包：`/home/builder/audio-build/proj/khaen-audio-web/`（二进制 + SHA256SUMS + unit + config 模板 + 安装脚本 + README/API + build/verify 日志）
 - 源码/构建目录：`/home/builder/tspi-audio-dsp/web/`
 
 OEM 预装用法与验收命令见 [deploy/OEM-HANDOFF.md](deploy/OEM-HANDOFF.md)；构建/验证原始记录见 `dist/INSTALL-MANIFEST.md`、
@@ -425,7 +425,7 @@ TSPI_MOCK=1 cargo run -- --mock # 本地 UI 验证
 
 | 现象 | 处理 |
 | --- | --- |
-| 忘了 token | `sudo tspi-audio-web --config /etc/tspi-audio-web/config.toml --print-token` 或 `journalctl -u tspi-audio-web -b | grep -i token` |
+| 忘了 token | `sudo khaen-audio-web --config /etc/khaen-audio-web/config.toml --print-token` 或 `journalctl -u khaen-audio-web -b | grep -i token` |
 | 80 被占用 / 无法绑定 | 默认 80；如被占用，把 `config.toml` 的 `listen` 改为 `0.0.0.0:8088` 回退后重启 unit，或排查占用进程（8080 是 AES67 daemon，勿用）；Linux 非 root 无法绑定 <1024，生产用 systemd 的 root 单元 |
 | 页面显示 CamillaDSP 不可达 | 确认 camilladsp 以 `-p 1234` 启动、`[camilladsp] ws_url` 正确；不影响其他页面 |
 | PTP 页面 offset 为空 | 确认当前模式与 PTP 来源（B1 不运行 ptp4l 属正常；B2/Dante 看对应服务与日志） |

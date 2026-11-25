@@ -3,7 +3,7 @@
 //
 // 本文件经 src/spsc.rs 末尾的 cfg(test) mod spsc_tests { include!(...) } 进入
 // 单测构建（cargo 不会自动发现 tests/<子目录>/*.rs；公共注册属 integrator）。
-// 运行：cargo test -p tspi-rt-host spsc
+// 运行：cargo test -p khaen-rt-host spsc
 //
 // 命名：全部 t16_ 前缀，便于 cargo test 按任务关键字过滤。
 

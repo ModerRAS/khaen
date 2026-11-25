@@ -1,9 +1,9 @@
 //! 图准备：T12 compile/T09 DAG、完整图版本（规范 SHA-256）、IR 应用、identity 保护。
 
-use tspi_file_runner::graph::{self, GraphKind};
-use tspi_file_runner::json::Json;
-use tspi_file_runner::session::{self, SourceProvider};
-use tspi_file_runner::{
+use khaen_file_runner::graph::{self, GraphKind};
+use khaen_file_runner::json::Json;
+use khaen_file_runner::session::{self, SourceProvider};
+use khaen_file_runner::{
     E_FILE_CHANNELS, E_FILE_GRAPH, E_FILE_HASH, E_FILE_IR, E_FILE_PATH_TABLE, E_FILE_RATE,
     E_FILE_TAPS, FALLBACK_IDENTITY_P_POST, FALLBACK_MUTE, TRIGGER_COMPILE_REJECT,
     TRIGGER_GRAPH_HASH_MISMATCH, TRIGGER_IR_ABSENT, TRIGGER_IR_STALE,
@@ -247,7 +247,7 @@ fn graph_protection_ir_stale_uses_base_p_without_ir() {
         true,
     ));
     let error = fixture.prepare().expect_err("stale without protection");
-    assert_eq!(error.code(), tspi_file_runner::E_FILE_IR_STALE);
+    assert_eq!(error.code(), khaen_file_runner::E_FILE_IR_STALE);
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn graph_ir_coeff_embedded_never_double_applies() {
         &[0.0f32, 0.0, 1.0],
         "coeff_embedded 不得再加 D"
     );
-    let run = tspi_file_runner::runner::run(&prepared, &Default::default()).expect("run");
+    let run = khaen_file_runner::runner::run(&prepared, &Default::default()).expect("run");
     // 单次 2 sample 延迟：y[n] = x[n-2]。
     let input = &fixture.input_planar[0..32];
     let output = &run.output[0];

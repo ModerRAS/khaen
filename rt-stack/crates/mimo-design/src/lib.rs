@@ -1,7 +1,7 @@
 //! 低频 MIMO 优化（calib-chain-20261121 / mimo-opt-20261122）。
 //!
 //! **SIMULATED / SYNTHETIC ONLY**：输入必须是 room-sim 生成的仿真 H(f)，或格式相同但明确标注为合成的数据。
-//! TSPI 生产设计路径仍是 tspi-modal-design（真实测量 provenance 门 + CGLS 求解器）；
+//! TSPI 生产设计路径仍是 khaen-modal-design（真实测量 provenance 门 + CGLS 求解器）；
 //! 本 crate 是仿真沙盒，用于在真实测量到位前验证目标函数/约束/指标口径。
 //!
 //! 模块：

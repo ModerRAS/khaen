@@ -7,7 +7,7 @@
 
 ```powershell
 cd C:\WorkSpace\Claw\projects\tspi-audio-dsp\rt-stack
-cargo test -p tspi-fir-designer crossover
+cargo test -p khaen-designer crossover
 ```
 
 实测（2026-11-17，rt-stack；Cursor v0.9 终审修复组 A 后收尾）：**running 18 tests; 18 passed / 0 failed / 0 ignored**，exit 0；
@@ -28,7 +28,7 @@ mod crossover_tests {
 }
 ```
 
-本文件因此参与 `src/lib.rs` 的单测构建，真实被 `cargo test -p tspi-fir-designer crossover` 执行
+本文件因此参与 `src/lib.rs` 的单测构建，真实被 `cargo test -p khaen-designer crossover` 执行
 （executed = 17）；不需要 integrator 注册，也不要再把它加到 public_registration.rs
 （include 文件按模块内联语义编写、依赖 `super::*` 作用域）。
 

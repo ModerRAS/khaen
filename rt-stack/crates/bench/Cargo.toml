@@ -1,12 +1,12 @@
 # TSPI benchmark 与 trace metrics（T06 scaffold；leaf T47）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
-name = "tspi-bench"
+name = "khaen-bench"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 description = "TSPI benchmark 与 trace metrics（T06 scaffold；leaf T47）"
 
 [dependencies]
-tspi-dsp-core = { workspace = true }
-tspi-rt-host = { workspace = true }
+khaen-core = { workspace = true }
+khaen-rt-host = { workspace = true }

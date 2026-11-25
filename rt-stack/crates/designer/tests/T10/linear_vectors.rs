@@ -3,7 +3,7 @@
 //! 覆盖：规范 §9 V1–V4/V12/V13 + 与构造代码独立的系数 oracle + 独立 naive DFT 对拍。
 //! 运行（integrator 注册前）：rustc --test 方式手工编译执行，见 evidence/T10/manifest。
 
-use tspi_fir_designer::linear::{
+use khaen_designer::linear::{
     delay_ms, delay_samples, design, group_delay_at, kaiser_required_taps, magnitude_db_at,
     response_at, AnalysisOptions, LinearSpec, Symmetry, WindowKind,
 };

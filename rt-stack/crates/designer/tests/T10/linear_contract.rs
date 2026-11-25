@@ -2,7 +2,7 @@
 //!
 //! 运行（integrator 注册前）：rustc --test 手工编译执行，见 evidence/T10/manifest。
 
-use tspi_fir_designer::linear::{
+use khaen_designer::linear::{
     delay_samples, design, design_checked, design_checked_with, effective_support, magnitude_db_at,
     response_at, symmetry_error, validate, verify_linear, verify_linear_with, AnalysisOptions,
     LinearError, LinearSpec, Symmetry, WindowKind, MAX_TAPS, MIN_TAPS,

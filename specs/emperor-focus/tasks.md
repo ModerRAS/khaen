@@ -41,7 +41,7 @@
 
 - [x] 5. 测试与证据
 - `TEMP`/`TMP` 指向 `C:/WorkSpace/Claw/scratch/lead/testtmp`
-- 跑 `cargo test -p tspi-mimo-design emperor`，以及侧路布局测试：24000 点在块长 64 和 128 下都能建布局，`Δsys = 574`
+- 跑 `cargo test -p khaen-mimo-design emperor`，以及侧路布局测试：24000 点在块长 64 和 128 下都能建布局，`Δsys = 574`
 - 日志和 `field_summary.json` 放进 `rt-stack/evidence/emperor-focus-field/`。现场还没跑的写成 `NOT_RUN`
 - 不提交、不 push、不部署
 - _需求: 5, 6.4_

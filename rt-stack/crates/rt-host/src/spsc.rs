@@ -38,9 +38,9 @@
 use core::cell::UnsafeCell;
 use core::sync::atomic::Ordering;
 
-pub use tspi_dsp_core::abi::{TspiBlockDescV1, TspiSpscHeaderV1, ABI_VERSION, TSPI_RING_MAGIC};
-pub use tspi_dsp_core::rt::RtStatus;
-use tspi_dsp_core::rt::{
+pub use khaen_core::abi::{TspiBlockDescV1, TspiSpscHeaderV1, ABI_VERSION, TSPI_RING_MAGIC};
+pub use khaen_core::rt::RtStatus;
+use khaen_core::rt::{
     BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SPSC_CAPTURE_SLOTS, SPSC_PLAYBACK_SLOTS,
 };
 

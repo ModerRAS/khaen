@@ -12,21 +12,28 @@ Most room-correction stacks recompile a graph at runtime and hope the swap is sm
 
 | Component | Crate | What it does |
 | --- | --- | --- |
-| Real-time host | `rt-host` | Single ALSA owner, 128-frame blocks, worker DAG, lock-free ring, plan arena, fault containment, last-good fallback |
-| Plan format | `core` | Application binary interface of the compiled plan (roles, delays, FIR, IIR, matrix), verified on parse |
-| Calibration | `calibration`, `modal-design`, `mimo-design` | Sweep → microphone capture → Farina deconvolution → level/delay/crossover/FIR/modal designs |
-| Filter design | `designer` | Linear-phase, minimum-phase, brickwall, apodizing, corrected designs |
-| Network audio | `aoip-aes67` | AES67 receiver/sender, SDP generation and parsing, SAP, RTSP/HTTP SDP, mDNS discovery (RFC subsets) |
-| Control plane | `control`, `web` | REST/WebSocket daemon, session auth, calibration jobs, web console |
-| Verification | `rt-check`, `compat`, `bench` | ABI layout checks, forbidden-call and drop audits, real-time checks, benchmarks |
-| Room simulation | `room-sim`, `file-runner` | Offline simulation and file-driven runs |
+| Real-time host | `khaen-rt-host` | Single ALSA owner, 128-frame blocks, worker DAG, lock-free ring, plan arena, fault containment, last-good fallback |
+| Plan format | `khaen-core` | Application binary interface of the compiled plan (roles, delays, FIR, IIR, matrix), verified on parse |
+| Calibration | `khaen-calibration`, `khaen-modal-design`, `khaen-mimo-design` | Sweep → microphone capture → Farina deconvolution → level/delay/crossover/FIR/modal designs |
+| Filter design | `khaen-designer` | Linear-phase, minimum-phase, brickwall, apodizing, corrected designs |
+| Network audio | `khaen-aoip-aes67` | AES67 receiver/sender, SDP generation and parsing, SAP, RTSP/HTTP SDP, mDNS discovery (RFC subsets) |
+| Control plane | `khaen-control`, `khaen-audio-web` | REST/WebSocket daemon, session auth, calibration jobs, web console |
+| Verification | `khaen-rt-check`, `khaen-compat`, `khaen-bench` | ABI layout checks, forbidden-call and drop audits, real-time checks, benchmarks |
+| Room simulation | `khaen-room-sim`, `khaen-file-runner` | Offline simulation and file-driven runs |
+
+## Naming
+
+Crates are published as `khaen-*`. The executables they build keep the historical
+`tspi-*` names (`tspi-rt-host`, `tspi-rt-daemon`, `tspi-calibrate`), because deployment
+units and install paths reference those names; renaming the binaries is a separate,
+coordinated change.
 
 ## Build
 
 ```sh
 cd rt-stack
 cargo test --workspace
-cargo run -p rt-host -- --help
+cargo run -p khaen-rt-host -- --help
 ```
 
 Linux needs `pkg-config` and `libasound2-dev` for the real ALSA backend; Windows and macOS build the offline paths only.

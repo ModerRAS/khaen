@@ -3,7 +3,7 @@
 #
 # 产物（schema tspi-rt-stack/release/v1，见 lib/release_manifest.py）：
 #   <out>/manifest.json       release_id/built_at/target/files[{path,size,sha256,kind}]
-#   <out>/bin/                tspi-rt-host（必需）、tspi-rt-daemon（可选）、tspi-cal（可选，goal-8 校准链 CLI）
+#   <out>/bin/                khaen-rt-host（必需）、tspi-rt-daemon（可选）、tspi-cal（可选，goal-8 校准链 CLI）
 #   <out>/units/              service/ 下 *.service/*.target + 90-safe-mute.{conf,env}.example
 #                             （B1：打包时对 units 跑 deploy/tests/check_unit_syntax.py 契约检查，并要求
 #                              tspi-irq-affinity.service 含 ExecStartPre=irq-affinity-pin wait）
@@ -52,15 +52,15 @@ done
 [ -n "$BIN_DIR" ] || die "缺少 --bin-dir（cargo release 输出目录）" 2
 [ -n "$OUT" ] || die "缺少 --out（bundle 输出目录）" 2
 [ -n "$RELEASE_ID" ] || RELEASE_ID="local-$(date +%Y%m%dT%H%M%S)"
-HOST_BIN="$BIN_DIR/tspi-rt-host"
-[ -f "$HOST_BIN" ] || die "缺少 tspi-rt-host: $HOST_BIN（先完成 aarch64 构建；见 evidence/deploy-artifacts）" 2
+HOST_BIN="$BIN_DIR/khaen-rt-host"
+[ -f "$HOST_BIN" ] || die "缺少 khaen-rt-host: $HOST_BIN（先完成 aarch64 构建；见 evidence/deploy-artifacts）" 2
 
 # ---- 二进制架构/哈希 ---------------------------------------------------------
 log "host binary: size=$(file_size_of "$HOST_BIN") sha256=$(sha256_of "$HOST_BIN")"
 ARCH_JSON="$(py "$DEPLOY_ROOT/lib/check_elf.py" "$HOST_BIN" 2>/dev/null || true)"
 log "arch: $(printf '%s' "$ARCH_JSON" | py -c 'import json,sys;d=json.load(sys.stdin);print(d.get("format"),d.get("arch"),d.get("bits"))' 2>/dev/null || printf '%s' "$ARCH_JSON")"
 if [ "$ALLOW_FOREIGN" != "1" ]; then
-  py "$DEPLOY_ROOT/lib/check_elf.py" "$HOST_BIN" --require-arch aarch64 >/dev/null || die "tspi-rt-host 不是 ELF aarch64（可 --allow-foreign-arch 做本地流程测试，但产物 NOT_DEPLOYABLE）" 3
+  py "$DEPLOY_ROOT/lib/check_elf.py" "$HOST_BIN" --require-arch aarch64 >/dev/null || die "khaen-rt-host 不是 ELF aarch64（可 --allow-foreign-arch 做本地流程测试，但产物 NOT_DEPLOYABLE）" 3
 fi
 BINS=("$HOST_BIN")
 [ -f "$BIN_DIR/tspi-rt-daemon" ] && BINS+=("$BIN_DIR/tspi-rt-daemon")
@@ -91,7 +91,7 @@ for f in "$UNITS_DIR"/*.service "$UNITS_DIR"/*.target; do
   [ -f "$f" ] || continue
   install -m 0644 "$f" "$OUT/units/"
 done
-for f in tspi-rt-host.service.d/90-safe-mute.conf.example tspi-rt-host.service.d/90-safe-mute.env.example; do
+for f in khaen-rt-host.service.d/90-safe-mute.conf.example khaen-rt-host.service.d/90-safe-mute.env.example; do
   [ -f "$UNITS_DIR/$f" ] && install -m 0644 "$UNITS_DIR/$f" "$OUT/units/"
 done || true
 # B1（2026-11-20 板窗）：units 必须过 systemd 契约检查（含 oneshot 开机等待前置），

@@ -5,7 +5,7 @@
 # bundle 由 deploy/bin/make-release-bundle.sh 生成（manifest.json 绑定 sha256/arch，见 lib/release_manifest.py）。
 #
 # 安装布局：
-#   /opt/tspi-rt-stack/releases/<release_id>/bin/{tspi-rt-host,...}
+#   /opt/tspi-rt-stack/releases/<release_id>/bin/{khaen-rt-host,...}
 #   /opt/tspi-rt-stack/releases/<release_id>/units/*.service|*.target
 #   /opt/tspi-rt-stack/releases/<release_id>/manifest.json, README.deploy.md
 #   /opt/tspi-rt-stack/current -> releases/<release_id>（原子替换）

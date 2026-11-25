@@ -22,9 +22,9 @@ SCHEMA = 'tspi-rt-stack/old-c-inventory/v1'
 RULES = [
     ('RETIRE_C_PROCESS', ['/usr/local/bin/camilladsp', '/etc/camilladsp/', '/etc/systemd/system/tspi-camilladsp.service',
                           '/etc/systemd/system/tspi-upmix-autodetect.service']),
-    ('REPLACE_SHIM', ['/usr/local/bin/tspi-audio-web', '/usr/local/bin/tspi-upmix', '/usr/local/bin/tspi-mode',
-                      '/etc/systemd/system/tspi-audio-web.service', '/etc/systemd/system/tspi-audio.target',
-                      '/etc/systemd/system/tspi-boot-mode.service', '/etc/tspi-audio-web/']),
+    ('REPLACE_SHIM', ['/usr/local/bin/khaen-audio-web', '/usr/local/bin/tspi-upmix', '/usr/local/bin/tspi-mode',
+                      '/etc/systemd/system/khaen-audio-web.service', '/etc/systemd/system/tspi-audio.target',
+                      '/etc/systemd/system/tspi-boot-mode.service', '/etc/khaen-audio-web/']),
     ('RETAIN_AOIP', ['/usr/local/bin/statime', '/usr/local/bin/inferno2pipe', '/usr/local/bin/aes67-daemon',
                      '/usr/sbin/ptp4l', '/usr/sbin/phc2sys', '/usr/sbin/pmc',
                      '/usr/lib/aarch64-linux-gnu/alsa-lib/', '/lib/modules/', '/etc/statime/',
@@ -43,13 +43,13 @@ ACTION = {
 
 # baseline 未覆盖但必须快照的板端路径（S0-10 子集 + 老 Web 配置）
 EXTRA_CAPTURE = [
-    '/usr/local/bin/camilladsp', '/usr/local/bin/tspi-audio-web', '/usr/local/bin/tspi-mode',
+    '/usr/local/bin/camilladsp', '/usr/local/bin/khaen-audio-web', '/usr/local/bin/tspi-mode',
     '/usr/local/bin/tspi-channelmap', '/usr/local/bin/tspi-upmix', '/usr/local/bin/tspi-ptp-status',
     '/usr/local/bin/statime', '/usr/local/bin/inferno2pipe', '/usr/local/bin/aes67-daemon',
     '/usr/sbin/ptp4l', '/usr/sbin/phc2sys', '/usr/sbin/pmc',
     '/usr/local/lib/tspi/lib.sh', '/usr/local/lib/tspi/ptp-status-hook', '/usr/local/lib/tspi/ucm-backport-mk5.sh',
     '/usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_pcm_inferno.so',
-    '/etc/tspi-audio-web/config.toml', '/etc/tspi-audio-web/auth.json',
+    '/etc/khaen-audio-web/config.toml', '/etc/khaen-audio-web/auth.json',
     '/run/tspi/camilladsp.yml', '/run/tspi/camilladsp.env', '/etc/tspi/last-mode', '/run/tspi/mode',
 ]
 

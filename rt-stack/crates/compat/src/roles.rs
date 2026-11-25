@@ -36,7 +36,7 @@
 //! # 非目标 / 边界
 //! - 不设计/拟合/校验滤波系数（T10/T39/T40/T41/T64）、不算 G/P、不写 plan/ABI 字节（T12/T23/T26）；
 //! - 不做 channelmap 渲染/stereo_strict 决策（T25）、不实现节目上混/下混（DEC §1）；
-//! - 不碰板端/ALSA/CueMix/服务/网络；不新增依赖（纯 std + tspi-dsp-core；YAML 子集解析器为本模块
+//! - 不碰板端/ALSA/CueMix/服务/网络；不新增依赖（纯 std + khaen-core；YAML 子集解析器为本模块
 //!   私有实现——T13 的解析器是私有函数，不能跨模块调用，也不改 calibration.rs 公共 API）；
 //! - 不解析/不消费 calibration YAML（T13 负责），只产出 T13 需要的 layout 角色表；
 //! - 未板端/未 RT 实测（NOT_RUN，见 evidence/T57/MANIFEST.md）。
@@ -58,7 +58,7 @@
 use std::fmt;
 use std::path::Path;
 
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     MAX_INPUT_CHANNELS, MAX_LOW_BAND_PARTICIPANTS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES,
 };
 

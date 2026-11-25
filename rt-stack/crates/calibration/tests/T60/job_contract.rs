@@ -2,7 +2,7 @@
 //!
 //! 注册纪律（rt-stack/README.md §5）：leaf 测试放 tests/<Txx>/，由 integrator 在
 //! tests/public_registration.rs 加 #[path = "T60/job_contract.rs"] mod job_contract; 后由 cargo 执行。
-//! 本文件只用 tspi_calibration::job 的公开 API（模拟 T42/T44/T61-T66 的最小消费方式），
+//! 本文件只用 khaen_calibration::job 的公开 API（模拟 T42/T44/T61-T66 的最小消费方式），
 //! 因此也可用 rustc --test 直接对 build 出的 rlib 做独立编译/执行验证（见 evidence/T60/MANIFEST.md）。
 //!
 //! 覆盖：R48/P08/P12/K14/K56 的最小公共契约：start/status/cancel/apply/rollback、设备互斥、
@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tspi_calibration::job::{
+use khaen_calibration::job::{
     sha256_hex, ArtifactKind, CalibrationJobBackend, ExitDisposition, FileCheckpointStore,
     InputHash, JobError, JobKind, JobManager, JobManagerConfig, JobRequest, JobSnapshot, JobStage,
     JobState, RecoveryOutcome, SafeOutputController, SafetyError, StageCtx, StageFailure,
@@ -241,7 +241,7 @@ fn public_api_full_flow_completes_with_artifact_manifest() {
     assert_eq!(safety.count("restore_last_good"), 0);
     let artifacts_dir = PathBuf::from(&terminal.artifacts_dir);
     let manifest = fs::read_to_string(artifacts_dir.join(ARTIFACT_MANIFEST_FILE_NAME)).unwrap();
-    assert!(manifest.contains("tspi-calibration-artifacts/v1"));
+    assert!(manifest.contains("khaen-calibration-artifacts/v1"));
     for artifact in &terminal.artifacts {
         assert!(manifest.contains(&artifact.sha256));
         let path = artifacts_dir.join(&artifact.relative_path);

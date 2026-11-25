@@ -88,7 +88,7 @@
 //! 节点/T56 资源计划的集成；f32 运行期量化误差复算归 T55/T22；本文件只做 f64 离线设计。
 //!
 //! 测试（私有，include! 内联，integrator 无需注册）：
-//! cargo test -p tspi-fir-designer crossover。
+//! cargo test -p khaen-designer crossover。
 
 use crate::linear::{group_delay_at, response_at, FreqResponse, WindowKind, MAGNITUDE_FLOOR};
 use std::fmt;

@@ -5,8 +5,8 @@
   P1 显式拒绝；**P1 不消费**，见 compat-matrix §6 C01–C08/R47、DEC §1/§6）。
 - 运行（rt-stack/ 下）：
   ```
-  cargo test -p tspi-dsp-compat content     # DoD 命令（测试名统一 content_ 前缀）
-  cargo test -p tspi-dsp-compat             # 整 crate 回归（T13 + T24 + T25 + T57）
+  cargo test -p khaen-compat content     # DoD 命令（测试名统一 content_ 前缀）
+  cargo test -p khaen-compat             # 整 crate 回归（T13 + T24 + T25 + T57）
   ```
   Cargo 自动把 tests/T25/main.rs 发现为独立集成测试 target（与 T13/T24/T57 同机制），
   不需要 integrator 在 public_registration.rs 注册。

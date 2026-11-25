@@ -1283,15 +1283,15 @@ consumer(slot q):
 
 | crate | RT 相关 module | 非 RT module | 主要任务 |
 |---|---|---|---|
-| `tspi-dsp-core` | `rt`、`direct`、`partitioned`、`workers` | `plan`、`compile`、`nodes`、`schedule_plan` | T07/T08/T09/T12/T23/T56 |
-| `tspi-rt-host` | `spsc`、`clock`（rt_tick）、`swap`（RT 侧 handoff） | `admission`、`alsa`、`clock`（mapping）、`fault`、`format`、`aoip`、`scheduler`、`main` | T16/T17/T18/T19/T20/T21/T22/T43/T45/T26 |
-| `tspi-dsp-compat` | 无 RT 执行模块（只产出 plan/配置） | `ws`（T24）、`calibration`（T13）、`content`（T25 内容状态）、`roles`（T57）、`channel_map`（T25） | T13/T24/T25/T57 |
-| `tspi-fir-designer` | 无 | 全部设计器模块 | T10/T11/T33–T41/T55 |
-| `tspi-control` | 无 | `rest`、`modes`、`web` | T42/T44/T70 |
-| `tspi-calibration` | 无（daemon 不在 RT 区） | `job/sweep/capture/positions/peq_fit/phase_fit/compile_apply` | T60–T66 |
-| `tspi-modal-design` | 无 | `ingest/timebase/target/solve/regularize/validate/artifact` | T48–T54/T73 |
-| `tspi-file-runner` | 无（file runner 模拟 I/O，不算生产 RT） | 全部 | T14 |
-| `tspi-bench` | 无 | 全部（测量工具） | T47 |
+| `khaen-core` | `rt`、`direct`、`partitioned`、`workers` | `plan`、`compile`、`nodes`、`schedule_plan` | T07/T08/T09/T12/T23/T56 |
+| `khaen-rt-host` | `spsc`、`clock`（rt_tick）、`swap`（RT 侧 handoff） | `admission`、`alsa`、`clock`（mapping）、`fault`、`format`、`aoip`、`scheduler`、`main` | T16/T17/T18/T19/T20/T21/T22/T43/T45/T26 |
+| `khaen-compat` | 无 RT 执行模块（只产出 plan/配置） | `ws`（T24）、`calibration`（T13）、`content`（T25 内容状态）、`roles`（T57）、`channel_map`（T25） | T13/T24/T25/T57 |
+| `khaen-designer` | 无 | 全部设计器模块 | T10/T11/T33–T41/T55 |
+| `khaen-control` | 无 | `rest`、`modes`、`web` | T42/T44/T70 |
+| `khaen-calibration` | 无（daemon 不在 RT 区） | `job/sweep/capture/positions/peq_fit/phase_fit/compile_apply` | T60–T66 |
+| `khaen-modal-design` | 无 | `ingest/timebase/target/solve/regularize/validate/artifact` | T48–T54/T73 |
+| `khaen-file-runner` | 无（file runner 模拟 I/O，不算生产 RT） | 全部 | T14 |
+| `khaen-bench` | 无 | 全部（测量工具） | T47 |
 
 > 归属：任何 crate 新增 RT 执行模块必须 §12.3 的 `[RT]` 规则 + T06 lint 白名单，否则拒绝。T06 只建 scaffold；本表是结构约束，不是实现完成声明。
 
@@ -1318,7 +1318,7 @@ rt-check state-machine   # 状态迁移表/事件完整性模型测试（T21/T26
 ### 12.3 关键类型（拟建，签名冻结；实现可改内部细节但不得改语义）
 
 ~~~text
-// tspi-dsp-core::rt
+// khaen-core::rt
 pub type WorkerId = u8;                 // 0..=3
 pub type PlanVersion = u32;
 
@@ -1378,7 +1378,7 @@ pub fn kernel_partitioned(plan: PlanRef, io: &BlockIo<'_>) -> RtStatus; // T08
 ~~~
 
 ~~~text
-// tspi-rt-host::spsc  [RT] 纯无锁、固定容量、无分配
+// khaen-rt-host::spsc  [RT] 纯无锁、固定容量、无分配
 pub struct Producer<'a> { /* &'a TspiSpscHeaderV1 + &'a [TspiBlockDescV1] + &'a mut [BlockPayload] */ }
 pub struct Consumer<'a> { /* 同上只读位 */ }
 impl<'a> Producer<'a> {
@@ -1388,7 +1388,7 @@ impl<'a> Consumer<'a> {
     pub fn try_pop(&mut self) -> Option<TspiBlockDescV1>;
 }
 
-// tspi-rt-host::swap  [NONRT] plan 注册/切换/退役（Drop 只在这里）
+// khaen-rt-host::swap  [NONRT] plan 注册/切换/退役（Drop 只在这里）
 pub struct PlanRegistry { /* owns PlanOwner(s) */ }
 impl PlanRegistry {
     pub fn admit(&mut self, token: PlanToken, env: &AdmissionEnv) -> Result<PlanVersion, RtStatus>;
@@ -1398,7 +1398,7 @@ impl PlanRegistry {
     pub fn collect_retired(&mut self) -> Option<PlanVersion>;
 }
 
-// tspi-rt-host::admission  [NONRT]
+// khaen-rt-host::admission  [NONRT]
 pub struct AdmissionEnv { pub cpu_set_mask: u64, pub allowed_cpu: [u16;4], pub expected_workers: u8,
                              pub rlimit_memlock: u64, pub stack_bytes: [u32;4], pub clock_source: u8,
                              pub crossfade_budget_required: bool }
@@ -1412,18 +1412,18 @@ pub struct AdmissionReport { pub plan_version: PlanVersion, pub arena_bytes: u64
                              pub affinity_hash: [u8;8], pub crossfade_accepted: bool }
 pub fn admit(plan: &PlanView<'_>, env: &AdmissionEnv) -> Result<AdmissionReport, RtStatus>;
 
-// tspi-rt-host::clock
+// khaen-rt-host::clock
 pub fn mono_now_ns() -> u64;                  // [IO]/[NONRT]
 pub fn rt_tick_budgeted(ctl: &TspiRtControlV1) -> u64;     // [RT] 仅 master，≤3 次/block
 pub fn ticks_to_ns(ticks: u64) -> u64;        // [NONRT] admission 标定的频率换算
 
-// tspi-rt-host::format  [IO]
+// khaen-rt-host::format  [IO]
 pub struct FormatConfig { pub hw: TspiHwParamsV1, pub dither: DitherCfg }
 pub struct FormatStats { pub nonfinite_in: u64, pub clipped: u64, pub nonfinite_out: u64 }
 pub fn convert_capture(cfg: &FormatConfig, src: &[u8], dst: &mut [f32]) -> Result<FormatStats, RtStatus>;
 pub fn convert_playback(cfg: &FormatConfig, src: &[f32], dst: &mut [u8]) -> Result<FormatStats, RtStatus>;
 
-// tspi-rt-host::fault  [WD]/[NONRT]
+// khaen-rt-host::fault  [WD]/[NONRT]
 pub struct Watchdog { /* 观测 heartbeat/epoch/worker stats，只置位 */ }
 impl Watchdog {
     pub fn observe(&mut self, ctl: &TspiRtControlV1, swap: &TspiSwapAckV1) -> WatchdogAction; // None | RequestMute | Fault
@@ -1431,19 +1431,19 @@ impl Watchdog {
 ~~~
 
 ~~~text
-// tspi-dsp-core::plan  [NONRT] 构建/校验/hash（可分配；不得被 RT 调用）
+// khaen-core::plan  [NONRT] 构建/校验/hash（可分配；不得被 RT 调用）
 pub struct PlanBuf { /* 拥有 plan 字节；Drop 只在 CTL */ }
 pub fn validate_plan(bytes: &[u8]) -> Result<PlanBuf, RtStatus>;
 pub fn recompute_graph_id(bytes: &[u8]) -> Result<[u8; 32], RtStatus>;
 pub fn pack_plan(header: &TspiPlanHeaderV1, tables: &PlanTables, coeffs: &[f32]) -> Result<Vec<u8>, RtStatus>;
 
-// tspi-dsp-core::workers  [RT] 线程入口
+// khaen-core::workers  [RT] 线程入口
 pub fn run_worker(k: WorkerId, regs: &TspiWorkerRegsV1) -> !;
 pub fn run_master(regs: &TspiMasterRegsV1, ctl: &TspiRtControlV1) -> !;
 ~~~
 
 ~~~text
-// tspi-dsp-core::rt  [RT] v1.1 增补（I03/I04/I05/I06；I01 为内部口径，ABI v1 不承载，E3）
+// khaen-core::rt  [RT] v1.1 增补（I03/I04/I05/I06；I01 为内部口径，ABI v1 不承载，E3）
 pub const ACK_MASK_ALL: u32 = 0xF;                       // 仅 expected=4；运行期用 ack_mask()
 pub const fn ack_mask(expected_workers: u8) -> u32 { (1u32 << expected_workers) - 1 }
 pub const fn total_delay_q16(int_part: u32, frac_q16: u32) -> u64 { ((int_part as u64) << 16) | frac_q16 as u64 }  // 内部/报告口径；ABI v1 下 frac_q16 恒 0（E3）
@@ -1454,7 +1454,7 @@ pub const fn total_delay_q16(int_part: u32, frac_q16: u32) -> u64 { ((int_part a
 #[RT] pub fn ack_phase(ack: &TspiBlockAckV1, worker: WorkerId, phase: u8) -> RtStatus;          // 先校验 ack 槽标签
 #[RT] pub fn wait_phases(ack: &TspiBlockAckV1, expected: u8, spin_max_iters: u32) -> RtStatus;  // ACK_MASK(expected)
 
-// tspi-dsp-core::rt::swap / plan  [NONRT]
+// khaen-core::rt::swap / plan  [NONRT]
 impl PlanRegistry {
     pub fn admit_crossfade(&mut self, old: PlanVersion, new: PlanToken, budget: &TspiCrossfadeBudgetV1) -> Result<PlanVersion, RtStatus>;
     pub fn poll_retire(&mut self, ctl: &TspiRtControlV1, ack: &TspiSwapAckV1) -> Option<PlanVersion>; // Some 才允许 drop/unmap
@@ -1477,7 +1477,7 @@ pub fn plan_affinity(env: &AdmissionEnv) -> Result<[TspiWorkerAffinityV1; 4], Rt
 
 ### 12.4 与 T06 stub 的最小验收（未来）
 
-T06 必须为上述类型/函数建 stub 并满足：`cargo test -p tspi-rt-host abi_layout`（真实测试、executed>0）覆盖附录 B 期望值；`rt-check forbid/drop-audit` 对空 stub 也必须有可运行入口与 1 个正例/1 个负例 fixture；不得用 “0 tests/只编译” 签收（WBS §最终验收补充）。
+T06 必须为上述类型/函数建 stub 并满足：`cargo test -p khaen-rt-host abi_layout`（真实测试、executed>0）覆盖附录 B 期望值；`rt-check forbid/drop-audit` 对空 stub 也必须有可运行入口与 1 个正例/1 个负例 fixture；不得用 “0 tests/只编译” 签收（WBS §最终验收补充）。
 
 
 

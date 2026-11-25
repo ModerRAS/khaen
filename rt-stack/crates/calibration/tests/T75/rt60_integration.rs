@@ -2,7 +2,7 @@
 //
 // 注册方式：crates/calibration/src/stage_backend.rs 末尾
 //   #[cfg(test)] mod t75_rt60_tests { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/T75/rt60_integration.rs")); }
-// 运行：cargo test -p tspi-calibration t75
+// 运行：cargo test -p khaen-calibration t75
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

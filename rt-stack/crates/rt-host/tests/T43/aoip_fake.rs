@@ -3,7 +3,7 @@
 //
 // 本文件经 src/aoip.rs 末尾的 cfg(test) mod aoip_fake_tests { include!(...) } 进入单测
 // 构建（cargo 不自动发现 tests/<子目录>；公共注册属 integrator）。运行：
-//   cargo test -p tspi-rt-host aoip_fake
+//   cargo test -p khaen-rt-host aoip_fake
 // 全部测试名 t43_ 前缀；模块路径含 aoip_fake_tests，可按 aoip_fake 过滤。
 // 离线：不打开 ALSA/pipe、不启动 aes67-daemon/statime、不连板端、不需要声卡/网络。
 

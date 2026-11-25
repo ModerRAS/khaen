@@ -4524,7 +4524,7 @@ pub fn build_report(request: &ReportRequest<'_>) -> Result<FirReport, ReportErro
     let verification = VerificationReport {
         method: "direct DTFT H(f)=sum h[n]exp(-j2pi f n/fs) + analytic GD Re(G/H)（§1.2；非 leaf 模块复用）",
         grid_points: grid.points,
-        ref_impl: "tspi-fir-designer::report 独立 oracle（自带 radix-2 FFT 仅用于 M2 相位-Hilbert）",
+        ref_impl: "khaen-designer::report 独立 oracle（自带 radix-2 FFT 仅用于 M2 相位-Hilbert）",
         consistency,
         passed,
     };

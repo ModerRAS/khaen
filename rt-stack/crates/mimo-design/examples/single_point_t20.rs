@@ -1,7 +1,7 @@
 //! 单点 MIMO 候选 B（T20 衰减改短）预测：真实 t4b 单点 5 执行器 H 上的离线设计实验。
 //!
 //! 用法（纯离线；不碰声卡/设备/板端，不 apply、不出声）：
-//!   cargo run --offline --release -p tspi-mimo-design --example single_point_t20 -- \
+//!   cargo run --offline --release -p khaen-mimo-design --example single_point_t20 -- \
 //!       --h <H_complex.csv> [--out <evidence-dir>] [--taps 2048,4096,8192,16384] [--design-points 100]
 //!
 //! 流程：
@@ -24,14 +24,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_mimo_design::decay::{
+use khaen_mimo_design::decay::{
     candidate_b_target_with_anchor, evaluate_decay, fir_spectrum, fit_path_firs, ir_of_spectrum,
     path_caps, solve_with_caps, spectrum_of_ir, Grid, MatrixMode, PathFir, M1_BANDS,
     T20_TARGET_RATIO,
 };
-use tspi_mimo_design::fill::{db_amp, SinglePointH};
-use tspi_mimo_design::fir::fir_response;
-use tspi_mimo_design::solve::Cx;
+use khaen_mimo_design::fill::{db_amp, SinglePointH};
+use khaen_mimo_design::fir::fir_response;
+use khaen_mimo_design::solve::Cx;
 
 const FS: f64 = 12_000.0;
 const NFFT: usize = 32_768;
@@ -766,7 +766,7 @@ fn run() -> Result<(), String> {
     if m == 0 {
         return Err("H 没有通道".to_string());
     }
-    let h_sha = tspi_room_sim::sha256::file_hex(&args.h)
+    let h_sha = khaen_room_sim::sha256::file_hex(&args.h)
         .map_err(|error| format!("H sha256 失败: {error}"))?;
     // measured-anchor 敏感性：63 Hz 用 acoustic-verify 2026-11-22 identity 实测 T20（同房间/同点；
     // 3 次 0.556/0.558/0.561 s，取 0.556 s → RT60=1.668 s）。其它带锚点不可用（100 无实测锚，
@@ -1400,9 +1400,9 @@ fn run() -> Result<(), String> {
         "# 复现命令（单点 MIMO 候选 B T20 预测；纯离线）\n\n\
          \x20   cd C:/WorkSpace/Claw/projects/tspi-audio-dsp/rt-stack\n\n\
          \x20   # 1) 单测（decay 模块；含 taps>4096 的 fit_path_firs 回退路径与 T20 定义）\n\
-         \x20   cargo test --offline -p tspi-mimo-design --lib\n\n\
+         \x20   cargo test --offline -p khaen-mimo-design --lib\n\n\
          \x20   # 2) 构建 CLI\n\
-         \x20   cargo build --offline --release -p tspi-mimo-design --example single_point_t20\n\n\
+         \x20   cargo build --offline --release -p khaen-mimo-design --example single_point_t20\n\n\
          \x20   # 3) 跑真实 t4b 单点 H：predicted-baseline 口径（设计自洽）→ t20/\n\
          \x20   ./target/release/examples/single_point_t20.exe --h evidence/calib-chain-20261121/mimo-fill-solver-20261122/h/H_complex.csv --out evidence/calib-chain-20261121/mimo-fill-solver-20261122/t20 --anchor predicted\n\n\
          \x20   # 4) measured-anchor 敏感性：63 Hz 用 acoustic-verify 实测 T20=0.556 s → t20/anchor-measured63/\n\

@@ -1,12 +1,12 @@
-# tspi-calibration/v1 示例：5.3.2（10 路；MOTU 0..9）
+# khaen-calibration/v1 示例：5.3.2（10 路；MOTU 0..9）
 # D3（2026-11-17）：中置 C 按设计与主箱相同为全频；当前无中置 → C 的 HP80/低频重定向/C:SUB pair/C 测试 deferred（NEEDS_HW）。
 # D7（2026-11-17）：允许 ≤ +3 dB boost（本文件 SUB1 的 +3.0 dB 恰在上限）；预测峰值须 ≤ -6 dBFS、实测 ≤ -1 dBFS。
-schema: tspi-calibration/v1
+schema: khaen-calibration/v1
 sample_rate: 48000
 reference_index: 0
 layout: "5.3.2"
 created_unix: 1794725000
-tool: {name: tspi-calibrate, version: "0.1.0"}
+tool: {name: khaen-calibrate, version: "0.1.0"}
 note: "示例数据，仅演示格式；真实值由测量生成"
 measurement:
   mode: direct

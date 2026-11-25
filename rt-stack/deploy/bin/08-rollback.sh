@@ -54,7 +54,7 @@ evidence_prepare "08-rollback"
 STACK_DIR="$(p "$TSPI_STACK_PREFIX")"
 CUR="$STACK_DIR/current"
 LG="$(p "$TSPI_STATE_DIR/last-good.json")"
-DROPIN_DIR="$(p "$TSPI_SYSTEMD_DIR")/tspi-rt-host.service.d"
+DROPIN_DIR="$(p "$TSPI_SYSTEMD_DIR")/khaen-rt-host.service.d"
 DROPIN="$DROPIN_DIR/90-safe-mute.conf"
 MUTE_ENV="$(p "$TSPI_ETC")/90-safe-mute.env"
 # F-17：safe-mute 用 EnvironmentFile 覆盖 rt-host.env 的 normal（systemd.exec：EnvironmentFile 覆盖 Environment=），
@@ -63,7 +63,7 @@ MUTE_ENV="$(p "$TSPI_ETC")/90-safe-mute.env"
 # 板端实测假阴性）；改为 lib/common.sh::unit_env_contains 的 /proc/<MainPID>/environ → EnvironmentFiles 解析。
 resolve_dropin_src() {
   local name="$1" cand
-  for cand in "$DEPLOY_ROOT/../service/tspi-rt-host.service.d/$name" \
+  for cand in "$DEPLOY_ROOT/../service/khaen-rt-host.service.d/$name" \
               "$(current_release_dir 2>/dev/null || true)/units/$name" \
               "$(p "$TSPI_STACK_PREFIX")/current/units/$name"; do
     [ -n "$cand" ] && [ -f "$cand" ] && { printf "%s" "$cand"; return 0; }
@@ -99,7 +99,7 @@ snapshot_state
 # ---- 1 停止新栈（不能停就退出，避免双实例） -------------------------------------
 stop_new_stack() {
   local where="$1" u
-  for u in tspi-rt-daemon.service tspi-rt-host.service; do
+  for u in tspi-rt-daemon.service khaen-rt-host.service; do
     if sunit_active "$u"; then
       if ! "$TSPI_SYSTEMCTL" stop "$u"; then ATTEMPTS+=("stop $u: FAIL"); return 1; fi
       ATTEMPTS+=("stop $u: OK")
@@ -109,7 +109,7 @@ stop_new_stack() {
   # 等待 inactive（daemon 不强制）
   local i=0
   while [ "$i" -lt "$TIMEOUT" ]; do
-    sunit_active tspi-rt-host.service || return 0
+    sunit_active khaen-rt-host.service || return 0
     sleep "${TSPI_POLL_SECS:-1}"; i=$((i+1))
   done
   ATTEMPTS+=("wait inactive: TIMEOUT ($where)")
@@ -181,35 +181,35 @@ fi
 
 # ---- 3 release 回退尝试 ---------------------------------------------------------
 if [ "$MODE" != "mute" ] && [ -z "$FINAL" ] && [ -n "$TARGET_REL" ]; then
-  if switch_current "$TARGET_REL" && remove_mute_dropin && start_and_wait tspi-rt-host.service; then
+  if switch_current "$TARGET_REL" && remove_mute_dropin && start_and_wait khaen-rt-host.service; then
     V_ARGS=(--live --timeout "$TIMEOUT" --allow-retained-active --evidence "$EVIDENCE_DIR/verify")
     if "$HERE/06-verify-switch.sh" "${V_ARGS[@]}"; then
       FINAL="ROLLED_BACK_LAST_GOOD"; EXIT_CODE=0
       ATTEMPTS+=("verify: PASS")
     else
       ATTEMPTS+=("verify: FAIL -> 降级 mute")
-      "$TSPI_SYSTEMCTL" stop tspi-rt-host.service >/dev/null 2>&1 || true
+      "$TSPI_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
       MODE="mute"
     fi
   else
     ATTEMPTS+=("release 回退启动失败 -> 降级 mute")
-    "$TSPI_SYSTEMCTL" stop tspi-rt-host.service >/dev/null 2>&1 || true
+    "$TSPI_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
     MODE="mute"
   fi
 fi
 
 # ---- 4 mute 兜底 ---------------------------------------------------------------
 if [ "$MODE" = "mute" ] && [ -z "$FINAL" ]; then
-  if install_mute_dropin && start_and_wait tspi-rt-host.service; then
-    if unit_env_contains tspi-rt-host.service "TSPI_HOST_SAFE_MODE=mute"; then
-      ATTEMPTS+=("mute env: 已生效（核对 $(unit_env_verify_source tspi-rt-host.service)；EnvironmentFile 覆盖 rt-host.env 的 normal）")
+  if install_mute_dropin && start_and_wait khaen-rt-host.service; then
+    if unit_env_contains khaen-rt-host.service "TSPI_HOST_SAFE_MODE=mute"; then
+      ATTEMPTS+=("mute env: 已生效（核对 $(unit_env_verify_source khaen-rt-host.service)；EnvironmentFile 覆盖 rt-host.env 的 normal）")
     else
       ATTEMPTS+=("mute env: NOT_APPLIED（MainPID /proc environ 与 EnvironmentFiles 均未含 TSPI_HOST_SAFE_MODE=mute；服务在=静音，需人工核对 drop-in/env）")
     fi
     FINAL="DEGRADED_MUTE"; EXIT_CODE=10
   else
     ATTEMPTS+=("mute 启动失败 -> 停止新栈（静音）")
-    "$TSPI_SYSTEMCTL" stop tspi-rt-host.service >/dev/null 2>&1 || true
+    "$TSPI_SYSTEMCTL" stop khaen-rt-host.service >/dev/null 2>&1 || true
     "$TSPI_SYSTEMCTL" stop tspi-rt-stack.target >/dev/null 2>&1 || true
     FINAL="STOPPED_SILENT_C_MASKED"; EXIT_CODE=6
   fi

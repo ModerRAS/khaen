@@ -4,7 +4,7 @@
 - 写域：crates/control/src/modes.rs + crates/control/tests/T44 + rt-stack/evidence/T44。
 - 权威输入：rt-stack/spec/compat-matrix.md A01-A22/K39-K44/R10-R12、rt-stack/spec/core-v1.md
   §5.1/§5.2/§5.4/§9.2、DSP-HOST-DECISION §5/§6/§7、WBS T44 行与 §1/§7、rt-stack/README.md §3/§5。
-- 测试文件：modes_contract.rs（52 tests）；运行：cargo test -p tspi-control modes。
+- 测试文件：modes_contract.rs（52 tests）；运行：cargo test -p khaen-control modes。
 
 ## 注册方式（不改 public_registration.rs）
 

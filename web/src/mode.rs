@@ -43,7 +43,7 @@ pub trait ModeStore: Send + Sync {
     async fn save(&self, persisted: &PersistedMode) -> Result<(), String>;
 }
 
-/// 文件持久化（/etc/tspi-audio-web/state.json）。
+/// 文件持久化（/etc/khaen-audio-web/state.json）。
 pub struct FileModeStore {
     path: String,
 }

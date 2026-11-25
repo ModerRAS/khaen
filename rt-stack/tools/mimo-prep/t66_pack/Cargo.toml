@@ -1,5 +1,5 @@
 [package]
-name = "tspi-mimo-t66-pack"
+name = "khaen-mimo-t66-pack"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,7 +9,7 @@ name = "mimo_t66_pack"
 path = "src/main.rs"
 
 [dependencies]
-tspi-calibration = { path = "../../../crates/calibration" }
-tspi-fir-designer = { path = "../../../crates/designer" }
+khaen-calibration = { path = "../../../crates/calibration" }
+khaen-designer = { path = "../../../crates/designer" }
 
 [workspace]

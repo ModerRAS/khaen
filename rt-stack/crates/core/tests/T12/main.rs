@@ -11,21 +11,21 @@
 //!
 //! 自包含（无第三方依赖）：极简 JSON 读取 T03 fixtures C07/C09（include_str 绑定只读参考文件）。
 //! Cargo 自动把 tests/T12/main.rs 发现为集成测试 target；运行：
-//! `cargo test -p tspi-dsp-core fusion -- --nocapture`
+//! `cargo test -p khaen-core fusion -- --nocapture`
 //!
 //! T03 fixtures 是只读输入；本测试不改它们，只读取 graph/input/expected/supports。
 
-use tspi_dsp_core::compile::{
+use khaen_core::compile::{
     compile, convolve_linear, delay_plan_residual_samples, design_delay_to_plan, next_pow2,
     oracle_spectral_convolve_circular, oracle_spectral_convolve_zero_padded, CompileInput,
     CompileOptions, CompiledPlans, FusionForm, SelectedPlan, SelectionReason, COMPILE_NO_SOURCE,
     PATH_FLAG_DIAG_BASELINE_INCLUDED, PATH_FLAG_FUSED, PATH_FLAG_ZERO_PAD_LINEAR_CONV,
 };
-use tspi_dsp_core::direct::{
+use khaen_core::direct::{
     direct_block_f64, DirectCoeffsF64, DirectLayout, DirectTopology, DIRECT_MAX_CONTAINERS,
     DIRECT_MAX_PARTICIPANTS, DIRECT_MAX_ROLES, DIRECT_MAX_SOURCES, DIRECT_NO_SOURCE,
 };
-use tspi_dsp_core::rt::RtStatus;
+use khaen_core::rt::RtStatus;
 
 const C07_JSON: &str =
     include_str!("../../../../reference/fixtures/cases/C07_factorized_fused.json");

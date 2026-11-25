@@ -4,7 +4,7 @@
 # rt-stack 既有 653 条测试与 Cargo.lock 的版本解析。workspace 成员注册由
 # integrator 独占的根 Cargo.toml 增行（task-235 最小接线，见 evidence/aes67-rx-proto/）。
 [package]
-name = "tspi-aoip-aes67"
+name = "khaen-aoip-aes67"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -13,5 +13,5 @@ description = "TSPI 自研用户态 AES67 接收端原型：SDP/RTP L24/抖动�
 [dependencies]
 
 [lib]
-name = "tspi_aoip_aes67"
+name = "khaen_aoip_aes67"
 path = "src/lib.rs"

@@ -2,7 +2,7 @@
 //
 // 本文件由 crates/control/src/rest.rs 的 #[cfg(test)] 子模块通过 include! 编译执行
 // （与 tests/T42/rest_contract.rs 同约定；不改 integrator 独占的 public_registration.rs）。
-// 运行：cargo test -p tspi-control rest matrix_routes -- --nocapture
+// 运行：cargo test -p khaen-control rest matrix_routes -- --nocapture
 //
 // 权威输入：
 // - spec/compat-matrix.md §3.7「R 矩阵 <-> rest.rs 路由落地对照」（机器可读 7 列表）

@@ -6,9 +6,9 @@
 
 ## 1. 结论
 
-这是一套客户端/服务端。服务端只有 `tspi-rt-host`：它一直运行，占着 MOTU，听 Unix socket。前台命令 `tspi-cal` 像 `docker` 那样连上、做完一件事、打印结果、退出，自己不占声卡。网页是另一个客户端：浏览器连 `tspi-rt-daemon`，daemon 把同一次请求转到同一只 socket，自己也不占声卡。两个客户端没有各自的校准状态，状态只在 host 里。
+这是一套客户端/服务端。服务端只有 `khaen-rt-host`：它一直运行，占着 MOTU，听 Unix socket。前台命令 `tspi-cal` 像 `docker` 那样连上、做完一件事、打印结果、退出，自己不占声卡。网页是另一个客户端：浏览器连 `tspi-rt-daemon`，daemon 把同一次请求转到同一只 socket，自己也不占声卡。两个客户端没有各自的校准状态，状态只在 host 里。
 
-用户说的校准播放和录音留在 `tspi-rt-host` 里。进程不退出。`TSPI_CAL_JOB_BACKEND=real` 时 daemon 发这些请求，不再对这次任务返回 503。socket 不在时，命令和网页都失败，不在本地另开一套播放。
+用户说的校准播放和录音留在 `khaen-rt-host` 里。进程不退出。`TSPI_CAL_JOB_BACKEND=real` 时 daemon 发这些请求，不再对这次任务返回 503。socket 不在时，命令和网页都失败，不在本地另开一套播放。
 
 校准入口是和 AES67 并列的一种 capture 源。进入校准模式后，AES67 和其他节目输入停在 DSP 链之外，扫频按块送进同一条 graph、侧路和 ALSA。求解在 host 的非实时线程里调用已经落地的 `emperor` 库和目标 FIR。
 
@@ -16,13 +16,13 @@
 
 操作页面用现有的 Dirac 式 8 步向导 `web/demo/dirac-style-flow`。daemon 提供这套页面，向导里的测量、求解和复测通过 socket 发给 host。双击打开时仍可读 `pilot.json` 做演示。从 daemon 打开时，这三步读真实任务，不再播演示动画。
 
-`nsp16` 不另留一套程序。实现时只读对照板上的 unit 和 toml，把 16 声道播放仍需要、仓库通用部署里还没有的项写进 `tspi-rt-host` 的部署文件。服务名用 `tspi-rt-host`。soak 期间只改仓库。
+`nsp16` 不另留一套程序。实现时只读对照板上的 unit 和 toml，把 16 声道播放仍需要、仓库通用部署里还没有的项写进 `khaen-rt-host` 的部署文件。服务名用 `khaen-rt-host`。soak 期间只改仓库。
 
 ```mermaid
 flowchart LR
   cli["tspi-cal 命令"] --> sock["Unix socket"]
   web["向导 / tspi-rt-daemon"] --> sock
-  sock --> host["tspi-rt-host 一直运行"]
+  sock --> host["khaen-rt-host 一直运行"]
   host --> chain["校准入口进同一条 DSP 链"]
   chain --> motu["MOTU"]
   umik["UMIK"] --> host
@@ -96,11 +96,11 @@ soak 未结束时，本仓库的安装脚本和这条命令都不连接 sender-h
 
 ## 5. 收回 nsp16
 
-仓库里没有 `nsp16` 文件。实现的第一步是只读读取板上的 `/etc/systemd/system/tspi-rt-host-nsp16.service` 和 `/etc/tspi-rt-stack/rt-host-nsp16.toml`，与 `rt-stack/service/tspi-rt-host.service` 以及现有 host 配置模板对照。
+仓库里没有 `nsp16` 文件。实现的第一步是只读读取板上的 `/etc/systemd/system/khaen-rt-host-nsp16.service` 和 `/etc/tspi-rt-stack/rt-host-nsp16.toml`，与 `rt-stack/service/khaen-rt-host.service` 以及现有 host 配置模板对照。
 
-收进 `tspi-rt-host` 部署文件的，是当前 16 声道播放仍依赖、而通用模板里没有的项，例如双流 AES67、plan、声卡和通道散开。只改了服务名的行不收。只属于 `deploy/config/tspi-rt-host-nsp7.service` 的项不收，nsp7 文件保持原样。
+收进 `khaen-rt-host` 部署文件的，是当前 16 声道播放仍依赖、而通用模板里没有的项，例如双流 AES67、plan、声卡和通道散开。只改了服务名的行不收。只属于 `deploy/config/khaen-rt-host-nsp7.service` 的项不收，nsp7 文件保持原样。
 
-对照结果写到 `rt-stack/deploy/NSP16-FOLD.md`：收进来的项、故意不收的项。读不到板上的文件就停在这一步，不凭记忆补一份 toml。不 `systemctl` 正在跑的 `tspi-rt-host-nsp16`，不替换 `/opt` 里的二进制。
+对照结果写到 `rt-stack/deploy/NSP16-FOLD.md`：收进来的项、故意不收的项。读不到板上的文件就停在这一步，不凭记忆补一份 toml。不 `systemctl` 正在跑的 `khaen-rt-host-nsp16`，不替换 `/opt` 里的二进制。
 
 ## 6. 测试
 

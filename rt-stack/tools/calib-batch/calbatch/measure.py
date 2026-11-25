@@ -1,7 +1,7 @@
 """TSPI 校准批量闭环：测量记录（capture meta）解析与 IR 提取。
 
 capture meta schema：tspi-cal-batch-capture/v1
-板端 tspi-calibrate measure-multi 产出 capture.raw（S24_3LE 单通道/多通道）+ 每通道
+板端 khaen-calibrate measure-multi 产出 capture.raw（S24_3LE 单通道/多通道）+ 每通道
 *.analysis.json；本模块只依赖冻结的 sweep 布局（plan 生成）与裸流本身，不依赖 Rust 工具内部结论。
 
 布局公式（与 calibrate/src/main.rs measure-multi 一致）：

@@ -1,4 +1,4 @@
-# tspi-room-sim 公开 API（契约 calib-chain-20261121/mimo-opt-20261122 §7）
+# khaen-room-sim 公开 API（契约 calib-chain-20261121/mimo-opt-20261122 §7）
 
 > **SIMULATED / SYNTHETIC ONLY（UNPROVEN）**：本 crate 是 RoomForge 鞋盒镜像源法（ISM）的 Rust 移植，
 > 零外部依赖（纯 `std`），只服务离线确定性仿真夹具：加载/校验、跨语言重渲染对拍、频带指标。
@@ -380,13 +380,13 @@ pub fn holdout_evaluate(p_before: &[Vec<Complex>], p_after: &[Vec<Complex>],
 cd rt-stack
 # 单元测试（54 个）+ 自造 mini fixture 集成测试（3 个）：ISM 手算、WAV roundtrip、SHA256 向量、
 # FFT vs DFT、JSON、metrics 手算小矩阵、alpha clamp、mini fixture load/h_matrix/rerender/篡改拒收。
-cargo test -p tspi-room-sim --offline
+cargo test -p khaen-room-sim --offline
 
 # 生成夹具的 5 场景 load + h_matrix + rerender_check（默认 ignored；需要夹具已生成）。
 # 注意：TSPI_ROOM_SIM_VALIDATION 是「输出 JSON 文件路径」，不是目录！
 $env:TSPI_ROOM_SIM_FIXTURES   = '...\mimo-opt-20261122\fixtures'
 $env:TSPI_ROOM_SIM_VALIDATION = '...\mimo-opt-20261122\validation\room-sim-render-check.json'
-cargo test -p tspi-room-sim --test fixtures_validation --offline -- --ignored --nocapture
+cargo test -p khaen-room-sim --test fixtures_validation --offline -- --ignored --nocapture
 ```
 
 ## 13. 跨语言验证结果（当前夹具版本）

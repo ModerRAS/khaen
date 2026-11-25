@@ -14,14 +14,14 @@
 //! 不改 public_registration.rs / lib.rs / Cargo.toml）。布局输入为真实 overlay
 //! `audio/overlay/etc/tspi-audio/layout-presets.yml`（include_str! 绑定），不写临时文件。
 
-use tspi_dsp_compat::channel_map::{
+use khaen_compat::channel_map::{
     center_downmix_gain_linear_f64, center_downmix_worst_case_added_db, CenterDownmixConfig,
     CenterDownmixPlan, CenterDownmixSource, CenterDownmixStatus, CenterDownmixTarget,
     CenterSpeakerState, ChannelMapErrorCode, CENTER_DOWNMIX_DEFAULT_PROGRAM_PEAK_DBFS,
     CENTER_DOWNMIX_GAIN_DB, CENTER_DOWNMIX_GAIN_LINEAR, CENTER_DOWNMIX_MIN_HEADROOM_DB,
     CENTER_DOWNMIX_PEAK_LIMIT_DBFS, CENTER_DOWNMIX_TARGET_ROLES, CENTER_ROLE_ID,
 };
-use tspi_dsp_compat::roles::LayoutPresets;
+use khaen_compat::roles::LayoutPresets;
 
 const OVERLAY: &str =
     include_str!("../../../../../audio/overlay/etc/tspi-audio/layout-presets.yml");

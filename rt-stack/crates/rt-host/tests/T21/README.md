@@ -8,9 +8,9 @@
 - 运行：
 
   ```
-  cargo test -p tspi-rt-host fault              # DoD（过滤命中 76 = 72×T21 + 3×T17 名含 fault + 1×scheduler "defaults" 含 fault）
-  cargo test -p tspi-rt-host fault -- --list   # executed 计数可复算（76 行，其中 t21_ 72 行）
-  cargo test -p tspi-rt-host                   # 整 crate 回归（T21 签收快照：lib 568 + abi_layout 3 + public_registration 1；随并发 leaf 增长）
+  cargo test -p khaen-rt-host fault              # DoD（过滤命中 76 = 72×T21 + 3×T17 名含 fault + 1×scheduler "defaults" 含 fault）
+  cargo test -p khaen-rt-host fault -- --list   # executed 计数可复算（76 行，其中 t21_ 72 行）
+  cargo test -p khaen-rt-host                   # 整 crate 回归（T21 签收快照：lib 568 + abi_layout 3 + public_registration 1；随并发 leaf 增长）
   ```
 
 - 全部离线：admission 用 `AdmissionEnv/MemoryPlan` 值（不执行真实 mlockall/getrlimit）、

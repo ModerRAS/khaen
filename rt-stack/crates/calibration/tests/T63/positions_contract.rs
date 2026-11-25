@@ -3,7 +3,7 @@
 // 本文件经 crates/calibration/src/positions.rs 末尾的
 //   #[cfg(test)] mod t63_tests { include!("../tests/T63/positions_contract.rs"); }
 // 编进 lib 单测（cargo 不自动发现 tests/<子目录>；公共注册属 integrator，不要重复注册）。
-// 运行：cargo test -p tspi-calibration positions
+// 运行：cargo test -p khaen-calibration positions
 //
 // 离线：不打开 ALSA / 不碰板端；用合成度量夹具验证 label/role/weight 必填、不要求 xyz、
 // design/validation 分组与质量门（缺 SNR/clock/phase 不继续）、plan/quality artifact 的
@@ -438,7 +438,7 @@ fn t63_positions_plan_json_roundtrip_is_deterministic_and_hash_bound() {
     let json_a = plan.to_json();
     let json_b = plan.to_json();
     assert_eq!(json_a, json_b);
-    assert!(json_a.contains("\"schema\":\"tspi-calibration-positions/v1\""));
+    assert!(json_a.contains("\"schema\":\"khaen-calibration-positions/v1\""));
     assert!(json_a.contains("\"design\""));
     assert!(json_a.contains("\"holdout\""));
     let parsed = MultipointPlan::from_json(&json_a).unwrap();
@@ -946,7 +946,7 @@ fn t63_positions_quality_json_is_deterministic_and_stale_plan_rejected() {
     let json_a = report.to_json();
     let json_b = report.to_json();
     assert_eq!(json_a, json_b);
-    assert!(json_a.contains("\"schema\":\"tspi-calibration-position-quality/v1\""));
+    assert!(json_a.contains("\"schema\":\"khaen-calibration-position-quality/v1\""));
     assert!(json_a.contains("\"scope\":\"design\""));
     assert!(json_a.contains("\"continue_allowed\":true"));
     let summary = QualityArtifactSummary::from_json(&json_a).unwrap();
@@ -1275,7 +1275,7 @@ fn t63_positions_writes_evidence_examples_when_requested() {
     .unwrap();
     assert!(resume.all_scopes_passed());
     let summary = format!(
-        "{{\"schema\":\"tspi-calibration-positions-resume-example/v1\",\"plan_sha256\":\"{}\",\"design_continue_allowed\":{},\"validation_continue_allowed\":{},\"design_points\":{},\"validation_points\":{}}}",
+        "{{\"schema\":\"khaen-calibration-positions-resume-example/v1\",\"plan_sha256\":\"{}\",\"design_continue_allowed\":{},\"validation_continue_allowed\":{},\"design_points\":{},\"validation_points\":{}}}",
         plan.plan_sha256(),
         resume
             .quality_for(QualityScope::Design)

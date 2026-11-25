@@ -87,7 +87,7 @@ use crate::target::{
     IMPROVEMENT_BAND_HZ, MAX_PARTICIPANTS, NEAR_ZERO_MAGNITUDE, SAMPLE_RATES_HZ,
 };
 use crate::timebase::ComplexPoint;
-use tspi_dsp_core::rt::{MAX_LOW_BAND_PARTICIPANTS, TAPS_NORMAL_MAX};
+use khaen_core::rt::{MAX_LOW_BAND_PARTICIPANTS, TAPS_NORMAL_MAX};
 
 // ===========================================================================
 // 常量与 schema

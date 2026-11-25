@@ -31,14 +31,14 @@
 //!    且不得依赖上一次进程的临时内存状态）；
 //! 6. **artifact**：每个 stage 产出登记 ArtifactRecord（relative path + SHA-256 + bytes + version +
 //!    stage + created_unix）；同一 relative path 内容不同即拒绝（artifact 不可变）；终态写
-//!    artifacts.manifest.json（schema tspi-calibration-artifacts/v1）；
+//!    artifacts.manifest.json（schema khaen-calibration-artifacts/v1）；
 //! 7. **失败只 last-good/mute**：任何 failure/cancel 都不启动 CamillaDSP、不 spawn 外部进程、
 //!    不假 ack；job 只调用 SafeOutputController 的 last-good 恢复 / 安全 mute 两个动作；
 //!    没有 apply 过（applied_by_job=false）时 last-good 原样保持，只释放设备；
 //! 8. **apply 门**：prepared 完成后默认停在 awaiting_apply（R48 apply 端点/用户确认）；只有
 //!    auto_apply=true 或显式 JobManager::apply() 才进入 apply；apply 幂等（重复 apply 返回同一 job）。
 //!
-//! 与旧 calibrate 手工流程的区别：本模块不是「跑一次 tspi-calibrate 再把文件拷回去」，而是给 daemon
+//! 与旧 calibrate 手工流程的区别：本模块不是「跑一次 khaen-calibrate 再把文件拷回去」，而是给 daemon
 //! 用的 job 对象：start/status/cancel/apply/rollback 全生命周期 + 可恢复 checkpoint + 证据 artifact。
 //!
 //! 写域纪律：只由 T60 维护本文件；T42（REST）/T44（mode）/T61–T66（sweep/capture/positions/fit/compile_apply）
@@ -55,11 +55,11 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// job 快照/checkpoint 的逻辑 schema（REST/T70 消费；字段只增不改，破坏性变更升 v2）。
-pub const JOB_SCHEMA: &str = "tspi-calibration-job/v1";
+pub const JOB_SCHEMA: &str = "khaen-calibration-job/v1";
 /// checkpoint 文本文件 schema（内部持久化格式；不是 REST 契约）。
-pub const CHECKPOINT_SCHEMA: &str = "tspi-calibration-checkpoint/v1";
+pub const CHECKPOINT_SCHEMA: &str = "khaen-calibration-checkpoint/v1";
 /// artifact manifest JSON schema（T59/T66/证据链消费）。
-pub const ARTIFACT_MANIFEST_SCHEMA: &str = "tspi-calibration-artifacts/v1";
+pub const ARTIFACT_MANIFEST_SCHEMA: &str = "khaen-calibration-artifacts/v1";
 /// 默认 checkpoint 文件名（放在 JobManagerConfig::checkpoint_path 指定目录或直接指定文件）。
 pub const CHECKPOINT_FILE_NAME: &str = "calibration-job.checkpoint";
 /// artifact manifest 文件名（每个 job 的 artifacts_dir 下）。
@@ -792,7 +792,7 @@ impl JobSnapshot {
         )
     }
 
-    /// 终态 artifact manifest JSON（schema tspi-calibration-artifacts/v1）。
+    /// 终态 artifact manifest JSON（schema khaen-calibration-artifacts/v1）。
     pub fn artifact_manifest_json(&self, generated_unix: u64) -> String {
         let artifacts = self
             .artifacts
@@ -2469,7 +2469,7 @@ pub struct JobManagerConfig {
 impl Default for JobManagerConfig {
     fn default() -> Self {
         JobManagerConfig {
-            artifacts_root: std::env::temp_dir().join("tspi-calibration-jobs"),
+            artifacts_root: std::env::temp_dir().join("khaen-calibration-jobs"),
             checkpoint_path: None,
             apply_confirm_timeout: None,
         }
@@ -4193,7 +4193,7 @@ mod tests {
         let manifest_path =
             PathBuf::from(&snapshot.artifacts_dir).join(ARTIFACT_MANIFEST_FILE_NAME);
         let manifest = fs::read_to_string(&manifest_path).unwrap();
-        assert!(manifest.contains("\"schema\":\"tspi-calibration-artifacts/v1\""));
+        assert!(manifest.contains("\"schema\":\"khaen-calibration-artifacts/v1\""));
         for artifact in &snapshot.artifacts {
             assert!(
                 manifest.contains(&artifact.sha256),
@@ -4216,7 +4216,7 @@ mod tests {
         );
         // JSON 契约关键字段
         let json = snapshot.to_json();
-        assert!(json.contains("\"schema\":\"tspi-calibration-job/v1\""));
+        assert!(json.contains("\"schema\":\"khaen-calibration-job/v1\""));
         assert!(json.contains("\"state\":\"complete\""));
         assert!(json.contains("\"job_id\":\"job-0001\""));
         assert!(json.contains("\"overall_progress\":1"));

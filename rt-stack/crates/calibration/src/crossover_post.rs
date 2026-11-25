@@ -1,7 +1,7 @@
 //! [NONRT] crossover（T39 输出 FIR 分频）接入 measured P_post / T66 plan 的接线层。
 //!
 //! 背景：T39 交付了 LR2/LR4/LR6/LR8 与 BW1..BW8 输出 FIR 分频**设计库**
-//!（<code>tspi-fir-designer::crossover</code>），core plan ABI 也有
+//!（<code>khaen-designer::crossover</code>），core plan ABI 也有
 //! <code>FirSegmentKind::Crossover</code> / <code>DIAG_FLAG_CROSSOVER</code> 组合语义；但
 //! measured 设计 -> FitP -> P_post -> T66 plan 的生产链此前**只承载 T64 目标曲线 FIR**，
 //! 没有任何路径把分频设计接进 P_post（缺口设计见
@@ -27,9 +27,9 @@
 
 use std::fmt::Write as _;
 
-use tspi_dsp_compat::ws::JsonValue;
-use tspi_dsp_core::nodes::{compose_fir_segments, FirSegment, FirSegmentKind};
-use tspi_fir_designer::crossover::{
+use khaen_compat::ws::JsonValue;
+use khaen_core::nodes::{compose_fir_segments, FirSegment, FirSegmentKind};
+use khaen_designer::crossover::{
     design_strict, plan_outputs, Branch, CrossoverDesign, CrossoverError, CrossoverMethod,
     CrossoverSpec, CrossoverType, OutputAssignment, OutputPlan, ValidatedCrossoverSpec,
     REGULAR_PROFILE_TAPS_CAP,
@@ -214,12 +214,12 @@ impl CrossoverSpecConfig {
         let method = self.t39_method()?;
         let _ = kind;
         let _ = method;
-        if self.taps < tspi_fir_designer::crossover::MIN_TAPS || self.taps > CROSSOVER_TAPS_PLAN_MAX
+        if self.taps < khaen_designer::crossover::MIN_TAPS || self.taps > CROSSOVER_TAPS_PLAN_MAX
         {
             return Err(cross_err(format!(
                 "crossover.taps={} 越界（{}..={CROSSOVER_TAPS_PLAN_MAX}；extended taps 不在本次 plan 接线内）",
                 self.taps,
-                tspi_fir_designer::crossover::MIN_TAPS
+                khaen_designer::crossover::MIN_TAPS
             )));
         }
         if !self.fc_hz.is_finite() {
@@ -723,10 +723,10 @@ fn canonical_json_text(value: &JsonValue) -> String {
 
 /// 固定字段顺序的对象（元组数组 -> json_object）。
 fn json_object_str<const N: usize>(pairs: [(&'static str, JsonValue); N]) -> JsonValue {
-    tspi_dsp_compat::ws::json_object(pairs.into_iter().collect())
+    khaen_compat::ws::json_object(pairs.into_iter().collect())
 }
 
 /// JSON 编码为字符串（错误转人读文本）。
 fn json_encode_str(value: &JsonValue) -> Result<String, String> {
-    tspi_dsp_compat::ws::json_encode(value).map_err(|error| error.to_string())
+    khaen_compat::ws::json_encode(value).map_err(|error| error.to_string())
 }

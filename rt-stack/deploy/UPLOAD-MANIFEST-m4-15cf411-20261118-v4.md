@@ -19,16 +19,16 @@
 | --- | --- | --- |
 | `deploy/` | `bin/00..08` + `make-release-bundle.sh` + **`make-deploy-package.sh`（新）**、`lib/`（common/check_window/check_elf/release_manifest/last_good/snapshot_to_json/irq_affinity/**release_tar.py 新**）、`config/`、`tools/`、`tests/`、README、UPLOAD-MANIFEST | `/var/tmp/tspi-rt-stack-deploy/`（root 执行） |
 | `service/` | host/daemon/target/irq-affinity units + host.service.d/90-safe-mute.{conf,env}.example + README | `/etc/systemd/system/`（04 安装；target Wants/After host+daemon） |
-| `release-bundle/`（16 文件） | `bin/tspi-rt-host`、`bin/tspi-rt-daemon`、`units/`（6）、`etc/`（5 个 `*.example`）、manifest.json、README.deploy.md、SHA256SUMS | `/opt/tspi-rt-stack/releases/m4-15cf411-20261118-v4/{bin,units,manifest.json,README.deploy.md}` + `current`（symlink） |
+| `release-bundle/`（16 文件） | `bin/khaen-rt-host`、`bin/tspi-rt-daemon`、`units/`（6）、`etc/`（5 个 `*.example`）、manifest.json、README.deploy.md、SHA256SUMS | `/opt/tspi-rt-stack/releases/m4-15cf411-20261118-v4/{bin,units,manifest.json,README.deploy.md}` + `current`（symlink） |
 | `README-UPLOAD.md`、`SHA256SUMS` | 上传说明 + 包级逐文件校验和 | `/var/tmp/` 保留（校验用） |
 
 ## 2. 关键文件 sha256（完整清单见包内 `SHA256SUMS`；bundle 14 项见 `rt-stack/evidence/release-v4/ARTIFACTS.md` §2）
 
 | 文件 | 大小(B) | sha256 |
 | --- | ---: | --- |
-| bin/tspi-rt-host（bundle） | 1176128 | `fb247696bd8ef5537359ddb832278c35333624fdd78bad78c13f3627610dd0c6` |
+| bin/khaen-rt-host（bundle） | 1176128 | `fb247696bd8ef5537359ddb832278c35333624fdd78bad78c13f3627610dd0c6` |
 | bin/tspi-rt-daemon（bundle） | 1286384 | `804a8bcd94bc73cf8aff29bc459633abbee0cf55d50c512ad4215c410c577c18` |
-| units/tspi-rt-host.service（**F3/F4 修改**） | 3594 | `1ddda0fb07e2b60e326b0a430336238f8ca65b7d58373b448923ccb8464be708` |
+| units/khaen-rt-host.service（**F3/F4 修改**） | 3594 | `1ddda0fb07e2b60e326b0a430336238f8ca65b7d58373b448923ccb8464be708` |
 | units/tspi-rt-daemon.service（**F3 修改**） | 2522 | `7d3028ab244fe86c2fcf54bd43fbede882a51c1e3cd0c6ea2d766dcebdde9182` |
 | units/90-safe-mute.conf.example（**F5 注释**） | 1513 | `7b1ae91920a678d1953dbfc5e1a7f29a803469e4eea04ddc1833c61d114aa55e` |
 | units/tspi-rt-stack.target | 1055 | `8948ef98470619ab6f491c03276d6a8cf740ca35219968d964fe578551fd9ca0` |
@@ -54,7 +54,7 @@ chmod +x deploy/bin/*.sh deploy/tools/*.sh deploy/tests/*.sh \
          deploy/config/irq-affinity-pin deploy/config/motu-48k-keeper
 # bundle 语义校验（只读）
 python3 deploy/lib/release_manifest.py verify release-bundle --require-arch aarch64   # files_checked=14, ok
-python3 deploy/lib/check_elf.py release-bundle/bin/tspi-rt-host --require-arch aarch64
+python3 deploy/lib/check_elf.py release-bundle/bin/khaen-rt-host --require-arch aarch64
 python3 deploy/lib/check_elf.py release-bundle/bin/tspi-rt-daemon --require-arch aarch64
 ```
 
@@ -75,7 +75,7 @@ sudo ./deploy/bin/05-atomic-switch.sh --live --authorize /var/tmp/window.json \
 
 release-v3 板窗的人工补救文件在新 unit 装载后不再需要（删除前确认新 unit 已生效）：
 - `/etc/tmpfiles.d/tspi-rt-stack.conf`（F3 补救；现由 unit 的 RuntimeDirectory/LogsDirectory 提供）
-- `/etc/systemd/system/tspi-rt-host.service.d/95-deviceallow.conf`（F4 补救；现 unit 内为 `DeviceAllow=char-alsa rw`）
+- `/etc/systemd/system/khaen-rt-host.service.d/95-deviceallow.conf`（F4 补救；现 unit 内为 `DeviceAllow=char-alsa rw`）
 - 手工 `/run/tspi-rt-stack`、`/var/log/tspi-rt-stack` 目录由 systemd 管理，不需保留。
 保留名单与窗口动作见 `rt-stack/evidence/board-window-20261118/deploy/REPORT.md` §5.3。
 

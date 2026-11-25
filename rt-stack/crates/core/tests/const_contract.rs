@@ -2,12 +2,12 @@
 //!
 //! 本测试是 T06 scaffold 自证的一部分：证明常量/公式被真实编译并执行断言，不是 0 tests。
 
-use tspi_dsp_core::abi::{TspiPlanHeaderV1, TspiWorkerAffinityV1};
-use tspi_dsp_core::events::{
+use khaen_core::abi::{TspiPlanHeaderV1, TspiWorkerAffinityV1};
+use khaen_core::events::{
     event_name, EV_HOST_INIT, EV_STOPPED, EV_WORKER_LOST, LANE_CONTROL, LANE_WORKER0,
     SEVERITY_FATAL, SEVERITY_INFO,
 };
-use tspi_dsp_core::rt::{
+use khaen_core::rt::{
     fft_size, fused_len_max, gate_ns_floor, max_partitions, t_block_ns_ceil, ACK_MASK_ALL,
     BLOCK_DEFAULT, BLOCK_SIZES, EVENT_LANES, EVENT_LANE_SLOTS, EVENT_RING_SLOTS, GRAPH_ID_BYTES,
     MAX_DIAG_FIRS, MAX_INPUT_CHANNELS, MAX_INPUT_ROLES, MAX_LOW_BAND_PARTICIPANTS,
@@ -86,27 +86,27 @@ fn abi_v11_affinity_layout_is_repr_c_legal() {
     // TspiPlanHeaderV1：v1.1 affinity/ctl 字段（errata E1 定稿：96/100/104/108，size 128）。
     assert_eq!(
         size_of::<TspiPlanHeaderV1>(),
-        tspi_dsp_core::abi::PLAN_HEADER_SIZE
+        khaen_core::abi::PLAN_HEADER_SIZE
     );
     assert_eq!(
         align_of::<TspiPlanHeaderV1>(),
-        tspi_dsp_core::abi::PLAN_HEADER_ALIGN
+        khaen_core::abi::PLAN_HEADER_ALIGN
     );
     assert_eq!(
         offset_of!(TspiPlanHeaderV1, affinity_table_offset),
-        tspi_dsp_core::abi::PLAN_HEADER_OFFSET_AFFINITY_TABLE
+        khaen_core::abi::PLAN_HEADER_OFFSET_AFFINITY_TABLE
     );
     assert_eq!(
         offset_of!(TspiPlanHeaderV1, affinity_count),
-        tspi_dsp_core::abi::PLAN_HEADER_OFFSET_AFFINITY_COUNT
+        khaen_core::abi::PLAN_HEADER_OFFSET_AFFINITY_COUNT
     );
     assert_eq!(
         offset_of!(TspiPlanHeaderV1, ctl_meta_offset),
-        tspi_dsp_core::abi::PLAN_HEADER_OFFSET_CTL_META
+        khaen_core::abi::PLAN_HEADER_OFFSET_CTL_META
     );
     assert_eq!(
         offset_of!(TspiPlanHeaderV1, ctl_meta_len),
-        tspi_dsp_core::abi::PLAN_HEADER_OFFSET_CTL_META_LEN
+        khaen_core::abi::PLAN_HEADER_OFFSET_CTL_META_LEN
     );
     assert_eq!(size_of::<TspiPlanHeaderV1>(), 128);
     assert_eq!(align_of::<TspiPlanHeaderV1>(), 64);

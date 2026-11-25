@@ -1,6 +1,6 @@
-//! T51 private integration tests — 因果有限 FIR 模态 solver（crate tspi-modal-design）。
+//! T51 private integration tests — 因果有限 FIR 模态 solver（crate khaen-modal-design）。
 //!
-//! 运行（在 rt-stack/ 下）：cargo test -p tspi-modal-design solve
+//! 运行（在 rt-stack/ 下）：cargo test -p khaen-modal-design solve
 //! 文件位置：crates/modal-design/tests/T51/main.rs（leaf 私有测试；不写 public_registration.rs）。
 //!
 //! 覆盖（WBS T51 DoD）：
@@ -18,20 +18,20 @@
 //! 本文件只构造内存夹具；不采音、不碰板端、不打开 ALSA、不写文件（独立 checker 的 dump
 //! 走 stdout，由 evidence 脚本读取）。
 
-use tspi_modal_design::ingest::{sha256_hex, PositionRole};
-use tspi_modal_design::solve::{
+use khaen_modal_design::ingest::{sha256_hex, PositionRole};
+use khaen_modal_design::solve::{
     solve, solve_from_target_plant, SolveError, SolveErrorKind, SolveMode, SolveOptions,
     SolvePosition, SolveProblem, SolveStatus, SolveWarning, MAX_SOLVE_TAPS, SOLVE_CLAIM,
     SOLVE_SCHEMA,
 };
-use tspi_modal_design::target::{
+use khaen_modal_design::target::{
     build_stereo_strict_target, build_target_matrix, validate_solution,
     validate_stereo_strict_solution, BandDecay, CurveBinding, DecayTarget, EffectivePlant,
     FittedPostBaseline, FrozenPostBaseline, ModalParticipants, PostBaselineInput, PostRoleFit,
     RawPlant, RawPosition, RawResponse, TargetMatrix, TargetSpec, ToneApplicationProof,
     ToneBinding, P1_LAYOUT_4_1_2,
 };
-use tspi_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
+use khaen_modal_design::timebase::{CommonD0, ComplexPoint, PolaritySource, ResolvedPolarity};
 
 // ===========================================================================
 // 常量与夹具
@@ -1186,7 +1186,7 @@ fn t51_solve_problem_rejections() {
     );
     // 来源 hash 非法。
     let mut bad_provenance = base.clone();
-    bad_provenance.provenance = Some(tspi_modal_design::solve::SolveProvenance {
+    bad_provenance.provenance = Some(khaen_modal_design::solve::SolveProvenance {
         baseline_hash: "not-a-hash".to_string(),
         plant_hash: "0".repeat(64),
         design_plant_hash: "0".repeat(64),
@@ -1427,7 +1427,7 @@ fn t51_solve_evidence_json_honest() {
 
 #[test]
 fn t51_solve_static_guard_no_io_and_claim() {
-    let source = tspi_modal_design::solve::solve_source_text_for_guards();
+    let source = khaen_modal_design::solve::solve_source_text_for_guards();
     for forbidden in [
         "std::fs",
         "std::process",

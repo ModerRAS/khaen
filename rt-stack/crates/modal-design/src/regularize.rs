@@ -106,7 +106,7 @@ use crate::target::{
     TargetMatrix, IMPROVEMENT_BAND_HZ, MAX_PARTICIPANTS, NEAR_ZERO_MAGNITUDE,
 };
 use crate::timebase::ComplexPoint;
-use tspi_dsp_core::rt::MAX_LOW_BAND_PARTICIPANTS;
+use khaen_core::rt::MAX_LOW_BAND_PARTICIPANTS;
 
 // ===========================================================================
 // 常量与 schema

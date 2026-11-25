@@ -1,7 +1,7 @@
 # TSPI control 层：REST / modes / Web（T06 scaffold；leaf T42/T44/T70）
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
-name = "tspi-control"
+name = "khaen-control"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -12,10 +12,10 @@ name = "tspi-rt-daemon"
 path = "src/main.rs"
 
 [dependencies]
-tspi-dsp-core = { workspace = true }
-tspi-rt-host = { workspace = true }
-tspi-dsp-compat = { workspace = true }
+khaen-core = { workspace = true }
+khaen-rt-host = { workspace = true }
+khaen-compat = { workspace = true }
 # task-226：daemon 挂真实 T60 JobManager 的 CalibrationPort 适配（E-3 收口；依赖方向
 # control -> calibration 与服务面一致）。manifest 约定由 integrator 写；本行属该任务
 # 的最小接口变更，已在 evidence/cursor-fix-rest-calibport/MANIFEST.md 登记待 integrator 复核。
-tspi-calibration = { workspace = true }
+khaen-calibration = { workspace = true }

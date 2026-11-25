@@ -5,7 +5,7 @@
  "target": "aarch64-unknown-linux-gnu",
  "files": [
   {
-   "path": "bin/tspi-rt-host",
+   "path": "bin/khaen-rt-host",
    "size": 1451984,
    "sha256": "40f158669da28ee94c95a6fbeb78de06004c4d60e8a43c3fb76ef24584fa8f9b",
    "kind": "binary"
@@ -47,7 +47,7 @@
    "kind": "unit"
   },
   {
-   "path": "units/tspi-rt-host.service",
+   "path": "units/khaen-rt-host.service",
    "size": 3594,
    "sha256": "1ddda0fb07e2b60e326b0a430336238f8ca65b7d58373b448923ccb8464be708",
    "kind": "unit"

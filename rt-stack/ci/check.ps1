@@ -32,15 +32,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "cargo test --workspace failed (exit $LASTEXITCODE)" }
 
     Write-Host "==> rt-check abi-layout"
-    & cargo run @cargoArgs --quiet -p tspi-rt-check --bin rt-check -- abi-layout
+    & cargo run @cargoArgs --quiet -p khaen-rt-check --bin rt-check -- abi-layout
     if ($LASTEXITCODE -ne 0) { throw "rt-check abi-layout failed (exit $LASTEXITCODE)" }
 
     Write-Host "==> rt-check forbid"
-    & cargo run @cargoArgs --quiet -p tspi-rt-check --bin rt-check -- forbid --root crates
+    & cargo run @cargoArgs --quiet -p khaen-rt-check --bin rt-check -- forbid --root crates
     if ($LASTEXITCODE -ne 0) { throw "rt-check forbid failed (exit $LASTEXITCODE)" }
 
     Write-Host "==> rt-check drop-audit"
-    & cargo run @cargoArgs --quiet -p tspi-rt-check --bin rt-check -- drop-audit --root crates
+    & cargo run @cargoArgs --quiet -p khaen-rt-check --bin rt-check -- drop-audit --root crates
     if ($LASTEXITCODE -ne 0) { throw "rt-check drop-audit failed (exit $LASTEXITCODE)" }
 
     Write-Host "ALL CHECKS PASS"

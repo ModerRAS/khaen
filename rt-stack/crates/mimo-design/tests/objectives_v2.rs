@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
-use tspi_mimo_design::report::Json;
-use tspi_mimo_design::{run_scene, Cx, RunConfig, SceneInput};
+use khaen_mimo_design::report::Json;
+use khaen_mimo_design::{run_scene, Cx, RunConfig, SceneInput};
 
 fn jget<'a>(root: &'a Json, keys: &[&str]) -> Option<&'a Json> {
     let mut cur = root;
@@ -161,8 +161,8 @@ fn seat_std_objective_beats_emodal_on_seat_std_metric() {
     let input = make_input();
     let emodal = run_scene(&input, &cfg_emodal(0.70)).expect("emodal");
     let mut cfg_seat = cfg_emodal(0.70);
-    cfg_seat.objective = tspi_mimo_design::objective::ObjectiveConfig::for_kind(
-        tspi_mimo_design::objective::ObjectiveKind::SeatStd,
+    cfg_seat.objective = khaen_mimo_design::objective::ObjectiveConfig::for_kind(
+        khaen_mimo_design::objective::ObjectiveKind::SeatStd,
         None,
     );
     let seat = run_scene(&input, &cfg_seat).expect("seat");
@@ -212,7 +212,7 @@ fn v1_emodal_regression_against_frozen_runs() {
         eprintln!("skip v1 regression: fixture not present at {:?}", scene_dir);
         return;
     }
-    let fx = tspi_room_sim::fixture::SceneFixture::load(&scene_dir).expect("load fixture");
+    let fx = khaen_room_sim::fixture::SceneFixture::load(&scene_dir).expect("load fixture");
     let hm = fx.h_matrix().expect("h matrix");
     let n_mics = hm.n_mics;
     let k = hm.n_bins();

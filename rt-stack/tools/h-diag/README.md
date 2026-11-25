@@ -50,7 +50,7 @@ my-run/
 
 `*.analysis.json`：旧工具 schema `tspi-channel-measurement/v1`，读取
 `fr`（或自动选择 `fr_modal`）的 `freq_hz/db/phase_deg`、`delay_samples/delay_ms/delay_coarse_samples`、
-`snr_db`、`peak_db`、`polarity`、`phase_ref`、`meta{``tspi-calibration-meta/v1``}`。
+`snr_db`、`peak_db`、`polarity`、`phase_ref`、`meta{``khaen-calibration-meta/v1``}`。
 
 ## 2. 用法（离线，只需 Python 3 + numpy）
 

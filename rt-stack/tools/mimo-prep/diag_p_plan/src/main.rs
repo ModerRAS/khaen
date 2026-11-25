@@ -9,14 +9,14 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use tspi_calibration::compile_apply::{
+use khaen_calibration::compile_apply::{
     ArtifactBinding, CompileApplyOptions, CompileApplyRequest, DelayPolarityEncoding,
     ExperimentMode, GPathInput, HeadroomEvidence, MappingBinding, PhaseEvidence, RoleBoostRecord,
     RoleCompileInput, RoleDacSlot, PEQ_FIT_SCHEMA, compile_plan,
 };
-use tspi_calibration::job::sha256_hex;
-use tspi_calibration::phase_fit::{PhaseChannelOp, PhaseFitChecks};
-use tspi_fir_designer::phase::Polarity;
+use khaen_calibration::job::sha256_hex;
+use khaen_calibration::phase_fit::{PhaseChannelOp, PhaseFitChecks};
+use khaen_designer::phase::Polarity;
 
 const PROGRAM_PEAK_DBFS: f64 = -18.0;
 
@@ -274,7 +274,7 @@ fn main_entry() -> Result<(), String> {
     let options = CompileApplyOptions {
         max_taps: input.max_taps,
         extended_taps_admitted: input.max_taps > 4096,
-        force_form: Some(tspi_dsp_core::compile::FusionForm::Factorized),
+        force_form: Some(khaen_core::compile::FusionForm::Factorized),
         ..Default::default()
     };
     let request = CompileApplyRequest::new(
@@ -310,8 +310,8 @@ fn main_entry() -> Result<(), String> {
         .collect::<String>();
     let mut manifest = String::new();
     let _ = writeln!(manifest, "{{");
-    let _ = writeln!(manifest, "  \"schema\": \"tspi-mimo-diag-plan/v1\",");
-    let _ = writeln!(manifest, "  \"tool\": {{\"name\":\"tspi-mimo-diag-plan\",\"version\":\"mimo-prod-20261122-1\"}},");
+    let _ = writeln!(manifest, "  \"schema\": \"khaen-mimo-diag-plan/v1\",");
+    let _ = writeln!(manifest, "  \"tool\": {{\"name\":\"khaen-mimo-diag-plan\",\"version\":\"mimo-prod-20261122-1\"}},");
     let _ = writeln!(manifest, "  \"status\": \"EXPERIMENT_NON_ACCEPTABLE\",");
     let _ = writeln!(manifest, "  \"claim\": \"PREDICTED_ONLY / SINGLE_POINT_NOT_SPATIAL / NO_MEASUREMENT\",");
     let _ = writeln!(manifest, "  \"compiled\": true, \"applied\": false, \"measured\": false,");

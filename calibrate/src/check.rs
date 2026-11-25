@@ -86,11 +86,11 @@ pub fn validate_doc(doc: &Value) -> Report {
         .get(Value::from("schema"))
         .and_then(Value::as_str)
         .unwrap_or("");
-    let v11 = schema == "tspi-calibration/v1.1";
-    let v1 = schema == "tspi-calibration/v1";
+    let v11 = schema == "khaen-calibration/v1.1";
+    let v1 = schema == "khaen-calibration/v1";
     if !v1 && !v11 {
         errors.push(format!(
-            "schema 必须是 tspi-calibration/v1 或 v1.1（当前 {schema:?}）"
+            "schema 必须是 khaen-calibration/v1 或 v1.1（当前 {schema:?}）"
         ));
     }
     let fs = as_int(map.get(Value::from("sample_rate"))).unwrap_or(-1);
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn v1_rejects_shelf_and_high_q() {
         let text = r#"
-schema: tspi-calibration/v1
+schema: khaen-calibration/v1
 sample_rate: 48000
 reference_index: 0
 channels:
@@ -315,7 +315,7 @@ channels:
     #[test]
     fn v11_accepts_shelf_and_high_q() {
         let text = r#"
-schema: tspi-calibration/v1.1
+schema: khaen-calibration/v1.1
 sample_rate: 48000
 reference_index: 0
 channels:
@@ -335,7 +335,7 @@ channels:
     #[test]
     fn unknown_type_fails() {
         let text = r#"
-schema: tspi-calibration/v1.1
+schema: khaen-calibration/v1.1
 sample_rate: 48000
 reference_index: 0
 channels:
@@ -357,7 +357,7 @@ channels:
     fn v11_doc_filter(q: &str, ty: &str) -> String {
         format!(
             r#"
-schema: tspi-calibration/v1.1
+schema: khaen-calibration/v1.1
 sample_rate: 48000
 reference_index: 0
 channels:

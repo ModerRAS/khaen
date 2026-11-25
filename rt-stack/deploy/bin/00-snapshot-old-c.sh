@@ -139,7 +139,7 @@ meta integrity_before "$BEFORE_DIGEST"
 # ---------------------------------------------------------------------------
 raw_cap_sh unit_files "systemctl list-unit-files 'tspi-*' --no-pager 2>&1 || true"
 raw_cap_sh unit_list "systemctl list-units 'tspi-*' --all --no-pager 2>&1 || true"
-raw_cap_sh unit_cat "systemctl cat tspi-audio.target tspi-camilladsp.service tspi-statime-inferno.service tspi-aes67-daemon.service tspi-ravenna-lkm.service tspi-ptp4l-master.service tspi-phc2sys.service tspi-boot-mode.service tspi-upmix-autodetect.service tspi-audio-web.service 2>&1 || true"
+raw_cap_sh unit_cat "systemctl cat tspi-audio.target tspi-camilladsp.service tspi-statime-inferno.service tspi-aes67-daemon.service tspi-ravenna-lkm.service tspi-ptp4l-master.service tspi-phc2sys.service tspi-boot-mode.service tspi-upmix-autodetect.service khaen-audio-web.service 2>&1 || true"
 raw_cap_sh wants "ls -la /etc/systemd/system/*.wants/ 2>/dev/null || true"
 for u in "${ALL_OLD_AUDIO_UNITS[@]}" "${NEW_STACK_UNITS[@]}"; do unit_row "$u"; done
 # socket/timer/drop-in 防 dependency 自动激活（bounded）
@@ -150,7 +150,7 @@ raw_cap_sh dropins "find /etc/systemd/system -maxdepth 2 -path '*tspi-*.service.
 # 3. 进程快照（旧 C / 旧 web / 保留 AoIP 服务）
 # ---------------------------------------------------------------------------
 raw_cap_sh ps_rt "ps -eLo pid,tid,cls,rtprio,pri,psr,comm --no-headers 2>/dev/null | sort -n || true"
-for pat in "${C_PROCESS_PATTERNS[@]}" tspi-audio-web statime aes67-daemon; do proc_row "$pat"; done
+for pat in "${C_PROCESS_PATTERNS[@]}" khaen-audio-web statime aes67-daemon; do proc_row "$pat"; done
 raw_cap_sh proc_holders "find /proc/[0-9]*/fd -maxdepth 1 -type l 2>/dev/null | head -n 4000 | xargs -r ls -l 2>/dev/null | grep -E ' /dev/snd/' || true"
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ raw_cap_sh proc_holders "find /proc/[0-9]*/fd -maxdepth 1 -type l 2>/dev/null | 
 # ---------------------------------------------------------------------------
 OLD_BINARIES=(
   /usr/local/bin/camilladsp
-  /usr/local/bin/tspi-audio-web
+  /usr/local/bin/khaen-audio-web
   /usr/local/bin/tspi-mode
   /usr/local/bin/tspi-channelmap
   /usr/local/bin/tspi-upmix
@@ -178,7 +178,7 @@ for b in "${OLD_BINARIES[@]}"; do file_row binary "$b"; done
 KVER="$(uname -r 2>/dev/null || true)"
 [ -n "$KVER" ] && file_row library "/lib/modules/$KVER/extra/MergingRavennaALSA.ko"
 for row in /usr/sbin/ptp4l /usr/sbin/phc2sys /usr/sbin/pmc; do file_row binary "$row"; done
-raw_cap_sh symlinks "for p in /usr/local/bin/camilladsp /usr/local/bin/tspi-audio-web /usr/local/bin/tspi-mode /usr/local/bin/tspi-upmix; do readlink -f \"\$p\" 2>/dev/null; done"
+raw_cap_sh symlinks "for p in /usr/local/bin/camilladsp /usr/local/bin/khaen-audio-web /usr/local/bin/tspi-mode /usr/local/bin/tspi-upmix; do readlink -f \"\$p\" 2>/dev/null; done"
 
 # ---------------------------------------------------------------------------
 # 5. 配置/unit/资产生成 sha256（旧栈 config；web auth 只 hash 不读内容）
@@ -203,12 +203,12 @@ OLD_CONFIGS=(
   /etc/systemd/system/tspi-audio.target
   /etc/systemd/system/tspi-camilladsp.service
   /etc/systemd/system/tspi-upmix-autodetect.service
-  /etc/systemd/system/tspi-audio-web.service
-  /etc/tspi-audio-web/config.toml
-  /etc/tspi-audio-web/auth.json
+  /etc/systemd/system/khaen-audio-web.service
+  /etc/khaen-audio-web/config.toml
+  /etc/khaen-audio-web/auth.json
 )
 for c in "${OLD_CONFIGS[@]}"; do file_row config "$c"; done
-raw_cap_sh tree_etc "find /etc/tspi-audio /etc/camilladsp /etc/tspi-audio-web -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort || true"
+raw_cap_sh tree_etc "find /etc/tspi-audio /etc/camilladsp /etc/khaen-audio-web -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort || true"
 raw_cap_sh tree_varlib "ls -la /var/lib/tspi/ 2>/dev/null; find /var/lib/tspi -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort | head -n 300 || true"
 raw_cap_sh pkg_versions "dpkg -l 2>/dev/null | grep -Ei 'alsa|boost|avahi|linuxptp|jq|statime' | head -n 120 || true"
 raw_cap_sh sha_release "sha256sum /etc/tspi-audio-manifest.txt 2>/dev/null || true"
@@ -238,7 +238,7 @@ raw_cap_sh net 'ip -br addr 2>/dev/null || true; ls -l /dev/ptp* 2>/dev/null || 
 # 8. 有界 journal（只读；不清理/不改级别）
 # ---------------------------------------------------------------------------
 raw_cap_sh journal_c 'journalctl -u tspi-camilladsp --since "-24h" --no-pager -q 2>/dev/null | tail -n 80 || true'
-raw_cap_sh journal_web 'journalctl -u tspi-audio-web --since "-24h" --no-pager -q 2>/dev/null | tail -n 40 || true'
+raw_cap_sh journal_web 'journalctl -u khaen-audio-web --since "-24h" --no-pager -q 2>/dev/null | tail -n 40 || true'
 
 # ---------------------------------------------------------------------------
 # 9. 只读自检 + 组装

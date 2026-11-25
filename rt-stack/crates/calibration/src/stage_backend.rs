@@ -37,10 +37,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tspi_dsp_core::abi::{sample_format, ABI_VERSION};
-use tspi_dsp_core::rt::{BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
-use tspi_modal_design::ingest::SampleFormat;
-use tspi_rt_host::format::{self, DitherCfg, FormatConfig, TspiHwParamsV1};
+use khaen_core::abi::{sample_format, ABI_VERSION};
+use khaen_core::rt::{BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
+use khaen_modal_design::ingest::SampleFormat;
+use khaen_rt_host::format::{self, DitherCfg, FormatConfig, TspiHwParamsV1};
 
 use crate::capture::{
     self, CaptureError, ElectricalReferenceCapture, ElectricalReferenceChannel,
@@ -675,7 +675,7 @@ impl StageProtectionConfig {
 ///
 /// - `Aplay`（默认）：保持既有行为——T61 timeline 经 aplay 管道直放；
 /// - `HostPlan`：把同一 T61 timeline 先渲染成 2ch S24_3LE 48k WAV，再交给
-///   `tspi-rt-host run --config <plan-arena>` 以 `[capture] source="file"` 播放，
+///   `khaen-rt-host run --config <plan-arena>` 以 `[capture] source="file"` 播放，
 ///   使测量回放真的经过已 apply 的 plan（stereo 2.0 单点路径）。
 ///
 /// 只对 Remeasure / IndependentHoldout 生效；首次 sweep_capture 必须仍用 aplay
@@ -684,7 +684,7 @@ impl StageProtectionConfig {
 pub enum RemeasurePlayback {
     /// 既有 aplay 直放（bit-identical 行为）。
     Aplay,
-    /// tspi-rt-host plan-arena + file 输入（stereo 2.0 单点，2ch plan）。
+    /// khaen-rt-host plan-arena + file 输入（stereo 2.0 单点，2ch plan）。
     HostPlan,
 }
 
@@ -713,7 +713,7 @@ impl RemeasurePlayback {
 /// 本 crate 的 arecord 采集（与 acoustic-verify A/B 实验同一路径）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemeasureHostConfig {
-    /// tspi-rt-host 可执行文件（默认 env `TSPI_RT_HOST_BIN` 或 PATH 中 `tspi-rt-host`）。
+    /// khaen-rt-host 可执行文件（默认 env `TSPI_RT_HOST_BIN` 或 PATH 中 `khaen-rt-host`）。
     pub host_bin: PathBuf,
     /// host ALSA backend：`alsa`（真实 MOTU 播放/窗口）|`fake`（仅离线接线诊断，不打开设备，
     /// 因此产不出声音 → 保护门会如实失败，不得当真实测量）。
@@ -733,7 +733,7 @@ pub struct RemeasureHostConfig {
 impl Default for RemeasureHostConfig {
     fn default() -> Self {
         RemeasureHostConfig {
-            // 与 host_apply 同语义：env TSPI_RT_HOST_BIN 优先，否则 PATH 中 tspi-rt-host。
+            // 与 host_apply 同语义：env TSPI_RT_HOST_BIN 优先，否则 PATH 中 khaen-rt-host。
             host_bin: crate::host_apply::HostApplyConfig::default().host_bin,
             backend: "alsa".to_string(),
             capture_channels: 20,
@@ -1379,7 +1379,7 @@ impl StageBackendConfig {
 /// 先渲染成 `wav_path`（file 输入）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct HostPlanPlayback {
-    /// tspi-rt-host 可执行文件。
+    /// khaen-rt-host 可执行文件。
     pub host_bin: PathBuf,
     /// rt-host 配置文件路径（会话前写入 `config_text`）。
     pub config_path: PathBuf,
@@ -1410,7 +1410,7 @@ pub struct HostPlanPlayback {
 pub enum SessionPlayback {
     /// 既有 aplay 管道直放（默认；sweep_capture 固定走这里）。
     Aplay,
-    /// tspi-rt-host plan-arena 从 file 输入播放（remeasure/holdout 可选）。
+    /// khaen-rt-host plan-arena 从 file 输入播放（remeasure/holdout 可选）。
     HostPlan(HostPlanPlayback),
 }
 
@@ -2373,7 +2373,7 @@ impl ToolsEngine {
                 return Err(StageError::new(
                     E_PLAYBACK_FAILED,
                     format!(
-                        "host-plan: spawn {} 失败：{error}（离线需 --host-bin 指向已构建的 tspi-rt-host；板端为 /opt/tspi-rt-stack/current/bin/tspi-rt-host）",
+                        "host-plan: spawn {} 失败：{error}（离线需 --host-bin 指向已构建的 khaen-rt-host；板端为 /opt/tspi-rt-stack/current/bin/khaen-rt-host）",
                         spec.host_bin.display()
                     ),
                 ));
@@ -2786,14 +2786,14 @@ pub fn read_host_plan_geometry(bytes: &[u8]) -> Result<HostPlanGeometry, String>
         ])
     };
     let magic = u32_at(0);
-    if magic != tspi_dsp_core::abi::TSPI_PLAN_MAGIC {
+    if magic != khaen_core::abi::TSPI_PLAN_MAGIC {
         return Err(format!(
             "plan header.magic={magic:#010x} != TSPI_PLAN_MAGIC={:#010x}（不是 plan.bin）",
-            tspi_dsp_core::abi::TSPI_PLAN_MAGIC
+            khaen_core::abi::TSPI_PLAN_MAGIC
         ));
     }
     let abi_version = u16_at(4);
-    if !tspi_dsp_core::abi::plan_abi_supported(abi_version) {
+    if !khaen_core::abi::plan_abi_supported(abi_version) {
         return Err(format!(
             "plan header.abi_version={abi_version} 不被支持（只接受 ABI v1/v2）"
         ));

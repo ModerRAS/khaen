@@ -46,8 +46,8 @@
 use std::fmt;
 use std::fmt::Write as _;
 
-use tspi_dsp_core::abi::{TspiBlockDescV1, ABI_VERSION};
-use tspi_dsp_core::rt::{
+use khaen_core::abi::{TspiBlockDescV1, ABI_VERSION};
+use khaen_core::rt::{
     BLOCK_SIZES, MAX_INPUT_CHANNELS, MAX_OUTPUT_CHANNELS, MAX_OUTPUT_ROLES, SAMPLE_RATES_HZ,
 };
 
@@ -2097,7 +2097,7 @@ fn json_option_u32(value: Option<u32>) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// 单元测试（WBS T61：fake backend 样本逐段验证；cargo test -p tspi-calibration sweep）
+// 单元测试（WBS T61：fake backend 样本逐段验证；cargo test -p khaen-calibration sweep）
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]

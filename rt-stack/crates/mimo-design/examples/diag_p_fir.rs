@@ -10,11 +10,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_mimo_design::decay::{
+use khaen_mimo_design::decay::{
     bandpass_ir, candidate_b_target, fit_path_firs, ir_of_spectrum, t20_from_ir, BandSpec, Grid,
 };
-use tspi_mimo_design::fill::SinglePointH;
-use tspi_mimo_design::solve::Cx;
+use khaen_mimo_design::fill::SinglePointH;
+use khaen_mimo_design::solve::Cx;
 
 const FS: f64 = 48_000.0;
 const NFFT: usize = 131_072; // 2.73 s
@@ -339,7 +339,7 @@ fn run() -> Result<(), String> {
 fn spectrum_of(samples: &[f64]) -> Vec<Cx> {
     let mut re = samples.to_vec();
     let mut im = vec![0.0f64; samples.len()];
-    tspi_mimo_design::fir::fft_in_place(&mut re, &mut im);
+    khaen_mimo_design::fir::fft_in_place(&mut re, &mut im);
     (0..samples.len() / 2 + 1).map(|k| Cx::new(re[k], im[k])).collect()
 }
 

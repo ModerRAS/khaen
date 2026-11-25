@@ -1,6 +1,6 @@
 //! g-singlepoint-20261121 probe harness (OFFLINE, design-side only).
 //!
-//! 目的：用真实单点 5 执行器测量 H(f) 直接构造 tspi-modal-design 的 SolveProblem，
+//! 目的：用真实单点 5 执行器测量 H(f) 直接构造 khaen-modal-design 的 SolveProblem，
 //! 离线跑 T51 solve / T52 regularize（λ 扫描 + 固定白名单），输出 G、predicted residual、
 //! effort、L-curve 与适用边界；并演示 T54 artifact 状态门（INCOMPLETE 不得编译）。
 //!
@@ -10,7 +10,7 @@
 //! - 单点 P=1 < M=5 ⇒ regularize 的 deliverable 恒为 false（贫穷边界），本程序如实输出。
 //!
 //! 用法（在 rt-stack/ 下）：
-//!   cargo run --offline -p tspi-calibration --example g_singlepoint_probe -- solve \
+//!   cargo run --offline -p khaen-calibration --example g_singlepoint_probe -- solve \
 //!       --h evidence/.../h/H_complex.csv --out .../solve/preserve_sub1pos --tag preserve_sub1pos
 //!   cargo run ... -- solve --h ... --target .../target_probe_S2.csv --out ... --tag probe_s2
 //!   cargo run ... -- artifact-gate --out ...
@@ -20,15 +20,15 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tspi_calibration::compile_apply::ArtifactBinding;
-use tspi_calibration::measured_design::{build_measured_design, load_measured_spec};
-use tspi_modal_design::regularize::{
+use khaen_calibration::compile_apply::ArtifactBinding;
+use khaen_calibration::measured_design::{build_measured_design, load_measured_spec};
+use khaen_modal_design::regularize::{
     regularize, RegularizeOptions, RegularizeOutcome, WhitelistKind,
 };
-use tspi_modal_design::solve::{
+use khaen_modal_design::solve::{
     solve, SolveMode, SolveOptions, SolveOutcome, SolvePosition, SolveProblem,
 };
-use tspi_modal_design::timebase::ComplexPoint;
+use khaen_modal_design::timebase::ComplexPoint;
 
 const ROLES: [&str; 5] = ["FL", "FR", "SL", "SR", "SUB1"];
 

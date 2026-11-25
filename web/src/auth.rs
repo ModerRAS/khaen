@@ -1,6 +1,6 @@
 //! 认证与会话。
 //!
-//! - 默认 token 存在配置文件（/etc/tspi-audio-web/config.toml，0600）。
+//! - 默认 token 存在配置文件（/etc/khaen-audio-web/config.toml，0600）。
 //! - 浏览器登录后使用 HttpOnly + SameSite=Strict 会话 Cookie；
 //!   所有写操作（POST/PUT/PATCH/DELETE）必须带与会话绑定的 CSRF token。
 //! - 脚本/自动化可直接用 \`X-Auth-Token\` 或 \`Authorization: Bearer <token>\`，
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::AppConfig;
 use crate::error::AppError;
 
-pub const SESSION_COOKIE: &str = "tspi_session";
+pub const SESSION_COOKIE: &str = "khaen_session";
 pub const CSRF_HEADER: &str = "x-csrf-token";
 pub const TOKEN_HEADER: &str = "x-auth-token";
 pub const MAX_SESSIONS: usize = 64;
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn cookie_parse() {
-        let h = headers_with(&[("cookie", "a=1; tspi_session=deadbeef; b=2")]);
+        let h = headers_with(&[("cookie", "a=1; khaen_session=deadbeef; b=2")]);
         assert_eq!(cookie_value(&h, SESSION_COOKIE).unwrap(), "deadbeef");
         assert!(cookie_value(&h, "nope").is_none());
     }
@@ -512,7 +512,7 @@ mod tests {
         let ok = auth.login("test", "secret-token").unwrap();
         assert_eq!(ok.csrf_token.len(), 48);
         assert_eq!(ok.session_id.len(), 48);
-        let h = headers_with(&[("cookie", &format!("tspi_session={}", ok.session_id))]);
+        let h = headers_with(&[("cookie", &format!("khaen_session={}", ok.session_id))]);
         match auth.authenticate(&h).unwrap() {
             Authenticated::Session { csrf } => assert_eq!(csrf, ok.csrf_token),
             other => panic!("expected session, got {other:?}"),
@@ -638,7 +638,7 @@ mod tests {
     fn expired_session_rejected() {
         let auth = AuthState::new_for_test("secret-token", 0);
         let ok = auth.login("test", "secret-token").unwrap();
-        let h = headers_with(&[("cookie", &format!("tspi_session={}", ok.session_id))]);
+        let h = headers_with(&[("cookie", &format!("khaen_session={}", ok.session_id))]);
         // ttl=0 时 expires == created，视为已过期
         assert!(auth.authenticate(&h).is_err());
     }
@@ -647,7 +647,7 @@ mod tests {
     fn logout_removes_session() {
         let auth = AuthState::new_for_test("secret-token", 3600);
         let ok = auth.login("test", "secret-token").unwrap();
-        let h = headers_with(&[("cookie", &format!("tspi_session={}", ok.session_id))]);
+        let h = headers_with(&[("cookie", &format!("khaen_session={}", ok.session_id))]);
         assert_eq!(auth.session_count(), 1);
         auth.logout(&h);
         assert_eq!(auth.session_count(), 0);

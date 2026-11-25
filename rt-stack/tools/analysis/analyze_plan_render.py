@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """analyze_plan_render.py -- independent sample-level verification of the plan-arena chain.
 
-Reads the raw f32le files written by tspi-rt-host backend=fake + [sink] out:
+Reads the raw f32le files written by khaen-rt-host backend=fake + [sink] out:
   <dir>/render-identity.raw   2ch x frames  (graph=stereo_identity, containers=2)
   <dir>/render-plan.raw       8ch x frames  (graph=plan-arena, containers=8)
 and measures, per tone of the multitone WAV fixture:

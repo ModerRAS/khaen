@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""tspi-calibration/v1 与 v1.1 契约校验器（纯 Python + PyYAML；板端可跑）。
+"""khaen-calibration/v1 与 v1.1 契约校验器（纯 Python + PyYAML；板端可跑）。
 
 v1.1（2026-11-16，裁决 5）：filters[].type = peaking|low_shelf|high_shelf。
   peaking 的 q 为有限数且 ≥0.1（无上限，窄模态可 >10）；
@@ -34,8 +34,8 @@ except ImportError:
     sys.stderr.write("需要 PyYAML（Debian: python3-yaml）\n")
     sys.exit(2)
 
-SCHEMA = "tspi-calibration/v1"
-SCHEMA_V11 = "tspi-calibration/v1.1"
+SCHEMA = "khaen-calibration/v1"
+SCHEMA_V11 = "khaen-calibration/v1.1"
 SUPPORTED_SCHEMAS = (SCHEMA, SCHEMA_V11)
 NAME_RE = re.compile(r"^[A-Z][A-Z0-9]*$")
 TOP_KEYS = {"schema", "sample_rate", "reference_index", "layout", "created_unix",
@@ -315,7 +315,7 @@ def check_doc(doc, layout_presets=None):
 
 def main():
     ap = argparse.ArgumentParser(description=(
-        "tspi-calibration/v1 与 v1.1 校验器。"
+        "khaen-calibration/v1 与 v1.1 校验器。"
         "v1：仅 peaking，q ∈ [0.1,10]。"
         "v1.1：peaking 的 q ≥ 0.1（无上限）；"
         "low_shelf/high_shelf 的 q 是 RBJ slope S，必须在 [0.1,1.0]。"
@@ -332,7 +332,7 @@ def main():
         return 2
     c = check_doc(doc, args.layout_presets)
     ok = not c.errors and (not args.strict or not c.warnings)
-    out = {"schema": "tspi-calibration-validation/v1", "file": os.path.abspath(args.file),
+    out = {"schema": "khaen-calibration-validation/v1", "file": os.path.abspath(args.file),
            "ok": ok, "strict": bool(args.strict), "errors": c.errors, "warnings": c.warnings}
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))

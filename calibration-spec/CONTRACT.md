@@ -1,6 +1,6 @@
-# 校准 YAML 契约 tspi-calibration/v1
+# 校准 YAML 契约 khaen-calibration/v1
 
-> 状态：**设计侧规范 v1（2026-11-15）/ v1.1（2026-11-16）/ B2 口径修订（2026-11-17）**，由 upmix-dev 维护；Rust 实现（tspi-calibrate，projects/tspi-audio-dsp/calibrate/）由 audio-stack 主写。
+> 状态：**设计侧规范 v1（2026-11-15）/ v1.1（2026-11-16）/ B2 口径修订（2026-11-17）**，由 upmix-dev 维护；Rust 实现（khaen-calibrate，projects/tspi-audio-dsp/calibrate/）由 audio-stack 主写。
 > 2026-11-17 B2 修订（依据 `scratch/lead/doc-audit/CONSOLIDATED.md` C-13/15/16/17/18 与 B2 组 P1/P2）：修正 delay_samples 方向、补充验收入口与 holdout、注明校验器覆盖差异；字段语义不变。
 > 本目录只放契约、验收口径、校验脚本与 review，不改 calibrate/ 代码。
 > 变更规则：字段名/语义一旦发布不再改；新增只能 optional 并升 minor（v1.1），破坏性变更升 v2。
@@ -10,8 +10,8 @@
 校准链路分三段，本契约定义中间产物的格式与消费规则：
 
 ```
-测量（tspi-calibrate，Rust）
-  └─ 输出 tspi-calibration/v1 YAML（每通道 delay_samples / polarity / PEQ filters）
+测量（khaen-calibrate，Rust）
+  └─ 输出 khaen-calibration/v1 YAML（每通道 delay_samples / polarity / PEQ filters）
        ├─ 消费方 A：channelmap v2 profile roles[]（WebUI/渲染器）
        └─ 消费方 B：独立 CamillaDSP 配置（filter 链）
   └─ 应用后再测量（T3 必须，K4）+ holdout（T6）→ 按 ACCEPTANCE.md 验证（含合并响应/相位抵消）
@@ -27,12 +27,12 @@
 ## 2. 顶层结构
 
 ```yaml
-schema: tspi-calibration/v1      # 必填，常量；v1.1 写 tspi-calibration/v1.1（见 §10）
+schema: khaen-calibration/v1      # 必填，常量；v1.1 写 khaen-calibration/v1.1（见 §10）
 sample_rate: 48000               # 必填，Hz（48000 / 96000）
 reference_index: 0               # 必填；参考通道的播放通道号（channels[].index 之一）；推荐指向 delay_samples=0（到达最晚）的通道
 layout: "5.3.2"                  # 建议必填；layout-presets.yml 的 output_layouts id
 created_unix: 1794725000         # 建议；producer 写
-tool: {name: tspi-calibrate, version: "0.1.0"}   # 建议；也接受 tool: "tspi-calibrate" + 顶层 version: "0.1.0"
+tool: {name: khaen-calibrate, version: "0.1.0"}   # 建议；也接受 tool: "khaen-calibrate" + 顶层 version: "0.1.0"
 note: "2026-11-15 客厅 5.3.2，UMIK-1 90° 校准/麦轴朝天花板，甜点单点"   # 可选，人读
 measurement:                     # 可选（建议）；用于复现，不参与应用
   mode: direct                   # direct（推荐）| through_render
@@ -68,7 +68,7 @@ channels:                        # 必填，非空；每个目标输出角色一
 
 | 字段 | 类型 | 必填 | 约束/语义 |
 | --- | --- | --- | --- |
-| schema | string | 是 | v1 文件必须等于 `tspi-calibration/v1`；新文件为 `tspi-calibration/v1.1`（差异见 §10） |
+| schema | string | 是 | v1 文件必须等于 `khaen-calibration/v1`；新文件为 `khaen-calibration/v1.1`（差异见 §10） |
 | sample_rate | u32 | 是 | 48000/96000；其他值工具可接受但消费方应警告 |
 | reference_index | u32 | 是 | 参考通道的 `index`；必须存在于 channels[].index；**推荐指向 delay_samples=0 的通道**（否则校验器 warning；Rust 主入口待补，见 §5.1） |
 | layout | string | 建议 | layout-presets id；写了下游必须校验 name/index 与布局一致 |
@@ -174,7 +174,7 @@ role.peq        = render_role.peq + [{freq, q, gain_db, type?} for f in filters]
 - 板端 `tspi-channelmap` 的 `peq` 支持 `type`（白名单 `peaking|low_shelf|high_shelf`，未知 type rc=2 拒绝整份 profile）。
   `q` 界限按 type 分流：peaking `[0.1, 10]`（channelmap 不接受 v1.1 契约里 peaking q>10，那种窄模态走 §4.2 片段）；
   shelf `[0.1, 1.0]`（越界 rc=3，不产文件）。渲染映射见 §4.2。
-- **q>10 的分裂（P2-8）**：v1.1 契约允许 peaking `q>10`，`tspi-calibrate validate` 会 PASS；但 channelmap 路线整份拒绝，
+- **q>10 的分裂（P2-8）**：v1.1 契约允许 peaking `q>10`，`khaen-calibrate validate` 会 PASS；但 channelmap 路线整份拒绝，
   该文件**只能走 §4.2 CamillaDSP 片段路径**。Python 校验器对 q>10 给 warning；报告必须写清消费路径。
 - `channels[].index` 是 MOTU 物理通道号（0-based），必须与本次运行态 mapping 一致；不是容器槽位号。
 - 渲染器验证：`tspi-channelmap validate/render` 必须通过。
@@ -217,7 +217,7 @@ Mixer → [HP/LP 分频] → Peaking×N（按文件顺序）→ Gain(role_gain+g
 
 ### 5.1 校验器覆盖差异（C-P1-7，2026-11-17）
 
-主入口 `tspi-calibrate validate`（Rust）与独立复核 `tools/validate_calibration.py`（Python）**并非全规则一致**：
+主入口 `khaen-calibrate validate`（Rust）与独立复核 `tools/validate_calibration.py`（Python）**并非全规则一致**：
 
 | 规则 | Rust 主入口 | Python 独立复核 |
 | --- | --- | --- |
@@ -232,14 +232,14 @@ Mixer → [HP/LP 分频] → Peaking×N（按文件顺序）→ Gain(role_gain+g
 | measurement.render_offsets | ❌（不校验） | ✅ |
 | q>10 的 channelmap 不可用 warning（v1.1） | ❌ | ✅ |
 
-因此 **T0 = Rust 主入口 + Python 独立复核都通过**；在 Rust 补齐上述规则前，不得只凭 `tspi-calibrate validate` 签 T0。
+因此 **T0 = Rust 主入口 + Python 独立复核都通过**；在 Rust 补齐上述规则前，不得只凭 `khaen-calibrate validate` 签 T0。
 `review/CALIBRATE-V11-VALIDATOR-RECEIPT.md` 的“一致”结论只覆盖已测 schema/type/q/freq 类用例。
 
 ## 6. 与现有 Rust 草稿（calibrate/src/model.rs）的差异
 
 | 契约 | 草稿现状 | 需要的最小改动 |
 | --- | --- | --- |
-| schema/sample_rate/reference_index | 已有 | schema 值改为 `tspi-calibration/v1`；顶层加 tool/created_unix（可选） |
+| schema/sample_rate/reference_index | 已有 | schema 值改为 `khaen-calibration/v1`；顶层加 tool/created_unix（可选） |
 | channels[].name | 无（只有 index） | 加 `name: String`（角色 id） |
 | delay_samples: i64 ≥0 | 已有 i64 | merge 写 `round(max t - t_i)` 并归一 min=0；fit（单通道）写 0（中间产物，待 merge 归一），方向定义见 §3.1 |
 | polarity: normal/invert | 已改 String | 已符合 |
@@ -268,7 +268,7 @@ Mixer → [HP/LP 分频] → Peaking×N（按文件顺序）→ Gain(role_gain+g
 
 ```bash
 # 主入口（Rust；producer 自带）
-tspi-calibrate validate examples/calibration-5.3.2.example.yml
+khaen-calibrate validate examples/calibration-5.3.2.example.yml
 # 独立复核（Python）
 python3 tools/validate_calibration.py examples/calibration-5.3.2.example.yml \
   --layout-presets /etc/tspi-audio/layout-presets.yml
@@ -284,7 +284,7 @@ python3 tools/validate_calibration.py examples/calibration-5.3.2.example.yml \
 
 ## 10. v1.1（2026-11-16）
 
-新写出的校准文件使用 `schema: tspi-calibration/v1.1`。v1 文件仍按旧规则校验。
+新写出的校准文件使用 `schema: khaen-calibration/v1.1`。v1 文件仍按旧规则校验。
 
 | 项 | v1 | v1.1 |
 | --- | --- | --- |
@@ -299,11 +299,11 @@ v1.1 的 peaking `q>10` 在契约内合法（validate PASS），但 **channelmap
 
 「架滤波器最多各一段」是 producer 端约定（`fit`/`merge` 的 `peq::maybe_shelves` 自动满足），两个校验器都不强制：消费方不得据此假设最多一段，应按 §4 追加所有已知 type 的 biquad。
 
-校验入口：`tspi-calibrate validate` 为主入口（producer 自带、板端可跑）；Python 校验器保留为独立复核（支持 v1/v1.1，不依赖 Rust 二进制，可加 `--layout-presets` 做映射交叉校验）：
+校验入口：`khaen-calibrate validate` 为主入口（producer 自带、板端可跑）；Python 校验器保留为独立复核（支持 v1/v1.1，不依赖 Rust 二进制，可加 `--layout-presets` 做映射交叉校验）：
 
 ```bash
-tspi-calibrate validate calibration.yml
-tspi-calibrate check-pair --dir results --calibration calibration.yml --pairs FL:SUB1:80
+khaen-calibrate validate calibration.yml
+khaen-calibrate check-pair --dir results --calibration calibration.yml --pairs FL:SUB1:80
 # 独立复核（Python）
 python3 calibration-spec/tools/validate_calibration.py calibration.yml \
   --layout-presets /etc/tspi-audio/layout-presets.yml

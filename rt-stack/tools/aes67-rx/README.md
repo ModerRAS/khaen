@@ -20,7 +20,7 @@ sender-host NSP (4.1.2, L24/48k, 7ch, 1ms) --RTP/UDP 单播 192.0.2.222:5004-->
 # 1) 解析/校验 SDP
 aes67-rx sdp-info --sdp aes67.sdp
 
-# 2) 接收真实流（先 systemctl stop tspi-rt-host 独占 MOTU）
+# 2) 接收真实流（先 systemctl stop khaen-rt-host 独占 MOTU）
 aes67-rx run --sdp aes67.sdp --duration-secs 20 --mlock     --report /root/aes67-rx/evidence/run.json
 
 # 3) 本机自测（自带 RTP 发送端，1 kHz/通道，写 MOTU）
