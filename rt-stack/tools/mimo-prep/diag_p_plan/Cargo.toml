@@ -1,5 +1,7 @@
 [package]
 name = "khaen-mimo-diag-plan"
+license = "GPL-3.0-only"
+description = "Diagnostic plan builder for low-frequency MIMO experiments"
 version = "0.1.0"
 edition = "2021"
 publish = false

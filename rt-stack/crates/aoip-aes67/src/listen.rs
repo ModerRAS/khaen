@@ -476,11 +476,11 @@ mod tests {
         assert!(empty.is_empty());
         assert_eq!(empty.describe(), "0.0.0.0（所有接口）");
         let single =
-            ReceiverInterfaces::try_from_addresses(&[Ipv4Addr::new(192, 168, 63, 222)]).expect("1");
+            ReceiverInterfaces::try_from_addresses(&[Ipv4Addr::new(192, 0, 2, 222)]).expect("1");
         assert_eq!(single.len(), 1);
-        assert_eq!(single.primary(), Some(Ipv4Addr::new(192, 168, 63, 222)));
+        assert_eq!(single.primary(), Some(Ipv4Addr::new(192, 0, 2, 222)));
         let dual = ReceiverInterfaces::try_from_addresses(&[
-            Ipv4Addr::new(192, 168, 63, 222),
+            Ipv4Addr::new(192, 0, 2, 222),
             Ipv4Addr::new(10, 0, 0, 5),
         ])
         .expect("2");
@@ -528,9 +528,9 @@ mod tests {
         assert!(allow.contains(Ipv4Addr::new(239, 69, 16, 146)));
         assert!(!allow.contains(Ipv4Addr::new(239, 69, 16, 148)));
         assert_eq!(
-            GroupAllow::try_from_groups(&[Ipv4Addr::new(192, 168, 63, 222)]),
+            GroupAllow::try_from_groups(&[Ipv4Addr::new(192, 0, 2, 222)]),
             Err(ListenConfigError::NotMulticastGroup {
-                address: Ipv4Addr::new(192, 168, 63, 222)
+                address: Ipv4Addr::new(192, 0, 2, 222)
             })
         );
         assert_eq!(
@@ -548,8 +548,8 @@ mod tests {
     fn ipv4_cidr_parse_and_match() {
         let cidr = Ipv4Cidr::parse("192.0.2.0/24").expect("cidr");
         assert_eq!(cidr.prefix_len(), 24);
-        assert_eq!(cidr.network(), Ipv4Addr::new(192, 168, 63, 0));
-        assert!(cidr.contains(Ipv4Addr::new(192, 168, 63, 222)));
+        assert_eq!(cidr.network(), Ipv4Addr::new(192, 0, 2, 0));
+        assert!(cidr.contains(Ipv4Addr::new(192, 0, 2, 222)));
         assert!(!cidr.contains(Ipv4Addr::new(192, 168, 64, 1)));
         // 主机位自动清零。
         let host = Ipv4Cidr::parse("192.0.2.222/24").expect("host cidr");
@@ -557,8 +557,8 @@ mod tests {
         // 无前缀 = /32。
         let single = Ipv4Cidr::parse("192.0.2.222").expect("single");
         assert_eq!(single.to_string(), "192.0.2.222/32");
-        assert!(single.contains(Ipv4Addr::new(192, 168, 63, 222)));
-        assert!(!single.contains(Ipv4Addr::new(192, 168, 63, 223)));
+        assert!(single.contains(Ipv4Addr::new(192, 0, 2, 222)));
+        assert!(!single.contains(Ipv4Addr::new(192, 0, 2, 223)));
         // /0 = 全放行。
         let any = Ipv4Cidr::parse("0.0.0.0/0").expect("any");
         assert!(any.contains(Ipv4Addr::new(8, 8, 8, 8)));
@@ -585,11 +585,11 @@ mod tests {
         ])
         .expect("allow");
         assert_eq!(allow.len(), 2);
-        assert!(allow.contains(Ipv4Addr::new(192, 168, 63, 10)));
-        assert!(allow.contains(Ipv4Addr::new(192, 168, 63, 222)));
+        assert!(allow.contains(Ipv4Addr::new(192, 0, 2, 10)));
+        assert!(allow.contains(Ipv4Addr::new(192, 0, 2, 222)));
         assert!(!allow.contains(Ipv4Addr::new(10, 0, 0, 1)));
         assert!(!allow.contains_ip(IpAddr::V6("::1".parse().expect("v6"))));
-        assert!(allow.contains_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 63, 10))));
+        assert!(allow.contains_ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))));
         assert_eq!(
             SourceAllow::try_from_cidrs(&[
                 Ipv4Cidr::parse("192.0.2.0/24").expect("a"),

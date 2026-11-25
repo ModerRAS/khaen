@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: build, test and contract checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rt-stack
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rt-stack
+
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Contract checks (ABI layout)
+        run: cargo run -q -p khaen-rt-check -- abi-layout
+
+      - name: Contract checks (forbidden calls)
+        run: cargo run -q -p khaen-rt-check -- forbid
+
+      - name: Contract checks (drop audit)
+        run: cargo run -q -p khaen-rt-check -- drop-audit

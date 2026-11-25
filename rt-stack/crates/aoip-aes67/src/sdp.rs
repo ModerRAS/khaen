@@ -1120,7 +1120,7 @@ a=comment:layout=4.1.2\r\n";
         };
         assert_eq!(mac, [0x02, 0x4E, 0x53, 0x50, 0x00, 0x01]);
         let connection = session.connection().expect("connection");
-        assert_eq!(connection.ipv4(), Ipv4Addr::new(192, 168, 63, 222));
+        assert_eq!(connection.ipv4(), Ipv4Addr::new(192, 0, 2, 222));
         assert!(!connection.is_multicast());
         session
             .validate_media_profile()
@@ -1297,18 +1297,18 @@ a=mediaclk:direct=0\r\n";
         assert_eq!(origin.username, "nsp");
         assert_eq!(origin.session_id, 1_311_738_121);
         assert_eq!(origin.session_version, 7);
-        assert_eq!(origin.ipv4(), Ipv4Addr::new(192, 168, 63, 222));
+        assert_eq!(origin.ipv4(), Ipv4Addr::new(192, 0, 2, 222));
         assert_eq!(session.media.framecount, Some(48));
         assert_eq!(session.media.channel_order, Some("SMPTE2110.(71)"));
         let filter = session.media.source_filter.expect("source-filter");
         assert!(filter.include);
         assert_eq!(filter.destination, Ipv4Addr::new(239, 69, 1, 1));
-        assert_eq!(filter.source, Ipv4Addr::new(192, 168, 63, 222));
+        assert_eq!(filter.source, Ipv4Addr::new(192, 0, 2, 222));
         assert_eq!(session.media.direction, Direction::SendOnly);
         assert_eq!(session.direction(), Direction::SendOnly);
         assert_eq!(
             session.origin_address(),
-            Some(Ipv4Addr::new(192, 168, 63, 222))
+            Some(Ipv4Addr::new(192, 0, 2, 222))
         );
         session
             .validate_media_profile()

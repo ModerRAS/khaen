@@ -2,10 +2,11 @@
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-file-runner"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "TSPI file runner：文件输入驱动 core plan（T06 scaffold；leaf T14）"
+description = "File-input runner that drives a compiled plan outside real time"
 
 [dependencies]
 khaen-core = { workspace = true }

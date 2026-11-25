@@ -3,7 +3,7 @@ name = "khaen-audio-web"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-description = "泰山派3M（RK3576）音频 DSP 设备 Web 管理服务"
+description = "Web console for the audio DSP host"
 license = "GPL-3.0-only"
 
 [dependencies]

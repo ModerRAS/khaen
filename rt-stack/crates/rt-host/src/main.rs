@@ -16677,7 +16677,7 @@ a=mediaclk:direct=0\n",
         // 单个 IPv4 / 逗号列表 / 单行 TOML 数组。
         let single = parse_aes67_iface("192.0.2.222").expect("单 IPv4");
         assert_eq!(single.len(), 1);
-        assert_eq!(single.primary(), Some(T239Ipv4Addr::new(192, 168, 63, 222)));
+        assert_eq!(single.primary(), Some(T239Ipv4Addr::new(192, 0, 2, 222)));
         let list = parse_aes67_iface("192.0.2.222, 10.0.0.5").expect("逗号列表");
         assert_eq!(list.len(), 2);
         let array = parse_aes67_iface("[\"192.0.2.222\", \"10.0.0.5\"]").expect("单行数组");
@@ -16737,7 +16737,7 @@ a=mediaclk:direct=0\n",
         let sources =
             parse_aes67_source_allow("192.0.2.0/24, 192.0.2.222").expect("来源列表");
         assert_eq!(sources.len(), 2);
-        assert!(sources.contains(T239Ipv4Addr::new(192, 168, 63, 10)));
+        assert!(sources.contains(T239Ipv4Addr::new(192, 0, 2, 10)));
         assert!(!sources.contains(T239Ipv4Addr::new(10, 0, 0, 1)));
         let bad_cidr = parse_aes67_source_allow("192.0.2.0/33").expect_err("前缀越界");
         assert!(bad_cidr.contains("aes67_source_allow"), "{bad_cidr}");
@@ -16764,7 +16764,7 @@ a=mediaclk:direct=0\n",
             .contains(T239Ipv4Addr::new(239, 69, 3, 1)));
         assert!(plan.receiver_configs[0]
             .source_allow
-            .contains(T239Ipv4Addr::new(192, 168, 63, 10)));
+            .contains(T239Ipv4Addr::new(192, 0, 2, 10)));
         // 组白名单未命中 → 启动 fail-closed（错误信息含 SDP 组与允许列表）。
         let cfg_miss = t239_userspace_config(
             &sdp,

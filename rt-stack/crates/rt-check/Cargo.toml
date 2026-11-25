@@ -2,10 +2,11 @@
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-rt-check"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "TSPI offline contract checker CLI：ABI 布局 / RT 禁止行为 / 无析构审计（T06 scaffold）"
+description = "Offline contract checker: ABI layout, forbidden calls and destructor audits"
 
 [lib]
 name = "khaen_rt_check"

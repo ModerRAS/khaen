@@ -381,7 +381,7 @@ mod tests {
 
     fn unicast_connection() -> Connection {
         Connection {
-            address: [192, 168, 63, 222],
+            address: [192, 0, 2, 222],
             ttl: None,
         }
     }
@@ -408,7 +408,7 @@ mod tests {
             channel_order: Some("SMPTE2110.(71)".to_string()),
             source_filter: Some(SourceFilter {
                 destination: Ipv4Addr::new(239, 69, 1, 1),
-                source: Ipv4Addr::new(192, 168, 63, 222),
+                source: Ipv4Addr::new(192, 0, 2, 222),
                 include: true,
             }),
         }
@@ -416,7 +416,7 @@ mod tests {
 
     fn aes67_8ch_description() -> SdpDescription {
         SdpDescription::new(
-            SdpOrigin::new(1_311_738_121, 1, Ipv4Addr::new(192, 168, 63, 222)),
+            SdpOrigin::new(1_311_738_121, 1, Ipv4Addr::new(192, 0, 2, 222)),
             "NativeSpatialPipe AES67 output flow0",
             multicast_connection(),
             aes67_8ch_media(),
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(origin.username, "-");
         assert_eq!(origin.session_id, 1_311_738_121);
         assert_eq!(origin.session_version, 1);
-        assert_eq!(origin.ipv4(), Ipv4Addr::new(192, 168, 63, 222));
+        assert_eq!(origin.ipv4(), Ipv4Addr::new(192, 0, 2, 222));
         assert_eq!(session.name, Some("NativeSpatialPipe AES67 output flow0"));
         let connection = session.connection().expect("c=");
         assert_eq!(connection.ipv4(), Ipv4Addr::new(239, 69, 1, 1));
@@ -480,7 +480,7 @@ mod tests {
         let filter = media.source_filter.expect("source-filter");
         assert!(filter.include);
         assert_eq!(filter.destination, Ipv4Addr::new(239, 69, 1, 1));
-        assert_eq!(filter.source, Ipv4Addr::new(192, 168, 63, 222));
+        assert_eq!(filter.source, Ipv4Addr::new(192, 0, 2, 222));
         session
             .validate_media_profile()
             .expect("写出的 AES67 8ch/L24/1ms SDP 必须通过媒体 profile 门");
@@ -502,7 +502,7 @@ mod tests {
         media.source_filter = None;
         media.direction = Direction::SendOnly;
         let description = SdpDescription::new(
-            SdpOrigin::new(42, 3, Ipv4Addr::new(192, 168, 63, 222)),
+            SdpOrigin::new(42, 3, Ipv4Addr::new(192, 0, 2, 222)),
             "44.1k corrected flow",
             unicast_connection(),
             media,
@@ -544,7 +544,7 @@ mod tests {
         media.port = 5_006;
         media.payload_type = 97;
         let description = SdpDescription::new(
-            SdpOrigin::new(7, 2, Ipv4Addr::new(192, 168, 63, 222)),
+            SdpOrigin::new(7, 2, Ipv4Addr::new(192, 0, 2, 222)),
             "recvonly monitoring flow",
             unicast_connection(),
             media,
@@ -694,7 +694,7 @@ mod tests {
         let mut description = base.clone();
         description.media.source_filter = Some(SourceFilter {
             destination: Ipv4Addr::new(239, 9, 9, 9),
-            source: Ipv4Addr::new(192, 168, 63, 222),
+            source: Ipv4Addr::new(192, 0, 2, 222),
             include: true,
         });
         assert_eq!(

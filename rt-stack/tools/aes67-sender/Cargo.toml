@@ -12,7 +12,7 @@ name = "aes67-sender"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Windows user-space AES67 L24/48k RTP sender (WASAPI loopback / WAV / raw PCM / sine) + minimal Rust receiver for loopback self-check"
+description = "User-space AES67 RTP sender (WASAPI loopback, WAV, raw PCM, sine) with a minimal reference receiver"
 license = "GPL-3.0-only"
 
 [dependencies]

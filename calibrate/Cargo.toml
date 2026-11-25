@@ -3,7 +3,7 @@ name = "khaen-calibrate"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-description = "泰山派3M 实时音频链路：多声道扬声器延迟/相位/PEQ 校准工具"
+description = "Speaker calibration: multi-channel delay, polarity and parametric EQ"
 license = "GPL-3.0-only"
 
 [dependencies]

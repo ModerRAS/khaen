@@ -2,10 +2,11 @@
 # 纯离线工具，零外部依赖；不接触音频设备。
 [package]
 name = "khaen-mimo-opt"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "Offline CLI: RoomForge MIMO fixtures -> B0/B1/B2/B3 FIR design -> metrics report"
+description = "Offline MIMO FIR optimizer: fixtures in, candidate bank out, metrics report"
 
 [dependencies]
 khaen-room-sim = { workspace = true }

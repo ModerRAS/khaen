@@ -151,6 +151,7 @@ fn t64_channel_input(
     (input, channel)
 }
 
+#[ignore = "requires measurement evidence fixtures that are not shipped in the public repository"]
 #[test]
 fn t64_target_aware_recovery_flat_on_reconstructed_job0001_modal_curve() {
     let (freqs, measured) = t64_reconstructed_modal_curve();
@@ -242,6 +243,7 @@ fn t64_target_aware_recovery_flat_on_reconstructed_job0001_modal_curve() {
     assert_eq!(report, report_again, "recovery must be deterministic");
 }
 
+#[ignore = "requires measurement evidence fixtures that are not shipped in the public repository"]
 #[test]
 fn t64_target_aware_recovery_not_triggered_for_tilt10() {
     let (freqs, measured) = t64_reconstructed_modal_curve();
@@ -268,6 +270,7 @@ fn t64_target_aware_recovery_not_triggered_for_tilt10() {
     assert_eq!(report.candidates_tried, 0);
 }
 
+#[ignore = "requires measurement evidence fixtures that are not shipped in the public repository"]
 #[test]
 fn t64_target_aware_recovery_unresolved_keeps_fail() {
     let (freqs, mut measured) = t64_reconstructed_modal_curve();
@@ -360,6 +363,7 @@ fn t64_fit_measured_spec(
     fit_peq(&request).expect("fit measured design")
 }
 
+#[ignore = "requires measurement evidence fixtures that are not shipped in the public repository"]
 #[test]
 fn t64_measured_dual_target_flat_and_tilt10_with_real_analysis() {
     let fl = t64_repo_evidence("board-window-20261118-calib/session-B/tool/FL-ch00.analysis.json");

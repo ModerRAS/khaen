@@ -1,5 +1,7 @@
 [package]
 name = "khaen-mimo-fir"
+license = "GPL-3.0-only"
+description = "MIMO FIR building blocks shared by the MIMO design tools"
 version = "0.1.0"
 edition = "2021"
 

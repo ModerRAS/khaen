@@ -5,10 +5,11 @@
 # integrator 独占的根 Cargo.toml 增行（task-235 最小接线，见 evidence/aes67-rx-proto/）。
 [package]
 name = "khaen-aoip-aes67"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "TSPI 自研用户态 AES67 接收端原型：SDP/RTP L24/抖动缓冲/媒体时钟/capture 固定块（task-235；离线验证，板端 NOT_RUN）"
+description = "AES67 receiver: SDP, RTP, jitter buffer, media clock and fixed-size capture blocks"
 
 [dependencies]
 

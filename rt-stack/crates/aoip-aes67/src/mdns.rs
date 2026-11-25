@@ -1602,7 +1602,7 @@ mod tests {
             "Line 1",
             name("tspi-aes67-1.local."),
             8854,
-            Ipv4Addr::new(192, 168, 63, 94),
+            Ipv4Addr::new(192, 0, 2, 94),
         )
         .expect("service")
     }
@@ -1713,7 +1713,7 @@ mod tests {
         // 空 TXT = 单个空串（RFC 6763 §6.1 L637-649）。
         assert_eq!(strings, &vec![Vec::<u8>::new()]);
         let a = additionals.iter().find(|r| r.rtype == TYPE_A).expect("a");
-        assert_eq!(a.rdata, RData::A(Ipv4Addr::new(192, 168, 63, 94)));
+        assert_eq!(a.rdata, RData::A(Ipv4Addr::new(192, 0, 2, 94)));
         // 名字与实例名（OP §3.5.2.1：<session name>._rtsp._tcp）。
         let instance = service.instance_name().expect("instance");
         assert_eq!(instance.to_absolute(), "Line 1._rtsp._tcp.local.");
@@ -1730,7 +1730,7 @@ mod tests {
             RavennaNodeService::Rtsp,
             name("tspi-aes67-1.local."),
             8854,
-            Ipv4Addr::new(192, 168, 63, 94),
+            Ipv4Addr::new(192, 0, 2, 94),
         )
         .expect("node");
         assert!(node
@@ -1742,7 +1742,7 @@ mod tests {
             RavennaNodeService::Http,
             name("tspi-aes67-1.local."),
             8080,
-            Ipv4Addr::new(192, 168, 63, 94),
+            Ipv4Addr::new(192, 0, 2, 94),
         )
         .expect("http node");
         assert_eq!(http.service_type.to_absolute(), SERVICE_HTTP_TCP);
@@ -1798,7 +1798,7 @@ mod tests {
         assert_eq!(instance.service_type, "_rtsp._tcp.local.");
         assert_eq!(instance.host, "tspi-aes67-1.local.");
         assert_eq!(instance.port, 8854);
-        assert_eq!(instance.addresses, vec![Ipv4Addr::new(192, 168, 63, 94)]);
+        assert_eq!(instance.addresses, vec![Ipv4Addr::new(192, 0, 2, 94)]);
         assert!(instance.ttl_remaining_s > 0);
         // 过期：PTR TTL = 4500 s → 4500_000 ms 后消失；主机记录 120 s 先过期不影响 PTR 枚举。
         assert!(cache
@@ -1911,7 +1911,7 @@ mod tests {
         assert_eq!(instances[0].port, 8854);
         assert_eq!(
             instances[0].addresses,
-            vec![Ipv4Addr::new(192, 168, 63, 94)]
+            vec![Ipv4Addr::new(192, 0, 2, 94)]
         );
         assert!(advertiser.announces_sent() >= 2);
         browser.stop();

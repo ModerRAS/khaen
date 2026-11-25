@@ -2,10 +2,11 @@
 # host 要调用 fit_peq / deconvolve，又不能和 khaen-calibration 互相依赖。
 [package]
 name = "khaen-cal-dsp"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "校准反卷积与 PEQ 拟合（不依赖 rt-host）"
+description = "Deconvolution and parametric-EQ fitting, independent of the real-time host"
 
 [dependencies]
 khaen-core = { workspace = true }

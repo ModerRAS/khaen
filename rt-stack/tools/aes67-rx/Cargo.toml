@@ -9,10 +9,11 @@
 # （测试窗口 systemctl stop khaen-rt-host）。
 [package]
 name = "khaen-aes67-rx"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "dsp-host AES67 用户态接收端运行二进制（L24/48k 7ch → MOTU 22ch S24_3LE；RT 线程/零分配/统计）"
+description = "AES67 receive-and-play binary: L24 at 48 kHz, 7 to 22 channels, real-time and allocation-free"
 
 [[bin]]
 name = "aes67-rx"

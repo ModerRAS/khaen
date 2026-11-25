@@ -2,10 +2,11 @@
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-compat"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "TSPI 兼容适配层：calibration / WS / roles / channel-map（T06 scaffold；leaf T13/T24/T25/T57）"
+description = "Compatibility layer: calibration profiles, WebSocket, roles and channel maps"
 
 [dependencies]
 khaen-core = { workspace = true }

@@ -2,10 +2,11 @@
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-calibration"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "TSPI 校准 daemon：job / sweep / capture / fit / compile-apply（T06 scaffold；leaf T60-T66）"
+description = "Calibration engine: jobs, sweeps, microphone capture, fitting and plan compilation"
 
 [dependencies]
 khaen-core = { workspace = true }

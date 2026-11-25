@@ -2,10 +2,11 @@
 # WBS T06 scaffold；本 manifest 只由 integrator 写。
 [package]
 name = "khaen-rt-host"
+license = "GPL-3.0-only"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "TSPI RT host：SPSC / admission / clock / swap / format / fault scaffold（T06；leaf T16-T22/T43/T45/T26）"
+description = "Real-time audio host: single device owner, worker DAG, plan arena and fault containment"
 
 [dependencies]
 khaen-core = { workspace = true }

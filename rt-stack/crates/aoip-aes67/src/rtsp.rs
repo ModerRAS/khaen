@@ -1494,7 +1494,7 @@ mod tests {
 
     fn test_sdp() -> String {
         let description = SdpDescription::new(
-            SdpOrigin::new(1311738121, 1, Ipv4Addr::new(192, 168, 63, 222)),
+            SdpOrigin::new(1311738121, 1, Ipv4Addr::new(192, 0, 2, 222)),
             "RTSP test session",
             Connection {
                 address: Ipv4Addr::new(239, 69, 1, 1).octets(),
