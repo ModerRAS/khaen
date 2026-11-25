@@ -1,8 +1,10 @@
+# 低频 MIMO 优化（离线设计层：仿真 H(f) → B0/B1/B2/B3 → 每源 FIR + spec 口径指标）。
+# SIMULATED / SYNTHETIC ONLY：不参与实时路径、不接触真实测量。
 [package]
 name = "khaen-mimo-design"
+description = "Offline low-frequency MIMO FIR design: solver, measurement quality gate, authority weighting and safety limits"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "MIMO matrix design: solver, measurement quality gate, authority weighting and safety limits"
 
 [dependencies]

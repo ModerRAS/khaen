@@ -1,8 +1,18 @@
+# KHAEN 离线契约检查 CLI（ABI 布局 / 禁止调用 / 析构审计；WBS T06 迁入）。
+# 纯 std、零外部依赖：不参与 RT 路径，可在任意控制区/CI 运行。
 [package]
 name = "khaen-rt-check"
+description = "Offline contract checker: ABI layout, forbidden calls and destructor audits"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Offline contract checker: ABI layout, forbidden calls and destructor audits"
+
+[lib]
+name = "khaen_rt_check"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rt-check"
+path = "src/main.rs"
 
 [dependencies]
