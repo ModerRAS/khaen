@@ -1,0 +1,9 @@
+[package]
+name = "khaen-plan-builder"
+description = "Assemble plan ABI v3 files from design and calibration outputs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+khaen-core = { path = "../core" }

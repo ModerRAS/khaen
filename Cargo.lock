@@ -298,6 +298,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "khaen-plan-builder"
+version = "0.1.0"
+dependencies = [
+ "khaen-core",
+]
+
+[[package]]
 name = "khaen-room-sim"
 version = "0.1.0"
 
