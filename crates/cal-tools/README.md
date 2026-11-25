@@ -198,3 +198,24 @@ JSON，可直接喂给 `khaen-closed-loop --predicted`。
 - 清单与三份文件的 sha256 让真机结果可复现、可回滚核对：同输入两次运行四份文件逐字节相同。
 - ⚠ 诚实边界：本工具只做离线判定与证据打包；真机采集、方案下发、回滚执行仍是 T42 设备侧
   流程（NOT_RUN，需要出声窗口与设备许可）。
+
+---
+
+# khaen-fir-plan（mimo FIR → 方案文件，离线）
+
+把 mimo 单点求解产出的时域冲激响应（`fir/*.csv`，每行一个抽头）编译成 plan ABI v3
+方案文件：crossover 段承载每 lane 的 FIR，内容/矩阵/保护/路由保持恒等。这样 mimo 的质量门、
+权威加权、安全钳位结果第一次成为**可下发、可预测、可回滚**的方案，而不是只活在报告里。
+
+    khaen-fir-plan --fir lane0.csv [--fir lane1.csv ...] --out plan.bin \
+        --sample-rate 48000 [--block-size 128] [--channels N]
+
+- 第 i 个 `--fir` 对应 lane i（从 0 开始）；未给出的 lane 保持恒等直通，`--channels` 默认等于
+  `--fir` 个数（可显式调大以保留恒等 lane）。
+- CSV：空行与 `#` 开头的注释行跳过，其余每行一个抽头（兼容 mimo `fir_csv` 格式）。
+- 输出确定性：同输入逐字节相同的方案文件、sha256 与 graph_id；方案可被 host 准入与图编译接受。
+- 预测侧联动：`khaen-plan-levels` 现在会把 crossover FIR 的幅度计入预测电平（未给 FIR 的
+  lane 记 0 dB），所以 `mimo FIR → plan → predicted` 是一条可闭环的链。
+- 退出码：0 成功 / 2 输入或配置错误（E_USAGE / E_IO / E_INPUT / E_FIR_PLAN_*） / 1 写失败。
+- ⚠ 诚实边界：FIR 只按**幅度**参与预测；因果 FIR 的群延迟不改变幅度，但真机对齐/相时需要
+  另行处理。FIR 的来源（合成场景或真机测量）与真机下发仍是 T42 设备侧流程（NOT_RUN）。

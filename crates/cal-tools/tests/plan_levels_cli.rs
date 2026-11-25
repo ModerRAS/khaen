@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use khaen_core::plan::{CrossoverFilter, Plan, ProtectionEntry, ProtectionSection};
+use khaen_core::plan::{MatrixSection, Plan, ProtectionEntry, ProtectionSection};
 use khaen_plan_builder::{PlanBuilder, PlanConfig};
 
 const BIN: &str = env!("CARGO_BIN_EXE_khaen-plan-levels");
@@ -214,18 +214,56 @@ fn usage_and_input_errors_exit_two() {
 }
 
 #[test]
-fn non_identity_plan_is_rejected() {
-    let root = temp_dir("identity");
+fn crossover_fir_plan_is_accepted_and_contributes() {
+    let root = temp_dir("crossover");
     let plan = PlanBuilder::new(PlanConfig::new(128, RATE, 1))
         .set_content_identity(1)
         .set_crossover_filters(
             1,
-            vec![CrossoverFilter {
+            vec![khaen_core::plan::CrossoverFilter {
                 lane: 0,
-                coeffs: vec![0.5, 0.5],
+                coeffs: vec![2.0],
             }],
         )
         .set_matrix_identity(1)
+        .set_protection(ProtectionSection {
+            lanes: 1,
+            entries: vec![entry(0, 0.0, vec![])],
+        })
+        .set_routing_identity(1)
+        .build()
+        .expect("plan");
+    let path = root.join("plan.bin");
+    std::fs::write(&path, plan.encode_checked().expect("encode")).expect("write");
+    let out = root.join("levels.json");
+    let result = run(&[
+        "--plan",
+        path.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+        "--centers",
+        "100,1000",
+    ]);
+    assert_eq!(result.code, 0, "{}", result.stderr);
+    let text = std::fs::read_to_string(&out).expect("levels");
+    assert_eq!(text.matches("6.020").count(), 2);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn non_identity_matrix_plan_is_rejected() {
+    let root = temp_dir("identity");
+    let plan = PlanBuilder::new(PlanConfig::new(128, RATE, 1))
+        .set_content_identity(1)
+        .set_crossover_identity(1)
+        .set_matrix(MatrixSection {
+            rows: 1,
+            cols: 1,
+            decimation: 1,
+            interpolation: 1,
+            taps: 1,
+            coeffs: vec![0.5],
+        })
         .set_protection(ProtectionSection {
             lanes: 1,
             entries: vec![entry(0, 0.0, vec![])],

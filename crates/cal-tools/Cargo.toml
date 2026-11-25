@@ -25,6 +25,10 @@ path = "src/bin/band_levels.rs"
 name = "khaen-closed-loop-run"
 path = "src/bin/closed_loop_run.rs"
 
+[[bin]]
+name = "khaen-fir-plan"
+path = "src/bin/fir_plan.rs"
+
 [dependencies]
 khaen-calibration = { path = "../calibration" }
 khaen-core = { path = "../core" }

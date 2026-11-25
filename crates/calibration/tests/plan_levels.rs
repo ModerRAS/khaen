@@ -298,21 +298,6 @@ fn non_identity_sections_are_rejected_not_silently_ignored() {
         PLAN
     );
 
-    let mut crossover = base.clone();
-    crossover.crossover = Some(CrossoverSection {
-        lanes: 1,
-        filters: vec![CrossoverFilter {
-            lane: 0,
-            coeffs: vec![0.5, 0.5],
-        }],
-    });
-    assert_eq!(
-        predicted_levels(&crossover, &[1_000.0])
-            .expect_err("non-identity crossover")
-            .code(),
-        PLAN
-    );
-
     let mut matrix = base.clone();
     matrix.matrix = Some(MatrixSection {
         rows: 1,
@@ -342,6 +327,96 @@ fn non_identity_sections_are_rejected_not_silently_ignored() {
     );
 }
 
+#[test]
+fn crossover_fir_contributes_to_predicted_levels() {
+    // 单 tap 2.0 = 恒定 +6.0206 dB；忽略保护段的 0 dB。
+    let mut plan = fixture_plan(1, vec![entry(0, 0.0, vec![])]);
+    plan.crossover = Some(CrossoverSection {
+        lanes: 1,
+        filters: vec![CrossoverFilter {
+            lane: 0,
+            coeffs: vec![2.0],
+        }],
+    });
+    let levels = predicted_levels(&plan, &[100.0, 1_000.0, 10_000.0]).expect("levels");
+    for band in &levels.points[0].bands {
+        assert!((band.level_db.unwrap() - 6.0206).abs() <= 1e-4, "{band:?}");
+    }
+
+    // 两点低通 [0.5, 0.5]：|H(f)| = cos(pi f / fs)，与手算逐带对账。
+    let mut lowpass = fixture_plan(1, vec![entry(0, 0.0, vec![])]);
+    lowpass.crossover = Some(CrossoverSection {
+        lanes: 1,
+        filters: vec![CrossoverFilter {
+            lane: 0,
+            coeffs: vec![0.5, 0.5],
+        }],
+    });
+    let centers = [100.0, 1_000.0, 10_000.0, 20_000.0];
+    let levels = predicted_levels(&lowpass, &centers).expect("levels");
+    for band in &levels.points[0].bands {
+        let expected = 20.0
+            * (std::f64::consts::PI * band.center_hz / FS)
+                .cos()
+                .abs()
+                .log10();
+        assert!(
+            (band.level_db.unwrap() - expected).abs() <= 1e-4,
+            "center {} Hz: predicted {:?}, expected {expected}",
+            band.center_hz,
+            band.level_db
+        );
+    }
+
+    // 未给 FIR 的 lane 记 0 dB（恒等）；给两个 lane 时各算各的。
+    let mut two_lanes = fixture_plan(2, vec![entry(0, 0.0, vec![]), entry(1, 0.0, vec![])]);
+    two_lanes.crossover = Some(CrossoverSection {
+        lanes: 2,
+        filters: vec![CrossoverFilter {
+            lane: 1,
+            coeffs: vec![2.0],
+        }],
+    });
+    let levels = predicted_levels(&two_lanes, &[1_000.0]).expect("levels");
+    assert!((levels.points[0].bands[0].level_db.unwrap()).abs() <= 1e-12);
+    assert!((levels.points[1].bands[0].level_db.unwrap() - 6.0206).abs() <= 1e-4);
+
+    // lane 越界与重复 FIR 都是方案错误。
+    let mut out_of_range = fixture_plan(1, vec![entry(0, 0.0, vec![])]);
+    out_of_range.crossover = Some(CrossoverSection {
+        lanes: 1,
+        filters: vec![CrossoverFilter {
+            lane: 3,
+            coeffs: vec![1.0],
+        }],
+    });
+    assert_eq!(
+        predicted_levels(&out_of_range, &[1_000.0])
+            .expect_err("lane out of range")
+            .code(),
+        PLAN
+    );
+    let mut duplicate = fixture_plan(1, vec![entry(0, 0.0, vec![])]);
+    duplicate.crossover = Some(CrossoverSection {
+        lanes: 1,
+        filters: vec![
+            CrossoverFilter {
+                lane: 0,
+                coeffs: vec![1.0],
+            },
+            CrossoverFilter {
+                lane: 0,
+                coeffs: vec![1.0],
+            },
+        ],
+    });
+    assert_eq!(
+        predicted_levels(&duplicate, &[1_000.0])
+            .expect_err("duplicate FIR")
+            .code(),
+        PLAN
+    );
+}
 #[test]
 fn invalid_band_centers_are_input_or_config_errors() {
     let plan = fixture_plan(1, vec![entry(0, 0.0, vec![])]);

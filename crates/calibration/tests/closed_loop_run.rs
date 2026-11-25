@@ -333,14 +333,15 @@ fn invalid_config_and_plan_are_stable_codes() {
         PLAN
     );
 
-    // 非恒等分频段：预测电平拒绝，运行包给方案错误。
+    // 非恒等矩阵段：预测电平拒绝，运行包给方案错误。
     let mut plan = fixture_plan();
-    plan.crossover = Some(khaen_core::plan::CrossoverSection {
-        lanes: 1,
-        filters: vec![khaen_core::plan::CrossoverFilter {
-            lane: 0,
-            coeffs: vec![0.5, 0.5],
-        }],
+    plan.matrix = Some(khaen_core::plan::MatrixSection {
+        rows: 1,
+        cols: 1,
+        decimation: 1,
+        interpolation: 1,
+        taps: 1,
+        coeffs: vec![0.5],
     });
     let inputs = RunInputs {
         plan: &plan,

@@ -246,5 +246,6 @@
 - 输出目录必须为空或不存在；四份文件固定命名 `predicted.json` / `observed.json` / `report.json` / `manifest.json`。
 - 同输入重跑四份文件逐字节相同（清单无时间戳）；清单 sha256 可作一次复测的身份。
 - 任一侧带功率为 0 记 null（missing）；`min_compared_bands` 不足判 INCOMPLETE，绝不把缺数据当通过。
-- 预测只覆盖方案保护段（PEQ + 每 lane 增益）；方案含非恒等的内容/分频/矩阵/路由段时预测阶段直接报 `E_PLAN_LEVELS_PLAN`。
+- 预测覆盖方案保护段（PEQ + 每 lane 增益）与 crossover 的每 lane FIR（幅度，不含群延迟）；方案含非恒等的内容/矩阵/路由段时预测阶段直接报 `E_PLAN_LEVELS_PLAN`。
+- 方案来源两条：`khaen-fir-plan`（mimo FIR CSV → crossover FIR 方案）或既有 `plan_compile`（PEQ 设计 → 保护段方案）；`khaen-plan-levels` 对两者用同一套预测口径。
 - 命令行退出码：0 PASS / 3 FAIL / 4 INCOMPLETE / 2 输入或方案错误 / 1 写输出失败。

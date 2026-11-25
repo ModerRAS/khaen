@@ -2,24 +2,24 @@
 //!
 //! # 口径
 //!
-//! 预测值 = 每个保护项（lane）的 `gain_db` + 该 lane 全部 PEQ biquad 的级联幅度（dB），
+//! 预测值 = 每个保护项（lane）的 `gain_db` + 该 lane 全部 PEQ biquad 的级联幅度（dB）
+//! + 该 lane 的 crossover FIR 幅度（dB，|Σ h[n] e^{-jωn}|；未给 FIR 的 lane 记 0 dB），
 //! 在给定 1/3 oct 中心频率处取值。biquad 差分方程：
 //! `y[n] = b0*x[n] + b1*x[n-1] + b2*x[n-2] - a1*y[n-1] - a2*y[n-2]`，
 //! 因此稳态频响为 `(b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)`。
 //!
 //! # 诚实边界
 //!
-//! - 只覆盖方案里的保护段（PEQ + 每 lane 增益）；内容布局 / 分频 / 矩阵 / 路由必须
-//!   是恒等段，否则返回 E_PLAN_LEVELS_PLAN 而不是悄悄少算。
+//! - 只覆盖保护段（PEQ + 每 lane 增益）与 crossover 的每 lane FIR；内容布局 / 矩阵 /
+//!   路由必须是恒等段，否则返回 E_PLAN_LEVELS_PLAN 而不是悄悄少算。
+//! - FIR 只按幅度计算：冲激响应的因果群延迟不改变幅度响应，但真机对相/对齐需要另行处理。
 //! - 预测是**相对频响**（0 dB = 方案外无滤波），不含房间、单元与麦克风响应；
 //!   实测侧必须用同一参考归一化（实测带电平 - 实测参考电平）后再喂闭环对账。
 //! - 测点名来自 lane 序号（L00 / L01 / ...），因为方案文件里没有测点名字；
 //!   实测文件必须使用同一命名才能对齐。
-//! - 延迟与极性不改变幅度响应，因此不参与预测。
+//! - 保护项的延迟与极性、FIR 的群延迟都不改变幅度响应，因此不参与幅度预测。
 
-use khaen_core::plan::{
-    ContentSection, CrossoverSection, MatrixSection, PeqSection, Plan, RoutingSection,
-};
+use khaen_core::plan::{ContentSection, MatrixSection, PeqSection, Plan, RoutingSection};
 use khaen_core::rt::SAMPLE_RATES_HZ;
 
 use crate::closed_loop::{BandLevel, LevelSet, PointLevels};
@@ -100,6 +100,7 @@ pub fn predicted_levels(plan: &Plan, centers_hz: &[f64]) -> Result<LevelSet, Pla
     if lanes == 0 {
         return Err(PlanLevelsError::new(PLAN, "plan protection has zero lanes"));
     }
+    let fir_by_lane = crossover_filters_by_lane(plan, lanes)?;
     let mut per_lane: Vec<Option<Vec<f64>>> = vec![None; lanes];
     for entry in &protection.entries {
         let lane = usize::from(entry.lane);
@@ -127,7 +128,11 @@ pub fn predicted_levels(plan: &Plan, centers_hz: &[f64]) -> Result<LevelSet, Pla
         let mut values = Vec::with_capacity(centers_hz.len());
         for &center_hz in centers_hz {
             let peq_db = cascade_magnitude_db(&entry.peq, center_hz, sample_rate_hz);
-            let value = f64::from(entry.gain_db) + peq_db;
+            let fir_db = match fir_by_lane[lane].as_deref() {
+                Some(coeffs) => fir_magnitude_db(coeffs, center_hz, sample_rate_hz)?,
+                None => 0.0,
+            };
+            let value = f64::from(entry.gain_db) + peq_db + fir_db;
             if !value.is_finite() {
                 return Err(PlanLevelsError::new(
                     PLAN,
@@ -213,21 +218,14 @@ fn validate_centers(centers_hz: &[f64], sample_rate_hz: f64) -> Result<(), PlanL
     Ok(())
 }
 
-/// 只接受恒等的内容布局 / 分频 / 矩阵 / 路由：预测只覆盖保护段。
+/// 内容布局 / 矩阵 / 路由必须是恒等段；crossover 的每 lane FIR 计入预测
+/// （见 crossover_filters_by_lane）。
 fn require_identity_sections(plan: &Plan) -> Result<(), PlanLevelsError> {
     if let Some(content) = plan.content.as_ref() {
         if !content_is_identity(content) {
             return Err(PlanLevelsError::new(
                 PLAN,
                 "plan content section is not identity; predicted levels only cover protection PEQ",
-            ));
-        }
-    }
-    if let Some(crossover) = plan.crossover.as_ref() {
-        if !crossover_is_identity(crossover) {
-            return Err(PlanLevelsError::new(
-                PLAN,
-                "plan crossover section is not identity; predicted levels only cover protection PEQ",
             ));
         }
     }
@@ -250,6 +248,73 @@ fn require_identity_sections(plan: &Plan) -> Result<(), PlanLevelsError> {
     Ok(())
 }
 
+/// 取出每 lane 的 crossover FIR（未出现的 lane = 恒等）；校验引用/重复/系数有限。
+fn crossover_filters_by_lane(
+    plan: &Plan,
+    lanes: usize,
+) -> Result<Vec<Option<Vec<f32>>>, PlanLevelsError> {
+    let mut by_lane: Vec<Option<Vec<f32>>> = vec![None; lanes];
+    let Some(crossover) = plan.crossover.as_ref() else {
+        return Ok(by_lane);
+    };
+    for filter in &crossover.filters {
+        let lane = usize::from(filter.lane);
+        if lane >= lanes {
+            return Err(PlanLevelsError::new(
+                PLAN,
+                format!(
+                    "crossover filter references lane {} but plan declares {lanes} lanes",
+                    filter.lane
+                ),
+            ));
+        }
+        if by_lane[lane].is_some() {
+            return Err(PlanLevelsError::new(
+                PLAN,
+                format!("duplicate crossover filter for lane {}", filter.lane),
+            ));
+        }
+        if filter.coeffs.is_empty() {
+            return Err(PlanLevelsError::new(
+                PLAN,
+                format!("crossover lane {} has no FIR taps", filter.lane),
+            ));
+        }
+        if let Some(index) = filter.coeffs.iter().position(|value| !value.is_finite()) {
+            return Err(PlanLevelsError::new(
+                PLAN,
+                format!("crossover lane {} tap {index} is not finite", filter.lane),
+            ));
+        }
+        by_lane[lane] = Some(filter.coeffs.clone());
+    }
+    Ok(by_lane)
+}
+
+/// 单 lane crossover FIR 在 freq_hz 处的幅度（dB）：|Σ h[n] e^{-jωn}|。
+fn fir_magnitude_db(
+    coeffs: &[f32],
+    freq_hz: f64,
+    sample_rate_hz: f64,
+) -> Result<f64, PlanLevelsError> {
+    let omega = 2.0 * std::f64::consts::PI * freq_hz / sample_rate_hz;
+    let mut re = 0.0;
+    let mut im = 0.0;
+    for (index, &value) in coeffs.iter().enumerate() {
+        let phase = omega * index as f64;
+        let value = f64::from(value);
+        re += value * phase.cos();
+        im -= value * phase.sin();
+    }
+    let magnitude = re.hypot(im);
+    if !magnitude.is_finite() || magnitude <= 0.0 {
+        return Err(PlanLevelsError::new(
+            PLAN,
+            format!("crossover FIR has zero or non-finite response at {freq_hz} Hz"),
+        ));
+    }
+    Ok(20.0 * magnitude.log10())
+}
 fn content_is_identity(content: &ContentSection) -> bool {
     if content.in_channels != content.out_lanes
         || usize::from(content.in_channels) != content.folds.len()
@@ -260,17 +325,6 @@ fn content_is_identity(content: &ContentSection) -> bool {
         usize::from(fold.src) == index
             && usize::from(fold.dst) == index
             && (fold.gain - 1.0).abs() <= 1e-12
-    })
-}
-
-fn crossover_is_identity(crossover: &CrossoverSection) -> bool {
-    if usize::from(crossover.lanes) != crossover.filters.len() {
-        return false;
-    }
-    crossover.filters.iter().enumerate().all(|(index, filter)| {
-        usize::from(filter.lane) == index
-            && filter.coeffs.len() == 1
-            && (filter.coeffs[0] - 1.0).abs() <= 1e-12
     })
 }
 

@@ -44,6 +44,7 @@ pub mod band_levels;
 pub mod closed_loop;
 pub mod closed_loop_run;
 pub mod deconvolve;
+pub mod fir_plan;
 pub mod ir_distance;
 pub mod ir_extract;
 pub mod job;
@@ -80,6 +81,11 @@ pub use closed_loop_run::{
     MANIFEST_SCHEMA as CLOSED_LOOP_RUN_MANIFEST_SCHEMA, TOOL_NAME as CLOSED_LOOP_RUN_TOOL_NAME,
 };
 pub use deconvolve::deconvolve;
+pub use fir_plan::{
+    compile_fir_plan, CompiledFirPlan, FirPlanConfig, FirPlanError, LaneFir,
+    BAD_INPUT as FIR_PLAN_BAD_INPUT, BUILD as FIR_PLAN_BUILD, CONFIG as FIR_PLAN_CONFIG,
+    ENCODE as FIR_PLAN_ENCODE,
+};
 pub use plan_compile::{
     compile_peq_design, CompiledPlan, PlanCompileError, PlanCompileOptions, PLAN_ARTIFACT_PATH,
 };

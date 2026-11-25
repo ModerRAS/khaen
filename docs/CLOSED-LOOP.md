@@ -31,11 +31,12 @@
 
 清单 schema：`khaen-closed-loop-run-manifest/v1`；报告 schema：`khaen-closed-loop-report/v1`；电平集合 schema：`khaen-closed-loop-levels/v1`。字段细节见 `docs/CONTRACTS.md` 的 D 节。
 
-## 3. 五个离线命令行工具
+## 3. 六个离线命令行工具
 
 | 工具 | 作用 | 退出码 |
 | --- | --- | --- |
-| `khaen-single-point` | 合成场景 → 求解 → 参数/报告/方案/清单 | 0 成功 / 3 PARTIAL / 4 NONE / 2 输入 / 1 运行 |
+| `khaen-single-point` | 合成场景 → 求解 → 报告/指标/FIR CSV/清单 | 0 成功 / 3 PARTIAL / 4 NONE / 2 输入 / 1 运行 |
+| `khaen-fir-plan` | mimo FIR CSV → 方案文件（crossover 承载 FIR） | 0 / 2 输入 / 1 写失败 |
 | `khaen-plan-levels` | 方案文件 → 预测电平（predicted 侧） | 0 / 2 输入 / 1 写失败 |
 | `khaen-band-levels` | 两段 WAV → 实测相对电平（observed 侧） | 0 / 2 输入 / 1 写失败 |
 | `khaen-closed-loop` | 两份电平集合 → 三态报告 | 0 PASS / 3 FAIL / 4 INCOMPLETE / 2 输入 / 1 写失败 |
@@ -49,7 +50,7 @@
 
 - 用户明确许可出声窗口；当前时段在 08:30–12:00 或 14:30–18:00 内；
 - 已知 MOTU 的 ALSA PCM 设备名（只读 `aplay -l` 获取）；
-- 已安装发布包：`/opt/khaen/current/bin/` 下有 `khaen-daemon`、`khaen-rt-host` 与五个校准命令行工具；
+- 已安装发布包：`/opt/khaen/current/bin/` 下有 `khaen-daemon`、`khaen-rt-host` 与六个校准命令行工具；
 - 状态目录 `/var/lib/khaen/` 可写。
 
 ### 4.1 只读枚举与设备健康（状态：NOT_RUN）
@@ -96,6 +97,20 @@ sha256sum baseline.wav > baseline.wav.sha256
 ```
 
 要求：无削波（峰值 < −6 dBFS）、时长足够（至少 30 个 4096 点窗）、底噪稳定。
+
+### 4.4b 生成校准方案（离线，可提前演练）
+
+方案文件有两个合法来源，都可在**不碰设备**的情况下提前产出并核对 sha256：
+
+1. **mimo 单点 FIR（推荐，目标①的产物）**：`khaen-single-point --scene ... --out out/` 产出
+   `out/single-point/fir/*.csv`，再用 `khaen-fir-plan --fir ... --out calibrated.bin
+   --sample-rate 48000` 编译成方案；方案里 crossover 承载每 lane 的 FIR，其余段恒等。
+2. **既有 PEQ 设计编译产物**：由 `khaen_calibration::plan_compile` 编译出的方案（保护段
+   PEQ + lane 增益），本次改造前的老路径，仍然有效。
+
+产出后先离线跑 `khaen-plan-levels --plan calibrated.bin --out predicted.json`，确认预测电平
+合理、与频带中心数量一致，再进入 4.5。预测器现在会同时计入保护段 PEQ/增益与 crossover FIR
+幅度（只按幅度，不含群延迟）。
 
 ### 4.5 下发校准方案（状态：NOT_RUN）
 
@@ -151,8 +166,8 @@ sha256sum baseline.wav > baseline.wav.sha256
 | `E_USAGE` | 命令行参数缺失/未知 | 对照 `--help` 或本文第 3 节 |
 | `E_IO` / `E_WAV_IO` | 文件读失败 | 检查路径与权限 |
 | `E_INPUT` / `E_WAV_INPUT` | 文件内容不是合法 WAV / 录音太短 | 重新采集，确认 16/24/32 位 PCM 或 32 位浮点 |
-| `E_PLAN` | 方案文件无法解码 | 用 `khaen-single-point` 重新产出方案 |
-| `E_PLAN_LEVELS_PLAN` | 方案含非恒等的内容/分频/矩阵/路由段 | 预测只覆盖保护段；换用校准方案 |
+| `E_PLAN` | 方案文件无法解码 | 用 `khaen-fir-plan` 由 FIR CSV 重新产出，或用既有编译器重新编译 |
+| `E_PLAN_LEVELS_PLAN` | 方案含非恒等的内容/矩阵/路由段 | 预测只覆盖保护段与 crossover FIR；换用校准方案 |
 | `E_BAND_LEVELS_ALIGNMENT` | 两段录音采样率不一致 | 统一录音采样率 |
 | `E_CLOSED_LOOP_ALIGNMENT` | 测点集合/频带/采样率对不上 | 检查 `--point`、`--lane`、`--centers` |
 | `E_CLOSED_LOOP_RUN_CONFIG` | 测点名/容差/带数/窗长非法 | 测点名只允许 ASCII 字母数字与 `-_.` |
@@ -160,7 +175,7 @@ sha256sum baseline.wav > baseline.wav.sha256
 
 ## 7. 诚实边界
 
-- 预测是方案保护段的**相对频响**，不含房间、单元、麦克风响应；实测侧必须用同参考归一化；
+- 预测是方案保护段 + crossover FIR 的**相对频响**，不含房间、单元、麦克风响应；实测侧必须用同参考归一化；
 - 不做绝对声压级校准，不做多点校准，不涉及 ADAT；
 - 真机行为（ALSA 播放、AES67 接收、MOTU 稳定性）在本仓库里仍是 NOT_RUN，只有设备窗口内的记录才算实测；
 - 任何一次 FAIL/INCOMPLETE 都必须原样进交接报告，不重试到通过为止。
@@ -168,6 +183,8 @@ sha256sum baseline.wav > baseline.wav.sha256
 ## 8. 命令速查
 
 ```bash
+# mimo FIR CSV -> 方案文件（第 i 个 --fir 是 lane i）
+khaen-fir-plan --fir fir/SUB1.csv --out plan.bin --sample-rate 48000
 # 方案 -> 预测电平
 khaen-plan-levels --plan plan.bin --out predicted.json
 # 两段录音 -> 实测电平
