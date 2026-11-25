@@ -7,3 +7,8 @@ license.workspace = true
 
 [dependencies]
 khaen-core = { path = "../core" }
+
+[dev-dependencies]
+# 测试用：证明组装结果能被 host 的准入与图编译接受（admit / PlanGraph::compile）。
+# 生产代码不依赖 host，职责边界见 src/lib.rs 文档。
+khaen-host = { path = "../host" }
