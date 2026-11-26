@@ -1,15 +1,19 @@
 //! API 合同盘点测试（docs/API.md 是前后端唯一约定，lead 维护）。
 //!
-//! 规则：文档里端点表（`| 方法 | 路径 | ... |`）出现的每个路径，daemon 必须真的挂载；
-//! 反过来 daemon 挂载的每个 `/api/*` 或 `/healthz` 路径也必须在文档端点表里出现。
+//! 规则：文档里端点表（`| 方法 | 路径 | ... |`）出现的每个“路径 + 方法”组合，
+//! daemon 必须真的挂载；反过来 daemon 挂载的每个路径/方法也必须在文档端点表里出现。
 //! 这样文档与路由的漂移会在 `cargo test` 直接失败，而不是等前端联调才发现。
 //!
-//! 已知边界：只比较路径集合（占位符统一成 `{}`），不比较 HTTP 方法组合；
-//! 路径若出现在文档正文而非端点表，会被视为“未文档化”，需要把它补成表格行。
+//! 已知边界：路径占位符统一成 `{}`、忽略 query string；路径若只出现在文档正文
+//! 而非端点表，会被视为“未文档化”，需要把它补成表格行。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+type Inventory = BTreeMap<String, BTreeSet<String>>;
+
+const METHODS: [&str; 5] = ["GET", "POST", "PUT", "DELETE", "PATCH"];
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -40,15 +44,19 @@ fn normalize(raw: &str) -> String {
 }
 
 fn is_method_cell(cell: &str) -> bool {
-    !cell.is_empty()
-        && cell
-            .split('/')
-            .all(|method| matches!(method, "GET" | "POST" | "PUT" | "DELETE" | "PATCH"))
+    let mut any = false;
+    for method in cell.split('/') {
+        if !METHODS.contains(&method) {
+            return false;
+        }
+        any = true;
+    }
+    any
 }
 
-/// 从 docs/API.md 的端点表格行提取路径。
-fn documented_endpoints(markdown: &str) -> BTreeSet<String> {
-    let mut paths = BTreeSet::new();
+/// 从 docs/API.md 的端点表格行提取 路径 -> 方法集合。
+fn documented_endpoints(markdown: &str) -> Inventory {
+    let mut inventory = Inventory::new();
     for line in markdown.lines() {
         let trimmed = line.trim();
         if !trimmed.starts_with('|') {
@@ -62,9 +70,12 @@ fn documented_endpoints(markdown: &str) -> BTreeSet<String> {
         if !path_cell.starts_with('/') {
             continue;
         }
-        paths.insert(normalize(path_cell));
+        let methods = inventory.entry(normalize(path_cell)).or_default();
+        for method in cells[1].split('/') {
+            methods.insert(method.to_string());
+        }
     }
-    paths
+    inventory
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -80,11 +91,23 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// 从 daemon 源码里提取 `.route("<path>", ...)` 的路径。
-fn routed_endpoints(source_dir: &Path) -> BTreeSet<String> {
+/// 从 axum 路由参数里提取方法名（`get(...)`/`post(...).put(...)` 等）。
+fn method_tokens(args: &str) -> BTreeSet<String> {
+    let mut methods = BTreeSet::new();
+    for token in args.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_') {
+        let upper = token.to_ascii_uppercase();
+        if METHODS.contains(&upper.as_str()) {
+            methods.insert(upper);
+        }
+    }
+    methods
+}
+
+/// 从 daemon 源码里提取 `.route("<path>", <methods>)` 的路径与方法。
+fn routed_endpoints(source_dir: &Path) -> Inventory {
     let mut files = Vec::new();
     collect_rs_files(source_dir, &mut files);
-    let mut paths = BTreeSet::new();
+    let mut inventory = Inventory::new();
     for file in files {
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
@@ -98,13 +121,36 @@ fn routed_endpoints(source_dir: &Path) -> BTreeSet<String> {
                 break;
             };
             let raw = &after[open + 1..open + 1 + close];
-            if raw.starts_with('/') {
-                paths.insert(normalize(raw));
+            let args_start = open + 1 + close + 1;
+            let mut depth = 0usize;
+            let mut args_end = after.len();
+            for (index, ch) in after[args_start..].char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        if depth == 0 {
+                            args_end = args_start + index;
+                            break;
+                        }
+                        depth -= 1;
+                    }
+                    _ => {}
+                }
             }
-            rest = &after[open + 1 + close + 1..];
+            if raw.starts_with('/') {
+                inventory
+                    .entry(normalize(raw))
+                    .or_default()
+                    .extend(method_tokens(&after[args_start..args_end]));
+            }
+            rest = if args_end < after.len() {
+                &after[args_end + 1..]
+            } else {
+                ""
+            };
         }
     }
-    paths
+    inventory
 }
 
 #[test]
@@ -116,15 +162,25 @@ fn documented_endpoints_match_daemon_routes() {
     let documented = documented_endpoints(&markdown);
     let routed = routed_endpoints(&root.join("crates").join("daemon").join("src"));
 
-    let missing_routes: Vec<&String> = documented.difference(&routed).collect();
-    let undocumented: Vec<&String> = routed.difference(&documented).collect();
+    let mut problems = Vec::new();
+    for (path, methods) in &documented {
+        match routed.get(path) {
+            None => problems.push(format!("{path}: documented but not routed")),
+            Some(routed_methods) if routed_methods != methods => problems.push(format!(
+                "{path}: documented methods {methods:?}, routed methods {routed_methods:?}"
+            )),
+            Some(_) => {}
+        }
+    }
+    for path in routed.keys() {
+        if !documented.contains_key(path) {
+            problems.push(format!("{path}: routed but not documented"));
+        }
+    }
     assert!(
-        missing_routes.is_empty(),
-        "docs/API.md documents endpoints that the daemon does not route: {missing_routes:?}"
-    );
-    assert!(
-        undocumented.is_empty(),
-        "the daemon routes endpoints missing from docs/API.md: {undocumented:?}"
+        problems.is_empty(),
+        "docs/API.md and the daemon router disagree (add/fix the endpoint table row):\n{}",
+        problems.join("\n")
     );
     assert!(
         documented.len() >= 40,
