@@ -42,6 +42,7 @@ pub mod capture;
 pub mod clock;
 pub mod http_sdp;
 pub mod iface;
+pub mod input_profile;
 pub mod jitter;
 pub mod listen;
 pub mod mdns;

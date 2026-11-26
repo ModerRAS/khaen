@@ -1025,7 +1025,7 @@ fn parse_source_filter(value: &str) -> Result<SourceFilter, SdpError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// H16 官方风格 SDP（组播 + PTPv2 + L24/48000/8 + ptime 1）。
