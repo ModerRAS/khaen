@@ -100,7 +100,7 @@ jobs:
           sudo rm -f /etc/systemd/system/khaen-daemon.service /etc/systemd/system/khaen-rt-host.service
           sudo bash deploy/install.sh "${previous_tar}" --no-restart
           test "$(readlink -f /opt/khaen/current)" = "/opt/khaen/releases/${previous#v}"
-          printf '# sentinel: must not be overwritten\n' | sudo tee /etc/khaen/daemon.env >/dev/null
+          printf 'KHAEN_BIND=127.0.0.1:18756\n# sentinel: must not be overwritten\n' | sudo tee /etc/khaen/daemon.env >/dev/null
           sudo bash deploy/install.sh "${latest_tar}" --no-restart
           test "$(readlink -f /opt/khaen/current)" = "/opt/khaen/releases/${latest#v}"
           sudo grep -q 'sentinel: must not be overwritten' /etc/khaen/daemon.env
