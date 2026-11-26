@@ -21,7 +21,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 license = "GPL-3.0-only"
 # rubato 5.1（ASRC）要求 1.87；本机工具链 1.99 足够。
