@@ -26,6 +26,38 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: Build daemon for deploy smoke test
+        run: cargo build -p khaen-daemon
+      # 发布包里的 deploy/smoke-test.sh 是部署验收的第一步；用真实 daemon 的
+      # process 目标在 CI 里跑一遍，防止它对 /api/status 加法字段之类再次过严。
+      - name: Deploy smoke-test against a real daemon
+        run: |
+          set -euo pipefail
+          state="$(mktemp -d)"
+          port=18755
+          KHAEN_BIND=127.0.0.1:$port \
+          KHAEN_STATE_DIR="$state" \
+          KHAEN_RT_TARGET=process \
+          KHAEN_SPEAKER_TEST=off \
+          KHAEN_CAL_BACKEND=off \
+          ./target/debug/khaen-daemon >/tmp/khaen-daemon-smoke.log 2>&1 &
+          daemon_pid=$!
+          cleanup() { kill "$daemon_pid" 2>/dev/null || true; wait "$daemon_pid" 2>/dev/null || true; rm -rf "$state"; }
+          trap cleanup EXIT
+          ready=0
+          for _ in $(seq 1 100); do
+            if curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then ready=1; break; fi
+            sleep 0.1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "daemon did not become ready; log:" >&2
+            cat /tmp/khaen-daemon-smoke.log >&2
+            exit 1
+          fi
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"password":"smoke-test-password","confirm":"smoke-test-password"}' \
+            "http://127.0.0.1:$port/api/auth/setup" >/dev/null
+          KHAEN_SMOKE_PASSWORD=smoke-test-password bash deploy/smoke-test.sh "http://127.0.0.1:$port" 1
 
   webui:
     runs-on: ubuntu-latest
