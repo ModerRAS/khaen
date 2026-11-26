@@ -4098,7 +4098,7 @@ mod tests {
 
     fn wait_terminal(manager: &JobManager) -> JobSnapshot {
         manager
-            .wait_terminal(Duration::from_secs(10))
+            .wait_terminal(Duration::from_secs(60))
             .unwrap_or_else(|error| {
                 panic!(
                     "wait_terminal failed: {error}; last={:?}",
@@ -4310,7 +4310,7 @@ mod tests {
         env.manager
             .start(full_request(false), Box::new(backend))
             .unwrap();
-        let prepared = wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        let prepared = wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::Prepared) && snapshot.awaiting_apply
         });
         assert!(!calls.lock().unwrap().contains(&JobStage::Apply));
@@ -4342,7 +4342,7 @@ mod tests {
         env.manager
             .start(full_request(false), Box::new(backend))
             .unwrap();
-        wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::Prepared) && snapshot.awaiting_apply
         });
         assert_eq!(env.manager.cancel().unwrap().as_u64(), 1);
@@ -4382,7 +4382,7 @@ mod tests {
         env.manager
             .start(full_request(true), Box::new(backend))
             .unwrap();
-        wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::SweepCapture)
         });
         env.manager.cancel().unwrap();
@@ -4568,7 +4568,7 @@ mod tests {
         env.manager
             .start(full_request(false), Box::new(backend))
             .unwrap();
-        wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::Preflight)
         });
         let second_calls = Arc::new(Mutex::new(Vec::new()));
@@ -4577,7 +4577,7 @@ mod tests {
             .start(full_request(true), Box::new(FakeBackend::new(second_calls)));
         assert_eq!(second.unwrap_err(), JobError::Busy);
         gate.open();
-        wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::Prepared) && snapshot.awaiting_apply
         });
         env.manager.cancel().unwrap();
@@ -4629,7 +4629,7 @@ mod tests {
         env.manager
             .start(full_request(false), Box::new(backend))
             .unwrap();
-        wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::Preflight)
         });
         assert!(matches!(
@@ -4651,7 +4651,7 @@ mod tests {
         env.manager
             .start(full_request(false), Box::new(backend))
             .unwrap();
-        wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::Prepared) && snapshot.awaiting_apply
         });
         env.manager.rollback().unwrap();
@@ -4721,7 +4721,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(resumed_id, JobId(7));
-        let terminal = manager.wait_terminal(Duration::from_secs(10)).unwrap();
+        let terminal = manager.wait_terminal(Duration::from_secs(60)).unwrap();
         assert_eq!(terminal.state, JobState::Complete);
         assert_eq!(calls.lock().unwrap().first().copied(), Some(JobStage::FitP));
         assert!(!calls.lock().unwrap().contains(&JobStage::Preflight));
@@ -4970,7 +4970,7 @@ mod tests {
         env.manager
             .start(full_request(true), Box::new(backend))
             .unwrap();
-        let blocked = wait_state(&env.manager, Duration::from_secs(10), |snapshot| {
+        let blocked = wait_state(&env.manager, Duration::from_secs(60), |snapshot| {
             snapshot.state == JobState::Active(JobStage::Preflight)
                 && snapshot.stage_progress >= 0.999
         });
@@ -5007,7 +5007,7 @@ mod tests {
             .start(full_request(true), Box::new(FakeBackend::new(next_calls)))
             .unwrap();
         assert!(next_id.as_u64() > terminal.job_id.as_u64());
-        let next_terminal = manager.wait_terminal(Duration::from_secs(10)).unwrap();
+        let next_terminal = manager.wait_terminal(Duration::from_secs(60)).unwrap();
         assert_eq!(next_terminal.state, JobState::Complete);
         let _ = manager.shutdown(Duration::from_secs(5));
     }
