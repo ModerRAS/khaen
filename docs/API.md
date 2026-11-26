@@ -48,11 +48,11 @@
 | GET | `/api/status` | `{daemon:{version,uptime_s,bind}, host_link:{connected,mode,target,age_ms}, format:{...}, input:{...}, output:{...}, plan:{version,graph_id,...}, mode?, muted?, safe, reconfigure:{generation,...}, not_wired:[], reasons:{}}`（`ok` 可缺省；拿不到的部分为 null + reasons）。**`mode` 为【加法】字段**：来自 rt-host 控制 status 顶层 `mode`（如 `aes67`），仅 socket 主路径有真值；file 回退/process 目标/链路不可用/旧 socket 缺字段时 `null` + 非空 `reasons.mode`，不编造。**`host_link.mode` 是控制通道传输模式 `socket/file/none`，与音频模式不是一回事**。 |
 | GET | `/api/device` | 设备监督器快照 `{wired, state, source, ...}`（process 目标时才有 `target`；`ok` 可缺省），不可用给 null+reason |
 | GET | `/api/coeff` | 当前已生效方案 `{ok, version, graph_id, ...}` |
-| GET | `/api/plan/history` | `{schema:"khaen-plan-history/v1", current:{...}, entries:[{version,graph_id,sha256,committed_at?},...]}`；**加法目标**：补 `ok:true` 与 `versions`（= entries 别名，不改旧字段） |
+| GET | `/api/plan/history` | `{ok, schema:"khaen-plan-history/v1", current:{...}, entries:[{version,graph_id,sha256,committed_at?},...], versions（= entries 别名）}`；v0.1.11 真 daemon 另带 `source`（daemon-process/rt-host/file/none）、`pagination`、`reasons`（缺失字段原因） |
 | POST | `/api/plan/inspect` | 请求 `{plan_path, plan_sha256?}`；响应 `{ok, decoded, admission, graph_id, budget}`（只读试运行） |
 | GET | `/api/motu` | `{schema:"khaen-motu/v1", detected, model, card_id, card_index, control_reachable, reason, reason_detail, channel_count, channels:[{channel,name,datastore}], mute, vol:[{channel,linear,db}], state:{...}, read_error, write:{status,single_key,readback,two_phase,batch,max_channels_per_request,reason}, not_wired:[], reasons:{}}`（只读；`ok` 可缺省） |
-| GET | `/api/calibration/wizard` | `{ok, config, ...}` |
-| GET | `/api/calibration/wizard/state` | `{ok, state}` |
+| GET | `/api/calibration/wizard` | `{ok, schema, config, defaults, saved, updated_at, reasons}`（PUT 同形 + `set_fields`；详见 §7） |
+| GET | `/api/calibration/wizard/state` | `{ok, schema, current_step, steps:[{step,key,status,reason,task}], active_job_id, last_job_id, measurement, snapshot, updated_at, reasons}`（8 步 gate 由 daemon 判定；详见 §7） |
 | GET | `/api/system/info` | `{ok, version, uptime_s, host, os, ...}` |
 | GET | `/api/system/logs?unit=&lines=` | `unit` ∈ `daemon`/`rt-host`（也接受 `rt_host`；其它值 400 `invalid_request`，details 给 `allowed`）；`lines` ∈ 1..=500（默认 200）。200 → `{ok, schema:"khaen-system-logs/v1", unit, unit_name, requested_lines, lines:[...], truncated, source:"journalctl", reason:null}`；journalctl 不可用 → 503 `logs_unavailable` + details{reason,unit}（不展示假数据） |
 | GET | `/api/system/diagnostics` | **附件下载**：`Content-Disposition: attachment; filename=...`，正文为诊断包（非内联 JSON）；前端用带认证的 blob 下载，不走 JSON 解析 |
@@ -91,7 +91,7 @@
   - target=rt-host：行为完全不变（无 `motu` 字段）。
 
 ## 5. /api/channels（数据面热重配，两阶段）
-- GET `/api/channels`：恒 200；`{ok, schema:"khaen-channels/v1", current:{channels,sample_rate,block_frames,aes67_group,aes67_port,aes67_payload_type,aes67_channels,aes67_map,jitter_frames,device}, device:{name,probe,state}, format:{...}, generation, busy, pending, last_gap_ms, last_result, input:{channels,map}, output:{channels,dac_map,channels_source}, mapping, plan:{graph_id,...}, hot_reconfigure:{wired,reason}, not_wired, reasons}`。
+- GET `/api/channels`：恒 200；`{ok, schema:"khaen-channels/v1", target, runtime_mode, current:{channels,sample_rate,block_frames,aes67_group,aes67_port,aes67_payload_type,aes67_channels,aes67_map,jitter_frames,device}, device:{name,probe,state}, format:{...}, generation, busy, pending, last_gap_ms, last_result, input:{channels,map}, output:{channels,dac_map,channels_source}, mapping, plan:{graph_id,...}, hot_reconfigure:{wired,reason}, not_wired, reasons}`（`target`/`runtime_mode` 是 v0.1.11 真 daemon 实际字段：控制目标与 process/rt-host 运行时模式）。
 - PUT `/api/channels` 请求 `{stage:"prepare"|"commit"|"abort", ...}`：
   - prepare 可带 `channels`/`sample_rate`/`aes67_group`/`aes67_port`/`aes67_payload_type`/`aes67_channels`/`aes67_map`/`jitter_frames`/`mapping`/`dac_map`；响应 `{ok, changed, diff, current, target, engine_token, token, commit_supported, blockers, admission, graph:{action,reason}, warnings}`。
   - commit `{stage:"commit", engine_token}` 响应 `{ok, applied, changed, generation, gap_ms, format, graph_dropped, rolled_back?, routing:{...}, idempotent?}`；失败按 §1 错误码 + `details.rolled_back`。
