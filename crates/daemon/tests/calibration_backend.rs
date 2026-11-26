@@ -1063,18 +1063,29 @@ async fn audit_index_survives_backend_reopen() {
     // 不启动第二个 HTTP 服务：直接在同 state_dir 上再构造一个生产后端（模拟 daemon 重启的索引加载）。
     let reopened =
         JobManagerCalibration::new(dir.path()).expect("reopen backend on the same state dir");
-    let page = reopened
-        .list_jobs(&JobQuery {
-            limit: 20,
-            offset: 0,
-        })
-        .expect("list persisted jobs");
-    assert!(page.total >= 1, "审计索引必须保留历史 job");
-    let summary = page
-        .jobs
-        .iter()
-        .find(|summary| summary.job_id == job.job_id)
-        .expect("persisted job summary");
+    // 审计索引按状态变化异步落盘：job 详情到终态后索引可能还差一次刷新才写出终态。
+    // 这里轮询到终态（最多 30 s），避免在慢 runner 上把一次索引刷新延迟当成持久化丢失。
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let (page, summary) = loop {
+        let page = reopened
+            .list_jobs(&JobQuery {
+                limit: 20,
+                offset: 0,
+            })
+            .expect("list persisted jobs");
+        assert!(page.total >= 1, "审计索引必须保留历史 job");
+        let summary = page
+            .jobs
+            .iter()
+            .find(|summary| summary.job_id == job.job_id)
+            .expect("persisted job summary")
+            .clone();
+        if summary.state.as_str() != "running" || Instant::now() >= deadline {
+            break (page, summary);
+        }
+        sleep_poll_interval().await;
+    };
+    let _ = page;
     assert_eq!(summary.state.as_str(), "succeeded");
     assert_eq!(summary.verdict.as_deref(), Some("PASS"));
     assert!(summary.created_unix.is_some());
