@@ -44,7 +44,7 @@ const messages: Messages = {
     menu: 'Open navigation',
     navDisabled: 'This page is not wired yet (planned {milestone})',
     stubBanner:
-      'M0/M1 skeleton: the backend API is not wired yet. Every value on this page is a "not wired" placeholder; no fake data is shown.',
+      'M1: authentication and sessions are wired. Status and control endpoints land from M2 on; until then every value is a "not wired" placeholder, never fake data.',
     hostLink: 'Control link',
     hostLinkNotWired: 'Control link not wired'
   },
@@ -99,33 +99,49 @@ const messages: Messages = {
     },
     field: {
       password: 'Password',
-      confirm: 'Repeat password',
-      token: 'Access token (advanced)'
+      confirm: 'Repeat password'
     },
     placeholder: {
       password: 'Enter password',
-      confirm: 'Repeat password',
-      token: 'Optional: sign in with X-KHAEN-Token'
+      confirm: 'Repeat password'
     },
     action: {
       submitSetup: 'Set password and continue',
-      submitLogin: 'Sign in'
+      submitLogin: 'Sign in',
+      retry: 'Retry'
+    },
+    state: {
+      checking: 'Checking authentication status…',
+      unavailable: 'Cannot reach the daemon'
     },
     validation: {
       required: 'Password is required',
       tooShort: 'Password must be at least {min} characters',
       mismatch: 'The two passwords do not match'
     },
-    stub: {
-      submitBlocked: 'Not wired in M1 yet: the auth API does not exist, so this form cannot sign in for real.',
-      note: 'The login / setup endpoints (/api/auth/*) land in M1. This page is a static shell with local validation only.',
-      previewLabel: 'Preview state (removed once M1 lands)',
-      previewSetup: 'Setup',
-      previewLogin: 'Sign in'
+    notice: {
+      sessionExpired: 'Your session has expired. Please sign in again.',
+      alreadyConfigured: 'The admin password is already set. Please sign in.'
     },
     footer: {
       version: 'Version {version}',
       build: 'Build {id}'
+    }
+  },
+  error: {
+    auth: {
+      invalidCredentials: 'Wrong password. Try again.',
+      invalidCurrentPassword: 'The current password is incorrect.',
+      rateLimited: 'Too many attempts (max 5 per minute). Please wait and try again.',
+      alreadyConfigured: 'The admin password is already set. Please sign in.',
+      notConfigured: 'The daemon has no admin password yet. Refresh the page and retry.',
+      csrfInvalid: 'Request verification failed. Refresh the page and retry.',
+      validation: 'The submitted values are not valid.',
+      unauthenticated: 'Sign in to continue.',
+      sessionExpired: 'Your session has expired. Please sign in again.',
+      network: 'Cannot reach the daemon (not running or network down). Check it and retry.',
+      server: 'Server error. Please retry later.',
+      unknown: 'Unexpected error. Please retry.'
     }
   },
   overview: {

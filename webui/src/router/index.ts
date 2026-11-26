@@ -1,24 +1,30 @@
 /**
- * 路由表与守卫骨架（PLAN §5.1 / §5.2）。
+ * 路由表与全局守卫（PLAN §5.1 / §5.2）。
  *
- * 本轮只落地两条路由：/login（公开，静态壳）与 /（概览占位壳）。
+ * 本轮只落地两条路由：/login（登录/初始化，公开）与 /（概览占位壳，需要会话）。
  * 其余页面（volume / channels / routing / format / calibration / system / logs）在菜单里灰显并标注计划里程碑，
- * 尚未注册路由——深链会由 catch-all 重定向回 /（M3+ 逐个接入时再补 route record）。
+ * 尚未注册路由——深链由 catch-all 重定向回 /（M3+ 逐个接入时再补 route record）。
  *
- * 守卫：未登录 → /login?next=...（next 只接受站内相对路径，防开放重定向）。
- * 骨架阶段 ensureSession() 返回 'unknown'（API 未接入），因此不会真的拦截——M1 落地即生效。
+ * 守卫（M1 起真实生效）：
+ * - 每次导航先 ensureSession()（结果缓存，401 由 store 清态）；
+ * - 未登录访问受保护页 -> /login?next=<站内相对路径>；
+ * - 已登录访问 /login -> 回跳 next（safeNext 拒绝开放重定向；不允许回跳 /login 自身）；
+ * - 任意受保护 API 的 401 -> setUnauthorizedHandler 注册的跳转（/login?next=...&expired=1）。
  */
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppShell from '@/components/AppShell.vue'
 import LoginView from '@/views/LoginView.vue'
 import OverviewView from '@/views/OverviewView.vue'
-import { ensureSession } from '@/stores/session'
+import { ensureSession, setUnauthorizedHandler } from '@/stores/session'
+import { resolveNavigation } from './guard'
+
+export { postLoginPath, safeNext } from './guard'
 
 declare module 'vue-router' {
   interface RouteMeta {
     /** true = 无需会话即可访问（仅登录页）。 */
     public?: boolean
-    /** true = 需要会话（守卫骨架，M1 前不拦截）。 */
+    /** true = 需要会话。 */
     requiresAuth?: boolean
     /** 页面标题 i18n 键（document.title / 顶栏标题）。 */
     titleKey?: string
@@ -85,27 +91,39 @@ export const router = createRouter({
   routes
 })
 
-/** 只允许站内相对路径作为登录后回跳目标（防开放重定向）。 */
-export function safeNext(raw: unknown): string {
-  if (typeof raw !== 'string' || raw.length === 0) {
-    return '/'
-  }
-  // 必须单斜杠开头；拒绝 //host、/\host、绝对 URL 与协议相对地址。
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) {
-    return '/'
-  }
-  return raw
-}
-
 router.beforeEach(async (to) => {
-  if (to.meta.public) {
-    return true
+  const status = await ensureSession()
+  const decision = resolveNavigation(
+    {
+      name: typeof to.name === 'string' ? to.name : null,
+      fullPath: to.fullPath,
+      query: to.query as Record<string, unknown>,
+      meta: to.meta
+    },
+    status
+  )
+
+  if (decision.kind === 'login') {
+    return decision.next === '/' ? { name: 'login' } : { name: 'login', query: { next: decision.next } }
   }
-  if (to.meta.requiresAuth) {
-    const status = await ensureSession()
-    if (status === 'unauthenticated') {
-      return { name: 'login', query: { next: to.fullPath } }
-    }
+  if (decision.kind === 'redirect') {
+    return decision.path
   }
   return true
+})
+
+/**
+ * 受保护 API 返回 401（会话过期/被清除）时的统一跳转。
+ * 只在需要认证的页面上保留 next；已经在登录页则不重复导航（避免循环）。
+ */
+setUnauthorizedHandler(() => {
+  const current = router.currentRoute.value
+  if (current.name === 'login') {
+    return
+  }
+  const query: Record<string, string> = { expired: '1' }
+  if (current.meta.requiresAuth === true) {
+    query.next = current.fullPath
+  }
+  void router.replace({ name: 'login', query })
 })

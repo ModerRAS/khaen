@@ -21,6 +21,7 @@ import {
   Menu,
   Monitor,
   Moon,
+  Loading,
   Odometer,
   Refresh,
   Share,
@@ -32,6 +33,7 @@ import { navGroups, type NavItem } from '@/router'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
 import { useViewport } from '@/composables/useViewport'
 import { setLocale } from '@/i18n'
+import { logout } from '@/stores/session'
 import { APP_VERSION } from '@/config'
 import StatusBadge from './StatusBadge.vue'
 
@@ -65,6 +67,8 @@ function readUserCollapsed(): boolean {
 
 const userCollapsed = ref(readUserCollapsed())
 const drawerOpen = ref(false)
+/** 登出请求进行中：菜单项禁用，避免重复触发。 */
+const signingOut = ref(false)
 
 /** <1280 自动折叠；用户显式折叠优先。 */
 const collapsed = computed(() => !isMobile.value && (isNarrow.value || userCollapsed.value))
@@ -93,8 +97,27 @@ function navigate(item: NavItem): void {
   void router.push(item.path)
 }
 
+/** 登出：调 POST /api/auth/logout（store 负责清态），随后回登录页。 */
+async function signOut(): Promise<void> {
+  if (signingOut.value) {
+    return
+  }
+  signingOut.value = true
+  try {
+    await logout()
+  } finally {
+    signingOut.value = false
+    drawerOpen.value = false
+    await router.replace({ name: 'login' })
+  }
+}
+
 function onMenuCommand(command: unknown): void {
   if (typeof command !== 'string') {
+    return
+  }
+  if (command === 'auth:logout') {
+    void signOut()
     return
   }
   if (command === 'theme:system' || command === 'theme:dark' || command === 'theme:light') {
@@ -224,10 +247,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   <span class="menu-line__flag">{{ t('topbar.comingSoon', { milestone: 'M6' }) }}</span>
                 </span>
               </el-dropdown-item>
-              <el-dropdown-item disabled>
+              <el-dropdown-item divided command="auth:logout" :disabled="signingOut">
                 <span class="menu-line">
                   <span>{{ t('topbar.logout') }}</span>
-                  <span class="menu-line__flag">{{ t('topbar.comingSoon', { milestone: 'M1' }) }}</span>
+                  <el-icon v-if="signingOut" class="is-loading"><Loading /></el-icon>
                 </span>
               </el-dropdown-item>
             </el-dropdown-menu>

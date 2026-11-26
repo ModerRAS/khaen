@@ -9,7 +9,8 @@
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "preview": "vite preview",
-    "i18n:check": "node scripts/i18n-check.mjs"
+    "i18n:check": "node scripts/i18n-check.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",

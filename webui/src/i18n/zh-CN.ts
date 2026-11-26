@@ -45,7 +45,7 @@ const messages = {
     expand: '展开侧栏',
     menu: '打开导航',
     navDisabled: '该页面尚未接入（计划 {milestone}）',
-    stubBanner: 'M0/M1 骨架：后端 API 尚未接入，页面上的数值一律显示为「未接入」占位，不展示假数据。',
+    stubBanner: 'M1：认证与会话已接入；状态与控制类接口自 M2 起逐个接入，未接入前一律显示「未接入」，不展示假数据。',
     hostLink: '控制通道',
     hostLinkNotWired: '控制通道未接入'
   },
@@ -100,33 +100,49 @@ const messages = {
     },
     field: {
       password: '密码',
-      confirm: '再次输入密码',
-      token: '访问令牌（高级）'
+      confirm: '再次输入密码'
     },
     placeholder: {
       password: '请输入密码',
-      confirm: '请再次输入密码',
-      token: '可选：使用 X-KHAEN-Token 直接登录'
+      confirm: '请再次输入密码'
     },
     action: {
       submitSetup: '设置密码并进入',
-      submitLogin: '登录'
+      submitLogin: '登录',
+      retry: '重试'
+    },
+    state: {
+      checking: '正在检查认证状态…',
+      unavailable: '无法连接 daemon'
     },
     validation: {
       required: '请输入密码',
       tooShort: '密码至少 {min} 个字符',
       mismatch: '两次输入的密码不一致'
     },
-    stub: {
-      submitBlocked: 'M1 未接入：认证 API 尚未实现，表单不会真的登录。',
-      note: '登录/初始化接口（/api/auth/*）将在 M1 接入；本页目前只有静态壳与本地校验。',
-      previewLabel: '预览状态（M1 接入后移除）',
-      previewSetup: '初始化',
-      previewLogin: '登录'
+    notice: {
+      sessionExpired: '会话已过期，请重新登录。',
+      alreadyConfigured: '管理员密码已设置，请直接登录。'
     },
     footer: {
       version: '版本 {version}',
       build: '构建 {id}'
+    }
+  },
+  error: {
+    auth: {
+      invalidCredentials: '密码错误，请重试',
+      invalidCurrentPassword: '当前密码不正确',
+      rateLimited: '尝试次数过多（每分钟最多 5 次），请稍后再试',
+      alreadyConfigured: '管理员密码已设置，请直接登录',
+      notConfigured: '服务端尚未初始化管理员密码，请刷新页面重试',
+      csrfInvalid: '请求校验失败，请刷新页面后重试',
+      validation: '提交内容不合法',
+      unauthenticated: '请先登录',
+      sessionExpired: '会话已过期，请重新登录',
+      network: '无法连接 daemon（后端未启动或网络中断），请检查后重试',
+      server: '服务器错误，请稍后重试',
+      unknown: '未知错误，请重试'
     }
   },
   overview: {

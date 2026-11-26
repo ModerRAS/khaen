@@ -1,128 +1,232 @@
 <script setup lang="ts">
 /**
- * 登录 / 初始化静态壳（PLAN §6.1 / §11.4）。
+ * 登录 / 初始化（PLAN §6.1 / §11.4）——M1 起接真实认证 API。
  *
- * 本页现在**不接认证 API**：
- * - setup / login 两态可切换预览（M1 落地后由 GET /api/auth/status 决定，移除预览开关）；
- * - 表单做本地校验（必填 / 最短长度 / 两次一致），提交按钮只提示「M1 未接入」，不伪造登录成功。
- * TODO(M1)：GET /api/auth/status 决定 setup|login；POST /api/auth/setup|login；成功保存 CSRF 并跳 next。
+ * 启动：GET /api/auth/status（经 stores/session.ensureSession）决定形态：
+ * - configured=false                         -> 初始化表单（密码 + 确认，>= MIN_PASSWORD_LENGTH 且一致）；
+ * - configured=true && authenticated=false    -> 登录表单（密码）；
+ * - authenticated=true                        -> 直接回跳 next（只接受站内相对路径）；
+ * - 后端不可达（configured=null）              -> 明确的不可达提示 + 重试（不假装任何状态）。
+ *
+ * 交互：回车提交；提交中按钮 loading 且表单禁用；错误走 role=alert/aria-live；
+ * 401 密码错误、429 限速、409 已初始化（切到登录态并提示）按 PLAN §6.1 映射成本地化文案。
+ * 底部固定展示前端版本 + 构建设识（构建标识来自 KHAEN_WEBUI_BUILD_ID，无时间戳）。
  */
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { Loading } from '@element-plus/icons-vue'
 import { APP_BUILD_ID, APP_VERSION, MIN_PASSWORD_LENGTH } from '@/config'
 import { setLocale } from '@/i18n'
+import { validateCredentials } from '@/auth/validation'
+import { classifyAuthError } from '@/api/errors'
+import { ensureSession, login, sessionState, setup } from '@/stores/session'
+import { postLoginPath } from '@/router/guard'
 
-type LoginMode = 'setup' | 'login'
+type Phase = 'checking' | 'setup' | 'signin' | 'unavailable'
 
 const { t, locale } = useI18n({ useScope: 'global' })
+const route = useRoute()
+const router = useRouter()
 
-const mode = ref<LoginMode>('setup')
+const phase = ref<Phase>('checking')
 const password = ref('')
 const confirm = ref('')
-const token = ref('')
-const error = ref('')
+const loading = ref(false)
+const errorKey = ref<string | null>(null)
+const errorDetail = ref('')
+const noticeKey = ref<string | null>(null)
+const passwordInput = ref<{ focus: () => void } | null>(null)
 
-const title = computed(() => t(mode.value === 'setup' ? 'login.title.setup' : 'login.title.login'))
-const desc = computed(() =>
-  t(mode.value === 'setup' ? 'login.desc.setup' : 'login.desc.login', { min: MIN_PASSWORD_LENGTH })
-)
-const submitLabel = computed(() =>
-  t(mode.value === 'setup' ? 'login.action.submitSetup' : 'login.action.submitLogin')
-)
+const isSetup = computed(() => phase.value === 'setup')
+const showForm = computed(() => phase.value === 'setup' || phase.value === 'signin')
+
+const headingTitle = computed(() => {
+  if (isSetup.value) {
+    return t('login.title.setup')
+  }
+  if (phase.value === 'signin') {
+    return t('login.title.login')
+  }
+  return t('app.name')
+})
+
+const headingDesc = computed(() => {
+  if (isSetup.value) {
+    return t('login.desc.setup', { min: MIN_PASSWORD_LENGTH })
+  }
+  if (phase.value === 'signin') {
+    return t('login.desc.login')
+  }
+  return t('app.tagline')
+})
+
+const submitLabel = computed(() => t(isSetup.value ? 'login.action.submitSetup' : 'login.action.submitLogin'))
+const errorText = computed(() => (errorKey.value !== null ? t(errorKey.value, { min: MIN_PASSWORD_LENGTH }) : ''))
+const noticeText = computed(() => (noticeKey.value !== null ? t(noticeKey.value) : ''))
 const localeLabel = computed(() => (locale.value === 'en-US' ? t('locale.enUS') : t('locale.zhCN')))
 
 function toggleLocale(): void {
   setLocale(locale.value === 'en-US' ? 'zh-CN' : 'en-US')
 }
 
-/** 仅本地校验（与后端 M1 规则保持一致：至少 MIN_PASSWORD_LENGTH 个字符、两次一致）。 */
-function validate(): boolean {
-  if (password.value.length === 0) {
-    error.value = t('login.validation.required')
-    return false
-  }
-  if (mode.value === 'setup') {
-    if (password.value.length < MIN_PASSWORD_LENGTH) {
-      error.value = t('login.validation.tooShort', { min: MIN_PASSWORD_LENGTH })
-      return false
-    }
-    if (confirm.value !== password.value) {
-      error.value = t('login.validation.mismatch')
-      return false
-    }
-  }
-  return true
+async function focusPassword(): Promise<void> {
+  await nextTick()
+  passwordInput.value?.focus()
 }
 
-/** TODO(M1)：替换为真实认证请求；现在只做本地校验 + 明确的未接入提示。 */
-function submit(): void {
-  error.value = ''
-  if (!validate()) {
+/** 拉取认证状态并决定页面形态；force=true 用于"重试"按钮（绕过缓存）。 */
+async function bootstrap(force = false): Promise<void> {
+  phase.value = 'checking'
+  errorKey.value = null
+  errorDetail.value = ''
+  const status = await ensureSession(force ? { force: true } : undefined)
+  if (status === 'authenticated') {
+    await router.replace(postLoginPath(route.query.next))
     return
   }
-  ElMessage.warning(t('login.stub.submitBlocked'))
+  if (sessionState.configured === false) {
+    phase.value = 'setup'
+  } else if (sessionState.configured === true) {
+    phase.value = 'signin'
+  } else {
+    phase.value = 'unavailable'
+  }
+  if (showForm.value) {
+    await focusPassword()
+  }
 }
+
+function retry(): void {
+  if (phase.value === 'checking') {
+    return
+  }
+  void bootstrap(true)
+}
+
+async function submit(): Promise<void> {
+  if (loading.value || !showForm.value) {
+    return
+  }
+  errorKey.value = null
+  errorDetail.value = ''
+  noticeKey.value = null
+
+  const validation = validateCredentials(
+    isSetup.value ? 'setup' : 'signin',
+    password.value,
+    confirm.value,
+    MIN_PASSWORD_LENGTH
+  )
+  if (!validation.ok) {
+    errorKey.value = validation.key
+    return
+  }
+
+  loading.value = true
+  try {
+    const result = isSetup.value ? await setup(password.value, confirm.value) : await login(password.value)
+    if (result.ok) {
+      password.value = ''
+      confirm.value = ''
+      await router.replace(postLoginPath(route.query.next))
+      return
+    }
+
+    const info = classifyAuthError(result.error, isSetup.value ? 'setup' : 'login')
+    if (info.code === 'already_configured') {
+      // 409：服务端已经有管理员密码（例如另一个窗口刚完成初始化）——直接切到登录态。
+      phase.value = 'signin'
+      noticeKey.value = 'login.notice.alreadyConfigured'
+      confirm.value = ''
+      await focusPassword()
+      return
+    }
+    if (info.code === 'not_configured') {
+      phase.value = 'setup'
+      errorKey.value = info.i18nKey
+      return
+    }
+    errorKey.value = info.i18nKey
+    errorDetail.value = info.detail ?? ''
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  if (route.query.expired === '1') {
+    noticeKey.value = 'login.notice.sessionExpired'
+  }
+  void bootstrap()
+})
 </script>
 
 <template>
   <div class="login-page">
-    <section class="login-card">
+    <section class="login-card" :aria-busy="loading">
       <div class="login-card__brand">
         <span class="login-card__mark" aria-hidden="true">KH</span>
         <div>
-          <h1 class="login-card__title">{{ title }}</h1>
-          <p class="login-card__desc">{{ desc }}</p>
+          <h1 class="login-card__title">{{ headingTitle }}</h1>
+          <p class="login-card__desc">{{ headingDesc }}</p>
         </div>
       </div>
 
-      <div class="login-card__mode">
-        <span class="login-card__mode-label">{{ t('login.stub.previewLabel') }}</span>
-        <el-radio-group v-model="mode" size="small">
-          <el-radio-button value="setup">{{ t('login.stub.previewSetup') }}</el-radio-button>
-          <el-radio-button value="login">{{ t('login.stub.previewLogin') }}</el-radio-button>
-        </el-radio-group>
+      <div v-if="phase === 'checking'" class="login-card__status" role="status" aria-live="polite">
+        <el-icon class="is-loading" :size="16"><Loading /></el-icon>
+        <span>{{ t('login.state.checking') }}</span>
       </div>
 
-      <el-form label-position="top" @submit.prevent="submit">
+      <div v-else-if="phase === 'unavailable'" class="login-card__status login-card__status--error" role="alert" aria-live="assertive">
+        <p class="login-card__status-title">{{ t('login.state.unavailable') }}</p>
+        <p class="login-card__status-detail">{{ t('error.auth.network') }}</p>
+        <el-button type="primary" class="login-card__submit touch-target" @click="retry">
+          {{ t('login.action.retry') }}
+        </el-button>
+      </div>
+
+      <el-form v-else-if="showForm" label-position="top" class="login-card__form" @submit.prevent="submit">
+        <p v-if="noticeText" class="login-card__notice" role="status" aria-live="polite">{{ noticeText }}</p>
+
         <el-form-item :label="t('login.field.password')">
           <el-input
+            ref="passwordInput"
             v-model="password"
             type="password"
             show-password
+            :disabled="loading"
             :placeholder="t('login.placeholder.password')"
-            :autocomplete="mode === 'setup' ? 'new-password' : 'current-password'"
+            :autocomplete="isSetup ? 'new-password' : 'current-password'"
+            :aria-label="t('login.field.password')"
           />
         </el-form-item>
 
-        <el-form-item v-if="mode === 'setup'" :label="t('login.field.confirm')">
+        <el-form-item v-if="isSetup" :label="t('login.field.confirm')">
           <el-input
             v-model="confirm"
             type="password"
             show-password
+            :disabled="loading"
             :placeholder="t('login.placeholder.confirm')"
             autocomplete="new-password"
+            :aria-label="t('login.field.confirm')"
           />
         </el-form-item>
 
-        <el-form-item v-if="mode === 'login'" :label="t('login.field.token')">
-          <el-input
-            v-model="token"
-            type="password"
-            show-password
-            :placeholder="t('login.placeholder.token')"
-            autocomplete="off"
-          />
-        </el-form-item>
+        <p class="login-card__error" role="alert" aria-live="assertive">{{ errorText }}</p>
+        <p v-if="errorDetail" class="login-card__detail">{{ errorDetail }}</p>
 
-        <div class="login-card__error" role="alert">{{ error }}</div>
-
-        <el-button type="primary" native-type="submit" class="login-card__submit">
+        <el-button
+          type="primary"
+          native-type="submit"
+          class="login-card__submit touch-target"
+          :loading="loading"
+          :disabled="loading"
+        >
           {{ submitLabel }}
         </el-button>
       </el-form>
-
-      <p class="login-card__note">{{ t('login.stub.note') }}</p>
 
       <div class="login-card__footer">
         <span>{{ t('login.footer.version', { version: APP_VERSION }) }}</span>
@@ -134,11 +238,55 @@ function submit(): void {
 </template>
 
 <style scoped>
-.login-card__note {
-  margin-top: var(--khaen-space-3);
+.login-card__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--khaen-space-2);
+  margin: var(--khaen-space-4) 0;
+  color: var(--khaen-text-secondary);
+  font-size: var(--khaen-font-aux);
+  text-align: center;
+}
+
+.login-card__status--error {
+  align-items: stretch;
+  padding: var(--khaen-space-3);
+  border: 1px solid color-mix(in srgb, var(--khaen-danger) 45%, transparent);
+  border-radius: var(--khaen-radius-panel);
+  background: var(--khaen-danger-soft);
+  color: var(--khaen-text);
+  text-align: left;
+}
+
+.login-card__status-title {
+  font-weight: 600;
+}
+
+.login-card__status-detail {
+  color: var(--khaen-text-secondary);
+  font-size: var(--khaen-font-aux);
+}
+
+.login-card__form {
+  margin-top: var(--khaen-space-2);
+}
+
+.login-card__notice {
+  margin-bottom: var(--khaen-space-3);
+  padding: var(--khaen-space-2) var(--khaen-space-3);
+  border: 1px solid color-mix(in srgb, var(--khaen-accent) 40%, transparent);
+  border-radius: var(--khaen-radius-button);
+  background: var(--khaen-accent-soft);
+  color: var(--khaen-text);
+  font-size: var(--khaen-font-aux);
+}
+
+.login-card__detail {
+  margin-top: var(--khaen-space-1);
   color: var(--khaen-text-muted);
   font-size: 11px;
-  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .login-card__locale {
