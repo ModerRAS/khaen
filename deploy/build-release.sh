@@ -81,6 +81,6 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT}/target}"
 
 cargo build --release --locked \
   --target "${TARGET}" \
-  -p khaen-daemon -p khaen-rt-host -p khaen-cal-tools -p khaen-calibration
+  -p khaen-daemon -p khaen-rt-host -p khaen-cal-tools -p khaen-calibration -p khaen-analyze
 
 echo "==> built: ${CARGO_TARGET_DIR}/${TARGET}/release"
