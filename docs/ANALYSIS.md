@@ -1,8 +1,8 @@
 # khaen-analyze：纯 Rust 离线分析工具链
 
-> 状态：Windows 本机实现 + 测试通过（48 个测试，三条门禁绿）；用 2026-11-26 真机闭环录音的
-> **合成等价件**（9 s / 48 kHz / 24-bit / 2ch，2.59 MB，与设备录音同规格同长度）验证；
-> 真机录音本体在设备上，本机重放 = NOT_RUN（见 §11）。工具只读 WAV、只写 JSON，不碰设备、不联网。
+> 状态：Windows 本机实现 + 测试通过（53 个测试，三条门禁绿）；用 2026-11-26 真机闭环录音的
+> **合成等价件**与**设备 WAV 副本**人工复核（T63 修掉“静音占比 >50% 时参考中位数落到静音上”的掉音
+> 漏检，见 §5.1）；在设备上运行 / CI = NOT_RUN（见 §11）。工具只读 WAV、只写 JSON，不碰设备、不联网。
 
 ## 1. 为什么有这套工具
 
@@ -119,41 +119,55 @@ khaen-analyze envelope --wav FILE --out FILE [--window-ms 50] [--dropout-db -20]
 | --- | --- | --- |
 | `--wav` / `--out` | 必填 | 输入 WAV / 输出 JSON（后者必须不存在） |
 | `--window-ms` | 50 | 短时 RMS 窗长（毫秒，> 0）；步长固定为一半 |
-| `--dropout-db` | -20 | 掉音阈值（相对中位电平，dB，必须 < 0） |
+| `--dropout-db` | -20 | 掉音阈值（相对**活动区中位电平**，dB，必须 < 0） |
 | `--min-windows` | 3 | 连续掉音窗数达到多少才记一个 gap |
 
-**算法**：矩形窗 RMS，每窗电平 `20·log10(rms)` dBFS（整窗全零记 null）；参考电平 = 全部有信号窗的
-dB 中位数；**在有信号区间内**（第一个到最后一个非 null 窗），电平 < 参考 + 阈值且连续 ≥ min_windows
-的窗段记一个 gap。文件头/尾的静音（闭环协议的 1.5 s 前后静音）算**边界**、不算掉音。
+**算法**（T63 起参考电平只取活动区）：
 
-**判定**（`verdict`）：`clean` / `dropout` / `silent`（全部窗无信号；缺数据不冒充通过）。
+1. **短时电平**：矩形窗 RMS，每窗 `20·log10(rms)` dBFS（整窗全零记 null），步长 = 窗长/2。
+2. **活动区**：真机录音的“静音”是约 −70 dBFS 的本底噪声而不是数字零；若对全体窗取中位数，
+   静音占比 >50% 时参考会落到静音上（T63 复查发现的漏检根因）。因此先估底噪再划活动区：
+   - 底噪 = 全窗电平 p10（最近秩；null 窗按 −∞ 计），输出 `noise_floor_dbfs`；
+   - 峰值 = 最大窗电平；峰值 − 底噪 ≤ 10 dB 视为没有明显静音段，全部有信号窗都算活动；
+   - 否则活动阈值 = max(峰值 − 40 dB, 峰值与底噪的 dB 中点)，输出 `active_threshold_dbfs`；
+   - `signal_start_s` / `signal_end_s` 是首/末**活动窗**的覆盖区间（边界静音不算活动区）。
+3. **参考电平** = 活动窗电平的中位数（`reference_median_dbfs`；不是全体窗中位）。
+4. **掉音** = 活动区内电平 < 参考 + `--dropout-db` 的窗；连续 ≥ `--min-windows` 记一个 gap；
+   越出活动区的头尾静音不算 gap。
+5. **gap 起止秒** = 首/末掉音窗的覆盖区间。
+
+**判定**（`verdict`）：`clean` = 活动区内没有达到门限的 gap；`dropout` = 至少一个 gap；
+`silent` = 全部窗无信号（参考不存在；缺数据不冒充通过）。
 
 **输出 schema**（`khaen-analyze-envelope/v1`，节选；`levels_dbfs` 为每窗电平数组，null = 整窗全零）：
 
 ```json
 {
+  "active_threshold_dbfs": -42.43919400786532,
+  "active_windows": 138,
   "channels": 2,
   "command": "envelope",
   "dropout_db": -20.0,
   "duration_s": 9.0,
   "gap_count": 1,
   "gaps": [
-    { "depth_db": -53.990106302933704, "end_s": 4.9, "start_s": 4.3, "windows": 23, "worst_dbfs": -69.04208905540284 }
+    { "depth_db": -51.59283424612244, "end_s": 4.9, "start_s": 4.3, "windows": 23, "worst_dbfs": -66.64425897154825 }
   ],
   "hop_samples": 1200,
   "level_unit": "dBFS",
   "max_gap_s": 0.6000000000000005,
   "min_windows": 3,
-  "reference_median_dbfs": -15.051982752469137,
+  "noise_floor_dbfs": -70.24302052696711,
+  "reference_median_dbfs": -15.051424725425811,
   "sample_rate_hz": 48000.0,
   "samples": 432000,
   "schema": "khaen-analyze-envelope/v1",
   "signal_end_s": 6.525,
-  "signal_start_s": 1.475,
+  "signal_start_s": 2.475,
   "tool": "khaen-analyze",
   "tool_version": "0.1.5",
   "verdict": "dropout",
-  "wav": "baseline-dropout.wav",
+  "wav": "majority-dropout.wav",
   "window": "rect",
   "window_ms": 50.0,
   "window_samples": 2400,
@@ -161,18 +175,38 @@ dB 中位数；**在有信号区间内**（第一个到最后一个非 null 窗�
 }
 ```
 
-上面这份就是 2026-11-26 事故的**合成等价件**：9 s = 1.5 s 静音 + 5 s 指数扫频（−12 dBFS）+ 1.5 s 静音，
-4.3–4.9 s 注入 −69 dBFS 本底 —— 工具报出 `verdict=dropout`、gap `4.3–4.9 s / 23 窗 / 深度 −54 dB`；
-同结构无掉音版本报 `clean`、`signal_start_s=1.475`、`signal_end_s=6.525`、中位电平 −15.05 dBFS
-（扫频幅度 0.25 的 RMS）。集成测试 `closed_loop_style_recording_with_gap_is_flagged` /
-`..._without_gap_is_clean` 锁死这两条。
+这份输出是 T63 回归用的“**静音过半**”合成件：9 s = 2.5 s 静音 + 4.0 s 指数扫频（−12 dBFS）+ 2.5 s
+静音（静音 55.6%），静音是 −70 dBFS 级**本底噪声**而非数字零；4.3–4.9 s 注入 −66 dBFS 段 → 工具报
+`verdict=dropout`、gap `4.3–4.9 s / 23 窗 / 深度 −51.6 dB`、参考 −15.05 dBFS（扫频 RMS）、
+底噪 −70.24 dBFS、活动阈值 −42.44 dBFS、活动窗 138。旧实现在同一文件上报 clean、参考 −70 dBFS。
+同结构无掉音版本报 `clean`（活动窗 161）。集成测试 `majority_silence_with_dropout_is_flagged` /
+`..._without_dropout_is_clean` 锁死这两条；另保留 2026-11-26 事故等价件（1.5 s+5 s+1.5 s，
+数字零静音 → 活动阈值 = 峰值 − 40 dB，gap 4.3–4.9 s）的 `closed_loop_style_recording_*` 测试。
+
+### 5.1 真实录音复核（2026-11-26 设备 WAV 副本，实测）
+
+用 2026-11-26 真机闭环复测的三段设备录音（各 9 s / 48 kHz / 24-bit / 2ch，2.59 MB；WAV 不入库，
+副本放本机临时目录人工复核，不进 CI）：
+
+| 录音 | 内容 | verdict | 参考（活动区中位） | 活动区 | gap |
+| --- | --- | --- | --- | --- | --- |
+| `baseline.wav` | 首次基线（4.3–4.9 s 报道掉音） | **dropout** | −47.16 dBFS | 2.300–6.825 s | **4.425–5.000 s**，22 窗，最深 −76.40 dBFS，相对参考 −29.24 dB |
+| `baseline2.wav` | 重录基线（干净） | clean | −47.28 dBFS | 2.800–6.925 s | — |
+| `applied.wav` | 施加方案后（干净） | clean | −45.86 dBFS | 2.175–6.825 s | — |
+
+- 掉音检出与 HANDOFF 记录的“4.3–4.9 s”一致到约一个窗长：该录音按 50 ms 窗的能量缺口实际在
+  4.4–5.0 s（用 `--window-ms 25` 复核仍为 4.425–5.000 s，说明是数据里的边界，不是窗分辨率）；
+- 该录音的扫频窗电平随频响在 −34…−59 dBFS 间变化；旧实现取全体中位得 −68.55 dBFS（落在静音上）
+  → clean 漏检；T63 后参考是活动区中位 −47.16 dBFS，掉音段 −76 dBFS 被正确检出。
 
 **边界（诚实说明）**：
 
 - 窗口只有**完全落在掉音段内**才判掉音，报告的 gap 比真实掉音段**向内收缩**（最多各缩一个窗长/步长），
   不会往外扩；
-- 参考电平是全部有信号窗的中位数：对 9 s 闭环录音（静音占 1/3）仍落在扫频电平上；若静音占比超过一半，
-  中位数会被静音拉低（报告给出 `reference_median_dbfs`，可人工核对）；
+- 活动区检测假设底噪明显低于信号：峰值与底噪差 ≤ 10 dB 时不区分（全部窗活动，参考仍可能被静音拉低）；
+  只低十几 dB 时用中点阈值，可能把安静信号窗算进/漏出活动区；
+- 活动区边界是保守的：低于活动阈值的弱响应扫频窗不算活动，`signal_start_s/signal_end_s` 会比真实
+  扫频端点向内收缩（最多几个窗）；
 - 若掉音紧贴扫频起点/终点、与头尾静音连成一片，会落进边界静音区而**漏检**；用 `signal_start_s` /
   `signal_end_s` 与 `levels_dbfs` 人工核对。
 
@@ -290,23 +324,25 @@ WAV 与带电平错误码与 `khaen-band-levels` **完全同名**（同一份 kh
 
 ## 11. 测试覆盖与未验证项
 
-48 个测试（Windows 本机全绿）：
+53 个测试（Windows 本机全绿）：
 
-- 12 个库单元测试：PSD 积分 = calibration 带功率（4 种窗长）、满幅正弦 −3.01 dBFS、窗长/采样率校验码、
-  中位数、gap 位置/深度、全静音判定、config 校验码、compare 与 `relative_band_levels` 逐位一致；
-- 36 个集成测试（跑真实二进制）：
+- 15 个库单元测试：PSD 积分 = calibration 带功率（4 种窗长）、满幅正弦 −3.01 dBFS、窗长/采样率校验码、
+  活动区检测（静音过半仍取活动区参考 / 连续信号全部活动 / 全静音）、中位数、gap 位置/深度、config
+  校验码、compare 与 `relative_band_levels` 逐位一致；
+- 38 个集成测试（跑真实二进制）：
   - `tests/wav.rs`（7）：PCM16/24/32、float32、立体声混单声道、坏文件/8-bit/9 声道/零采样率/缺文件错误码；
   - `tests/spectrum.rs`（9）：带电平 = RMS dBFS、满幅 −3.01、双音相对电平、16-bit vs float32 一致、
     PSD 积分 = 带电平、自定义窗、非法窗/中心/录音过短；
-  - `tests/envelope.rs`（8）：干净信号、掉音位置/深度/边界内缩、min-windows 抑制、阈值相对中位、
-    全静音、**2026-11-26 事故等价件（有掉音/无掉音）**、非法配置；
+  - `tests/envelope.rs`（10）：干净信号、掉音位置/深度/边界内缩、min-windows 抑制、阈值相对中位、
+    全静音、**2026-11-26 事故等价件（有/无掉音）**、**静音过半（55.6% 本底噪声）有/无掉音（T63 回归，
+    9 s / 48 kHz / 24-bit / 2ch）**、非法配置；
   - `tests/compare.rs`（5）：−6.02 dB 增益、与 calibration 逐位一致、同文件 0 dB、全零侧 missing、采样率不匹配；
   - `tests/cli.rs`（7）：三子命令确定性、摘要 sha = 文件 sha、用法/输入错误码、`--out` 已存在退出码 1、`--help`。
 
 **NOT_RUN**（本机做不了，不能写成实测）：
 
-- 真机录音本体重放：设备 `/var/lib/khaen/closed-loop/{baseline2,applied}.wav` 在本机没有副本
-  （HANDOFF 只留 sha256），本工具在真机 WAV 上的输出 = NOT_RUN；
 - 在 N150 设备上运行 khaen-analyze：NOT_RUN（设备尚未部署 khaen，见 `docs/CLOSED-LOOP.md` §4.0）；
 - Linux CI 的 fmt/clippy/test：NOT_RUN（本机 Windows 通过，CI 由集成方跑）；
-- 16/24/32f/多声道覆盖来自**合成 WAV**，不是真机录音的格式多样性实测。
+- 16/24/32f/多声道覆盖来自**合成 WAV**，不是真机录音的格式多样性实测；
+- 真机 WAV 复核（§5.1）是人工验证：WAV 不入库、不进 CI，结论只覆盖 2026-11-26 这三段录音
+  （其他设备/增益/时长组合未测）。

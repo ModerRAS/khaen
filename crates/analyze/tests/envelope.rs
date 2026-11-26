@@ -26,6 +26,124 @@ const FRAMES: usize = FS as usize * 2;
 const GAP_START: usize = 38_400; // 0.8 s
 const GAP_END: usize = 48_000; // 1.0 s
 
+/// T63 回归用录音结构：2.5 s 前静音 + 4.0 s 指数扫频 + 2.5 s 后静音（静音 55.6% > 50%）。
+const MAJORITY_SILENCE_FRAMES: usize = FS as usize * 9;
+const MAJORITY_SWEEP_START: usize = FS as usize * 5 / 2; // 2.5 s
+const MAJORITY_SWEEP_END: usize = MAJORITY_SWEEP_START + FS as usize * 4; // 6.5 s
+
+/// 两个正弦叠加的确定性本底噪声：各幅度 a 时 RMS = a（不是数字零）。
+fn noise_floor_sample(index: usize, amplitude: f64) -> f64 {
+    let t = index as f64 / f64::from(FS);
+    amplitude
+        * ((2.0 * std::f64::consts::PI * 37.0 * t).sin()
+            + (2.0 * std::f64::consts::PI * 113.0 * t).sin())
+}
+
+/// 仿 2026-11-26 真机录音的“静音过半”结构：静音是本底噪声（有限 dBFS），
+/// 正是旧版参考中位数落到静音上、掉音漏检的原因。
+fn majority_silence_recording(dropout: Option<(usize, usize)>) -> Vec<f64> {
+    let noise_amplitude = 10f64.powf(-70.0 / 20.0);
+    let mut frames: Vec<f64> = (0..MAJORITY_SILENCE_FRAMES)
+        .map(|index| noise_floor_sample(index, noise_amplitude))
+        .collect();
+    let duration = 4.0;
+    let (f0, f1) = (20.0f64, 20_000.0f64);
+    let k = (f1 / f0).ln() / duration;
+    for (index, frame) in frames
+        .iter_mut()
+        .enumerate()
+        .take(MAJORITY_SWEEP_END)
+        .skip(MAJORITY_SWEEP_START)
+    {
+        let t = (index - MAJORITY_SWEEP_START) as f64 / f64::from(FS);
+        let phase = 2.0 * std::f64::consts::PI * f0 * ((k * t).exp() - 1.0) / k;
+        *frame = 0.25 * phase.sin();
+    }
+    if let Some((start, end)) = dropout {
+        let dropout_amplitude = 10f64.powf(-66.0 / 20.0);
+        for (index, frame) in frames.iter_mut().enumerate().take(end).skip(start) {
+            *frame = noise_floor_sample(index, dropout_amplitude);
+        }
+    }
+    frames
+}
+
+fn interleaved_stereo(frames: &[f64]) -> Vec<f64> {
+    let mut interleaved = Vec::with_capacity(frames.len() * 2);
+    for &frame in frames {
+        interleaved.push(frame);
+        interleaved.push(frame);
+    }
+    interleaved
+}
+
+#[test]
+fn majority_silence_with_dropout_is_flagged() {
+    // 旧实现：参考中位数落在 -70 dBFS 静音上 -> verdict=clean、gaps=0（漏检）。
+    let dir = temp_dir("envelope-majority-silence");
+    let wav = dir.join("baseline.wav");
+    let frames = majority_silence_recording(Some((FS as usize * 43 / 10, FS as usize * 49 / 10)));
+    write_pcm24(&wav, FS, 2, &interleaved_stereo(&frames));
+    let out = dir.join("envelope.json");
+    let result = run_envelope(&wav, &out, &[]);
+    assert_eq!(result.code, 0, "{}", result.stderr);
+    let document = read_json(&out);
+    assert_eq!(document["verdict"], "dropout");
+    assert_eq!(document["gap_count"], 1);
+    let gap = &document["gaps"].as_array().expect("gaps")[0];
+    let start = gap["start_s"].as_f64().expect("start");
+    let end = gap["end_s"].as_f64().expect("end");
+    assert!((start - 4.3).abs() < 0.03, "start {start}");
+    assert!((end - 4.9).abs() < 0.03, "end {end}");
+    let windows = gap["windows"].as_u64().expect("windows");
+    assert!((20..=26).contains(&windows), "windows {windows}");
+    let depth = gap["depth_db"].as_f64().expect("depth");
+    assert!(depth < -40.0, "depth {depth}");
+    // 参考必须是扫频电平（-15.05 dBFS 的 RMS），不是 -70 dBFS 的静音。
+    let reference = document["reference_median_dbfs"]
+        .as_f64()
+        .expect("reference");
+    assert!((reference - -15.05).abs() < 0.5, "reference {reference}");
+    let floor = document["noise_floor_dbfs"].as_f64().expect("floor");
+    assert!((floor - -70.0).abs() < 2.0, "floor {floor}");
+    let threshold = document["active_threshold_dbfs"]
+        .as_f64()
+        .expect("threshold");
+    assert!(
+        (-60.0..=-35.0).contains(&threshold),
+        "threshold {threshold}"
+    );
+    let active = document["active_windows"].as_u64().expect("active windows");
+    assert!((120..=165).contains(&active), "active windows {active}");
+    let signal_start = document["signal_start_s"].as_f64().expect("signal start");
+    let signal_end = document["signal_end_s"].as_f64().expect("signal end");
+    assert!(
+        (signal_start - 2.475).abs() < 0.06,
+        "signal start {signal_start}"
+    );
+    assert!((signal_end - 6.525).abs() < 0.06, "signal end {signal_end}");
+    // 24-bit / 2ch WAV 解码也走同一条路径。
+    assert_eq!(document["channels"], 2);
+}
+
+#[test]
+fn majority_silence_without_dropout_is_clean() {
+    let dir = temp_dir("envelope-majority-silence-clean");
+    let wav = dir.join("baseline.wav");
+    let frames = majority_silence_recording(None);
+    write_pcm24(&wav, FS, 2, &interleaved_stereo(&frames));
+    let out = dir.join("envelope.json");
+    let result = run_envelope(&wav, &out, &[]);
+    assert_eq!(result.code, 0, "{}", result.stderr);
+    let document = read_json(&out);
+    assert_eq!(document["verdict"], "clean");
+    assert_eq!(document["gap_count"], 0);
+    let reference = document["reference_median_dbfs"]
+        .as_f64()
+        .expect("reference");
+    assert!((reference - -15.05).abs() < 0.5, "reference {reference}");
+}
+
 #[test]
 fn clean_sine_has_no_dropout() {
     let dir = temp_dir("envelope-clean");
