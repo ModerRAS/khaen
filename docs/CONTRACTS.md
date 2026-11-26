@@ -151,7 +151,7 @@
 
 ### B.1.5 模式（mode）
 
-模式是**输入使能**，不是方案补丁；真实采集源切换属于数据面/设备监督层（跨进程控制通道未实现，T70g）。
+模式是**输入使能**，不是方案补丁；真实采集源切换属于数据面/设备监督层（跨进程控制通道已由 T70f-b/T70f-c 以 UNIX socket 落地；采集源切换 T70g 未实现）。
 
 - 支持值：`off`（整链静音）、`on` / `aes67`（解除静音；当前唯一实现的输入源固定为 aes67）。其它值 `bad_request`，消息里写明 "not wired"，不返回假成功。
 - 两阶段与其它界面一致：`surface=mode` 只准备草稿（`engine_token` / `planned_version` / `mode` / `changed` / `applies_to="control-plane engine (output enable)"`）；`commit` 才在下一块边界调用引擎静音（`off`）或解除静音（`aes67`），响应带 `applied_block`。同值请求 `changed=false`，commit 为空操作。
