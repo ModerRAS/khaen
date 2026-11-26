@@ -60,10 +60,11 @@ async fn api_meta_reports_real_version_and_capability_constants() {
     assert_eq!(body["surfaces"], serde_json::json!(WIRED_SURFACES));
 
     let not_wired = body["not_wired"].as_array().expect("not_wired 必须是数组");
+    // 控制面能力（逐项照常量）+ 校准 job 后端（默认未接线，条目随实现状态变化）。
     assert_eq!(
         not_wired.len(),
-        NOT_WIRED_OPS.len() + NOT_WIRED_SURFACES.len(),
-        "not_wired 必须完整反映未实现 op / 未接通 surface: {not_wired:?}"
+        NOT_WIRED_OPS.len() + NOT_WIRED_SURFACES.len() + 1,
+        "not_wired 必须完整反映未实现 op / 未接通 surface / 未接线后端: {not_wired:?}"
     );
     for ((op, reason), entry) in NOT_WIRED_OPS.iter().zip(not_wired.iter()) {
         assert_eq!(entry["op"], Value::String((*op).to_string()));
@@ -76,6 +77,36 @@ async fn api_meta_reports_real_version_and_capability_constants() {
         assert_eq!(entry["surface"], Value::String((*surface).to_string()));
         assert_eq!(entry["reason"], Value::String((*reason).to_string()));
     }
+    let calibration_entry = not_wired.last().expect("not_wired 非空");
+    assert_eq!(
+        calibration_entry["op"],
+        Value::String("calibration.jobs".into())
+    );
+    assert!(
+        calibration_entry["reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()),
+        "校准后端未接线必须带原因: {calibration_entry}"
+    );
+    // meta.calibration 如实反映当前注入的服务状态（默认 NotWired）。
+    assert_eq!(body["calibration"]["wired"], Value::Bool(false));
+    assert!(body["calibration"]["reason"]
+        .as_str()
+        .is_some_and(|reason| !reason.is_empty()));
+    // meta.host_link：当前控制通道实况（T70f-b）。默认测试服务是 process 目标（进程内引擎），
+    // 如实标 daemon-process + socket=null + 原因；能力清单 not_wired 语义不变（上面已逐项对齐）。
+    assert_eq!(
+        body["host_link"]["target"],
+        Value::String("daemon-process".into())
+    );
+    assert_eq!(body["host_link"]["socket"], Value::Null);
+    assert!(matches!(
+        body["host_link"]["mode"].as_str(),
+        Some("file") | Some("none")
+    ));
+    assert!(body["host_link"]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("KHAEN_RT_TARGET=process")));
 }
 
 #[test]

@@ -253,7 +253,9 @@ async fn safety_latch_mutes_engine_through_daemon_poll() {
     };
     let state = DaemonState::new(config)
         .expect("state")
-        .with_device(monitor);
+        .with_device(monitor)
+        // 本用例验证 daemon 轮询把进程内引擎静音（T70c 语义）：显式选 process 目标。
+        .with_host_link(khaen_daemon::host_link::HostLink::process());
     assert_eq!(state.control().status_json()["mute"], Value::Bool(false));
 
     // 静音在块边界生效：静音请求后必须真的跑块，状态里的 mute 才反映实际输出。

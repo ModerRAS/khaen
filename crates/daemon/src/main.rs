@@ -14,6 +14,11 @@
 //!   解析结果注入 `DaemonState`，handler 不读环境。
 //! - `KHAEN_CONTROL_COMMAND`：可选的“拉起控制通道”命令（等价 v1 的 tspi-motu-net-up）。
 //! - `KHAEN_DEVICE_POLL_MS`：监督器轮询间隔，默认 500。
+//! - `KHAEN_RT_TARGET` / `KHAEN_RT_SOCKET` / `KHAEN_RT_TIMEOUT_MS`：daemon→rt-host 控制通道
+//!   （T70f-b，见 `khaen_daemon::host_link`）。目标默认 `rt-host`（`process` 仅测试/离线演示，
+//!   响应与状态显式标 `target: daemon-process`）；socket 默认 `/run/khaen/rt-host.sock`；
+//!   往返超时默认 10000 ms（必须大于 rt-host 的 5 s 块边界 ack 上限）。非法值启动即失败
+//!   （稳定错误 + 退出码 2），不静默回退。
 //!
 //! 一个进程只能有一个监督器 owner；音频线程用块路径上的安全检查，不另开状态机。
 
@@ -53,6 +58,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => EngineConfig::default(),
     };
     let plan_rate = config.sample_rate;
+    // 控制通道配置：默认 rt-host（真数据面）；非法值启动即失败（与 bind 同样的 fail-closed 策略）。
+    let host_link = match khaen_daemon::host_link::HostLinkConfig::from_env() {
+        Ok(config) => khaen_daemon::host_link::HostLink::new(config),
+        Err(error) => {
+            eprintln!("khaen-daemon: {error}");
+            std::process::exit(2);
+        }
+    };
     // rt-host 状态文件路径：启动时解析一次并注入 DaemonState（handler 不读环境）。
     let rt_status_file = std::env::var("KHAEN_RT_STATUS_FILE")
         .ok()
@@ -63,7 +76,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         DaemonState::new(config)?
             .with_bind(bind)
             .with_device(device_monitor(plan_rate))
-            .with_rt_status_file(rt_status_file),
+            .with_rt_status_file(rt_status_file)
+            .with_host_link(host_link),
     );
 
     let poll_ms = std::env::var("KHAEN_DEVICE_POLL_MS")
@@ -77,6 +91,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         poll_state.poll_device();
     });
 
+    let host_link = state.host_link();
+    println!(
+        "khaen-daemon host-link target={} socket={} timeout_ms={}",
+        host_link.target().as_str(),
+        host_link
+            .socket()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        host_link.config().timeout.as_millis()
+    );
     let device = state.device_json();
     println!(
         "khaen-daemon device wired={} state={} reason={}",

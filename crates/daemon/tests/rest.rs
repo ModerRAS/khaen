@@ -95,7 +95,10 @@ async fn spawn() -> (TestServer, Arc<DaemonState>) {
         .expect("state")
         .with_bind(addr)
         // 测试固定注入一个不存在的 rt-host 状态文件：/api/status 必须可预测地退化。
-        .with_rt_status_file(state_dir.path().join("rt-host-status.json")),
+        .with_rt_status_file(state_dir.path().join("rt-host-status.json"))
+        // T70f-b：这些用例验证进程内引擎的真实数值行为，显式选 process 目标（响应带 target 标记）；
+        // rt-host 转发语义由 tests/host_link.rs 覆盖。
+        .with_host_link(khaen_daemon::host_link::HostLink::process()),
     );
     let app =
         router(Arc::clone(&state)).into_make_service_with_connect_info::<std::net::SocketAddr>();
@@ -373,13 +376,14 @@ async fn status_reports_v1_aggregate_and_degrades_without_rt_host() {
     ] {
         assert!(body["reasons"][path].is_string(), "缺原因: {path}");
     }
-    // not_wired 至少含 T70f 控制通道（元素 {path, reason}）。
+    // not_wired 至少含控制通道条目（元素 {path, reason}）：本测试显式用 process 目标，
+    // 所以控制通道如实标注为 host_link.control（不再写死 T70f 未实现）。
     let not_wired = body["not_wired"].as_array().expect("not_wired 必须是数组");
-    let socket = not_wired
+    let control = not_wired
         .iter()
-        .find(|entry| entry["path"] == Value::String("host_link.socket".into()))
-        .expect("not_wired 必须含 host_link.socket");
-    assert!(socket["reason"].as_str().is_some_and(|r| !r.is_empty()));
+        .find(|entry| entry["path"] == Value::String("host_link.control".into()))
+        .expect("not_wired 必须含 host_link.control");
+    assert!(control["reason"].as_str().is_some_and(|r| !r.is_empty()));
 }
 
 #[tokio::test(flavor = "current_thread")]

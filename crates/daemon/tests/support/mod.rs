@@ -9,12 +9,19 @@
 
 #![allow(dead_code)] // 不同的测试二进制只用到其中一部分工具
 
+pub mod calibration_fake;
+pub mod host_link_fake;
+pub mod plan_fixture;
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use khaen_daemon::auth::{AuthConfig, SESSION_COOKIE};
+use khaen_daemon::calibration::service::CalibrationService;
+use khaen_daemon::host_link::{HostLink, HostLinkConfig, Transport};
 use khaen_daemon::{router, DaemonState};
 use khaen_host::EngineConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -22,6 +29,34 @@ use tokio::net::TcpListener;
 
 /// 测试用固定密码（满足 >=8 字符；只在临时状态目录里使用）。
 pub const TEST_PASSWORD: &str = "khaen-test-password";
+
+/// 进程内目标（仅测试/离线演示）：控制 op 作用于 daemon 进程内引擎，响应标 `target: daemon-process`。
+///
+/// 默认测试服务都用它——旧 REST 测试的语义（真跑进程内引擎）保持不变，同时按 T70f-b 的契约
+/// 显式标注目标；rt-host 转发语义由注入假传输的测试单独覆盖。
+pub fn process_link() -> Arc<HostLink> {
+    HostLink::process()
+}
+
+/// rt-host 目标 + 注入传输（内存假实现或 TCP 回环），2 s 超时（并行跑测试时也不至于误超时）。
+///
+/// 泛型入参让调用方直接传 `Arc<FakeTransport>`（在函数调用点做 unsize 转换，
+/// 不用写 `as Arc<dyn Transport>`）。
+pub fn injected_link<T: Transport + 'static>(transport: Arc<T>) -> Arc<HostLink> {
+    injected_link_with_timeout(transport, Duration::from_secs(2))
+}
+
+/// 同 [`injected_link`]，但显式给往返超时（超时降级测试用短超时）。
+pub fn injected_link_with_timeout<T: Transport + 'static>(
+    transport: Arc<T>,
+    timeout: Duration,
+) -> Arc<HostLink> {
+    let transport: Arc<dyn Transport> = transport;
+    HostLink::with_transport(
+        HostLinkConfig::rt_host("/tmp/khaen-test-rt-host.sock").with_timeout(timeout),
+        transport,
+    )
+}
 
 /// 测试用临时状态目录；Drop 时递归删除。
 pub struct TempStateDir {
@@ -117,7 +152,7 @@ pub async fn spawn_at(state_dir: &Path) -> TestServer {
 
 /// 用指定状态目录 + 自定义认证配置（如短会话 TTL）启动服务；不自动登录。
 pub async fn spawn_at_with_config(state_dir: &Path, config: AuthConfig) -> TestServer {
-    spawn_custom(state_dir, config, None).await
+    spawn_custom(state_dir, config, None, None, None).await
 }
 
 /// 同 spawn_at_with_config，但注入 rt-host 状态文件路径（测试 M2 聚合的 fixture）。
@@ -126,15 +161,70 @@ pub async fn spawn_at_with_rt_status_file(state_dir: &Path, rt_status_file: Path
         state_dir,
         AuthConfig::for_tests(state_dir.to_path_buf()),
         Some(rt_status_file),
+        None,
+        None,
+    )
+    .await
+}
+
+/// 用指定状态目录 + 注入控制通道启动服务；可选 rt-host 状态文件路径；不自动登录。
+pub async fn spawn_at_with_link(
+    state_dir: &Path,
+    link: Arc<HostLink>,
+    rt_status_file: Option<PathBuf>,
+) -> TestServer {
+    spawn_custom(
+        state_dir,
+        AuthConfig::for_tests(state_dir.to_path_buf()),
+        rt_status_file,
+        None,
+        Some(link),
+    )
+    .await
+}
+
+/// 临时状态目录 + 注入控制通道（可选状态文件），自动 setup/login。
+pub async fn spawn_with_link(link: Arc<HostLink>, rt_status_file: Option<PathBuf>) -> TestServer {
+    let dir = Arc::new(TempStateDir::new("host-link"));
+    let mut server = spawn_at_with_link(dir.path(), link, rt_status_file).await;
+    server.owned_dir = Some(Arc::clone(&dir));
+    server.session = Some(bootstrap_session(&server).await);
+    server
+}
+
+/// 用临时状态目录 + 注入校准 job 服务启动服务（自动 setup/login）。
+pub async fn spawn_with_calibration(service: Arc<dyn CalibrationService>) -> TestServer {
+    let dir = Arc::new(TempStateDir::new("calibration"));
+    let mut server = spawn_at_with_service(dir.path(), service).await;
+    server.owned_dir = Some(Arc::clone(&dir));
+    server.session = Some(bootstrap_session(&server).await);
+    server
+}
+
+/// 用指定状态目录 + 注入校准服务启动服务；不自动登录。
+pub async fn spawn_at_with_service(
+    state_dir: &Path,
+    service: Arc<dyn CalibrationService>,
+) -> TestServer {
+    spawn_custom(
+        state_dir,
+        AuthConfig::for_tests(state_dir.to_path_buf()),
+        None,
+        Some(service),
+        None,
     )
     .await
 }
 
 /// 真实监听随机端口；启动时解析的监听地址注入 DaemonState（/api/status 的 daemon.bind 用它）。
+///
+/// `link` 为 None 时用 [`process_link`]（旧测试语义）；转发语义测试显式注入 rt-host 链路。
 async fn spawn_custom(
     state_dir: &Path,
     config: AuthConfig,
     rt_status_file: Option<PathBuf>,
+    calibration: Option<Arc<dyn CalibrationService>>,
+    link: Option<Arc<HostLink>>,
 ) -> TestServer {
     // 先绑定端口，再构造 state：daemon.bind 必须是启动时解析的真实监听地址。
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
@@ -145,6 +235,10 @@ async fn spawn_custom(
     if let Some(rt_status_file) = rt_status_file {
         state = state.with_rt_status_file(rt_status_file);
     }
+    if let Some(calibration) = calibration {
+        state = state.with_calibration(calibration);
+    }
+    state = state.with_host_link(link.unwrap_or_else(process_link));
     let state = Arc::new(state);
     let app = router(Arc::clone(&state)).into_make_service_with_connect_info::<SocketAddr>();
     let handle = tokio::spawn(async move {
@@ -250,12 +344,7 @@ pub async fn request_json(
     request_authed(server, method, path, Some(body)).await
 }
 
-async fn request_authed(
-    server: &TestServer,
-    method: &str,
-    path: &str,
-    body: Option<&str>,
-) -> HttpResponse {
+fn auth_headers(server: &TestServer, method: &str) -> Vec<(String, String)> {
     let mut headers: Vec<(String, String)> = Vec::new();
     if let Some(session) = server.session() {
         headers.push((
@@ -267,7 +356,41 @@ async fn request_authed(
             headers.push(("X-KHAEN-CSRF".to_string(), session.csrf.clone()));
         }
     }
-    request_with(server, method, path, &headers, body).await
+    headers
+}
+
+async fn request_authed(
+    server: &TestServer,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> HttpResponse {
+    let headers = auth_headers(server, method);
+    request_with_raw(server, method, path, &headers, body.map(str::as_bytes)).await
+}
+
+/// 发一个自动带认证的原始字节请求（upload / 二进制 body）。
+pub async fn request_bytes(
+    server: &TestServer,
+    method: &str,
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+) -> HttpResponse {
+    let mut headers = auth_headers(server, method);
+    headers.push(("Content-Type".to_string(), content_type.to_string()));
+    request_with_raw(server, method, path, &headers, Some(body)).await
+}
+
+/// 发一个不带自动认证头的原始字节请求（未鉴权 / 缺 CSRF / 自定义 Content-Type 场景）。
+pub async fn request_bytes_with(
+    server: &TestServer,
+    method: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: Option<&[u8]>,
+) -> HttpResponse {
+    request_with_raw(server, method, path, headers, body).await
 }
 
 /// 发一个不带自动认证头的 HTTP/1.1 请求，返回完整响应。
@@ -278,30 +401,42 @@ pub async fn request_with(
     headers: &[(String, String)],
     body: Option<&str>,
 ) -> HttpResponse {
+    request_with_raw(server, method, path, headers, body.map(str::as_bytes)).await
+}
+
+/// 原始字节版本的请求构造（request_with / request_bytes 共用）。
+pub async fn request_with_raw(
+    server: &TestServer,
+    method: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: Option<&[u8]>,
+) -> HttpResponse {
     let mut stream = tokio::net::TcpStream::connect(&server.addr)
         .await
         .expect("connect");
-    let mut text = format!(
+    let mut head = format!(
         "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
         server.addr
     );
     for (name, value) in headers {
-        text.push_str(&format!("{name}: {value}\r\n"));
+        head.push_str(&format!("{name}: {value}\r\n"));
     }
     if let Some(body) = body {
         if !headers
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
         {
-            text.push_str("Content-Type: application/json\r\n");
+            head.push_str("Content-Type: application/json\r\n");
         }
-        text.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        head.push_str(&format!("Content-Length: {}\r\n", body.len()));
     }
-    text.push_str("\r\n");
+    head.push_str("\r\n");
+    let mut text = head.into_bytes();
     if let Some(body) = body {
-        text.push_str(body);
+        text.extend_from_slice(body);
     }
-    stream.write_all(text.as_bytes()).await.expect("write");
+    stream.write_all(&text).await.expect("write");
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).await.expect("read");
 

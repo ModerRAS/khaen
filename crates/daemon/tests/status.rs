@@ -93,9 +93,17 @@ async fn status_aggregates_a_fresh_rt_host_status_file() {
     assert_eq!(body["output"]["bytes_written"], Value::from(33_792_000u64));
     assert_eq!(body["device"]["state"], Value::String("present".into()));
     assert_eq!(body["device"]["rate_readback"], Value::from(48_000u64));
+    // 测试服务显式用 process 目标（进程内引擎）：host_link.target 如实标注，
+    // 控制通道按能力进 not_wired（path=host_link.control），不再写死“T70f 未实现”。
+    assert_eq!(
+        body["host_link"]["target"],
+        Value::String("daemon-process".into())
+    );
+    assert_eq!(body["host_link"]["mode"], Value::String("file".into()));
+    assert_eq!(body["host_link"]["socket"], Value::Null);
     assert!(body["not_wired"].as_array().is_some_and(|items| items
         .iter()
-        .any(|item| item["path"] == json!("host_link.socket"))));
+        .any(|item| item["path"] == json!("host_link.control"))));
     assert!(body["reasons"]["plan.version"].is_string());
 }
 

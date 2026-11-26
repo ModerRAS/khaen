@@ -1,0 +1,1555 @@
+//! 校准 REST 的 axum 路由与 handler（T36）。
+//!
+//! # 端点与状态码
+//!
+//! | 方法 | 路径 | 成功 | 说明 |
+//! |---|---|---|---|
+//! | POST | /api/calibration/uploads | 201/200 | 原始字节 → `{upload_id,sha256,bytes,created}`；同 sha 幂等（200） |
+//! | GET | /api/calibration/jobs | 200 | `{schema,available,reason,engine,active_job_id,total,limit,offset,jobs,reasons}` |
+//! | POST | /api/calibration/jobs | 202 | `{job_id,location}`；同刻只允许一个 active job（409 switch_busy） |
+//! | GET | /api/calibration/jobs/{id} | 200 | `{schema,job:{...},reasons}` |
+//! | POST | /api/calibration/jobs/{id}/cancel | 200 | `{job_id,status}` |
+//! | POST | /api/calibration/jobs/{id}/apply | 200 | prepare→commit（现有控制面）+ 回写 |
+//! | POST | /api/calibration/jobs/{id}/rollback | 200 | rollback→commit（现有控制面）+ 回写 |
+//! | GET | /api/calibration/jobs/{id}/artifacts/{name} | 200 | 白名单产物；按 manifest sha256 校验 |
+//! | GET/PUT | /api/calibration/wizard | 200 | 向导配置（wizard.json） |
+//! | GET | /api/calibration/wizard/state | 200 | 8 步向导状态（真实来源推导） |
+//! | POST | /api/calibration/wizard/apply | 200 | 内部转 job apply |
+//!
+//! 所有 /api 路径都过现有 auth 中间件（登录会话；写方法额外 CSRF），错误体固定
+//! `{"error":{"code","message","details"}}`（PLAN §4.1）。缺失字段一律 null + `reasons`，
+//! 不编数值、不伪造进度。
+
+use std::collections::{BTreeMap, HashMap};
+use std::time::SystemTime;
+
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde_json::{json, Map, Value};
+
+use khaen_core::sha256::sha256_hex;
+
+use crate::calibration::service::{
+    AppliedVersion, CalibrationError, JobApply, JobInputs, JobQuery, JobRecord, JobResult,
+    JobState, JobStep, NewJob, OFFLINE_JOB_STEPS,
+};
+use crate::calibration::store::{self, MAX_UPLOAD_BYTES};
+use crate::calibration::wizard::{self, MeasurementDraft, WizardStateInputs, WIZARD_SCHEMA};
+use crate::calibration::CalibrationHub;
+use crate::{error_response, DaemonState};
+
+/// job 列表 schema。
+pub const JOBS_SCHEMA: &str = "khaen-calibration-jobs/v1";
+/// job 详情 schema。
+pub const JOB_SCHEMA: &str = "khaen-calibration-job/v1";
+/// 列表默认每页条数。
+pub const DEFAULT_LIMIT: usize = 20;
+/// 列表最大每页条数。
+pub const MAX_LIMIT: usize = 100;
+/// JSON 请求体上限（job/wizard 的 JSON 很小）。
+pub const MAX_JSON_BODY: usize = 64 * 1024;
+/// 单个 job 最多回显的产物数（与 backend manifest 上限一致）。
+pub const MAX_LIST_ARTIFACTS: usize = 256;
+
+/// 组装校准 REST 路由（挂到 /api 全局 auth 中间件之下）。
+pub fn routes() -> Router<std::sync::Arc<DaemonState>> {
+    Router::new()
+        .route("/api/calibration/uploads", post(upload))
+        .route("/api/calibration/jobs", get(list_jobs).post(create_job))
+        .route("/api/calibration/jobs/{job_id}", get(job_detail))
+        .route("/api/calibration/jobs/{job_id}/cancel", post(cancel_job))
+        .route("/api/calibration/jobs/{job_id}/apply", post(apply_job))
+        .route(
+            "/api/calibration/jobs/{job_id}/rollback",
+            post(rollback_job),
+        )
+        .route(
+            "/api/calibration/jobs/{job_id}/artifacts/{name}",
+            get(download_artifact),
+        )
+        .route("/api/calibration/wizard", get(get_wizard).put(put_wizard))
+        .route("/api/calibration/wizard/state", get(get_wizard_state))
+        .route("/api/calibration/wizard/apply", post(wizard_apply))
+}
+
+// ---------------------------------------------------------------------------
+// 公共小工具
+// ---------------------------------------------------------------------------
+
+fn now_rfc3339() -> String {
+    crate::status::rfc3339_utc(SystemTime::now())
+}
+
+fn ok_json(value: Value) -> Response {
+    (StatusCode::OK, Json(value)).into_response()
+}
+
+/// 读 JSON 请求体（空 body → Value::Null，由 handler 决定是否必填）。
+async fn read_json_body(body: Body) -> Result<Value, CalibrationError> {
+    let bytes = axum::body::to_bytes(body, MAX_JSON_BODY)
+        .await
+        .map_err(|error| {
+            CalibrationError::invalid_request(
+                "<body>",
+                format!("cannot read request body: {error}"),
+            )
+        })?;
+    if bytes.is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_slice(&bytes).map_err(|error| {
+        CalibrationError::invalid_request(
+            "<body>",
+            format!("request body must be valid JSON: {error}"),
+        )
+    })
+}
+
+/// 要求 body 是 JSON object。
+fn require_body_object(value: Value) -> Result<Map<String, Value>, CalibrationError> {
+    match value {
+        Value::Object(object) => Ok(object),
+        Value::Null => Err(CalibrationError::invalid_request(
+            "<body>",
+            "request body must be a JSON object",
+        )),
+        _ => Err(CalibrationError::invalid_request(
+            "<body>",
+            "request body must be a JSON object",
+        )),
+    }
+}
+
+/// 拒绝未知字段（严格按 REST 契约；未知字段 400）。
+fn reject_unknown_fields(
+    object: &Map<String, Value>,
+    allowed: &[&str],
+    prefix: &str,
+) -> Result<(), CalibrationError> {
+    for key in object.keys() {
+        if !allowed.contains(&key.as_str()) {
+            let field = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            return Err(CalibrationError::invalid_request(
+                &field,
+                format!(
+                    "unknown field {field:?}: allowed fields are {}",
+                    allowed.join(", ")
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn required_object<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+) -> Result<&'a Map<String, Value>, CalibrationError> {
+    match object.get(field) {
+        None => Err(CalibrationError::invalid_request(
+            field,
+            format!("missing required field {field:?}"),
+        )),
+        Some(Value::Object(nested)) => Ok(nested),
+        Some(_) => Err(CalibrationError::invalid_request(
+            field,
+            format!("{field} must be a JSON object"),
+        )),
+    }
+}
+
+fn required_string(object: &Map<String, Value>, field: &str) -> Result<String, CalibrationError> {
+    match object.get(field) {
+        None => Err(CalibrationError::invalid_request(
+            field,
+            format!("missing required field {field:?}"),
+        )),
+        Some(Value::String(text)) => Ok(text.clone()),
+        Some(_) => Err(CalibrationError::invalid_request(
+            field,
+            format!("{field} must be a string"),
+        )),
+    }
+}
+
+fn required_number(object: &Map<String, Value>, field: &str) -> Result<f64, CalibrationError> {
+    match object.get(field) {
+        None => Err(CalibrationError::invalid_request(
+            field,
+            format!("missing required field {field:?}"),
+        )),
+        Some(Value::Number(number)) => Ok(number.as_f64().unwrap_or(f64::NAN)),
+        Some(_) => Err(CalibrationError::invalid_request(
+            field,
+            format!("{field} must be a number"),
+        )),
+    }
+}
+
+fn required_u64(object: &Map<String, Value>, field: &str) -> Result<u64, CalibrationError> {
+    match object.get(field) {
+        None => Err(CalibrationError::invalid_request(
+            field,
+            format!("missing required field {field:?}"),
+        )),
+        Some(Value::Number(number)) => number.as_u64().ok_or_else(|| {
+            CalibrationError::invalid_request(
+                field,
+                format!("{field} must be a non-negative integer"),
+            )
+        }),
+        Some(_) => Err(CalibrationError::invalid_request(
+            field,
+            format!("{field} must be a non-negative integer"),
+        )),
+    }
+}
+
+/// job id 校验（路径参数；拒绝分隔符与超长值）。
+fn validate_job_id(job_id: &str) -> Result<(), CalibrationError> {
+    let ok = !job_id.is_empty()
+        && job_id.len() <= 64
+        && !job_id.contains("..")
+        && job_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    if ok {
+        Ok(())
+    } else {
+        Err(CalibrationError::invalid_request(
+            "job_id",
+            "job_id must be 1..=64 characters of ASCII letters, digits, '-', '_' or '.'",
+        ))
+    }
+}
+
+fn insert_reason_if_null(
+    reasons: &mut BTreeMap<String, String>,
+    path: &str,
+    is_null: bool,
+    reason: impl Into<String>,
+) {
+    if is_null && !reasons.contains_key(path) {
+        reasons.insert(path.to_string(), reason.into());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 上传
+// ---------------------------------------------------------------------------
+
+/// POST /api/calibration/uploads：原始字节 body（64 MiB 上限），内容寻址存盘。
+pub(crate) async fn upload(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    // 1) 媒体类型（先把明显错误的请求挡掉，不读 body）。
+    let essence = match store::content_type_essence(&headers) {
+        Some(essence) => essence,
+        None => {
+            return CalibrationError::unsupported_format(None).into_response();
+        }
+    };
+    if !store::is_supported_upload_content_type(&essence) {
+        return CalibrationError::unsupported_format(Some(&essence)).into_response();
+    }
+    // 2) Content-Length 预检（超限直接 413，不读 body）。
+    if let Some(length) = content_length(&headers) {
+        if length > MAX_UPLOAD_BYTES {
+            return CalibrationError::upload_too_large(MAX_UPLOAD_BYTES).into_response();
+        }
+    }
+    // 3) 读取 body（有上限；chunked 超限在读取阶段报错）。
+    let bytes = match axum::body::to_bytes(body, MAX_UPLOAD_BYTES as usize).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            if is_length_limit_error(&error) {
+                return CalibrationError::upload_too_large(MAX_UPLOAD_BYTES).into_response();
+            }
+            return CalibrationError::invalid_request(
+                "<body>",
+                format!("cannot read upload body: {error}"),
+            )
+            .into_response();
+        }
+    };
+    if bytes.is_empty() {
+        return CalibrationError::invalid_request("<body>", "upload body must not be empty")
+            .into_response();
+    }
+    // 4) sha256 + 原子写（阻塞 IO 放 spawn_blocking，不堵 async worker）。
+    let store = state.calibration().uploads().clone();
+    let payload = bytes.clone();
+    let stored = tokio::task::spawn_blocking(move || store.save(payload.as_ref())).await;
+    match stored {
+        Ok(Ok((record, created))) => {
+            let status = if created {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            };
+            (
+                status,
+                Json(json!({
+                    "upload_id": record.upload_id,
+                    "sha256": record.sha256,
+                    "bytes": record.bytes,
+                    "created": created,
+                })),
+            )
+                .into_response()
+        }
+        Ok(Err(error)) => error.into_response(),
+        Err(join) => {
+            CalibrationError::internal(format!("upload worker failed: {join}")).into_response()
+        }
+    }
+}
+
+fn content_length(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
+/// axum body 读取错误是否是超限（http-body-util 的 LengthLimitError 在错误链里）。
+fn is_length_limit_error(error: &axum::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if current.to_string().contains("length limit") {
+            return true;
+        }
+        source = current.source();
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// jobs 列表 / 创建
+// ---------------------------------------------------------------------------
+
+/// GET /api/calibration/jobs?limit=&offset=
+pub(crate) async fn list_jobs(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    query: Result<Query<HashMap<String, String>>, axum::extract::rejection::QueryRejection>,
+) -> Response {
+    let params = match query {
+        Ok(Query(params)) => params,
+        Err(error) => {
+            return CalibrationError::invalid_request("<query>", error.body_text()).into_response()
+        }
+    };
+    let list_query = match parse_page_query(&params) {
+        Ok(query) => query,
+        Err(error) => return error.into_response(),
+    };
+    let hub = state.calibration();
+    let calibration = hub.status();
+    let page = match hub.service().list_jobs(&list_query) {
+        Ok(page) => page,
+        Err(error) => return error.into_response(),
+    };
+    let mut reasons = BTreeMap::new();
+    let reason = if calibration.wired {
+        calibration.reason.clone()
+    } else {
+        let text = calibration
+            .reason
+            .clone()
+            .unwrap_or_else(|| crate::calibration::NOT_WIRED_REASON.to_string());
+        reasons.insert("jobs".to_string(), text.clone());
+        Some(text)
+    };
+    insert_reason_if_null(
+        &mut reasons,
+        "engine",
+        calibration.engine.is_none(),
+        "engine is reported by the calibration job backend when it exposes one; this daemon has no engine source for offline jobs",
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "active_job_id",
+        calibration.active_job.is_none(),
+        if calibration.wired {
+            "no calibration job is active"
+        } else {
+            crate::calibration::NOT_WIRED_REASON
+        },
+    );
+    let jobs: Vec<Value> = page
+        .jobs
+        .iter()
+        .take(list_query.limit)
+        .map(|summary| {
+            let record_json = json!({
+                "id": summary.job_id,
+                "kind": summary.kind,
+                "status": summary.state.as_str(),
+                "verdict": summary.verdict,
+                "created_at": summary.created_at,
+                "started_at": summary.started_at,
+                "finished_at": summary.finished_at,
+                "duration_ms": summary.duration_ms,
+                "error": summary.error.as_ref().map(|error| json!({"code": error.code, "message": error.message})),
+                "reason": summary.reason,
+            });
+            record_json
+        })
+        .collect();
+    ok_json(json!({
+        "schema": JOBS_SCHEMA,
+        "available": calibration.wired,
+        "reason": reason,
+        "engine": calibration.engine,
+        "active_job_id": calibration.active_job,
+        "total": page.total,
+        "limit": list_query.limit,
+        "offset": list_query.offset,
+        "jobs": jobs,
+        "reasons": reasons,
+    }))
+}
+
+fn parse_page_query(params: &HashMap<String, String>) -> Result<JobQuery, CalibrationError> {
+    for key in params.keys() {
+        if key != "limit" && key != "offset" {
+            return Err(CalibrationError::invalid_request(
+                key,
+                format!("unknown query parameter {key:?}: allowed parameters are limit, offset"),
+            ));
+        }
+    }
+    let limit = match params.get("limit") {
+        None => DEFAULT_LIMIT,
+        Some(text) => {
+            let value = text.trim().parse::<usize>().map_err(|_| {
+                CalibrationError::invalid_request("limit", "limit must be an integer")
+            })?;
+            if !(1..=MAX_LIMIT).contains(&value) {
+                return Err(CalibrationError::invalid_request(
+                    "limit",
+                    format!("limit must be in 1..={MAX_LIMIT}"),
+                ));
+            }
+            value
+        }
+    };
+    let offset = match params.get("offset") {
+        None => 0,
+        Some(text) => text.trim().parse::<usize>().map_err(|_| {
+            CalibrationError::invalid_request("offset", "offset must be a non-negative integer")
+        })?,
+    };
+    Ok(JobQuery { limit, offset })
+}
+
+/// POST /api/calibration/jobs：校验 kind/inputs/上传，交给服务创建（202）。
+pub(crate) async fn create_job(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    body: Body,
+) -> Response {
+    let value = match read_json_body(body).await {
+        Ok(value) => value,
+        Err(error) => return error.into_response(),
+    };
+    let object = match require_body_object(value) {
+        Ok(object) => object,
+        Err(error) => return error.into_response(),
+    };
+    if let Err(error) = reject_unknown_fields(&object, &["kind", "inputs"], "") {
+        return error.into_response();
+    }
+    let kind = match required_string(&object, "kind") {
+        Ok(kind) => kind,
+        Err(error) => return error.into_response(),
+    };
+    if kind != crate::calibration::service::JOB_KIND_SINGLE_POINT_OFFLINE {
+        return CalibrationError::invalid_request(
+            "kind",
+            format!(
+                "unsupported job kind {kind:?}: only single_point_offline is defined (PLAN §4.7)"
+            ),
+        )
+        .into_response();
+    }
+    let inputs_object = match required_object(&object, "inputs") {
+        Ok(inputs) => inputs,
+        Err(error) => return error.into_response(),
+    };
+    if let Err(error) = reject_unknown_fields(
+        inputs_object,
+        &[
+            "plan_sha",
+            "baseline_upload_id",
+            "applied_upload_id",
+            "centers_hz",
+            "tolerance_db",
+            "min_bands",
+        ],
+        "inputs",
+    ) {
+        return error.into_response();
+    }
+    let inputs = match parse_job_inputs(state.calibration(), inputs_object) {
+        Ok(inputs) => inputs,
+        Err(error) => return error.into_response(),
+    };
+    let new_job = match resolve_uploads(state.calibration(), &inputs) {
+        Ok(new_job) => new_job,
+        Err(error) => return error.into_response(),
+    };
+    match state.calibration().service().start_job(&new_job) {
+        Ok(record) => {
+            let location = format!("/api/calibration/jobs/{}", record.job_id);
+            (
+                StatusCode::ACCEPTED,
+                Json(json!({
+                    "job_id": record.job_id,
+                    "location": location,
+                })),
+            )
+                .into_response()
+        }
+        Err(error) => error.into_response(),
+    }
+}
+
+fn parse_job_inputs(
+    hub: &CalibrationHub,
+    object: &Map<String, Value>,
+) -> Result<JobInputs, CalibrationError> {
+    let plan_sha = required_string(object, "plan_sha")?;
+    if !store::is_sha256_hex(&plan_sha) {
+        return Err(CalibrationError::invalid_request(
+            "inputs.plan_sha",
+            "plan_sha must be a 64-character hex sha256",
+        ));
+    }
+    let baseline_upload_id = required_string(object, "baseline_upload_id")?;
+    if !store::is_upload_id(&baseline_upload_id) {
+        return Err(CalibrationError::invalid_upload(format!(
+            "inputs.baseline_upload_id must be 64 lowercase hex characters, got {baseline_upload_id:?}"
+        ))
+        .with_detail("field", json!("inputs.baseline_upload_id")));
+    }
+    let applied_upload_id = required_string(object, "applied_upload_id")?;
+    if !store::is_upload_id(&applied_upload_id) {
+        return Err(CalibrationError::invalid_upload(format!(
+            "inputs.applied_upload_id must be 64 lowercase hex characters, got {applied_upload_id:?}"
+        ))
+        .with_detail("field", json!("inputs.applied_upload_id")));
+    }
+    // 提前校验存在性（在服务调用前给出稳定 404，而不是把坏 id 传给后端）。
+    if hub.uploads().lookup(&baseline_upload_id)?.is_none() {
+        return Err(CalibrationError::upload_not_found(&baseline_upload_id)
+            .with_detail("field", json!("inputs.baseline_upload_id")));
+    }
+    if hub.uploads().lookup(&applied_upload_id)?.is_none() {
+        return Err(CalibrationError::upload_not_found(&applied_upload_id)
+            .with_detail("field", json!("inputs.applied_upload_id")));
+    }
+    let centers_hz = parse_centers(object.get("centers_hz"))?;
+    let tolerance_db = required_number(object, "tolerance_db")?;
+    if !tolerance_db.is_finite() || tolerance_db <= 0.0 || tolerance_db > wizard::MAX_TOLERANCE_DB {
+        return Err(CalibrationError::invalid_request(
+            "inputs.tolerance_db",
+            format!(
+                "tolerance_db must be a finite number in (0, {}]",
+                wizard::MAX_TOLERANCE_DB
+            ),
+        ));
+    }
+    let min_bands = required_u64(object, "min_bands")?;
+    let min_bands = u32::try_from(min_bands).map_err(|_| {
+        CalibrationError::invalid_request("inputs.min_bands", "min_bands does not fit in u32")
+    })?;
+    if min_bands == 0 {
+        return Err(CalibrationError::invalid_request(
+            "inputs.min_bands",
+            "min_bands must be >= 1",
+        ));
+    }
+    if min_bands as usize > centers_hz.len() {
+        return Err(CalibrationError::invalid_request(
+            "inputs.min_bands",
+            format!(
+                "min_bands ({min_bands}) must not exceed the number of centers_hz ({})",
+                centers_hz.len()
+            ),
+        ));
+    }
+    Ok(JobInputs {
+        plan_sha: plan_sha.to_ascii_lowercase(),
+        baseline_upload_id,
+        applied_upload_id,
+        centers_hz,
+        tolerance_db,
+        min_bands,
+    })
+}
+
+fn parse_centers(value: Option<&Value>) -> Result<Vec<f64>, CalibrationError> {
+    let values = match value {
+        None => {
+            return Err(CalibrationError::invalid_request(
+                "inputs.centers_hz",
+                "missing required field \"centers_hz\"",
+            ))
+        }
+        Some(Value::Array(values)) => values,
+        Some(_) => {
+            return Err(CalibrationError::invalid_request(
+                "inputs.centers_hz",
+                "centers_hz must be an array of numbers",
+            ))
+        }
+    };
+    if values.is_empty() {
+        return Err(CalibrationError::invalid_request(
+            "inputs.centers_hz",
+            "centers_hz must not be empty",
+        ));
+    }
+    if values.len() > wizard::MAX_CENTERS {
+        return Err(CalibrationError::invalid_request(
+            "inputs.centers_hz",
+            format!(
+                "centers_hz must have at most {} entries",
+                wizard::MAX_CENTERS
+            ),
+        ));
+    }
+    let mut centers = Vec::with_capacity(values.len());
+    for value in values {
+        let center = value.as_f64().ok_or_else(|| {
+            CalibrationError::invalid_request(
+                "inputs.centers_hz",
+                "centers_hz entries must be numbers",
+            )
+        })?;
+        if !center.is_finite() || center < wizard::MIN_CENTER_HZ || center > wizard::MAX_CENTER_HZ {
+            return Err(CalibrationError::invalid_request(
+                "inputs.centers_hz",
+                format!(
+                    "centers_hz entries must be finite Hz values in [{}, {}]",
+                    wizard::MIN_CENTER_HZ,
+                    wizard::MAX_CENTER_HZ
+                ),
+            ));
+        }
+        centers.push(center);
+    }
+    for pair in centers.windows(2) {
+        // 上面已校验每个值有限且 > 0，可直接比较（不会出现 NaN）。
+        if pair[0] >= pair[1] {
+            return Err(CalibrationError::invalid_request(
+                "inputs.centers_hz",
+                "centers_hz must be strictly increasing",
+            ));
+        }
+    }
+    Ok(centers)
+}
+
+fn resolve_uploads(hub: &CalibrationHub, inputs: &JobInputs) -> Result<NewJob, CalibrationError> {
+    let baseline = hub
+        .uploads()
+        .lookup(&inputs.baseline_upload_id)?
+        .ok_or_else(|| CalibrationError::upload_not_found(&inputs.baseline_upload_id))?;
+    let applied = hub
+        .uploads()
+        .lookup(&inputs.applied_upload_id)?
+        .ok_or_else(|| CalibrationError::upload_not_found(&inputs.applied_upload_id))?;
+    Ok(NewJob {
+        kind: crate::calibration::service::JOB_KIND_SINGLE_POINT_OFFLINE.to_string(),
+        inputs: inputs.clone(),
+        baseline: baseline.as_ref_record(),
+        applied: applied.as_ref_record(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// job 详情 / 取消
+// ---------------------------------------------------------------------------
+
+/// GET /api/calibration/jobs/{id}
+pub(crate) async fn job_detail(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    Path(job_id): Path<String>,
+) -> Response {
+    if let Err(error) = validate_job_id(&job_id) {
+        return error.into_response();
+    }
+    let hub = state.calibration();
+    match hub.service().job(&job_id) {
+        Ok(record) => ok_json(json!({
+            "schema": JOB_SCHEMA,
+            "job": job_json(&record),
+            "reasons": job_reasons(&record),
+        })),
+        Err(error) => error.into_response(),
+    }
+}
+
+/// POST /api/calibration/jobs/{id}/cancel
+pub(crate) async fn cancel_job(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    Path(job_id): Path<String>,
+) -> Response {
+    if let Err(error) = validate_job_id(&job_id) {
+        return error.into_response();
+    }
+    match state.calibration().service().cancel(&job_id) {
+        Ok(record) => ok_json(json!({
+            "job_id": record.job_id,
+            "status": record.state.as_str(),
+        })),
+        Err(error) => error.into_response(),
+    }
+}
+
+/// 单个 job 的 REST JSON（job 对象；缺失字段 null，原因在 job_reasons）。
+fn job_json(record: &JobRecord) -> Value {
+    let steps: Vec<Value> = OFFLINE_JOB_STEPS
+        .iter()
+        .map(|name| {
+            let step = record
+                .steps
+                .iter()
+                .find(|step| step.name == *name)
+                .map(step_json)
+                .unwrap_or_else(|| {
+                    json!({
+                        "name": name,
+                        "status": "pending",
+                        "started_at": Value::Null,
+                        "finished_at": Value::Null,
+                        "sha256": Value::Null,
+                        "detail": Value::Null,
+                    })
+                });
+            step
+        })
+        .collect();
+    let artifacts: Vec<Value> = record
+        .artifacts
+        .iter()
+        .take(MAX_LIST_ARTIFACTS)
+        .map(|artifact| {
+            json!({
+                "name": artifact.name,
+                "sha256": artifact.sha256,
+                "bytes": artifact.bytes,
+                "content_type": artifact
+                    .content_type
+                    .clone()
+                    .unwrap_or_else(|| store::artifact_content_type(&artifact.name).to_string()),
+                "downloadable": store::is_whitelisted_artifact(&artifact.name),
+            })
+        })
+        .collect();
+    json!({
+        "id": record.job_id,
+        "kind": record.kind,
+        "status": record.state.as_str(),
+        "step": record.active_step,
+        "verdict": record.verdict,
+        "created_at": record.created_at,
+        "started_at": record.started_at,
+        "finished_at": record.finished_at,
+        "duration_ms": record.duration_ms,
+        "engine": record.engine,
+        "steps": steps,
+        "artifacts": artifacts,
+        "inputs": record.inputs.as_ref().map(inputs_json),
+        "result": record.result.as_ref().map(result_json),
+        "error": record.error.as_ref().map(|error| json!({"code": error.code, "message": error.message})),
+        "reason": record.reasons.get("state").cloned(),
+        "apply_state": record.apply.state.as_str(),
+        "applied_version": record.apply.applied_version,
+        "apply": apply_json(&record.apply),
+    })
+}
+
+fn step_json(step: &JobStep) -> Value {
+    json!({
+        "name": step.name,
+        "status": step.state.as_str(),
+        "started_at": step.started_at,
+        "finished_at": step.finished_at,
+        "sha256": step.sha256,
+        "detail": step.detail,
+    })
+}
+
+fn inputs_json(inputs: &JobInputs) -> Value {
+    json!({
+        "plan_sha": inputs.plan_sha,
+        "baseline_upload_id": inputs.baseline_upload_id,
+        "applied_upload_id": inputs.applied_upload_id,
+        "centers_hz": inputs.centers_hz,
+        "tolerance_db": inputs.tolerance_db,
+        "min_bands": inputs.min_bands,
+    })
+}
+
+fn result_json(result: &JobResult) -> Value {
+    let bands: Vec<Value> = result
+        .bands
+        .iter()
+        .map(|band| {
+            json!({
+                "hz": band.hz,
+                "predicted_db": band.predicted_db,
+                "observed_db": band.observed_db,
+                "delta_db": band.delta_db,
+                "missing": band.missing,
+            })
+        })
+        .collect();
+    json!({
+        "verdict": result.verdict,
+        "max_delta_db": result.max_delta_db,
+        "compared_bands": result.compared_bands,
+        "missing_bands": result.missing_bands,
+        "violations": result.violations,
+        "bands": bands,
+        "design": result.design.as_ref().map(|design| json!({
+            "residual": design.residual,
+            "admission": {
+                "accepted": design.admission_accepted,
+                "code": design.admission_code,
+                "reason": design.admission_reason,
+            },
+        })),
+        "plan": result.plan.as_ref().map(|plan| json!({
+            "sha256": plan.sha256,
+            "graph_id": plan.graph_id,
+        })),
+    })
+}
+
+fn apply_json(apply: &JobApply) -> Value {
+    json!({
+        "state": apply.state.as_str(),
+        "applied_version": apply.applied_version,
+        "previous_version": apply.previous_version,
+        "applied_at": apply.applied_at,
+        "plan_sha256": apply.plan_sha256,
+    })
+}
+
+/// job 缺失字段的原因（服务给的原因 + daemon 推导，不编值）。
+fn job_reasons(record: &JobRecord) -> Map<String, Value> {
+    let mut reasons: BTreeMap<String, String> = record.reasons.clone();
+    let state = record.state.as_str();
+    insert_reason_if_null(
+        &mut reasons,
+        "verdict",
+        record.verdict.is_none(),
+        format!("job is {state}: the verdict is produced by the closed_loop stage"),
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "created_at",
+        record.created_at.is_none(),
+        "the calibration backend did not report a creation timestamp",
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "started_at",
+        record.started_at.is_none(),
+        if record.state == JobState::Queued {
+            "job has not started yet (queued)".to_string()
+        } else {
+            "the calibration backend did not report a start timestamp".to_string()
+        },
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "finished_at",
+        record.finished_at.is_none(),
+        if record.state.is_terminal() {
+            "the calibration backend did not report a finish timestamp".to_string()
+        } else {
+            format!("job is not finished yet (state={state})")
+        },
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "duration_ms",
+        record.duration_ms.is_none(),
+        "duration_ms is derived by the backend from its stage timestamps; it is null until those exist",
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "engine",
+        record.engine.is_none(),
+        "offline single-point jobs do not open an audio engine in the daemon process; engine is reported by the job backend when it has one",
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "inputs",
+        record.inputs.is_none(),
+        "the calibration backend did not persist the job inputs; the daemon only echoes what the backend reports",
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "result",
+        record.result.is_none(),
+        format!("job is {state}: analysis results exist after the closed_loop and bundle stages"),
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "apply.applied_version",
+        record.apply.applied_version.is_none(),
+        "job has not been applied to the control plane (apply_state=not_applied)".to_string(),
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "apply.previous_version",
+        record.apply.previous_version.is_none(),
+        "no version was running before the job was applied",
+    );
+    insert_reason_if_null(
+        &mut reasons,
+        "apply.plan_sha256",
+        record.apply.plan_sha256.is_none(),
+        "the job has not been applied, so there is no applied plan sha256 yet",
+    );
+    reasons
+        .into_iter()
+        .map(|(key, value)| (key, Value::String(value)))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// apply / rollback（两阶段：服务取 plan/目标版本 → 现有控制面 prepare/commit）
+// ---------------------------------------------------------------------------
+
+/// POST /api/calibration/jobs/{id}/apply
+pub(crate) async fn apply_job(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    Path(job_id): Path<String>,
+) -> Response {
+    if let Err(error) = validate_job_id(&job_id) {
+        return error.into_response();
+    }
+    apply_flow(&state, &job_id).await
+}
+
+/// POST /api/calibration/wizard/apply {job_id?}
+pub(crate) async fn wizard_apply(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    body: Body,
+) -> Response {
+    let value = match read_json_body(body).await {
+        Ok(value) => value,
+        Err(error) => return error.into_response(),
+    };
+    let job_id = match value {
+        Value::Null => None,
+        Value::Object(object) => {
+            if let Err(error) = reject_unknown_fields(&object, &["job_id"], "") {
+                return error.into_response();
+            }
+            match object.get("job_id") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(job_id)) => {
+                    if let Err(error) = validate_job_id(job_id) {
+                        return error.into_response();
+                    }
+                    Some(job_id.clone())
+                }
+                Some(_) => {
+                    return CalibrationError::invalid_request(
+                        "job_id",
+                        "job_id must be a string or null",
+                    )
+                    .into_response()
+                }
+            }
+        }
+        _ => {
+            return CalibrationError::invalid_request("<body>", "body must be a JSON object")
+                .into_response()
+        }
+    };
+    let job_id = match job_id {
+        Some(job_id) => job_id,
+        None => {
+            let calibration = state.calibration().status();
+            if !calibration.wired {
+                return CalibrationError::not_wired(
+                    calibration
+                        .reason
+                        .as_deref()
+                        .unwrap_or(crate::calibration::NOT_WIRED_REASON),
+                )
+                .into_response();
+            }
+            match calibration.last_job_id {
+                Some(job_id) => job_id,
+                None => {
+                    return CalibrationError::no_applicable_job(
+                        "body has no job_id and no calibration job has run yet",
+                    )
+                    .into_response()
+                }
+            }
+        }
+    };
+    apply_flow(&state, &job_id).await
+}
+
+async fn apply_flow(state: &DaemonState, job_id: &str) -> Response {
+    let service = std::sync::Arc::clone(state.calibration().service());
+    // 1) 服务侧校验 job 状态并给出 plan 引用。
+    let apply_plan = match service.apply(job_id) {
+        Ok(plan) => plan,
+        Err(error) => return error.into_response(),
+    };
+    // 2) 记录 apply 前的运行状态（snapshot：回滚目标）。
+    let before = state.control().status_json();
+    let plan_path = apply_plan.plan_path.to_string_lossy().to_string();
+    // 3) 现有控制面两阶段：prepare → commit（同一把控制面锁内完成）。
+    let (commit, readback) = {
+        let mut control = state.control();
+        let prepare = match control.prepare_json(&plan_path, &apply_plan.plan_sha256) {
+            Ok(prepare) => prepare,
+            Err(error) => return error_response(error).into_response(),
+        };
+        let Some(engine_token) = prepare["engine_token"].as_str() else {
+            return CalibrationError::internal(
+                "control plane prepare response has no engine_token",
+            )
+            .into_response();
+        };
+        let commit = match control.commit_json(engine_token) {
+            Ok(commit) => commit,
+            Err(error) => return error_response(error).into_response(),
+        };
+        let readback = control.status_json();
+        (commit, readback)
+    };
+    let version = commit["version"].as_u64();
+    let graph_id = commit["graph_id"].as_str().unwrap_or_default().to_string();
+    let previous_version = before["actual_version"].as_u64();
+    let applied_at = now_rfc3339();
+    let mut reasons: BTreeMap<String, String> = BTreeMap::new();
+    reasons.insert(
+        "snapshot.sha256".to_string(),
+        "the control plane status does not expose the running plan sha256; only version/graph_id are available".to_string(),
+    );
+    let job_json = match version {
+        Some(version) => {
+            let applied = AppliedVersion {
+                version,
+                graph_id: graph_id.clone(),
+                previous_version,
+            };
+            match service.apply_committed(job_id, &applied) {
+                Ok(record) => {
+                    reasons.extend(record.reasons.clone());
+                    json!({
+                        "schema": JOB_SCHEMA,
+                        "job": job_json(&record),
+                    })
+                }
+                Err(error) => {
+                    // 控制面已经生效；回写失败只影响 job 记录，不能让调用方以为没生效。
+                    reasons.insert(
+                        "job".to_string(),
+                        format!(
+                            "the plan was applied but the calibration service could not record it: {}",
+                            error.message()
+                        ),
+                    );
+                    Value::Null
+                }
+            }
+        }
+        None => {
+            reasons.insert(
+                "applied_version".to_string(),
+                "control plane commit response has no version field".to_string(),
+            );
+            Value::Null
+        }
+    };
+    ok_json(json!({
+        "applied": true,
+        "job_id": job_id,
+        "applied_version": version,
+        "applied_block": commit["applied_block"].clone(),
+        "graph_id": graph_id,
+        "sha256": apply_plan.plan_sha256,
+        "snapshot": {
+            "version": previous_version,
+            "graph_id": before["graph_id"].clone(),
+            "sha256": Value::Null,
+        },
+        "ack": { "synthetic": false, "actual": true },
+        "readback": readback,
+        "applied_at": applied_at,
+        "job": job_json,
+    "reasons": reasons.into_iter().map(|(key, value)| (key, Value::String(value))).collect::<Map<String, Value>>(),
+    }))
+}
+
+/// POST /api/calibration/jobs/{id}/rollback
+pub(crate) async fn rollback_job(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    Path(job_id): Path<String>,
+) -> Response {
+    if let Err(error) = validate_job_id(&job_id) {
+        return error.into_response();
+    }
+    let service = std::sync::Arc::clone(state.calibration().service());
+    let target = match service.rollback(&job_id) {
+        Ok(target) => target,
+        Err(error) => return error.into_response(),
+    };
+    let before = state.control().status_json();
+    let (commit, readback) = {
+        let mut control = state.control();
+        let prepare = match control.rollback_json(Some(target.target_version)) {
+            Ok(prepare) => prepare,
+            Err(error) => return error_response(error).into_response(),
+        };
+        let Some(engine_token) = prepare["engine_token"].as_str() else {
+            return CalibrationError::internal(
+                "control plane rollback response has no engine_token",
+            )
+            .into_response();
+        };
+        let commit = match control.commit_json(engine_token) {
+            Ok(commit) => commit,
+            Err(error) => return error_response(error).into_response(),
+        };
+        let readback = control.status_json();
+        (commit, readback)
+    };
+    let version = commit["version"].as_u64();
+    let graph_id = commit["graph_id"].as_str().unwrap_or_default().to_string();
+    let rolled_back_at = now_rfc3339();
+    let mut reasons: BTreeMap<String, String> = BTreeMap::new();
+    reasons.insert(
+        "sha256".to_string(),
+        "the control plane rollback response does not expose the restored plan sha256; only version/graph_id are available".to_string(),
+    );
+    reasons.insert(
+        "snapshot".to_string(),
+        format!(
+            "rollback target was version {}; the pre-rollback running version was {} (reported by control status, may be null)",
+            target.target_version,
+            before["actual_version"]
+                .as_u64()
+                .map(|version| version.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        ),
+    );
+    let job_value = match version {
+        Some(version) => {
+            let applied = AppliedVersion {
+                version,
+                graph_id: graph_id.clone(),
+                previous_version: Some(target.target_version),
+            };
+            match service.rollback_committed(&job_id, &applied) {
+                Ok(record) => json!({
+                    "schema": JOB_SCHEMA,
+                    "job": job_json(&record),
+                }),
+                Err(error) => {
+                    reasons.insert(
+                        "job".to_string(),
+                        format!(
+                            "the plan was rolled back but the calibration service could not record it: {}",
+                            error.message()
+                        ),
+                    );
+                    Value::Null
+                }
+            }
+        }
+        None => Value::Null,
+    };
+    ok_json(json!({
+        "rolled_back": true,
+        "job_id": job_id,
+        "restored_version": target.target_version,
+        "applied_version": version,
+        "graph_id": graph_id,
+        "sha256": Value::Null,
+        "readback": readback,
+        "rolled_back_at": rolled_back_at,
+        "job": job_value,
+        "reasons": reasons.into_iter().map(|(key, value)| (key, Value::String(value))).collect::<Map<String, Value>>(),
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// 产物下载
+// ---------------------------------------------------------------------------
+
+/// GET /api/calibration/jobs/{id}/artifacts/{name}
+pub(crate) async fn download_artifact(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    Path((job_id, name)): Path<(String, String)>,
+) -> Response {
+    if let Err(error) = validate_job_id(&job_id) {
+        return error.into_response();
+    }
+    // 白名单先于任何后端调用：不在白名单的名字一律 404（不泄露存在性）。
+    if !store::is_safe_artifact_name(&name) || !store::is_whitelisted_artifact(&name) {
+        return CalibrationError::artifact_not_found(&job_id, &name).into_response();
+    }
+    let service = state.calibration().service();
+    let artifacts = match service.artifacts(&job_id) {
+        Ok(artifacts) => artifacts,
+        Err(error) => return error.into_response(),
+    };
+    let Some(info) = artifacts.iter().find(|artifact| artifact.name == name) else {
+        return CalibrationError::artifact_not_found(&job_id, &name).into_response();
+    };
+    let bytes = match service.read_artifact(&job_id, &name) {
+        Ok(bytes) => bytes,
+        Err(error) => return error.into_response(),
+    };
+    let actual = sha256_hex(&bytes);
+    if !actual.eq_ignore_ascii_case(info.sha256.trim()) {
+        return CalibrationError::artifact_sha_mismatch(
+            &job_id,
+            &name,
+            info.sha256.trim(),
+            &actual,
+        )
+        .into_response();
+    }
+    let content_type = info
+        .content_type
+        .clone()
+        .unwrap_or_else(|| store::artifact_content_type(&name).to_string());
+    let mut response = (StatusCode::OK, bytes).into_response();
+    let headers = response.headers_mut();
+    if let Ok(value) = HeaderValue::from_str(&content_type) {
+        headers.insert(CONTENT_TYPE, value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&format!("attachment; filename=\"{name}\"")) {
+        headers.insert(CONTENT_DISPOSITION, value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&info.sha256) {
+        headers.insert("x-khaen-artifact-sha256", value);
+    }
+    response
+}
+
+// ---------------------------------------------------------------------------
+// wizard
+// ---------------------------------------------------------------------------
+
+fn wizard_json(load: &wizard::WizardLoad, saved_fields: Option<Vec<String>>) -> Value {
+    let mut reasons: Map<String, Value> = wizard::config_reasons(&load.stored);
+    if let Some(corruption) = &load.corruption {
+        reasons.insert("wizard_store".to_string(), json!(corruption));
+    }
+    let mut body = json!({
+        "schema": WIZARD_SCHEMA,
+        "config": load.stored.config_json(),
+        "defaults": wizard::WizardStored::defaults_json(),
+        "saved": load.saved,
+        "updated_at": load.updated_at,
+        "reasons": Value::Object(reasons),
+    });
+    if let Some(fields) = saved_fields {
+        body["set_fields"] = json!(fields);
+    }
+    body
+}
+
+/// GET /api/calibration/wizard
+pub(crate) async fn get_wizard(State(state): State<std::sync::Arc<DaemonState>>) -> Response {
+    let load = state.calibration().wizard().load();
+    ok_json(wizard_json(&load, None))
+}
+
+/// PUT /api/calibration/wizard（部分字段；未知字段 400）
+pub(crate) async fn put_wizard(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    body: Body,
+) -> Response {
+    let value = match read_json_body(body).await {
+        Ok(value) => value,
+        Err(error) => return error.into_response(),
+    };
+    if !value.is_object() {
+        return CalibrationError::invalid_request(
+            "<body>",
+            "wizard PUT body must be a JSON object",
+        )
+        .into_response();
+    }
+    let hub = state.calibration();
+    let load = hub.wizard().load();
+    let outcome = match wizard::apply_wizard_patch(&load.stored, hub.uploads(), &value) {
+        Ok(outcome) => outcome,
+        Err(error) => return error.into_response(),
+    };
+    let updated_at = match hub.wizard().save(&outcome.stored) {
+        Ok(updated_at) => updated_at,
+        Err(error) => return error.into_response(),
+    };
+    let saved = wizard::WizardLoad {
+        stored: outcome.stored,
+        saved: true,
+        updated_at: Some(updated_at),
+        corruption: None,
+    };
+    ok_json(wizard_json(&saved, Some(outcome.set_fields)))
+}
+
+/// GET /api/calibration/wizard/state
+pub(crate) async fn get_wizard_state(State(state): State<std::sync::Arc<DaemonState>>) -> Response {
+    let hub = state.calibration();
+    let load = hub.wizard().load();
+    let aggregated = crate::status::aggregate(&state, SystemTime::now());
+    let control_status = state.control().status_json();
+    let calibration = hub.status();
+    let service = std::sync::Arc::clone(hub.service());
+    // 最近 job：优先状态里的 last_job_id，其次列表第一条（后端按新→旧返回）。
+    let last_job_id = calibration.last_job_id.clone();
+    let last_job = match last_job_id {
+        Some(job_id) => service.job(&job_id).ok(),
+        None => match service.list_jobs(&JobQuery {
+            limit: 1,
+            offset: 0,
+        }) {
+            Ok(page) => page
+                .jobs
+                .first()
+                .and_then(|summary| service.job(&summary.job_id).ok()),
+            Err(_) => None,
+        },
+    };
+    let measurement = measurement_draft(hub, &load.stored, last_job.as_ref());
+    let updated_at = now_rfc3339();
+    let mut value = wizard::derive_state(WizardStateInputs {
+        status: &aggregated,
+        control_status: &control_status,
+        calibration: &calibration,
+        last_job: last_job.as_ref(),
+        stored: &load.stored,
+        measurement: &measurement,
+        updated_at: &updated_at,
+    });
+    // 配置损坏/未保存也要在状态里如实说明（向导配置是第 3 步 gate 的来源）。
+    if let Some(corruption) = &load.corruption {
+        if let Some(reasons) = value["reasons"].as_object_mut() {
+            reasons.insert("wizard_store".to_string(), json!(corruption));
+        }
+    }
+    if !load.saved {
+        if let Some(reasons) = value["reasons"].as_object_mut() {
+            reasons.insert(
+                "wizard".to_string(),
+                json!("wizard settings have not been saved yet: PUT /api/calibration/wizard persists them to the state directory"),
+            );
+        }
+    }
+    // 测量草稿的缺失原因（step5 刷新恢复依赖它）。
+    if let Some(reasons) = value["reasons"].as_object_mut() {
+        if measurement.baseline_upload_id.is_none() && measurement.applied_upload_id.is_none() {
+            reasons.insert(
+                "measurement".to_string(),
+                json!("no offline measurement uploads recorded yet: upload the baseline and applied WAV files, then PUT /api/calibration/wizard with measurement (or start a job)"),
+            );
+        }
+    }
+    value["updated_at"] = json!(updated_at);
+    ok_json(value)
+}
+
+/// 组装第 5 步的测量草稿：最近 job inputs 优先，其次 wizard.json 的 measurement。
+fn measurement_draft(
+    hub: &CalibrationHub,
+    stored: &wizard::WizardStored,
+    last_job: Option<&JobRecord>,
+) -> MeasurementDraft {
+    let mut draft = if let Some(inputs) = last_job.and_then(|job| job.inputs.as_ref()) {
+        MeasurementDraft {
+            baseline_upload_id: Some(inputs.baseline_upload_id.clone()),
+            applied_upload_id: Some(inputs.applied_upload_id.clone()),
+            baseline_sha256: None,
+            applied_sha256: None,
+        }
+    } else {
+        MeasurementDraft {
+            baseline_upload_id: stored.measurement.baseline_upload_id.clone(),
+            applied_upload_id: stored.measurement.applied_upload_id.clone(),
+            baseline_sha256: None,
+            applied_sha256: None,
+        }
+    };
+    for (id, sha) in [
+        (draft.baseline_upload_id.clone(), &mut draft.baseline_sha256),
+        (draft.applied_upload_id.clone(), &mut draft.applied_sha256),
+    ] {
+        if let Some(upload_id) = id {
+            if let Ok(Some(record)) = hub.uploads().lookup(&upload_id) {
+                *sha = Some(record.sha256);
+            }
+        }
+    }
+    draft
+}
+
+// ---------------------------------------------------------------------------
+// 单元测试（纯 JSON/校验逻辑；HTTP 端到端在 tests/calibration_*.rs）
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::calibration::service::code;
+
+    #[test]
+    fn page_query_defaults_and_bounds() {
+        let mut params = HashMap::new();
+        assert_eq!(
+            parse_page_query(&params).expect("defaults"),
+            JobQuery {
+                limit: DEFAULT_LIMIT,
+                offset: 0
+            }
+        );
+        params.insert("limit".into(), "5".into());
+        params.insert("offset".into(), "10".into());
+        assert_eq!(
+            parse_page_query(&params).expect("explicit"),
+            JobQuery {
+                limit: 5,
+                offset: 10
+            }
+        );
+        for (key, value) in [
+            ("limit", "0"),
+            ("limit", "101"),
+            ("limit", "x"),
+            ("offset", "-1"),
+            ("other", "1"),
+        ] {
+            let mut params = HashMap::new();
+            params.insert(key.into(), value.into());
+            let error = parse_page_query(&params).expect_err("rejected");
+            assert_eq!(error.code(), code::INVALID_REQUEST, "{key}={value}");
+        }
+    }
+
+    #[test]
+    fn job_id_validation_rejects_path_tricks() {
+        assert!(validate_job_id("job-0001").is_ok());
+        assert!(validate_job_id("a.b_c-1").is_ok());
+        for bad in ["", "..", "a/b", "a\\b", "job 1", &"x".repeat(65)] {
+            let error = validate_job_id(bad).expect_err("rejected");
+            assert_eq!(error.code(), code::INVALID_REQUEST, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn job_reasons_fill_every_missing_field_without_inventing_values() {
+        let new_job = NewJob {
+            kind: crate::calibration::service::JOB_KIND_SINGLE_POINT_OFFLINE.to_string(),
+            inputs: JobInputs {
+                plan_sha: "0".repeat(64),
+                baseline_upload_id: "1".repeat(64),
+                applied_upload_id: "2".repeat(64),
+                centers_hz: vec![100.0, 1000.0],
+                tolerance_db: 2.0,
+                min_bands: 2,
+            },
+            baseline: crate::calibration::service::UploadRef {
+                upload_id: "1".repeat(64),
+                sha256: "1".repeat(64),
+                bytes: 1,
+                path: std::path::PathBuf::from("a"),
+            },
+            applied: crate::calibration::service::UploadRef {
+                upload_id: "2".repeat(64),
+                sha256: "2".repeat(64),
+                bytes: 2,
+                path: std::path::PathBuf::from("b"),
+            },
+        };
+        let record = JobRecord::new_queued("job-0001", &new_job, None);
+        let job = job_json(&record);
+        assert_eq!(job["id"], json!("job-0001"));
+        assert_eq!(job["status"], json!("queued"));
+        assert_eq!(job["verdict"], Value::Null);
+        assert_eq!(job["steps"].as_array().expect("steps").len(), 4);
+        for step in job["steps"].as_array().expect("steps") {
+            assert_eq!(step["status"], json!("pending"));
+            assert_eq!(step["sha256"], Value::Null);
+        }
+        let reasons = job_reasons(&record);
+        for path in [
+            "verdict",
+            "created_at",
+            "started_at",
+            "finished_at",
+            "duration_ms",
+            "engine",
+            "result",
+            "apply.applied_version",
+        ] {
+            assert!(
+                reasons.get(path).is_some_and(|value| value.is_string()),
+                "{path} 缺原因"
+            );
+        }
+        assert!(
+            reasons.get("inputs").is_none(),
+            "inputs 有回显，不该有缺失原因"
+        );
+    }
+
+    #[test]
+    fn json_body_helpers_are_strict() {
+        let object = serde_json::json!({"a": 1, "b": "x"});
+        let object = object.as_object().expect("object");
+        assert!(reject_unknown_fields(object, &["a", "b"], "").is_ok());
+        let error = reject_unknown_fields(object, &["a"], "").expect_err("unknown");
+        assert_eq!(error.code(), code::INVALID_REQUEST);
+        assert_eq!(required_string(object, "b").expect("string"), "x");
+        assert!(required_string(object, "missing").is_err());
+        assert!(required_u64(object, "a").is_ok());
+        assert!(required_number(object, "a").is_ok());
+    }
+
+    #[test]
+    fn centers_validation_rejects_unsorted_and_out_of_range() {
+        assert!(parse_centers(Some(&json!([100.0, 1000.0]))).is_ok());
+        for bad in [
+            json!([]),
+            json!([1000.0, 100.0]),
+            json!([0.0]),
+            json!([25000.0]),
+            json!(["100"]),
+            json!([100.0, 100.0]),
+        ] {
+            assert!(parse_centers(Some(&bad)).is_err(), "{bad}");
+        }
+        assert!(parse_centers(None).is_err());
+    }
+}
