@@ -12,7 +12,7 @@
 const messages = {
   routingEdit: {
     subtitle:
-      '输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断 + lane → DAC 可编辑两阶段：当前值来自 /api/channels 的 mapping（daemon 在 prepare/upload 时记录的方案 routing 镜像，不是数据面实时回读）；编辑经 POST /api/surface {surface:"routing"} → POST /api/commit / POST /api/abort。mapping=null 时显示「当前值未知」+ 原因，不用旧值/默认值冒充；changed/diff 等可选回执缺失时如实显示「服务端未上报」。',
+      '输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断 + lane → DAC 可编辑两阶段：当前值来自 /api/channels 的 mapping（daemon 在 prepare/upload 时记录的方案 routing 镜像，不是数据面实时回读）；编辑经 POST /api/surface（surface:"routing"）→ POST /api/commit / POST /api/abort。mapping=null 时显示「当前值未知」+ 原因，不用旧值/默认值冒充；changed/diff 等可选回执缺失时如实显示「服务端未上报」。',
     meta: {
       label: '能力（/api/meta surface=routing）',
       wired: '已接入：可以 prepare → commit',
@@ -45,7 +45,7 @@ const messages = {
     },
     edit: {
       title: 'lane → DAC 可编辑表（两阶段）',
-      desc: '编辑 lane → DAC 全量替换表：本地校验 → POST /api/surface {surface:"routing", data:{routes, dac_channels?}} 生成草稿 → POST /api/commit 生效 / POST /api/abort 丢弃。prepare 只准备草稿，不改变运行态。',
+      desc: '编辑 lane → DAC 全量替换表：本地校验 → POST /api/surface（surface:"routing"，data: routes、dac_channels?）生成草稿 → POST /api/commit 生效 / POST /api/abort 丢弃。prepare 只准备草稿，不改变运行态。',
       toolbar: {
         prefill: '从 mapping 预填',
         add: '新增 lane',

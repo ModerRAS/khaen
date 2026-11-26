@@ -11,7 +11,7 @@
 const messages = {
   routingEdit: {
     subtitle:
-      'Read-only diagnostics of input → 22-lane matrix → DAC outputs, plus editable two-phase lane → DAC routing: the current value comes from /api/channels mapping (the plan routing mirror daemon recorded at prepare/upload, not a live data-plane readback). Edits go through POST /api/surface {surface:"routing"} → POST /api/commit / POST /api/abort. When mapping=null the page shows "current value unknown" with the reason — old/default values are never passed off as current; optional receipts (changed/diff/…) are shown honestly as "not reported by server" when absent.',
+      'Read-only diagnostics of input → 22-lane matrix → DAC outputs, plus editable two-phase lane → DAC routing: the current value comes from /api/channels mapping (the plan routing mirror daemon recorded at prepare/upload, not a live data-plane readback). Edits go through POST /api/surface (surface:"routing") → POST /api/commit / POST /api/abort. When mapping=null the page shows "current value unknown" with the reason — old/default values are never passed off as current; optional receipts (changed/diff/…) are shown honestly as "not reported by server" when absent.',
     meta: {
       label: 'Capability (/api/meta surface=routing)',
       wired: 'Wired: prepare → commit is available',
@@ -44,7 +44,7 @@ const messages = {
     },
     edit: {
       title: 'Editable lane → DAC table (two-phase)',
-      desc: 'Edit the full lane → DAC replacement table: local validation → POST /api/surface {surface:"routing", data:{routes, dac_channels?}} creates a draft → POST /api/commit applies it / POST /api/abort discards it. prepare only creates a draft and does not change the running state.',
+      desc: 'Edit the full lane → DAC replacement table: local validation → POST /api/surface (surface:"routing", data: routes, dac_channels?) creates a draft → POST /api/commit applies it / POST /api/abort discards it. prepare only creates a draft and does not change the running state.',
       toolbar: {
         prefill: 'Prefill from mapping',
         add: 'Add lane',
