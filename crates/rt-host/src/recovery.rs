@@ -398,8 +398,9 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
                     // 设备丢失故障显式清除；欠载/处理器等其它锁存故障保持（fail-closed 语义）。
                     runtime.clear_device_loss_fault();
                     let graph = runtime.graph_info();
+                    let total_recoveries = lifecycle.recoveries();
                     println!(
-                        "khaen-rt-host: device recovered at block {blocks} after {attempt} reopen attempt(s) ({absent_ms} ms absent); jitter buffer rebuilt + refilling, plan version {:?} graph {:?} unchanged; resuming",
+                        "khaen-rt-host: device recovered at block {blocks} after {attempt} reopen attempt(s) ({absent_ms} ms absent, {total_recoveries} lifetime recoveries); jitter buffer rebuilt + refilling, plan version {:?} graph {:?} unchanged; resuming",
                         graph.version, graph.graph_id
                     );
                     persist_status(runtime, options, &lifecycle);
