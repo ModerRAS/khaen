@@ -8,6 +8,14 @@ license.workspace = true
 [dependencies]
 khaen-core = { path = "../core" }
 khaen-host = { path = "../host" }
+# 进程内校准（T70f-c）：复用已回迁的测量链路（T61 时间轴 / T62 采集时基 / T67 stage 后端），
+# 不在 rt-host 里重写扫频/时基/质量门数学。
+khaen-calibration = { path = "../calibration" }
 # 控制通道（T70f-a）的行 JSON 协议：解析已有依赖 serde_json（与 host/daemon 同一版本，
 # 不引入新 crate；状态文件仍手写 JSON，不在 RT 路径上加依赖）。
 serde_json = "1"
+
+# 进程内校准的真实 UMIK 采集（T70f-c）：只在校准模式的非实时线程打开本机 ALSA capture；
+# 其它平台没有真实采集路径（如实 DEVICE_UNAVAILABLE），校准协议/状态机仍平台无关地编译测试。
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "0.12"

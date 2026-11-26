@@ -49,6 +49,30 @@ fn assert_error(value: &Value, code: &str) {
     );
 }
 
+/// 校准未装配时（KHAEN_CAL=off / 测试夹具默认）：cal_* 必须如实进 not_wired，
+/// status.calibration 如实报 enabled=false，且 wired 不含 cal_*。
+fn assert_calibration_disabled(response: &Value) {
+    let wired = response["wired"].as_array().expect("wired array");
+    for op in crate::control::cal::CAL_OPS {
+        assert!(
+            !wired.iter().any(|value| value.as_str() == Some(op)),
+            "cal op {op} must not be reported wired when calibration is off: {response}"
+        );
+    }
+    let not_wired = response["not_wired"].as_array().expect("not_wired array");
+    for op in crate::control::cal::CAL_OPS {
+        assert!(
+            not_wired
+                .iter()
+                .any(|entry| entry["op"].as_str() == Some(op)),
+            "cal op {op} must be listed in not_wired when calibration is off: {response}"
+        );
+    }
+    assert_eq!(response["calibration"]["enabled"], json!(false));
+    assert_eq!(response["calibration"]["mode"], json!("playback"));
+    assert_eq!(response["calibration"]["real_capture"], json!(false));
+}
+
 fn text(value: &Value) -> String {
     value["engine_token"]
         .as_str()
@@ -160,7 +184,7 @@ fn status_before_first_snapshot_is_honest() {
         .as_object()
         .expect("surface_reasons object")
         .is_empty());
-    assert_eq!(response["not_wired"], json!([]));
+    assert_calibration_disabled(&response);
 }
 
 #[test]
@@ -180,7 +204,7 @@ fn status_reports_snapshot_fields_capabilities_and_age() {
     assert_eq!(response["safe_mode"], json!(false));
     assert_eq!(response["mode"], json!("aes67"));
     assert_eq!(response["wired"], json!(WIRED_OPS));
-    assert_eq!(response["not_wired"], json!([]));
+    assert_calibration_disabled(&response);
     // 没有已生效方案：图字段为 null 且必须给原因，不允许编数。
     assert_eq!(response["graph_id"], Value::Null);
     assert_eq!(response["actual_version"], Value::Null);
@@ -908,6 +932,9 @@ fn command_without_block_loop_returns_not_applied() {
         initial_plan: None,
         initial_version: 0,
         command_timeout: Duration::from_millis(100),
+        calibration: None,
+        channels: None,
+        reconfigure: None,
     });
     let started = Instant::now();
     let response: Value =
@@ -931,6 +958,9 @@ fn command_without_block_loop_returns_not_applied() {
         initial_plan: None,
         initial_version: 0,
         command_timeout: Duration::from_millis(100),
+        calibration: None,
+        channels: None,
+        reconfigure: None,
     });
     let response: Value =
         serde_json::from_str(&core.handle_line(r#"{"op":"mute","mute":true}"#)).expect("json");
@@ -946,8 +976,8 @@ fn disabled_bridge_is_a_no_op() {
     let mut runtime = fake_runtime();
     let mut bridge = ControlBridge::disabled();
     assert!(!bridge.enabled());
-    let lifecycle = DeviceLifecycle::new();
-    assert_eq!(bridge.poll_commands(&mut runtime, &lifecycle), 0);
+    let mut lifecycle = DeviceLifecycle::new();
+    assert_eq!(bridge.poll_commands(&mut runtime, &mut lifecycle, 0), 0);
     bridge.maybe_publish(&runtime, &lifecycle);
     // 不 panic、不改变运行期状态即可。
     assert_eq!(runtime.blocks(), 0);
@@ -963,7 +993,7 @@ fn control_target_runtime_applies_commands_and_rejects_format_mismatch() {
     let (command_tx, command_rx) = std::sync::mpsc::channel();
     let snapshot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut bridge = ControlBridge::new(command_rx, std::sync::Arc::clone(&snapshot), 1);
-    let lifecycle = DeviceLifecycle::new();
+    let mut lifecycle = DeviceLifecycle::new();
     bridge.publish(&runtime, &lifecycle);
 
     // mute：回执 applied_block=1，块边界后才生效。
@@ -974,7 +1004,7 @@ fn control_target_runtime_applies_commands_and_rejects_format_mismatch() {
             ack: ack_tx,
         })
         .expect("queue mute");
-    assert_eq!(bridge.poll_commands(&mut runtime, &lifecycle), 1);
+    assert_eq!(bridge.poll_commands(&mut runtime, &mut lifecycle, 0), 1);
     match ack_rx.recv().expect("mute ack") {
         CommandReply::Mute {
             mute,
@@ -1008,7 +1038,7 @@ fn control_target_runtime_applies_commands_and_rejects_format_mismatch() {
             ack: ack_tx,
         })
         .expect("queue commit");
-    assert_eq!(bridge.poll_commands(&mut runtime, &lifecycle), 1);
+    assert_eq!(bridge.poll_commands(&mut runtime, &mut lifecycle, 0), 1);
     match ack_rx.recv().expect("commit ack") {
         CommandReply::PlanApplied { applied_block } => assert_eq!(applied_block, 2),
         other => panic!("unexpected reply: {other:?}"),
@@ -1050,11 +1080,12 @@ fn control_target_runtime_applies_commands_and_rejects_format_mismatch() {
             ack: ack_tx,
         })
         .expect("queue mismatched commit");
-    assert_eq!(bridge.poll_commands(&mut runtime, &lifecycle), 1);
+    assert_eq!(bridge.poll_commands(&mut runtime, &mut lifecycle, 0), 1);
     match ack_rx.recv().expect("reject ack") {
         CommandReply::Rejected { code, message } => {
             assert_eq!(code, error::NOT_APPLIED);
-            assert!(message.contains("restart"));
+            assert!(message.contains("not staged"));
+            assert!(message.contains("channels_prepare"));
         }
         other => panic!("unexpected reply: {other:?}"),
     }

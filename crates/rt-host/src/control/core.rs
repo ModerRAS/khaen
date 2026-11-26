@@ -12,12 +12,15 @@
 //!
 //! 差异（如实）：
 //! - 这里没有自己的执行器：真正生效要经块线程，所以 commit 的 applied_block 来自块线程回执；
-//! - 本进程的数据面执行器/设备格式在进程生命周期内固定：format 两阶段只改控制面编译格式，
-//!   commit 如实报 device_restart_required=true / pcm_reconfigured=false（M3b 热重配未实现）；
-//!   此后 prepare/commit 计划会因数据面格式不匹配被块线程如实拒绝（not_applied）。
+//! - format 两阶段只改控制面编译格式（commit 如实报 device_restart_required=true /
+//!   pcm_reconfigured=false）；真正换数据面格式/通道/AES67 输入的是 M3b 热重配
+//!   （channels_* op，见 [`super::reconfigure`]）：块线程在块边界换设备/收包/引擎，失败回滚，
+//!   进程/PID 不变、实测 gap_ms 如实上报；数据面格式已被热重配改掉后，旧格式的方案草稿
+//!   会被块线程如实拒绝（not_applied），旧图基线/回滚历史同时失效（fail-closed 清理）。
 //! - status 带快照年龄（age_ms/stale），图信息来自块线程发布的快照（不阻塞块线程）。
 
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::time::Duration;
 
 use khaen_core::rt::{BLOCK_SIZES, SAMPLE_RATES_HZ};
@@ -33,7 +36,12 @@ use khaen_host::plan::Plan;
 use khaen_host::runtime::{compile_plan_draft, PlanDraft, RuntimeError};
 use serde_json::{json, Map, Value};
 
+use super::cal::{CalMode, CalibrationCore, CalibrationSetup, CAL_OPS};
 use super::command::{CommandReply, ControlCommand};
+use super::reconfigure::{
+    shared_tracker, ChannelsCommitEffect, ChannelsConfig, ChannelsState, ReconfigGate,
+    SharedReconfigure, CHANNELS_OPS,
+};
 use super::snapshot::SharedSnapshot;
 
 /// commit/mute 等块边界动作等一次 ack 的上限。
@@ -63,6 +71,12 @@ pub struct ControlCoreConfig {
     pub initial_version: u64,
     /// ack 等待上限。
     pub command_timeout: Duration,
+    /// 进程内校准装配（T70f-c）：None = 本进程不支持校准（cal_* 全部 unsupported + not_wired）。
+    pub calibration: Option<CalibrationSetup>,
+    /// 热重配协议上下文（M3b）：None = channels_* 全部 unsupported + not_wired。
+    pub channels: Option<ChannelsConfig>,
+    /// 热重配追踪器（与块线程桥、状态文件共享同一份；None 时新建一份私有追踪器）。
+    pub reconfigure: Option<SharedReconfigure>,
 }
 
 /// prepare 产出的方案草稿：token、编译好的图、方案对象（生效后成为基线/历史）。
@@ -128,6 +142,14 @@ pub struct ControlCore {
     base_plan: Option<Plan>,
     /// 已生效方案有限历史（版本升序）。
     history: Vec<CommittedPlan>,
+    /// 进程内校准模式（T70f-c）；None = 未接通。
+    calibration: Option<CalibrationCore>,
+    /// 热重配状态机（M3b）；None = 未接通（channels_* -> unsupported + not_wired）。
+    channels: Option<ChannelsState>,
+    /// 热重配/校准互斥门（提交在执行时持有；校准 enter 检查）。
+    gate: Arc<ReconfigGate>,
+    /// 热重配追踪器（状态/状态文件同一份）。
+    reconfigure: SharedReconfigure,
 }
 
 impl std::fmt::Debug for ControlCore {
@@ -142,6 +164,12 @@ impl std::fmt::Debug for ControlCore {
             .field("pending_mode", &self.pending_mode.is_some())
             .field("base_plan", &self.base_plan.is_some())
             .field("history_len", &self.history.len())
+            .field(
+                "calibration",
+                &self.calibration.as_ref().map(|cal| cal.mode().as_str()),
+            )
+            .field("channels", &self.channels)
+            .field("gate_busy", &self.gate.is_busy())
             .finish_non_exhaustive()
     }
 }
@@ -180,6 +208,26 @@ impl ControlCore {
     /// 新建控制核心。
     pub fn new(config: ControlCoreConfig) -> Self {
         let initial_plan = config.initial_plan;
+        let gate = Arc::new(ReconfigGate::new());
+        let reconfigure = config.reconfigure.unwrap_or_else(shared_tracker);
+        // 校准核心需要数据面格式与快照槽（与协议核心同一份；工厂里的命令通道在 setup 里）。
+        let calibration = config.calibration.map(|setup| {
+            CalibrationCore::new(
+                setup,
+                config.data_plane_format.clone(),
+                Arc::clone(&config.snapshot),
+                Arc::clone(&gate),
+            )
+        });
+        // 热重配状态机（M3b）：初始配置来自启动时的运行时配置。
+        let channels = config.channels.map(|channels| {
+            ChannelsState::new(
+                channels.config,
+                channels.probe,
+                Arc::clone(&reconfigure),
+                config.limits.clone(),
+            )
+        });
         let history = initial_plan
             .as_ref()
             .map(|plan| {
@@ -203,6 +251,22 @@ impl ControlCore {
             pending_mode: None,
             base_plan: initial_plan,
             history,
+            calibration,
+            channels,
+            gate,
+            reconfigure,
+        }
+    }
+
+    /// 重配/校准互斥门句柄（测试/诊断用；提交执行期间被占用）。
+    pub(crate) fn reconfigure_gate(&self) -> Arc<ReconfigGate> {
+        Arc::clone(&self.gate)
+    }
+
+    /// 进程退出前收尾：取消并等待进程内校准的测量线程（块线程已停时调用）。
+    pub fn shutdown(&mut self) {
+        if let Some(calibration) = self.calibration.as_mut() {
+            calibration.shutdown();
         }
     }
 
@@ -232,20 +296,40 @@ impl ControlCore {
         &self,
         build: impl FnOnce(Sender<CommandReply>) -> ControlCommand,
     ) -> Result<CommandReply, ControlError> {
+        self.send_inner(build).map_err(|(error, _)| error)
+    }
+
+    /// [`ControlCore::send`] + "命令是否可能仍会被执行"：
+    ///
+    /// 只有 ack 超时才可能仍会执行（命令已入队，块线程可能稍后处理）；通道关闭时命令没有
+    /// 进入块线程，不会执行。热重配用它决定是否保留"在飞"标记（结果未知要如实 busy）。
+    fn send_inner(
+        &self,
+        build: impl FnOnce(Sender<CommandReply>) -> ControlCommand,
+    ) -> Result<CommandReply, (ControlError, bool)> {
         let (ack, replies) = mpsc::channel();
         self.commands.send(build(ack)).map_err(|_| {
-            not_applied(
-                "rt-host block loop is not running: control command channel is closed; nothing was applied",
+            (
+                not_applied(
+                    "rt-host block loop is not running: control command channel is closed; nothing was applied",
+                ),
+                false,
             )
         })?;
         match replies.recv_timeout(self.command_timeout) {
             Ok(reply) => Ok(reply),
-            Err(RecvTimeoutError::Timeout) => Err(not_applied(format!(
-                "rt-host block loop did not acknowledge the block-boundary action within {:?}; nothing is reported as applied",
-                self.command_timeout
-            ))),
-            Err(RecvTimeoutError::Disconnected) => Err(not_applied(
-                "rt-host block loop stopped before acknowledging the block-boundary action; nothing is reported as applied",
+            Err(RecvTimeoutError::Timeout) => Err((
+                not_applied(format!(
+                    "rt-host block loop did not acknowledge the block-boundary action within {:?}; nothing is reported as applied",
+                    self.command_timeout
+                )),
+                true,
+            )),
+            Err(RecvTimeoutError::Disconnected) => Err((
+                not_applied(
+                    "rt-host block loop stopped before acknowledging the block-boundary action; nothing is reported as applied",
+                ),
+                false,
             )),
         }
     }
@@ -315,6 +399,18 @@ impl ControlCore {
                 let data = object.get("data").cloned().unwrap_or_else(|| json!({}));
                 self.prepare_surface_json(surface, &data)
             }
+            // 进程内校准（T70f-c）：全部经同一控制通道，不新开 socket。
+            "cal_status" => self.cal_status(),
+            "cal_enter" => self.cal_enter(object),
+            "cal_leave" => self.cal_leave(),
+            "cal_measure" => self.cal_measure(object, false),
+            "cal_remeasure" => self.cal_measure(object, true),
+            "cal_solve" => self.cal_solve(object),
+            // 热重配（M3b）：同一控制通道，块边界生效（提交走命令通道 + 一次性 ack）。
+            "channels_status" => self.channels_status(),
+            "channels_prepare" => self.channels_prepare(object),
+            "channels_commit" => self.channels_commit_json(object),
+            "channels_abort" => self.channels_abort_json(object),
             other => {
                 if let Some((_, reason)) = NOT_WIRED_OPS.iter().find(|(name, _)| *name == other) {
                     Err(ControlError::new(
@@ -329,6 +425,313 @@ impl ControlCore {
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------
+    // 进程内校准（T70f-c）
+    // ---------------------------------------------------------------
+
+    /// 校准核心是否接通（None = 本进程不支持，如实报 unsupported）。
+    fn calibration_not_wired() -> ControlError {
+        ControlError::new(
+            error::UNSUPPORTED,
+            "calibration ops are not wired in this process: KHAEN_CAL is off (or the calibration setup failed); the calibration channel is not available and no measurement is fabricated",
+        )
+    }
+
+    fn calibration_mut(&mut self) -> Result<&mut CalibrationCore, ControlError> {
+        self.calibration
+            .as_mut()
+            .ok_or_else(Self::calibration_not_wired)
+    }
+
+    fn cal_status(&self) -> Result<Value, ControlError> {
+        let cal = self
+            .calibration
+            .as_ref()
+            .ok_or_else(Self::calibration_not_wired)?;
+        Ok(cal.status_json())
+    }
+
+    fn cal_enter(&mut self, object: &Map<String, Value>) -> Result<Value, ControlError> {
+        self.calibration_mut()?.enter(object)
+    }
+
+    fn cal_leave(&mut self) -> Result<Value, ControlError> {
+        self.calibration_mut()?.leave()
+    }
+
+    fn cal_measure(
+        &mut self,
+        object: &Map<String, Value>,
+        remeasure: bool,
+    ) -> Result<Value, ControlError> {
+        self.calibration_mut()?.measure(object, remeasure)
+    }
+
+    fn cal_solve(&mut self, object: &Map<String, Value>) -> Result<Value, ControlError> {
+        // 求解需要"当前方案"作为映射说明；clone 一小份（方案可 Clone）。
+        let plan = self.base_plan.clone();
+        self.calibration_mut()?.solve(object, plan.as_ref())
+    }
+    // ---------------------------------------------------------------
+    // 热重配（M3b）
+    // ---------------------------------------------------------------
+
+    /// channels_* 未接线（测试默认/没有数据面通道上下文）。
+    fn channels_not_wired() -> ControlError {
+        ControlError::new(
+            error::UNSUPPORTED,
+            "hot reconfiguration (channels_*) is not wired in this process: there is no data-plane channel context (runtime configuration / device probe); no reconfiguration is fabricated",
+        )
+    }
+
+    /// 对账 ack 丢失的提交：块线程追踪器里出现结果时采用（成功会同步控制面镜像）。
+    fn recover_channels(&mut self) -> Option<super::reconfigure::ReconcileOutcome> {
+        let outcome = {
+            let channels = self.channels.as_mut()?;
+            channels.recover_in_flight()?
+        };
+        if let Some(effect) = outcome.effect.clone() {
+            self.apply_channels_effect(effect);
+        }
+        Some(outcome)
+    }
+
+    /// 把热重配成功后的副作用同步到控制面：数据面格式镜像 + （格式变化时）清旧图基线。
+    fn apply_channels_effect(&mut self, effect: ChannelsCommitEffect) {
+        let ChannelsCommitEffect {
+            format,
+            engine_changed,
+            ..
+        } = effect;
+        // 控制面编译格式原先与数据面一致时，跟随数据面新格式；若控制面早已被 format op
+        // 改成别的格式（format_mismatch），保持如实的不一致，不偷偷覆盖。
+        let was_aligned = self.engine_config == self.data_plane_format;
+        self.data_plane_format = format.clone();
+        if was_aligned {
+            self.engine_config = format;
+        }
+        if engine_changed {
+            // 引擎格式变了：旧格式下编译的方案草稿/图基线/回滚历史全部失效（fail-closed 清理，
+            // 不把旧格式的图当成还能用）。
+            self.draft = None;
+            self.pending_format = None;
+            self.pending_mode = None;
+            self.base_plan = None;
+            self.history.clear();
+        }
+    }
+
+    fn channels_status(&mut self) -> Result<Value, ControlError> {
+        self.recover_channels();
+        let snapshot = self.snapshot();
+        let channels = self
+            .channels
+            .as_ref()
+            .ok_or_else(Self::channels_not_wired)?;
+        Ok(channels.status_json(snapshot.as_ref()))
+    }
+
+    fn channels_prepare(&mut self, object: &Map<String, Value>) -> Result<Value, ControlError> {
+        self.recover_channels();
+        // `op` 是协议信封字段，不是 channels 配置字段（其余未知字段仍按拼错拒绝）。
+        let mut fields = object.clone();
+        fields.remove("op");
+        let channels = self
+            .channels
+            .as_mut()
+            .ok_or_else(Self::channels_not_wired)?;
+        channels.prepare(&fields)
+    }
+
+    /// channels_commit 的 token 字段（契约写 `token`；兼容 `engine_token` 别名）。
+    fn channels_request_token(object: &Map<String, Value>) -> Result<String, ControlError> {
+        match object.get("token").or_else(|| object.get("engine_token")) {
+            Some(Value::String(token)) => Ok(token.clone()),
+            Some(_) => Err(bad_request("field token must be a string")),
+            None => Err(bad_request("missing field: token")),
+        }
+    }
+
+    /// channels_commit：块边界执行热重配（单活动；幂等 token；失败如实回滚）。
+    fn channels_commit_json(&mut self, object: &Map<String, Value>) -> Result<Value, ControlError> {
+        let token = Self::channels_request_token(object)?;
+        // 先对账可能丢失的 ack（同一 token 的结果可直接原样重放）。
+        if let Some(outcome) = self.recover_channels() {
+            if outcome.token == token {
+                return Ok(outcome.response);
+            }
+        }
+        if self.channels.is_none() {
+            return Err(Self::channels_not_wired());
+        }
+        // 与 T70f-c 互斥：校准模式中提交会换设备/格式，直接拒绝。
+        if self.calibration.as_ref().map(CalibrationCore::mode) == Some(CalMode::Calibration) {
+            return Err(ControlError::new(
+                super::cal::error::BUSY,
+                "in-process calibration mode is active (cal_busy): channels_commit would reconfigure the output device under a calibration session; call cal_leave first",
+            ));
+        }
+        // 幂等重放 / 单活动。
+        {
+            let channels = self.channels.as_ref().expect("checked above");
+            if let Some(response) = channels.last_committed_replay(&token) {
+                return Ok(response);
+            }
+            if channels.in_flight().is_some() {
+                return Err(ControlError::new(
+                    super::reconfigure::error::CHANNELS_BUSY,
+                    "another channels commit is in flight (or its acknowledgement was lost): wait for channels_status to show the result before committing again",
+                ));
+            }
+        }
+        let (draft, probe) = {
+            let channels = self.channels.as_mut().expect("checked above");
+            let draft = channels.take_draft(&token)?;
+            let probe = channels.probe();
+            (draft, probe)
+        };
+        if !draft.changed {
+            let response = self
+                .channels
+                .as_mut()
+                .expect("checked above")
+                .finish_noop(draft);
+            return Ok(response);
+        }
+        if !self.gate.enter() {
+            return Err(ControlError::new(
+                super::reconfigure::error::CHANNELS_BUSY,
+                "a reconfiguration/calibration transition is already in progress",
+            ));
+        }
+        if let Err(error) = self
+            .channels
+            .as_mut()
+            .expect("checked above")
+            .begin_commit(&draft.token)
+        {
+            self.gate.leave();
+            return Err(error);
+        }
+        let command_token = draft.token.clone();
+        let command_config = draft.config.clone();
+        let reply = self.send_inner(move |ack| ControlCommand::Reconfigure {
+            token: command_token,
+            config: Box::new(command_config),
+            plan: None,
+            probe,
+            ack,
+        });
+        self.gate.leave();
+        match reply {
+            Ok(CommandReply::Reconfigured { done, gap_ms }) => {
+                let (response, effect) = self
+                    .channels
+                    .as_mut()
+                    .expect("checked above")
+                    .finish_success(&draft, &done, gap_ms);
+                self.apply_channels_effect(effect);
+                Ok(response)
+            }
+            Ok(CommandReply::ReconfigureFailed { failure, gap_ms }) => {
+                let response = self
+                    .channels
+                    .as_mut()
+                    .expect("checked above")
+                    .finish_failure(&failure, Some(gap_ms));
+                Ok(response)
+            }
+            Ok(other) => {
+                self.channels
+                    .as_mut()
+                    .expect("checked above")
+                    .abandon_in_flight();
+                Err(unexpected_reply(other))
+            }
+            Err((error, may_still_execute)) => {
+                // ack 超时：命令可能仍会被块线程执行，保留在飞标记（结果未知 -> busy，
+                // 后续请求会先用追踪器对账）；通道关闭：命令没送出去，直接释放。
+                if !may_still_execute {
+                    if let Some(channels) = self.channels.as_mut() {
+                        channels.abandon_in_flight();
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn channels_abort_json(&mut self, object: &Map<String, Value>) -> Result<Value, ControlError> {
+        let token = Self::channels_request_token(object)?;
+        self.recover_channels();
+        let channels = self
+            .channels
+            .as_mut()
+            .ok_or_else(Self::channels_not_wired)?;
+        channels.abort(&token)
+    }
+
+    /// status.wired：本进程实际接通的 op（校准接通时才列 cal_*）。
+    fn wired_ops(&self) -> Vec<&'static str> {
+        let mut wired: Vec<&'static str> = WIRED_OPS.to_vec();
+        if self.calibration.is_some() {
+            wired.extend_from_slice(&CAL_OPS);
+        }
+        if self.channels.is_some() {
+            wired.extend_from_slice(CHANNELS_OPS);
+        }
+        wired
+    }
+
+    /// status.not_wired：未接通的 op + 原因（校准关闭时 cal_* 全部列进去）。
+    fn not_wired_json(&self) -> Value {
+        let mut entries: Vec<Value> = NOT_WIRED_OPS
+            .iter()
+            .map(|(op, reason)| json!({ "op": op, "reason": reason }))
+            .collect();
+        if self.calibration.is_none() {
+            for op in CAL_OPS {
+                entries.push(json!({
+                    "op": op,
+                    "reason": "calibration is not wired in this process: KHAEN_CAL is off (or the calibration setup failed); the op is unavailable and no measurement is fabricated",
+                }));
+            }
+        }
+        if self.channels.is_none() {
+            for op in CHANNELS_OPS {
+                entries.push(json!({
+                    "op": op,
+                    "reason": "hot reconfiguration is not wired in this process: there is no data-plane channel context (no runtime configuration/device probe); the op is unavailable and no reconfiguration is fabricated",
+                }));
+            }
+        }
+        Value::Array(entries)
+    }
+
+    /// status.calibration 摘要（关闭时给出原因，不假装 enabled）。
+    fn calibration_json(&self) -> Value {
+        match &self.calibration {
+            Some(cal) => cal.status_json(),
+            None => json!({
+                "ok": true,
+                "enabled": false,
+                "mode": "playback",
+                "simulated": false,
+                "engine": Value::Null,
+                "real_capture": false,
+                "reasons": {
+                    "enabled": "calibration is not wired in this process (KHAEN_CAL is off or the calibration setup failed)",
+                },
+            }),
+        }
+    }
+
+    /// status.reconfigure：热重配追踪器（generation/last_gap_ms/last_result/在飞）。
+    fn reconfigure_json(&self) -> Value {
+        let tracker = super::reconfigure::lock_tracker(&self.reconfigure);
+        tracker.status_json()
     }
 
     // ---------------------------------------------------------------
@@ -374,8 +777,10 @@ impl ControlCore {
                 "absent_since": Value::Null,
                 "reopen_attempts": Value::Null,
                 "last_device_error": Value::Null,
-                "wired": WIRED_OPS,
-                "not_wired": [],
+                "wired": self.wired_ops(),
+                "not_wired": self.not_wired_json(),
+                "calibration": self.calibration_json(),
+                "reconfigure": self.reconfigure_json(),
                 "surfaces": surfaces_json(),
                 "surface_reasons": surface_reasons_json(),
                 "age_ms": Value::Null,
@@ -419,7 +824,7 @@ impl ControlCore {
         if format_mismatch {
             reasons.insert(
                 "device_restart_required".to_string(),
-                json!("the control-plane compile format was changed via the format op; the running rt-host data plane keeps its process-lifetime engine/device format until the process is restarted (M3b hot reconfiguration is not implemented)"),
+                json!("the control-plane compile format was changed via the format op and differs from the running data-plane format; use channels_prepare/channels_commit to hot-reconfigure the data plane (the process/PID stays up), then the control-plane compile format follows it, or commit a format matching the running data plane"),
             );
         }
         if lifecycle.is_absent() {
@@ -491,11 +896,10 @@ impl ControlCore {
             "absent_since": lifecycle.absent_since_ms(),
             "reopen_attempts": lifecycle.reopen_attempts(),
             "last_device_error": lifecycle.last_device_error(),
-            "wired": WIRED_OPS,
-            "not_wired": NOT_WIRED_OPS
-                .iter()
-                .map(|(op, reason)| json!({ "op": op, "reason": reason }))
-                .collect::<Vec<Value>>(),
+            "wired": self.wired_ops(),
+            "not_wired": self.not_wired_json(),
+            "calibration": self.calibration_json(),
+            "reconfigure": self.reconfigure_json(),
             "surfaces": surfaces_json(),
             "surface_reasons": surface_reasons_json(),
             "age_ms": snapshot.age_ms(),
@@ -998,9 +1402,9 @@ impl ControlCore {
 
     /// 格式变更第一阶段（format op）：校验目标格式 -> 存草稿；commit 才改控制面编译格式。
     ///
-    /// 真实边界：数据面执行器/设备格式在 rt-host 进程生命周期内固定（M3b 热重配未实现），
-    /// 所以响应如实给 device_restart_required（目标 != 数据面格式时为 true）与 note；
-    /// compile 后本进程的图无法在旧格式数据面上生效（commit 会回 not_applied）。
+    /// 真实边界：format 只改控制面的编译格式（数据面格式用 M3b 的 channels_prepare/
+    /// channels_commit 热重配）。所以响应如实给 device_restart_required（目标 != 数据面格式
+    /// 时为 true）与 note；旧格式数据面上该草稿无法生效（commit 会回 not_applied）。
     pub fn prepare_format_json(
         &mut self,
         object: &Map<String, Value>,
@@ -1065,7 +1469,7 @@ impl ControlCore {
             "applies_to": "control-plane engine",
             "device_restart_required": device_restart_required,
             "data_plane_format": format_json(&self.data_plane_format),
-            "note": "format changes only rebuild the control-plane compile format in this process; the running data-plane engine/device format is fixed for the rt-host process lifetime, so a real change requires restarting khaen-rt-host with the new format (M3b hot reconfiguration is not implemented)",
+            "note": "format changes only rebuild the control-plane compile format in this process; to change the running data-plane engine/device format without restarting rt-host, use channels_prepare/channels_commit (M3b hot reconfiguration: measured gap_ms, automatic rollback, process/PID unchanged)",
         });
         self.pending_format = Some(FormatDraft {
             token,
@@ -1126,7 +1530,7 @@ impl ControlCore {
             "mute_preserved": true,
             "device_restart_required": device_restart_required,
             "pcm_reconfigured": false,
-            "note": "control-plane compile format updated and the running-plan baseline/history invalidated (plans embed the format); the running data-plane engine, its graph and the PCM stream are untouched, so a real format change still requires restarting khaen-rt-host (device_restart_required=true; M3b hot reconfiguration is not implemented)",
+            "note": "control-plane compile format updated and the running-plan baseline/history invalidated (plans embed the format); the running data-plane engine, its graph and the PCM stream are untouched here — use channels_prepare/channels_commit for a hot data-plane format change (device_restart_required=true until then)",
         }))
     }
 
@@ -1265,7 +1669,11 @@ fn notes_json() -> Value {
     );
     notes.insert(
         "format_live_change".to_string(),
-        json!("the data-plane engine/device format is fixed for the rt-host process lifetime; format commit only updates the control-plane compile format and reports device_restart_required=true (M3b hot reconfiguration is not implemented)"),
+        json!("format commit only updates the control-plane compile format (device_restart_required=true when it differs from the running data plane); to change the running data-plane format/channels/AES67 input without restarting the process, use channels_prepare + channels_commit (M3b hot reconfiguration, reported with a measured gap_ms and automatic rollback on failure)"),
+    );
+    notes.insert(
+        "hot_reconfiguration".to_string(),
+        json!("channels_prepare validates (map length = AES67 channel count with slots < output channels, payload type 96..=127, supported sample rate, read-only ALSA probe, admission) and returns a token + planned generation; channels_commit mutes at a block boundary, closes the old PCM, applies the new configuration (new hw params, rebuilt AES67 receiver/jitter ring, new engine format), verifies the hw readback and unmutes; any failure rolls back to the previous configuration and reports rolled_back; the process/PID and the block counter stay up"),
     );
     notes.insert(
         "capture_source".to_string(),

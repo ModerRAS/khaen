@@ -9,11 +9,13 @@
 //! 调用 publish。没有控制通道（bridge disabled）时所有方法都是空操作，块循环行为不变。
 
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::recovery::DeviceLifecycle;
 
-use super::command::{execute_command, ControlCommand, ControlTarget};
+use super::command::{execute_command, CommandContext, ControlCommand, ControlTarget};
+use super::reconfigure::{shared_tracker, SharedReconfigure};
 use super::snapshot::{publish_period_ms, RuntimeSnapshot, SharedSnapshot};
 
 /// 控制通道在块线程侧的桥。
@@ -28,6 +30,8 @@ pub struct ControlBridge {
     published_blocks: u64,
     /// 上一次发布时采用的周期（毫秒；随数据面格式算一次）。
     publish_period_ms: Option<u64>,
+    /// 热重配追踪器（块线程执行 channels_commit 时写；控制线程/状态文件读）。
+    reconfigure: SharedReconfigure,
 }
 
 impl ControlBridge {
@@ -39,6 +43,7 @@ impl ControlBridge {
             publish_every: 0,
             published_blocks: 0,
             publish_period_ms: None,
+            reconfigure: shared_tracker(),
         }
     }
 
@@ -54,7 +59,19 @@ impl ControlBridge {
             publish_every,
             published_blocks: 0,
             publish_period_ms: None,
+            reconfigure: shared_tracker(),
         }
+    }
+
+    /// 用共享的热重配追踪器（与 ControlCore/状态文件同一份；main 装配用）。
+    pub fn with_reconfigure(mut self, reconfigure: SharedReconfigure) -> Self {
+        self.reconfigure = reconfigure;
+        self
+    }
+
+    /// 追踪器句柄（测试/诊断用）。
+    pub fn reconfigure(&self) -> SharedReconfigure {
+        Arc::clone(&self.reconfigure)
     }
 
     /// 是否接上了控制通道。
@@ -63,10 +80,14 @@ impl ControlBridge {
     }
 
     /// 取出并执行所有已排队的块边界命令；返回处理条数（块线程调用）。
+    ///
+    /// `lifecycle` 可变：热重配失败/设备 absent 时要如实登记缺失（退避重开由监督循环
+    /// 接着做）；`now_ms` 是监督循环的单调毫秒时钟（与 DeviceLifecycle 同口径）。
     pub fn poll_commands<T: ControlTarget>(
         &mut self,
         target: &mut T,
-        lifecycle: &DeviceLifecycle,
+        lifecycle: &mut DeviceLifecycle,
+        now_ms: u64,
     ) -> usize {
         let mut handled = 0usize;
         let mut disconnected = false;
@@ -78,7 +99,12 @@ impl ControlBridge {
                 match commands.try_recv() {
                     Ok(command) => {
                         handled += 1;
-                        execute_command(command, target);
+                        let mut ctx = CommandContext {
+                            lifecycle,
+                            reconfigure: &self.reconfigure,
+                            now_ms,
+                        };
+                        execute_command(command, target, &mut ctx);
                     }
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {

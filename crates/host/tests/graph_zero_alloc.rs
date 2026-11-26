@@ -11,6 +11,7 @@ use khaen_core::plan::{
     ContentSection, CrossoverFilter, CrossoverSection, Fold, MatrixSection, PeqSection, Plan,
     ProtectionEntry, ProtectionSection, RoutingSection,
 };
+use khaen_host::graph::{KernelChoice, KernelPath};
 use khaen_host::{AdmissionLimits, EngineConfig, PlanGraph, Processor};
 
 struct CountingAllocator;
@@ -41,7 +42,20 @@ unsafe impl GlobalAlloc for CountingAllocator {
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
+/// 确定性长 FIR（只用于让 lane 0 走分区卷积路径；数值形状不重要）。
+fn long_fir(taps: usize) -> Vec<f32> {
+    (0..taps)
+        .map(|index| {
+            let sign = if index % 2 == 0 { 1.0 } else { -1.0 };
+            sign / (index as f32 + 1.0)
+        })
+        .collect()
+}
+
 /// 非平凡链：五个段全部启用（content fold / crossover FIR / 满矩阵 / 保护 / 路由）。
+///
+/// crossover lane 0 用 2048 taps（> CROSSOVER_PARTITIONED_MIN_TAPS -> UPOLS 分区卷积路径），
+/// lane 1 用 3 taps（direct 直算路径）：零分配断言同时覆盖两条卷积实现。
 fn busy_plan() -> Plan {
     Plan {
         block_size: 128,
@@ -67,7 +81,7 @@ fn busy_plan() -> Plan {
             filters: vec![
                 CrossoverFilter {
                     lane: 0,
-                    coeffs: vec![0.5, 0.25, 0.125],
+                    coeffs: long_fir(2048),
                 },
                 CrossoverFilter {
                     lane: 1,
@@ -125,6 +139,20 @@ fn graph_process_performs_no_heap_allocation() {
     };
     let mut graph =
         PlanGraph::compile(&plan, &config, &AdmissionLimits::default()).expect("compile graph");
+    // T56：图侧派发快照是真实探测值；Auto 在本机有 SIMD 时必须接优化入口（partitioned 与
+    // direct 两条 lane 路径都在本图里）。
+    let backend = graph.simd_backend();
+    assert_eq!(graph.kernel_choice(), KernelChoice::Auto);
+    assert_eq!(
+        graph.kernel_path(),
+        if backend.is_simd() {
+            KernelPath::Optimized
+        } else {
+            KernelPath::Scalar
+        },
+        "Auto 路径必须与本机后端探测一致"
+    );
+    assert_eq!(graph.kernel_dispatch().backend, backend);
     let mut input = vec![0.0f32; 128 * 2];
     let mut output = vec![0.0f32; 128 * 2];
     for (index, sample) in input.iter_mut().enumerate() {
@@ -146,5 +174,35 @@ fn graph_process_performs_no_heap_allocation() {
     assert!(
         output.iter().any(|sample| *sample != 0.0),
         "busy chain produced only silence"
+    );
+
+    // 标量回退（显式 KernelChoice::Scalar）的 RT 路径同样零分配：两条内核入口都不能在
+    // process 里分配。编译本身允许分配，因此窗口在编译与预热之后才开。
+    let mut scalar_graph = PlanGraph::compile_with_kernel(
+        &plan,
+        &config,
+        &AdmissionLimits::default(),
+        KernelChoice::Scalar,
+    )
+    .expect("compile scalar graph");
+    assert_eq!(scalar_graph.kernel_path(), KernelPath::Scalar);
+    for _ in 0..8usize {
+        scalar_graph.process(&input, &mut output);
+    }
+    let before_scalar = ALLOCATIONS.load(Ordering::Relaxed);
+    for round in 0..200usize {
+        for (index, sample) in input.iter_mut().enumerate() {
+            *sample = (((round * 13 + index) % 89) as f32) * 1.0e-2 - 0.45;
+        }
+        scalar_graph.process(&input, &mut output);
+    }
+    let allocated_scalar = ALLOCATIONS.load(Ordering::Relaxed) - before_scalar;
+    assert_eq!(
+        allocated_scalar, 0,
+        "scalar graph process allocated {allocated_scalar} times"
+    );
+    assert!(
+        output.iter().any(|sample| *sample != 0.0),
+        "scalar busy chain produced only silence"
     );
 }

@@ -36,10 +36,41 @@
 //! 编译期一次性分配。运行期每块帧数也必须是 `F` 的整数倍：不足一组的尾部按 fail-safe 写
 //! +0.0（不 panic、不破坏跨块状态）；真实块由引擎 / 调用方保证是整倍块长。
 //!
+//! # SIMD 派发评估（T56，未接 optimized，附实测依据）
+//!
+//! T56 把 crossover 两条卷积路径接到 `khaen_core::kernels::dispatch` 的优化入口；本段**没有**
+//! 同样接线，原因来自实测拆分而不是"漏了"（本机 release quick，22 lane / B=128 / 48 kHz，
+//! 单块预算 2.667 ms，p50 见 `khaen-bench` 的 graph 档位）：
+//!
+//! ~~~text
+//! 档位                          p50 µs   budget%   说明
+//! C-matrix3k        (8-tap)      90.0     3.4%    3 kHz 域：262 活跃格
+//! C1-matrix3k-1tap  (1-tap)      82.2     3.1%    同一条链只把矩阵格换成 1 tap
+//! E-matrix-full-rate(8-tap)     136.3     5.1%    全速率：262 × 8 tap
+//! E1-full-rate-1tap (1-tap)       6.5     0.2%    全速率静态混音
+//! ~~~
+//!
+//! 1. **生产形态（3 kHz 低速率域）的成本几乎全在重采样器**：C1 与 C 只差 8 µs（8 个 tap 的
+//!    矩阵 FIR 全部代价），其余 ~82 µs 是每列抽取器 + 每行插值器（[RationalResampler]，
+//!    16 taps/phase）。重采样器在 `khaen_core::kernels::resample`，T39a/T56 的内核优化入口
+//!    只覆盖 direct / partitioned 卷积，**没有** resample 的 optimized 入口；在 core 之外
+//!    无法把这段接到 SIMD，属于后续 core 任务。矩阵 FIR 本身即使归零也只省 ~0.3% 预算。
+//! 2. **全速率形态（factor = 1）的矩阵 FIR 才是本段唯一可 SIMD 化的热点**（E 档 ~130 µs 的
+//!    矩阵 FIR，约 4.9% 预算），但它不在生产形态里：DESIGN 的矩阵目标域是 3 kHz，校准链
+//!    （`calibration::plan_levels`）用的是 identity 矩阵（编译期折叠为直通）。要接线只能
+//!    按格子调 1 源/1 角色/1 容器的 direct 优化入口、再用 scratch 累加（内核入口是写不是
+//!    累加）：每块 262 次内核调用 + 2 次额外搬运，估算收益 ~2-3% 预算，代价是 factor = 1
+//!    配置的默认舍入行为改变，且需要一套新的矩阵格子对拍测试。T56 的写范围只含
+//!    `crates/host/src/graph/**` 与两个既有测试文件，不值得为这个非生产形态扩大数值面；
+//!    结论记为后续任务（若 factor = 1 成为生产配置，再按上面设计接线并补对拍）。
+//!
+//! 因此本段在两条 `KernelPath` 下都是同一套标量实现（`KernelChoice` 只影响 crossover）；
+//! `PlanGraph::kernel_dispatch` 上报的是**图实际接的内核**，不会因为本段没接 SIMD 而虚报。
+//!
 //! # T22 边界
 //!
 //! 未实现（留给后续）：系数在块边界的原子切换（方案切换由 host 的 commit 层做整图切换）、
-//! 变比重采样（ASRC）、低速率域分区卷积。
+//! 变比重采样（ASRC）、低速率域分区卷积、矩阵段的 SIMD/Core-optimized 格子卷积（见上节）。
 
 use khaen_core::kernels::resample::RationalResampler;
 use khaen_core::plan::MatrixSection;

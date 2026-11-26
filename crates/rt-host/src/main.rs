@@ -6,7 +6,8 @@
 //! - 设备监督器的生产装配留到与 daemon 的联动（T70f 后续），本进程默认
 //!   `SupervisorOptions::enabled = false`（状态如实为 absent，不假装断言过速率）；
 //! - 方案切换：启动时读一次方案文件（`KHAEN_PLAN`）；运行期可经 Unix socket 控制通道
-//!   （T70f-a 已实现服务端：status/mute/prepare/commit/abort/coeff/inspect/surface/rollback/format）
+//!   （T70f-a 已实现服务端：status/mute/prepare/commit/abort/coeff/inspect/surface/rollback/format；
+//!   T70f-c 校准 cal_*；M3b 热重配 channels_status/prepare/commit/abort）
 //!   在块边界换图/静音。daemon 侧的代理客户端（把 REST 转发成本协议）是 T70f-b，尚未实现；
 //!   在它接上之前，daemon 的 `/api/*` 仍只作用于 daemon 自己的控制面副本，不代表已作用于本进程。
 //! - 采样率回读：打开 PCM 前后回读 `/proc/asound/.../hw_params` 的 `rate:`；若与方案速率
@@ -33,13 +34,29 @@
 //!
 //! 如实边界：
 //! - 控制通道起不来（路径不可写/已被占用等）只打印原因、数据面继续跑，**不退出进程**；
-//! - `format` 只改控制面的编译格式：数据面执行器/设备格式在进程生命周期内固定，commit 如实报
-//!   `device_restart_required=true` / `pcm_reconfigured=false`（M3b 热重配未实现）；之后
-//!   格式不匹配的方案 commit 回 `not_applied`，不会把不匹配的图塞进引擎；
+//! - `format` 只改控制面的编译格式（commit 如实报 `device_restart_required=true` /
+//!   `pcm_reconfigured=false`）；真正换数据面格式/通道/AES67 映射走 M3b 热重配：
+//!   `channels_prepare`（校验 + 只读设备探测 + token/diff）→ `channels_commit`（块边界静音、
+//!   关旧 PCM、重开新 hw params、重建收包/输入抖动环/引擎、hw 回读校验、恢复；失败按旧配置
+//!   回滚并如实报 `rolled_back`），进程/PID 不变、块计数连续、实测 `gap_ms` 上报；
+//!   格式不匹配的方案 commit 仍回 `not_applied`，不会把不匹配的图塞进引擎；
 //! - 传输层不做认证（本机可信连接，socket 权限由部署/umask 决定）；跨机/多用户部署需要另外的
 //!   鉴权层，不在本任务；
 //! - 设备缺失（T42o absent）时控制通道照常响应 status，mute/commit 仍受理，图在恢复出块后的
 //!   第一个块边界生效（如实上报 `applied_block`）。
+//!
+//! # 热重配（M3b，进程/PID 不变）
+//!
+//! `channels_status/prepare/commit/abort`（同一控制通道）把"换通道数/采样率/AES67 组播-端口-PT-
+//! 映射/抖动水位"变成可回滚的两阶段操作：prepare 在控制线程校验（映射长度 = AES67 RTP 通道数、
+//! 槽位 < 输出通道且单射、PT 96..=127、速率属支持集合、准入、只读读 `/proc/asound` 探测）并返回
+//! token + planned generation + diff；commit 经命令通道交给块线程，在块边界执行：安全静音 → 关旧
+//! PCM → 按新配置重开设备、重建 AES67 收包线程（端口/组播变化时）与输入抖动环、引擎格式变化时
+//! 重建 SlotEngine（旧图丢弃，如实报 `graph_dropped`）→ 回读 hw rate/channels 校验 → 恢复用户静音。
+//! 任何一步失败都按旧配置回滚（`rolled_back` 如实说明、`generation` 不前进、设备恢复不了就保持
+//! fail-closed absent 并继续退避重开）；与进程内校准模式互斥（校准中 commit -> `cal_busy`，
+//! 重配中 cal_enter -> `reconfiguring`）。实测 `gap_ms` 是"静音到恢复"的控制窗口，**不是声学空档**；
+//! 目标参考 ≤2 s，不设硬上限（真机数值 NOT_RUN，见交接）。
 //!
 //! # 环境变量
 //!
@@ -63,11 +80,13 @@
 //! | `KHAEN_CONTROL` | `on` | 控制通道开关：`off`/`0`/`false` 关闭；其它非法值按配置错误退出 2 |
 //! | `KHAEN_CONTROL_SOCKET` | `/run/khaen/rt-host.sock` | 控制通道 Unix socket 路径 |
 //!
-//! # 状态文件字段（schema 仍是 `khaen-rt-status/v1`，T42o 为向后兼容的纯增量）
+//! # 状态文件字段（schema 仍是 `khaen-rt-status/v1`，均为向后兼容的纯增量）
 //!
-//! 原有字段不变；新增：`device_state`（`present`/`absent`）、`absent_since`（本次缺失起点，
+//! 原有字段不变；T42o 新增：`device_state`（`present`/`absent`）、`absent_since`（本次缺失起点，
 //! 进程内单调毫秒，present 为 `null`）、`reopen_attempts`（本次缺失期间的重开次数）、
 //! `last_device_error`（最近一次设备错误文本或 `null`）。设备缺失期间 `safe` 恒为 `true`。
+//! M3b 新增：`format`（数据面块长/速率/通道）与 `reconfigure`（`generation`、`last_gap_ms`、
+//! `last_result`、`in_flight`）。
 //!
 //! # 退出码
 //!
@@ -260,6 +279,17 @@ mod app {
     pub fn parse_hw_params_rate(text: &str) -> Option<u32> {
         for line in text.lines() {
             let Some(rest) = line.trim().strip_prefix("rate:") else {
+                continue;
+            };
+            return rest.split_whitespace().next()?.parse::<u32>().ok();
+        }
+        None
+    }
+
+    /// 解析 hw_params 文本里的 `channels:` 行（`closed` 或没有该行返回 None）。
+    pub fn parse_hw_params_channels(text: &str) -> Option<u32> {
+        for line in text.lines() {
+            let Some(rest) = line.trim().strip_prefix("channels:") else {
                 continue;
             };
             return rest.split_whitespace().next()?.parse::<u32>().ok();
@@ -507,10 +537,23 @@ mod app {
     /// `device_state`=present|absent、`absent_since`（进程内单调毫秒或 null）、
     /// `reopen_attempts`（本次缺失期间的重开次数）、`last_device_error`（null 或转义后的错误文本）。
     /// 设备缺失期间 `safe` 恒为 true（fail-closed：没有输出）。
+    /// 旧入口（保持向后兼容）：不含 format/reconfigure 增量字段。
     pub fn write_status_file(
         path: &Path,
         status: &RuntimeStatus,
         lifecycle: &DeviceLifecycle,
+    ) -> std::io::Result<()> {
+        write_status_file_ext(path, status, lifecycle, None, None)
+    }
+
+    /// 增量版状态文件写入：`format`（数据面块长/速率/通道）与 `reconfigure`（M3b 热重配
+    /// generation/last_gap_ms/last_result/在飞）是向后兼容的纯增量字段。
+    pub fn write_status_file_ext(
+        path: &Path,
+        status: &RuntimeStatus,
+        lifecycle: &DeviceLifecycle,
+        format: Option<&EngineConfig>,
+        reconfigure: Option<&crate::control::ReconfigureTracker>,
     ) -> std::io::Result<()> {
         let graph_id = match status.graph.graph_id.as_deref() {
             Some(id) => json_string(id),
@@ -542,16 +585,44 @@ mod app {
             "present"
         };
         let safe = status.state.requires_mute() || lifecycle.is_absent();
+        let format_json = match format {
+            Some(format) => serde_json::json!({
+                "block_frames": format.block_frames,
+                "sample_rate": format.sample_rate,
+                "channels": format.channels,
+            })
+            .to_string(),
+            None => "null".to_string(),
+        };
+        let reconfigure_json = match reconfigure {
+            Some(tracker) => tracker.status_json().to_string(),
+            None => "null".to_string(),
+        };
+        // T41：ASRC 状态（未启用为 null；纯增量字段，旧读方忽略即可）。
+        let asrc_json = match status.input.asrc {
+            Some(asrc) => {
+                let last_error = match asrc.last_error {
+                    Some(code) => json_string(code),
+                    None => "null".to_string(),
+                };
+                format!(
+                    "{{\"enabled\":{},\"ratio_ppm\":{},\"ppm_estimate\":{},\"fill_frames\":{},\"last_error\":{}}}",
+                    asrc.enabled, asrc.ratio_ppm, asrc.ppm_estimate, asrc.fill_frames, last_error
+                )
+            }
+            None => "null".to_string(),
+        };
         let json = format!(
             concat!(
                 "{{\"schema\":\"khaen-rt-status/v1\",\"blocks\":{},",
                 "\"state\":\"{}\",\"muted\":{},\"safe\":{},",
                 "\"plan_rate\":{},\"device_rate\":{},\"rate_asserted\":{},",
-                "\"input\":{{\"packets\":{},\"underruns\":{},\"jitter_fill\":{},\"ssrc\":{}}},",
+                "\"input\":{{\"packets\":{},\"underruns\":{},\"jitter_fill\":{},\"ssrc\":{},\"asrc\":{}}},",
                 "\"output\":{{\"xruns\":{},\"blocks_written\":{},\"bytes_written\":{}}},",
                 "\"receiver\":{{\"packets_received\":{},\"queue_full_drops\":{},\"recv_errors\":{}}},",
                 "\"graph_id\":{},\"last_error\":{},",
-                "\"device_state\":\"{}\",\"absent_since\":{},\"reopen_attempts\":{},\"last_device_error\":{}}}\n"
+                "\"device_state\":\"{}\",\"absent_since\":{},\"reopen_attempts\":{},\"last_device_error\":{},",
+                "\"format\":{},\"reconfigure\":{}}}\n"
             ),
             status.blocks,
             status.state.as_str(),
@@ -564,6 +635,7 @@ mod app {
             status.input.underruns,
             status.input.jitter_fill,
             ssrc,
+            asrc_json,
             status.output.xruns,
             status.output.blocks_written,
             status.output.bytes_written,
@@ -575,7 +647,9 @@ mod app {
             device_state,
             absent_since,
             lifecycle.reopen_attempts(),
-            last_device_error
+            last_device_error,
+            format_json,
+            reconfigure_json
         );
         let temporary = path.with_extension("tmp");
         std::fs::write(&temporary, json.as_bytes())?;
@@ -715,16 +789,54 @@ mod app {
             }
         }
 
+        // 热重配追踪器（M3b）：块线程在块边界执行 channels_commit 时写，控制核心与状态文件读。
+        // 没有控制通道时也创建（状态文件要如实报 generation/last_gap/last_result）。
+        let reconfigure = crate::control::shared_tracker();
         // 跨进程控制通道（T70f-a）：数据面优先——控制通道起不来只打印原因并继续，不退出进程。
         // 块线程是 Runtime 的唯一 owner；控制线程只发块边界命令并读状态快照。
-        let mut bridge = ControlBridge::disabled();
+        let mut bridge =
+            ControlBridge::disabled().with_reconfigure(std::sync::Arc::clone(&reconfigure));
         let mut control_server: Option<crate::control::ControlServer> = None;
+        // 控制核心句柄（校准测量线程在进程退出前要取消/join；只有控制通道起来才存在）。
+        let mut shutdown_handle: Option<Arc<Mutex<crate::control::ControlCore>>> = None;
         if settings.control.enabled {
             let (command_tx, command_rx) = mpsc::channel();
             let snapshot: SharedSnapshot = Arc::new(Mutex::new(None));
+            // 进程内校准（T70f-c）：配置非法只让 cal_* 保持 not_wired，数据面照常跑。
+            // 命令通道是块线程的唯一入口：真机校准播放也要经它（不新开 socket/不换设备 owner）。
+            let calibration = match crate::control::CalibrationConfig::from_env() {
+                Ok(None) => None,
+                Ok(Some(config)) => {
+                    let factory =
+                        crate::control::cal::engine::build_factory(&config, command_tx.clone());
+                    println!(
+                        "khaen-rt-host: in-process calibration enabled (engine {}, kind {}, simulated={}, artifact dir {})",
+                        factory.engine_name(),
+                        factory.kind().as_str(),
+                        factory.simulated(),
+                        config.artifact_dir.display()
+                    );
+                    Some(crate::control::CalibrationSetup { config, factory })
+                }
+                Err(err) => {
+                    eprintln!(
+                        "khaen-rt-host: calibration configuration rejected ({}); calibration ops stay not_wired",
+                        err.message()
+                    );
+                    None
+                }
+            };
             let (initial_plan_value, initial_version) = match initial_plan {
                 Some((plan, version)) => (Some(plan), version),
                 None => (None, 0),
+            };
+            // 热重配协议上下文（M3b）：启动时的完整运行时配置 + 只读 /proc/asound 探测。
+            let channels = crate::control::ChannelsConfig {
+                config: settings.config.clone(),
+                probe: Arc::new(crate::control::AlsaDeviceProbe::new(
+                    settings.alsa_device.clone(),
+                    Path::new("/proc/asound").to_path_buf(),
+                )),
             };
             let core = ControlCore::new(ControlCoreConfig {
                 data_plane_format: runtime.config().engine.clone(),
@@ -735,10 +847,15 @@ mod app {
                 initial_plan: initial_plan_value,
                 initial_version,
                 command_timeout: crate::control::core::COMMAND_ACK_TIMEOUT,
+                calibration,
+                channels: Some(channels),
+                reconfigure: Some(std::sync::Arc::clone(&reconfigure)),
             });
             let core = Arc::new(Mutex::new(core));
+            let core_handle = Arc::clone(&core);
             match crate::control::start(&settings.control, core) {
                 Ok(server) => {
+                    shutdown_handle = Some(core_handle);
                     if let Some(path) = server.socket_path() {
                         println!(
                             "khaen-rt-host: control channel listening on {} (KHAEN_CONTROL=off disables it)",
@@ -746,7 +863,8 @@ mod app {
                         );
                     }
                     control_server = Some(server);
-                    bridge = ControlBridge::new(command_rx, snapshot, settings.stats_every);
+                    bridge = ControlBridge::new(command_rx, snapshot, settings.stats_every)
+                        .with_reconfigure(std::sync::Arc::clone(&reconfigure));
                 }
                 Err(err) => {
                     eprintln!(
@@ -767,19 +885,23 @@ mod app {
         };
         let mut pacer = crate::recovery::RealPacer::new();
         // control_server 必须活到块循环结束（Drop 时停止 accept 并移除 socket）。
-        let exit = if bridge.enabled() {
-            crate::recovery::drive_loop_with_control(
-                &mut runtime,
-                &options,
-                &mut pacer,
-                &mut bridge,
-            )
-            .0
-        } else {
-            // 没有控制通道：走既有 T42o 主循环（行为与 T70f-a 之前完全一致）。
-            crate::recovery::drive_loop(&mut runtime, &options, &mut pacer).0
-        };
-        // 控制通道句柄活到数据面循环结束；Drop 停止 accept 并移除 socket 文件。
+        // 无论控制通道是否起来都走带桥的主循环：桥 disabled 时所有命令/快照操作是空操作
+        // （与既有 T42o 行为一致），但热重配追踪器始终是 app 的这一份（状态文件如实读它）。
+        let exit = crate::recovery::drive_loop_with_control(
+            &mut runtime,
+            &options,
+            &mut pacer,
+            &mut bridge,
+        )
+        .0;
+        // 数据面已停：先让进程内校准取消并等测量线程收尾（不把半截测量线程留到进程退出），
+        // 再 Drop 控制通道句柄（停止 accept 并移除 socket 文件）。
+        if let Some(handle) = shutdown_handle {
+            match handle.lock() {
+                Ok(mut core) => core.shutdown(),
+                Err(poisoned) => poisoned.into_inner().shutdown(),
+            }
+        }
         #[cfg(unix)]
         drop(control_server);
         #[cfg(not(unix))]
@@ -792,6 +914,7 @@ mod app {
 mod tests {
     use super::app;
     use crate::recovery::DeviceLifecycle;
+    use khaen_host::aes67_input::AsrcInputStats;
     use khaen_host::alsa_backend::AlsaStats;
     use khaen_host::runtime::{ReceiverStats, RuntimeStatus};
     use khaen_host::safety::RuntimeState;
@@ -850,6 +973,8 @@ mod tests {
         assert_eq!(doc["device_rate"], serde_json::Value::Null);
         assert_eq!(doc["input"]["packets"], serde_json::json!(34));
         assert_eq!(doc["input"]["ssrc"], serde_json::Value::Null);
+        // T41：未启用 ASRC 时 input.asrc 为 null（纯增量字段）。
+        assert_eq!(doc["input"]["asrc"], serde_json::Value::Null);
         assert_eq!(doc["graph_id"], serde_json::Value::Null);
         assert_eq!(doc["last_error"], serde_json::Value::Null);
         // T42o 设备缺失字段：present 时 absent_since/last_device_error 为 null、attempts=0。
@@ -859,6 +984,102 @@ mod tests {
         assert_eq!(doc["last_device_error"], serde_json::Value::Null);
         // 原子替换：临时文件不残留。
         assert!(!path.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn status_file_reports_asrc_snapshot() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "khaen-rt-host-status-asrc-{}.json",
+            std::process::id()
+        ));
+        let mut runtime = status();
+        runtime.input.asrc = Some(AsrcInputStats {
+            enabled: true,
+            ratio_ppm: -200,
+            ppm_estimate: -199,
+            fill_frames: 256,
+            last_error: Some("ERR_ASRC_PROCESS"),
+        });
+        runtime.input.asrc_bypasses = 3;
+        app::write_status_file(&path, &runtime, &DeviceLifecycle::new())
+            .expect("write status file");
+        let text = std::fs::read_to_string(&path).expect("read status file");
+        let _ = std::fs::remove_file(&path);
+        let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert_eq!(doc["input"]["asrc"]["enabled"], serde_json::json!(true));
+        assert_eq!(doc["input"]["asrc"]["ratio_ppm"], serde_json::json!(-200));
+        assert_eq!(
+            doc["input"]["asrc"]["ppm_estimate"],
+            serde_json::json!(-199)
+        );
+        assert_eq!(doc["input"]["asrc"]["fill_frames"], serde_json::json!(256));
+        assert_eq!(
+            doc["input"]["asrc"]["last_error"],
+            serde_json::json!("ERR_ASRC_PROCESS")
+        );
+    }
+
+    #[test]
+    fn status_file_includes_format_and_reconfigure_delta() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "khaen-rt-host-status-hot-{}.json",
+            std::process::id()
+        ));
+        let tracker = crate::control::ReconfigureTracker {
+            generation: 3,
+            last_gap_ms: Some(37),
+            last_result: Some(serde_json::json!({
+                "ok": true,
+                "applied": true,
+                "gap_ms": 37,
+                "note": "\"quoted\" 文本要正确转义",
+            })),
+            ..crate::control::ReconfigureTracker::default()
+        };
+        let format = khaen_host::engine::EngineConfig {
+            block_frames: 128,
+            sample_rate: 48_000,
+            channels: 4,
+        };
+        app::write_status_file_ext(
+            &path,
+            &status(),
+            &DeviceLifecycle::new(),
+            Some(&format),
+            Some(&tracker),
+        )
+        .expect("write status file with deltas");
+        let text = std::fs::read_to_string(&path).expect("read status file");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(text.matches('\n').count(), 1, "must be a single line");
+        let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        // schema 不变：只加向后兼容的增量字段。
+        assert_eq!(doc["schema"], serde_json::json!("khaen-rt-status/v1"));
+        assert_eq!(doc["blocks"], serde_json::json!(12));
+        assert_eq!(doc["format"]["block_frames"], serde_json::json!(128));
+        assert_eq!(doc["format"]["sample_rate"], serde_json::json!(48_000));
+        assert_eq!(doc["format"]["channels"], serde_json::json!(4));
+        assert_eq!(doc["reconfigure"]["generation"], serde_json::json!(3));
+        assert_eq!(doc["reconfigure"]["last_gap_ms"], serde_json::json!(37));
+        assert_eq!(
+            doc["reconfigure"]["last_result"]["applied"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            doc["reconfigure"]["last_result"]["note"],
+            serde_json::json!("\"quoted\" 文本要正确转义")
+        );
+
+        // 旧入口（不带增量参数）仍写 `null`，老调用方/测试行为不变。
+        app::write_status_file(&path, &status(), &DeviceLifecycle::new())
+            .expect("write legacy status file");
+        let text = std::fs::read_to_string(&path).expect("read legacy status file");
+        let _ = std::fs::remove_file(&path);
+        let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert!(doc["format"].is_null());
+        assert!(doc["reconfigure"].is_null());
     }
 
     #[test]

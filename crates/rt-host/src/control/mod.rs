@@ -35,18 +35,21 @@
 //! # 能力上报（如实）
 //!
 //! 已实现的 op 全部在 status.wired 里；五个语义界面 surfaces 全部接通（surface 的响应
-//! 形状与 host 的 ControlState 一致）。format 的真实边界：**数据面执行器/设备格式在
-//! rt-host 进程生命周期内固定**，format 的两阶段只改控制面的编译格式，commit 如实报
-//! device_restart_required=true / pcm_reconfigured=false，不谎称已重开 PCM
-//! （M3b 热重配未实现）。状态里 format_mismatch / notes.format_live_change 说明这一点。
+//! 形状与 host 的 ControlState 一致）。format 的两阶段只改控制面的编译格式，commit 如实报
+//! device_restart_required=true / pcm_reconfigured=false；真正换数据面格式/通道/AES67 输入
+//! 的是 M3b 热重配（channels_status/prepare/commit/abort，见 reconfigure 模块）：块边界静音→
+//! 换设备/收包/引擎→hw 回读校验→恢复，失败按旧配置回滚，进程/PID 不变、实测 gap_ms 如实上报。
+//! 与进程内校准互斥（校准中 commit -> cal_busy；重配中 cal_enter -> reconfiguring）。
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 pub mod bridge;
+pub mod cal;
 pub mod command;
 pub mod core;
+pub mod reconfigure;
 pub mod snapshot;
 pub mod transport;
 
@@ -54,12 +57,16 @@ pub mod transport;
 mod unix;
 
 #[cfg(test)]
+mod reconfigure_tests;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
 
 pub use bridge::ControlBridge;
+pub use cal::{CalibrationConfig, CalibrationSetup};
 pub use core::{ControlCore, ControlCoreConfig};
+pub use reconfigure::{shared_tracker, AlsaDeviceProbe, ChannelsConfig, ReconfigureTracker};
 
 /// 控制通道开关环境变量：off / 0 / false 关闭，on / 1 / true 或不设 = 打开。
 pub const CONTROL_ENV: &str = "KHAEN_CONTROL";

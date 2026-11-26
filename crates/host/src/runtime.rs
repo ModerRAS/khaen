@@ -140,6 +140,16 @@ pub mod codes {
     pub const RECEIVER_THREAD_SPAWN: &str = "ERR_AES67_RECEIVER_THREAD_SPAWN";
     /// 收包线程 panic（join 失败）。
     pub const RECEIVER_THREAD_PANIC: &str = "ERR_AES67_RECEIVER_THREAD_PANIC";
+    /// 热重配被拒绝：目标配置非法（未触碰任何句柄）。
+    pub const RECONFIGURE_CONFIG: &str = "ERR_RECONFIGURE_CONFIG";
+    /// 热重配失败：收包侧重建失败（socket bind/join/线程）。
+    pub const RECONFIGURE_RECEIVER: &str = "ERR_RECONFIGURE_RECEIVER";
+    /// 热重配失败：新输出设备打不开。
+    pub const RECONFIGURE_DEVICE: &str = "ERR_RECONFIGURE_DEVICE";
+    /// 热重配失败：新 hw params 回读与目标不一致（或读不到）。
+    pub const RECONFIGURE_VERIFY: &str = "ERR_RECONFIGURE_HW_VERIFY";
+    /// 热重配失败且旧配置也恢复不了（设备/收包至少一项没回到旧状态）。
+    pub const RECONFIGURE_ROLLBACK: &str = "ERR_RECONFIGURE_ROLLBACK";
 }
 
 // ===========================================================================
@@ -576,6 +586,48 @@ impl Drop for Aes67Receiver {
     }
 }
 
+// ===========================================================================
+// 收包源工厂（热重配用）：重建收包线程需要有"如何再造一个同款 PacketSource"的能力
+// ===========================================================================
+
+/// 收包源工厂类型：给新的 `Aes67InputConfig` + `ReceiverConfig` 造一个新的包源。
+///
+/// 生产装配（[`Runtime::new`] / [`Runtime::new_deferred`]）用真实 UDP 绑定；测试注入
+/// 的假包源没有"克隆自己"的能力，因此它们用 [`Runtime::with_source`] 构造（工厂为
+/// `None`，热重配若需要重绑收包会如实拒绝，不假装重建）。
+pub type SourceFactory = Box<
+    dyn Fn(
+            &Aes67InputConfig,
+            &ReceiverConfig,
+        ) -> Result<Box<dyn PacketSource + Send>, ReceiverError>
+        + Send,
+>;
+
+/// 把 `Box<dyn PacketSource>` 适配成可交给 [`Aes67Receiver::spawn`] 的具体类型。
+struct BoxedSource(Box<dyn PacketSource + Send>);
+
+impl PacketSource for BoxedSource {
+    fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.recv(buf)
+    }
+
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.0.local_addr()
+    }
+
+    fn rcvbuf_applied(&self) -> bool {
+        self.0.rcvbuf_applied()
+    }
+}
+
+/// 生产收包源工厂：真实 UDP 绑定（bind + join 组播 + 读超时）。
+fn udp_source_factory() -> SourceFactory {
+    Box::new(|input: &Aes67InputConfig, receiver: &ReceiverConfig| {
+        let source = UdpPacketSource::bind(input, receiver)?;
+        Ok(Box::new(source) as Box<dyn PacketSource + Send>)
+    })
+}
+
 /// 收包线程主循环：读一个 datagram → 拷进 SPSC 槽位 → 满则计数丢弃。
 fn receiver_loop<S: PacketSource>(
     mut source: S,
@@ -813,6 +865,14 @@ impl DeviceDriver for NoDeviceDriver {
     }
 }
 
+/// 未加载方案时的初始处理链（热重配/构造共用；返回 Send 的处理链）。
+fn unloaded_processor(policy: UnloadedPolicy) -> Box<dyn Processor + Send> {
+    match policy {
+        UnloadedPolicy::Passthrough => Box::new(Passthrough),
+        UnloadedPolicy::Silence => Box::new(Silent),
+    }
+}
+
 /// 按配置装配生产设备监督器。
 fn build_device_driver(config: &RuntimeConfig) -> Result<Box<dyn DeviceDriver>, RuntimeError> {
     let plan_rate = config.effective_plan_rate();
@@ -1004,6 +1064,12 @@ pub struct Runtime<P: PcmOutput> {
     /// （避免把欠载/处理器等其它锁存故障一起清掉）。
     device_fault: bool,
     last_error: Option<&'static str>,
+    /// 进行中的校准播放（T70f-c；None = 播放模式）。
+    calibration: Option<ActiveCalibration>,
+    /// 收包源工厂（热重配重建收包线程用；测试注入的假包源为 None）。
+    source_factory: Option<SourceFactory>,
+    /// 用户静音请求（与安全静音独立的用户意图；热重配前后要原样恢复）。
+    user_mute: bool,
 }
 
 impl<P: PcmOutput> fmt::Debug for Runtime<P> {
@@ -1031,7 +1097,7 @@ impl<P: PcmOutput> Runtime<P> {
         config.validate()?;
         let source = UdpPacketSource::bind(&config.input, &config.receiver)?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, true)
+        Self::build_validated(config, source, driver, true, Some(udp_source_factory()))
     }
 
     /// 构造运行时但**不打开输出设备**：设备缺失/掉线由控制路径 [`Runtime::open_device`] 重试。
@@ -1043,7 +1109,7 @@ impl<P: PcmOutput> Runtime<P> {
         config.validate()?;
         let source = UdpPacketSource::bind(&config.input, &config.receiver)?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, false)
+        Self::build_validated(config, source, driver, false, Some(udp_source_factory()))
     }
 
     /// 用注入的 PacketSource（假包源/其它 socket 实现）构造运行时。
@@ -1053,7 +1119,48 @@ impl<P: PcmOutput> Runtime<P> {
     ) -> Result<Self, RuntimeError> {
         config.validate()?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, true)
+        Self::build_validated(config, source, driver, true, None)
+    }
+
+    /// 注入假包源 + 收包源工厂（热重配测试用）：工厂负责按新 input/收包配置再造一个
+    /// 假包源；`source` 是启动时的那一个。
+    pub fn with_source_factory<S, F>(
+        config: RuntimeConfig,
+        source: S,
+        factory: F,
+    ) -> Result<Self, RuntimeError>
+    where
+        S: PacketSource + 'static,
+        F: Fn(
+                &Aes67InputConfig,
+                &ReceiverConfig,
+            ) -> Result<Box<dyn PacketSource + Send>, ReceiverError>
+            + Send
+            + 'static,
+    {
+        config.validate()?;
+        let driver = build_device_driver(&config)?;
+        Self::build_validated(config, source, driver, true, Some(Box::new(factory)))
+    }
+
+    /// [`with_source_factory`] 的"设备延迟打开"版本（热重配 + 设备缺失测试用）。
+    pub fn with_source_deferred_factory<S, F>(
+        config: RuntimeConfig,
+        source: S,
+        factory: F,
+    ) -> Result<Self, RuntimeError>
+    where
+        S: PacketSource + 'static,
+        F: Fn(
+                &Aes67InputConfig,
+                &ReceiverConfig,
+            ) -> Result<Box<dyn PacketSource + Send>, ReceiverError>
+            + Send
+            + 'static,
+    {
+        config.validate()?;
+        let driver = build_device_driver(&config)?;
+        Self::build_validated(config, source, driver, false, Some(Box::new(factory)))
     }
 
     /// [`Runtime::with_source`] 的"设备延迟打开"版本：构造期不碰设备（设备缺失模拟/重开测试用）。
@@ -1063,7 +1170,7 @@ impl<P: PcmOutput> Runtime<P> {
     ) -> Result<Self, RuntimeError> {
         config.validate()?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, false)
+        Self::build_validated(config, source, driver, false, None)
     }
 
     /// 用注入的包源 + 设备驱动构造运行时（测试/daemon 注入用）。
@@ -1073,7 +1180,7 @@ impl<P: PcmOutput> Runtime<P> {
         driver: Box<dyn DeviceDriver>,
     ) -> Result<Self, RuntimeError> {
         config.validate()?;
-        Self::build_validated(config, source, driver, true)
+        Self::build_validated(config, source, driver, true, None)
     }
 
     fn build_validated<S: PacketSource + 'static>(
@@ -1081,12 +1188,10 @@ impl<P: PcmOutput> Runtime<P> {
         source: S,
         driver: Box<dyn DeviceDriver>,
         open_device: bool,
+        source_factory: Option<SourceFactory>,
     ) -> Result<Self, RuntimeError> {
         let input = Aes67Input::new(config.input.clone()).map_err(RuntimeError::Input)?;
-        let initial: Box<dyn Processor + Send> = match config.unloaded_policy {
-            UnloadedPolicy::Passthrough => Box::new(Passthrough),
-            UnloadedPolicy::Silence => Box::new(Silent),
-        };
+        let initial = unloaded_processor(config.unloaded_policy);
         let engine =
             SlotEngine::new(config.engine.clone(), initial).map_err(RuntimeError::Engine)?;
         let mut backend: AlsaOutputBackend<P> = AlsaOutputBackend::new();
@@ -1119,6 +1224,9 @@ impl<P: PcmOutput> Runtime<P> {
             last_fault_reason: None,
             device_fault: false,
             last_error: None,
+            calibration: None,
+            source_factory,
+            user_mute: false,
         })
     }
 
@@ -1377,7 +1485,13 @@ impl<P: PcmOutput> Runtime<P> {
     pub fn request_mute(&mut self, mute: bool) -> MuteReceipt {
         let receipt = self.engine.request_mute(mute);
         self.safety.set_user_mute(mute);
+        self.user_mute = mute;
         receipt
+    }
+
+    /// 用户静音请求（与安全静音独立的用户意图；热重配前后原样恢复用）。
+    pub fn user_mute_requested(&self) -> bool {
+        self.user_mute
     }
 
     /// 引擎当前实际静音状态（块边界后的值，来自块引擎统计）。
@@ -1455,6 +1569,442 @@ impl<P: PcmOutput> Runtime<P> {
         let (version, graph_id, processor) = draft.into_parts();
         self.engine.stage_processor(processor, version, graph_id)
     }
+    // -----------------------------------------------------------------------
+    // 热重配（M3b）：控制路径换采样率/通道/AES67 输入/输出设备，失败按旧配置回滚
+    // -----------------------------------------------------------------------
+
+    /// 控制路径热重配（M3b）：不退出进程，换输入/引擎/设备配置。
+    ///
+    /// 调用者约束：必须在块循环的块边界调用（此时没有块在跑），并且已经静音。
+    /// 本方法自己做"关旧设备/收包 → 建新对象 → 开新设备 → 回读校验"，任何一步失败都
+    /// 按旧配置恢复（best-effort），返回 [`ReconfigureFailure`] 说明回滚后的真实状态。
+    ///
+    /// 语义：
+    /// - `target` 必须是完整的新 [`RuntimeConfig`]（调用方从当前配置派生，`config.validate` 先跑）；
+    /// - 引擎格式（rate/block/channels）变化才重建 [`SlotEngine`]，旧图随旧引擎丢弃
+    ///   （`graph_dropped=true`）；`plan` 是控制线程按 `target.engine` 预编译的草稿，给了就
+    ///   在新引擎上 stage（下一块边界生效）；
+    /// - 收包 socket 只在 port/multicast/收包参数变化时重绑（需要构造时注入的收包源工厂）；
+    /// - 设备必须能按新 DeviceConfig 打开，且 `verify` 回读的 hw rate/channels 必须与目标一致，
+    ///   否则关新句柄、按旧配置重开；
+    /// - 块计数（`blocks`）连续、安全监督器与用户静音保持；ALSA 统计与输入统计会从新句柄/
+    ///   新抖动环重新计数（`alsa_stats_reset`/`input_stats_reset` 如实上报）。
+    ///
+    /// 不是 RT 路径（控制线程调用；设备 IO/分配都在这里），`run_block` 热路径一行不改。
+    pub fn reconfigure(
+        &mut self,
+        target: RuntimeConfig,
+        plan: Option<PlanDraft>,
+        verify: impl FnOnce() -> Result<HwReadback, String>,
+    ) -> Result<ReconfigureOutcome, ReconfigureFailure> {
+        let old = self.config.clone();
+        let old_device_was_started = self.backend.is_started();
+        let old_receiver_was_running = self.receiver.is_running();
+        // 1) 校验目标配置：失败时什么都没碰。
+        if let Err(err) = target.validate() {
+            return Err(ReconfigureFailure {
+                code: codes::RECONFIGURE_CONFIG,
+                stage: "validate",
+                message: err.to_string(),
+                rolled_back: true,
+                device_started: old_device_was_started,
+                receiver_running: old_receiver_was_running,
+            });
+        }
+        // 2) 先把新对象全部分配好（分配失败时也什么都没碰）。
+        let new_input = match Aes67Input::new(target.input.clone()) {
+            Ok(input) => input,
+            Err(err) => {
+                return Err(ReconfigureFailure {
+                    code: codes::RECONFIGURE_CONFIG,
+                    stage: "input",
+                    message: err.to_string(),
+                    rolled_back: true,
+                    device_started: old_device_was_started,
+                    receiver_running: old_receiver_was_running,
+                });
+            }
+        };
+        let engine_changed = target.engine != old.engine;
+        let new_engine = if engine_changed {
+            match SlotEngine::new(
+                target.engine.clone(),
+                unloaded_processor(target.unloaded_policy),
+            ) {
+                Ok(engine) => Some(engine),
+                Err(err) => {
+                    return Err(ReconfigureFailure {
+                        code: codes::RECONFIGURE_CONFIG,
+                        stage: "engine",
+                        message: err.to_string(),
+                        rolled_back: true,
+                        device_started: old_device_was_started,
+                        receiver_running: old_receiver_was_running,
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        let new_driver = match build_device_driver(&target) {
+            Ok(driver) => driver,
+            Err(err) => {
+                return Err(ReconfigureFailure {
+                    code: codes::RECONFIGURE_CONFIG,
+                    stage: "driver",
+                    message: err.to_string(),
+                    rolled_back: true,
+                    device_started: old_device_was_started,
+                    receiver_running: old_receiver_was_running,
+                });
+            }
+        };
+        let new_block = vec![0.0f32; new_input.samples_per_block()];
+        let new_out_block = if engine_changed {
+            Some(vec![
+                0.0f32;
+                target
+                    .engine
+                    .block_frames
+                    .saturating_mul(target.engine.channels)
+            ])
+        } else {
+            None
+        };
+        // 3) 收包：只有 port/组播地址/收包参数变化才需要重绑 socket。
+        let needs_rebind = target.input.port != old.input.port
+            || target.input.multicast_addr != old.input.multicast_addr
+            || target.receiver != old.receiver;
+        if needs_rebind && self.source_factory.is_none() {
+            return Err(ReconfigureFailure {
+                code: codes::RECONFIGURE_RECEIVER,
+                stage: "receiver_source",
+                message: "this runtime was built with an injected packet source and no source factory; rebinding the AES67 receiver (port/multicast/interface change) is unavailable, so the configuration was not changed (fail-closed)".to_string(),
+                rolled_back: true,
+                device_started: old_device_was_started,
+                receiver_running: old_receiver_was_running,
+            });
+        }
+        let mut new_receiver: Option<Aes67Receiver> = None;
+        if needs_rebind {
+            // 同端口不能叠两个 socket：先停旧收包线程（最坏一次 recv 超时的 join）。
+            let _ = self.receiver.stop();
+            match self.spawn_receiver(&target) {
+                Ok(receiver) => new_receiver = Some(receiver),
+                Err(err) => {
+                    let receiver_running = self.restore_receiver(&old);
+                    return Err(ReconfigureFailure {
+                        code: codes::RECONFIGURE_RECEIVER,
+                        stage: "receiver_spawn",
+                        message: err.to_string(),
+                        rolled_back: receiver_running,
+                        device_started: old_device_was_started,
+                        receiver_running,
+                    });
+                }
+            }
+        }
+        // 4) 设备：先关旧 PCM，再按新配置打开；失败/回读不符就按旧配置恢复。
+        if let Err(err) = self.backend.stop() {
+            // stop 目前不会失败；真失败了也按"新设备还没开"处理，回滚收包。
+            drop(new_receiver);
+            let receiver_running = self.restore_receiver_if_stopped(&old, needs_rebind);
+            return Err(ReconfigureFailure {
+                code: codes::RECONFIGURE_DEVICE,
+                stage: "device_close",
+                message: format!("close output device failed: {err}"),
+                rolled_back: receiver_running,
+                device_started: false,
+                receiver_running,
+            });
+        }
+        if let Err(err) = self.backend.start(&target.device) {
+            drop(new_receiver);
+            let (device_started, receiver_running) =
+                self.rollback_reconfigure(&old, needs_rebind, old_device_was_started);
+            let mut message = format!("open new output device failed: {err}");
+            if !device_started && old_device_was_started {
+                message.push_str("; the previous output device could not be reopened either (device absent, fail-closed)");
+            }
+            return Err(ReconfigureFailure {
+                code: codes::RECONFIGURE_DEVICE,
+                stage: "device_open",
+                message,
+                rolled_back: device_started == old_device_was_started && receiver_running,
+                device_started,
+                receiver_running,
+            });
+        }
+        // 5) 回读校验：必须是真实 hw params（rate/channels 都要读到，且与目标一致）。
+        let readback = match verify() {
+            Ok(readback) => readback,
+            Err(message) => {
+                return Err(self.fail_after_verify(
+                    &old,
+                    needs_rebind,
+                    old_device_was_started,
+                    format!("hw params readback failed: {message}"),
+                ));
+            }
+        };
+        let target_channels = u32::try_from(target.device.channels).ok();
+        let mismatch = if readback.sample_rate.is_none() || readback.channels.is_none() {
+            Some(format!(
+                "hw params readback unavailable (rate {:?}, channels {:?}); hot reconfiguration is fail-closed without a real readback",
+                readback.sample_rate, readback.channels
+            ))
+        } else if readback.sample_rate != Some(target.device.sample_rate) {
+            Some(format!(
+                "hw rate readback {:?} Hz != target {} Hz",
+                readback.sample_rate, target.device.sample_rate
+            ))
+        } else if readback.channels != target_channels {
+            Some(format!(
+                "hw channels readback {:?} != target {:?}",
+                readback.channels, target_channels
+            ))
+        } else {
+            None
+        };
+        if let Some(message) = mismatch {
+            return Err(self.fail_after_verify(
+                &old,
+                needs_rebind,
+                old_device_was_started,
+                message,
+            ));
+        }
+        // 6) 全部校验通过：提交新状态（块计数/安全状态/用户静音保持）。
+        let graph_dropped = engine_changed && plan.is_none();
+        if needs_rebind {
+            self.receiver = new_receiver.take().expect("receiver spawned above");
+        }
+        self.config = target;
+        self.input = new_input;
+        self.block = new_block;
+        if let Some(engine) = new_engine {
+            self.engine = engine;
+        }
+        if let Some(out_block) = new_out_block {
+            self.out_block = out_block;
+        }
+        self.driver = new_driver;
+        self.consecutive_underruns = 0;
+        self.consecutive_overruns = 0;
+        if !old_device_was_started {
+            // 设备此前 absent：重配成功即恢复，清掉"设备丢失"锁存故障（其它锁存故障保持）。
+            self.clear_device_loss_fault();
+        }
+        if let Some(draft) = plan {
+            self.stage_plan_draft(draft);
+        }
+        Ok(ReconfigureOutcome {
+            format: self.config.engine.clone(),
+            receiver_rebound: needs_rebind,
+            engine_rebuilt: engine_changed,
+            graph_dropped,
+            device_was_absent: !old_device_was_started,
+            hw: readback,
+            blocks: self.blocks,
+            alsa_stats_reset: old_device_was_started,
+            input_stats_reset: true,
+        })
+    }
+
+    /// 热重配收尾失败（新设备已打开但回读校验不符）：关新设备、按旧配置恢复。
+    fn fail_after_verify(
+        &mut self,
+        old: &RuntimeConfig,
+        needs_rebind: bool,
+        old_device_was_started: bool,
+        message: String,
+    ) -> ReconfigureFailure {
+        let (device_started, receiver_running) =
+            self.rollback_reconfigure(old, needs_rebind, old_device_was_started);
+        ReconfigureFailure {
+            code: codes::RECONFIGURE_VERIFY,
+            stage: "hw_verify",
+            message,
+            rolled_back: device_started == old_device_was_started && receiver_running,
+            device_started,
+            receiver_running,
+        }
+    }
+
+    /// 失败回滚：关掉新设备（如果开过）、按旧配置重开旧设备与旧收包线程。
+    ///
+    /// 返回（回滚后设备是否打开, 回滚后收包是否在跑）。旧设备本来就没打开时"恢复"=
+    /// 保持关闭（设备 absent 的 fail-closed 语义），不算失败。
+    fn rollback_reconfigure(
+        &mut self,
+        old: &RuntimeConfig,
+        needs_rebind: bool,
+        old_device_was_started: bool,
+    ) -> (bool, bool) {
+        let _ = self.backend.stop();
+        let device_started = if old_device_was_started {
+            match self.backend.start(&old.device) {
+                Ok(()) => true,
+                Err(err) => {
+                    // 旧设备也打不开：进入 fail-closed（不退出进程，由宿主按退避重开）。
+                    self.report_device_loss(format!(
+                        "hot reconfiguration rolled back but the previous output device could not be reopened: {err}",
+                    ));
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        let receiver_running = self.restore_receiver_if_stopped(old, needs_rebind);
+        (device_started, receiver_running)
+    }
+
+    /// 收包线程被停掉后按给定配置重建；没停过则原样返回当前状态。
+    fn restore_receiver_if_stopped(&mut self, old: &RuntimeConfig, stopped: bool) -> bool {
+        if stopped && !self.receiver.is_running() {
+            self.restore_receiver(old)
+        } else {
+            self.receiver.is_running()
+        }
+    }
+
+    /// 按给定配置重建收包线程（热重配回滚用；需要构造时注入的收包源工厂）。
+    fn restore_receiver(&mut self, config: &RuntimeConfig) -> bool {
+        match self.spawn_receiver(config) {
+            Ok(receiver) => {
+                self.receiver = receiver;
+                self.receiver.is_running()
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// 用收包源工厂按配置造一个新收包线程（不装配到 self）。
+    fn spawn_receiver(&self, config: &RuntimeConfig) -> Result<Aes67Receiver, RuntimeError> {
+        let Some(factory) = self.source_factory.as_ref() else {
+            return Err(RuntimeError::Receiver(ReceiverError::new(
+                codes::RECONFIGURE_RECEIVER,
+                "this runtime has no source factory (injected packet source); the AES67 receiver cannot be rebuilt",
+            )));
+        };
+        let source = factory(&config.input, &config.receiver)?;
+        Aes67Receiver::spawn(BoxedSource(source), &config.receiver)
+    }
+
+    // -----------------------------------------------------------------------
+    // 校准播放（T70f-c）：控制线程预渲染，块线程逐块写设备
+    // -----------------------------------------------------------------------
+
+    /// 控制路径：开始一段校准播放（预渲染数据在此一次性移交给 Runtime）。
+    ///
+    /// 只登记，不写设备；块循环看到 [Runtime::calibration_playback_active] 后改用
+    /// [Runtime::run_calibration_block] 写设备。返回总块数。已在校准播放时返回配置错误
+    /// （同一时刻只允许一段；由控制面串行化）。不是 RT 路径。
+    pub fn begin_calibration_playback(
+        &mut self,
+        playback: CalibrationPlayback,
+    ) -> Result<u64, RuntimeError> {
+        if self.calibration.is_some() {
+            return Err(RuntimeError::Config(
+                "calibration playback already active (single session at a time)",
+            ));
+        }
+        if playback.block_frames() != self.config.engine.block_frames {
+            return Err(RuntimeError::Config(
+                "calibration playback block_frames does not match the runtime engine block size",
+            ));
+        }
+        if playback.channels() != self.config.engine.channels {
+            return Err(RuntimeError::Config(
+                "calibration playback channels do not match the runtime engine channels",
+            ));
+        }
+        let total = playback.total_blocks();
+        self.calibration = Some(ActiveCalibration {
+            playback,
+            next_block: 0,
+        });
+        Ok(total)
+    }
+
+    /// 控制路径：结束校准播放（回到播放模式）。返回此前是否有校准播放。
+    pub fn end_calibration_playback(&mut self) -> bool {
+        self.calibration.take().is_some()
+    }
+
+    /// 是否有进行中的校准播放。
+    pub fn calibration_playback_active(&self) -> bool {
+        self.calibration.is_some()
+    }
+
+    /// 校准播放进度（已写块数, 总块数）；没有校准播放时为 None。
+    pub fn calibration_playback_progress(&self) -> Option<(u64, u64)> {
+        self.calibration.as_ref().map(|active| {
+            (
+                active.next_block.min(active.playback.total_blocks()),
+                active.playback.total_blocks(),
+            )
+        })
+    }
+
+    /// 块循环一步（校准模式）：把预渲染块写到设备；扫频写完后输出收尾静音。
+    ///
+    /// RT 约束：只用预分配缓冲做定长 memcpy/fill（无分配、无锁、无 IO），真实设备 IO
+    /// 仍走 backend.playout（与 run_block 同一条后端路径、同样的 xrun 恢复）。
+    /// 安全静音照旧：安全监督器要求静音或已有待上报故障时整块清零（fail-closed）。
+    /// 不推进输入抖动缓冲、不跑方案图、不改图版本。
+    pub fn run_calibration_block(&mut self) -> Result<&[f32], RuntimeError> {
+        if !self.backend.is_started() {
+            return Err(RuntimeError::Backend(BackendError::NotStarted));
+        }
+        let Some(active) = self.calibration.as_mut() else {
+            return Err(RuntimeError::Config("no calibration playback is active"));
+        };
+        let block_samples = active.playback.block_frames * active.playback.channels;
+        if active.next_block < active.playback.total_blocks {
+            let offset = (active.next_block as usize) * block_samples;
+            self.out_block
+                .copy_from_slice(&active.playback.data[offset..offset + block_samples]);
+            active.next_block += 1;
+        } else {
+            // 扫频数据已播完：收尾静音，直到控制线程显式 end（不要让节目混进采集尾巴）。
+            self.out_block.fill(0.0);
+        }
+        let done = active.next_block.min(active.playback.total_blocks);
+        let total = active.playback.total_blocks;
+        active
+            .playback
+            .progress
+            .blocks_done
+            .store(done, Ordering::Release);
+        active
+            .playback
+            .progress
+            .started
+            .store(true, Ordering::Release);
+        if done >= total {
+            active
+                .playback
+                .progress
+                .finished
+                .store(true, Ordering::Release);
+        }
+        let muted = self.safety.requires_mute() || self.pending_fault.is_some();
+        if muted {
+            self.out_block.fill(0.0);
+        }
+        self.blocks = self.blocks.saturating_add(1);
+        if let Err(err) = self.backend.playout(&self.out_block) {
+            self.output_errors = self.output_errors.saturating_add(1);
+            self.last_error = Some(codes::BACKEND);
+            self.device_fault = true;
+            self.note_fault(FaultReason::Internal);
+            return Err(RuntimeError::Backend(err));
+        }
+        self.safety.note_block_ok();
+        Ok(&self.out_block)
+    }
 
     /// 一步完成 prepare + commit（控制面简单路径）；返回将生效的块号。
     pub fn apply_plan(
@@ -1498,6 +2048,206 @@ fn fault_message(reason: FaultReason) -> &'static str {
     }
 }
 
+// ===========================================================================
+// 校准播放 seam（T70f-c）：控制线程预渲染整段 sweep，块线程逐块写设备
+// ===========================================================================
+//
+// 校准模式（旧 cal_control 设计回迁）里音频线程要"播放一段由非实时线程生成的扫频"：
+// 控制线程把 T61 时间轴完整渲染成帧交错 f32（时长 10~30 s，内存几 MB），交给块线程；
+// 块线程每块只做一次 memcpy（+ 安全静音判断）就写设备，**不跑方案图**——这样既不会
+// 因为未加载方案时的 fail-closed 静音策略把扫频吞掉，也不会把校准信号混进节目链。
+//
+// RT 约束：run_calibration_block 只做定长 memcpy/fill、原子计数、后端写；无分配、无锁、
+// 无 IO（backend.playout 与 run_block 同一条后端路径），不推进输入抖动缓冲与图状态。
+// 数据在 begin_calibration_playback（控制路径）一次性交给 Runtime，之后块线程只读。
+
+/// 校准播放进度（块线程写、控制线程/校准引擎读；原子量，无锁）。
+#[derive(Debug)]
+pub struct CalibrationProgress {
+    total_blocks: AtomicU64,
+    blocks_done: AtomicU64,
+    started: AtomicBool,
+    finished: AtomicBool,
+}
+
+impl CalibrationProgress {
+    /// 新建（总块数 = 播放时长 / 块长）。
+    pub fn new(total_blocks: u64) -> Self {
+        Self {
+            total_blocks: AtomicU64::new(total_blocks),
+            blocks_done: AtomicU64::new(0),
+            started: AtomicBool::new(false),
+            finished: AtomicBool::new(false),
+        }
+    }
+
+    /// 总块数。
+    pub fn total_blocks(&self) -> u64 {
+        self.total_blocks.load(Ordering::Acquire)
+    }
+
+    /// 已写出的块数（含收尾静音块）。
+    pub fn blocks_done(&self) -> u64 {
+        self.blocks_done.load(Ordering::Acquire)
+    }
+
+    /// 扫频数据是否已经全部写出（之后块线程输出收尾静音，直到 end）。
+    pub fn finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+
+    /// 块线程是否已经开始播放（第一次 run_calibration_block）。
+    pub fn started(&self) -> bool {
+        self.started.load(Ordering::Acquire)
+    }
+}
+
+/// 一段预渲染好的校准播放数据（帧交错 f32，长度 = 总块数 x 块长 x 通道数）。
+pub struct CalibrationPlayback {
+    data: Arc<[f32]>,
+    block_frames: usize,
+    channels: usize,
+    total_blocks: u64,
+    progress: Arc<CalibrationProgress>,
+}
+
+impl core::fmt::Debug for CalibrationPlayback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CalibrationPlayback")
+            .field("block_frames", &self.block_frames)
+            .field("channels", &self.channels)
+            .field("total_blocks", &self.total_blocks)
+            .field("frames", &(self.data.len() / self.channels.max(1)))
+            .finish_non_exhaustive()
+    }
+}
+
+impl CalibrationPlayback {
+    /// 用帧交错 f32 构造；长度必须是 块长 x 通道数 的整数倍，数据不能为空。
+    pub fn new(
+        interleaved: Vec<f32>,
+        block_frames: usize,
+        channels: usize,
+        progress: Arc<CalibrationProgress>,
+    ) -> Result<Self, RuntimeError> {
+        if block_frames == 0 || channels == 0 {
+            return Err(RuntimeError::Config(
+                "calibration playback: zero block/channels",
+            ));
+        }
+        let block_samples = block_frames
+            .checked_mul(channels)
+            .ok_or(RuntimeError::Config(
+                "calibration playback: block size overflow",
+            ))?;
+        if interleaved.is_empty() || !interleaved.len().is_multiple_of(block_samples) {
+            return Err(RuntimeError::Config(
+                "calibration playback: data length is not a multiple of block_frames*channels",
+            ));
+        }
+        let total_blocks = (interleaved.len() / block_samples) as u64;
+        if total_blocks == 0 {
+            return Err(RuntimeError::Config("calibration playback: empty data"));
+        }
+        // 进度对象与数据一起移交：调用方按同一总块数构造 CalibrationProgress。
+        if progress.total_blocks() != total_blocks {
+            return Err(RuntimeError::Config(
+                "calibration playback: progress total_blocks does not match data",
+            ));
+        }
+        Ok(Self {
+            data: Arc::from(interleaved),
+            block_frames,
+            channels,
+            total_blocks,
+            progress,
+        })
+    }
+
+    /// 总块数。
+    pub fn total_blocks(&self) -> u64 {
+        self.total_blocks
+    }
+
+    /// 每块帧数。
+    pub fn block_frames(&self) -> usize {
+        self.block_frames
+    }
+
+    /// 通道数（= 数据帧内样本数）。
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// 进度共享句柄（校准引擎轮询用）。
+    pub fn progress(&self) -> Arc<CalibrationProgress> {
+        Arc::clone(&self.progress)
+    }
+}
+
+/// Runtime 内正在进行的校准播放。
+struct ActiveCalibration {
+    playback: CalibrationPlayback,
+    /// 下一块要写出的数据块号；>= total_blocks 之后写出收尾静音。
+    next_block: u64,
+}
+
+// ===========================================================================
+// 热重配 seam（M3b）：控制路径换配置的机械结果/失败信息
+// ===========================================================================
+
+/// 新设备打开后从 hw params 回读到的真实值（None = 该字段读不到）。
+///
+/// 回读校验由宿主注入（rt-host 读 /proc/asound 的 hw_params；测试注入假值）：
+/// Runtime 只做"rate/channels 必须都读到且等于目标"的判定，不猜设备能力。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HwReadback {
+    /// hw params 回读的速率（Hz）。
+    pub sample_rate: Option<u32>,
+    /// hw params 回读的通道数。
+    pub channels: Option<u32>,
+}
+
+/// 热重配成功的机械结果（rt-host 控制面在此基础上上报 gap/代际/回滚）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconfigureOutcome {
+    /// 生效后的执行器格式。
+    pub format: EngineConfig,
+    /// 收包线程是否重绑（false = socket 没动，只换了输入抖动环/映射）。
+    pub receiver_rebound: bool,
+    /// 块引擎是否重建（格式变化才重建）。
+    pub engine_rebuilt: bool,
+    /// 旧图是否随旧引擎被丢弃（格式变了且没有预编译草稿可 stage）。
+    pub graph_dropped: bool,
+    /// 重配前输出设备是否处于未打开（absent/掉线）状态。
+    pub device_was_absent: bool,
+    /// 回读校验过的真实 hw params。
+    pub hw: HwReadback,
+    /// 块计数（热重配不重置累计块数，保持音频时间连续）。
+    pub blocks: u64,
+    /// ALSA 统计是否因重开设备被清零（AlsaOutputBackend::start 重置统计）。
+    pub alsa_stats_reset: bool,
+    /// 输入抖动环/输入统计是否重建（热重配总重建输入，预热静音随后重新开始）。
+    pub input_stats_reset: bool,
+}
+
+/// 热重配失败（已尽力按旧配置回滚；字段说明回滚后的真实状态）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconfigureFailure {
+    /// 稳定错误码（见 codes::RECONFIGURE_*）。
+    pub code: &'static str,
+    /// 失败阶段（validate/input/engine/driver/receiver_source/receiver_spawn/device_close/
+    /// device_open/hw_verify）。
+    pub stage: &'static str,
+    /// 人读原因。
+    pub message: String,
+    /// 是否已按旧配置恢复（false = 设备/收包至少一项没回到旧状态）。
+    pub rolled_back: bool,
+    /// 回滚后输出设备是否已打开。
+    pub device_started: bool,
+    /// 回滚后收包线程是否在跑。
+    pub receiver_running: bool,
+}
 /// Linux 上可直接出声的运行时（真实 ALSA PCM）。
 #[cfg(target_os = "linux")]
 pub type LinuxRuntime = Runtime<crate::alsa_backend::AlsaPcm>;

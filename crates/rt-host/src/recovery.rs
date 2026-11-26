@@ -37,7 +37,7 @@ use khaen_host::runtime::{Runtime, RuntimeError};
 
 use crate::app::{
     check_device_rate, device_pcm_index, print_status, read_cards_text, read_hw_rate,
-    resolve_card_index, write_status_file,
+    resolve_card_index, write_status_file_ext,
 };
 
 /// 第一次重开前的退避（毫秒）。
@@ -269,16 +269,31 @@ fn rate_text(rate: Option<u32>) -> String {
 }
 
 /// 把当前状态快照原子写入状态文件（未配置路径时什么都不做）。
+///
+/// 增量字段（schema 仍是 khaen-rt-status/v1）：`format`（当前数据面块长/速率/通道）与
+/// `reconfigure`（generation/last_gap_ms/last_result/在飞），来自块线程发布的热重配追踪器。
 fn persist_status<P: PcmOutput>(
     runtime: &Runtime<P>,
     options: &LoopOptions,
     lifecycle: &DeviceLifecycle,
+    bridge: &crate::control::ControlBridge,
 ) {
     let Some(path) = options.status_file.as_deref() else {
         return;
     };
     let status = runtime.status();
-    if let Err(error) = write_status_file(path, &status, lifecycle) {
+    let tracker = bridge.reconfigure();
+    let tracker = tracker
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if let Err(error) = write_status_file_ext(
+        path,
+        &status,
+        lifecycle,
+        Some(&runtime.config().engine),
+        Some(&tracker),
+    ) {
         eprintln!(
             "khaen-rt-host: cannot write status file {}: {error}",
             path.display()
@@ -349,19 +364,27 @@ pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
         // 启动时没有块路径错误可上报：控制路径显式进 faulted（状态文件 state=faulted/safe=true）。
         runtime.report_device_loss(format!("output device unavailable at startup: {error}"));
         lifecycle.note_absent(pacer.now_ms(), error);
-        persist_status(runtime, options, &lifecycle);
+        persist_status(runtime, options, &lifecycle, bridge);
         bridge.publish(runtime, &lifecycle);
     }
 
     loop {
-        // 块边界：先执行控制线程排队的命令（mute / 换图），再用 ack 唤醒等待中的控制线程。
-        bridge.poll_commands(runtime, &lifecycle);
+        // 块边界：先执行控制线程排队的命令（mute / 换图 / 热重配），再用 ack 唤醒等待中的控制线程。
+        bridge.poll_commands(runtime, &mut lifecycle, pacer.now_ms());
         if target_blocks != 0 && blocks >= target_blocks {
             break;
         }
         if runtime.device_started() {
-            match runtime.run_block() {
-                Ok(_) => {
+            // 校准播放（T70f-c）优先：音频线程只把预渲染扫频块写到设备，不跑节目图；
+            // 扫频写完后继续写收尾静音，直到控制面显式 CalPlaybackEnd（引擎侧收完尾巴）。
+            let calibration = runtime.calibration_playback_active();
+            let result = if calibration {
+                runtime.run_calibration_block().map(|_| ())
+            } else {
+                runtime.run_block().map(|_| ())
+            };
+            match result {
+                Ok(()) => {
                     blocks = blocks.saturating_add(1);
                     if runtime.has_pending_fault() {
                         runtime.poll_device();
@@ -386,7 +409,7 @@ pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
                                 "khaen-rt-host: safety requires mute; continuing (fail-closed blocks are silent)"
                             );
                         }
-                        persist_status(runtime, options, &lifecycle);
+                        persist_status(runtime, options, &lifecycle, bridge);
                     }
                     bridge.maybe_publish(runtime, &lifecycle);
                 }
@@ -409,7 +432,7 @@ pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
                         error.code()
                     );
                     lifecycle.note_absent(pacer.now_ms(), error.to_string());
-                    persist_status(runtime, options, &lifecycle);
+                    persist_status(runtime, options, &lifecycle, bridge);
                     bridge.publish(runtime, &lifecycle);
                 }
             }
@@ -421,10 +444,13 @@ pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
                 // 设备缺失期间也照常响应控制命令：按小片睡，片间 poll 一次（
                 // absent 时 mute/commit 仍会被受理，图在恢复后的第一个块边界生效）。
                 pacer.sleep_ms(wait.min(CONTROL_POLL_SLICE_MS));
-                bridge.poll_commands(runtime, &lifecycle);
+                bridge.poll_commands(runtime, &mut lifecycle, pacer.now_ms());
                 continue;
             }
             let attempt = lifecycle.note_attempt(now);
+            // 热重配可能改了采样率/通道：退避重开必须按当前生效配置的速率校验
+            // （用启动时快照的 plan_rate 会把已生效的新速率误判成 device_rate_mismatch）。
+            let plan_rate = runtime.config().effective_plan_rate();
             match open_output(runtime, options, plan_rate) {
                 Ok(()) => {
                     let absent_ms = now.saturating_sub(lifecycle.absent_since_ms().unwrap_or(now));
@@ -437,7 +463,7 @@ pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
                         "khaen-rt-host: device recovered at block {blocks} after {attempt} reopen attempt(s) ({absent_ms} ms absent, {total_recoveries} lifetime recoveries); jitter buffer rebuilt + refilling, plan version {:?} graph {:?} unchanged; resuming",
                         graph.version, graph.graph_id
                     );
-                    persist_status(runtime, options, &lifecycle);
+                    persist_status(runtime, options, &lifecycle, bridge);
                     bridge.publish(runtime, &lifecycle);
                 }
                 Err(error) => {
@@ -451,7 +477,7 @@ pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
                             lifecycle.next_attempt_at_ms().saturating_sub(now)
                         );
                     }
-                    persist_status(runtime, options, &lifecycle);
+                    persist_status(runtime, options, &lifecycle, bridge);
                     bridge.publish(runtime, &lifecycle);
                 }
             }
@@ -462,7 +488,7 @@ pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
     bridge.publish(runtime, &lifecycle);
     let status = runtime.status();
     print_status(&status, &lifecycle);
-    persist_status(runtime, options, &lifecycle);
+    persist_status(runtime, options, &lifecycle, bridge);
     if let Err(error) = runtime.stop_receiver() {
         eprintln!(
             "khaen-rt-host: receiver stop failed: [{:?}] {error}",
@@ -980,5 +1006,94 @@ mod tests {
         // 最终状态：设备已恢复（present），快照是恢复后发布的。
         assert!(!snapshot.lifecycle.is_absent());
         assert!(!snapshot.status.switch_pending);
+    }
+
+    /// T70f-c：校准播放期间块循环走 Runtime::run_calibration_block（不跑节目图），
+    /// 扫频块写完后转收尾静音；结束后回到节目块路径。脚本化假 PCM 逐块校验字节长度
+    /// （脏写/长度错会 panic），因此这里同时覆盖 "run_block 在 cal 模式不 panic/不脏写"。
+    #[test]
+    fn drive_loop_plays_calibration_playback_then_returns_to_program() {
+        use khaen_host::runtime::{CalibrationPlayback, CalibrationProgress};
+
+        use crate::control::command::{CommandReply, ControlCommand};
+
+        let device = format!("rt-host-test-cal-playback-{}", std::process::id());
+        let state = ScriptState::default();
+        register_scripted_pcm(&device, &state);
+        let (source, handle) = test_source();
+        for index in 0..64u16 {
+            handle.send(packet(index, u32::from(index) * BLOCK_FRAMES as u32));
+        }
+        let mut runtime =
+            Runtime::<ScriptedPcm>::with_source_deferred(runtime_config(&device), source)
+                .expect("deferred runtime");
+        let (command_tx, command_rx) = std::sync::mpsc::channel();
+        let snapshot: std::sync::Arc<
+            std::sync::Mutex<Option<crate::control::snapshot::RuntimeSnapshot>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut bridge = crate::control::ControlBridge::new(command_rx, snapshot.clone(), 0);
+        let mut options = LoopOptions {
+            alsa_device: "hw:99".to_string(),
+            proc_asound: std::env::temp_dir().join("khaen-rt-host-tests-no-asound"),
+            status_file: None,
+            run_seconds: 1,
+            stats_every: 0,
+        };
+        let mut pacer = TestPacer::default();
+
+        // 2 块已知扫频数据（块长 128、1 通道，与运行时格式一致）。
+        let progress = std::sync::Arc::new(CalibrationProgress::new(2));
+        let mut data = vec![0.0f32; BLOCK_FRAMES * 2];
+        data[..BLOCK_FRAMES].fill(0.5);
+        data[BLOCK_FRAMES..].fill(-0.25);
+        let playback =
+            CalibrationPlayback::new(data, BLOCK_FRAMES, 1, std::sync::Arc::clone(&progress))
+                .expect("calibration playback buffer");
+        let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+        command_tx
+            .send(ControlCommand::CalPlaybackBegin {
+                playback,
+                ack: ack_tx,
+            })
+            .expect("queue calibration playback");
+
+        let (exit, lifecycle) =
+            drive_loop_with_control(&mut runtime, &options, &mut pacer, &mut bridge);
+        assert_eq!(exit, ExitCode::SUCCESS);
+        assert!(!lifecycle.is_absent());
+        match ack_rx.recv().expect("calibration playback acked") {
+            CommandReply::CalPlaybackStarted { total_blocks } => assert_eq!(total_blocks, 2),
+            other => panic!("unexpected calibration playback reply: {other:?}"),
+        }
+        // 循环跑满 1 s（375 块）：前 2 块写扫频，其余写收尾静音；进度如实 finished。
+        assert_eq!(runtime.calibration_playback_progress(), Some((2, 2)));
+        assert!(progress.finished(), "calibration progress must finish");
+        assert_eq!(runtime.status().blocks, 375);
+        assert_eq!(
+            runtime.status().graph.version,
+            None,
+            "calibration playback must not stage/commit a plan"
+        );
+        let writes_during_calibration = state.write_ok.load(Ordering::SeqCst);
+        assert!(
+            writes_during_calibration >= 375,
+            "calibration playback must keep writing the device (got {writes_during_calibration})"
+        );
+        // 结束校准播放再跑一轮：回到节目块路径（继续写设备、块号继续增长）。
+        assert!(runtime.end_calibration_playback());
+        assert!(!runtime.calibration_playback_active());
+        options.run_seconds = 1;
+        let (exit, _) = drive_loop_with_control(&mut runtime, &options, &mut pacer, &mut bridge);
+        assert_eq!(exit, ExitCode::SUCCESS);
+        assert!(
+            state.write_ok.load(Ordering::SeqCst) > writes_during_calibration,
+            "program blocks must resume after calibration playback ends"
+        );
+        let snapshot = snapshot
+            .lock()
+            .expect("snapshot lock")
+            .clone()
+            .expect("block loop published a snapshot");
+        assert!(snapshot.status.blocks > 375);
     }
 }
