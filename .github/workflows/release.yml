@@ -44,7 +44,7 @@ jobs:
           # --allow-downgrades：加 arm64 ports 源后 apt 可能把 amd64 侧候选降到旧版本
           # （runner 镜像自带更新版），这里允许降级，避免 -y 下直接失败。
           sudo apt-get install -y --allow-downgrades --no-install-recommends \
-            pkg-config gcc-aarch64-linux-gnu libasound2-dev:amd64
+            pkg-config gcc-aarch64-linux-gnu libc6-dev-arm64-cross libasound2-dev:amd64
           # arm64 ALSA 头/库不装进 dpkg multiarch：amd64 与 ports 的版本偶发错位会让 apt 报
           # “Unable to satisfy dependencies”。只解包到独立交叉 sysroot（AARCH64_SYSROOT）。
           mkdir -p /tmp/arm64-debs
