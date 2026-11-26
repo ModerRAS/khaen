@@ -268,9 +268,15 @@ async fn create_job(
     );
     assert_eq!(body["location"], json!(format!("{JOBS}/{job_id}")));
     let state = body["state"].as_str().expect("state");
+    // 202 的 state 是创建时的真实快照，不保证非终态：慢机器上 job 可能还没开始，
+    // 快 runner 上 invalid-WAV 之类会失败得足够快，响应返回时已经是 failed。
+    // 契约只要求 202 + 合法状态 + 后续详情可查（轮询/终态断言在调用方）。
     assert!(
-        matches!(state, "queued" | "running"),
-        "new job must not be terminal: {body}"
+        matches!(
+            state,
+            "queued" | "running" | "succeeded" | "failed" | "cancelled"
+        ),
+        "unexpected job state in create response: {body}"
     );
     job_id
 }
