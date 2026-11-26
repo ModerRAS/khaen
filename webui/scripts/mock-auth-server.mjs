@@ -18,9 +18,14 @@
  *   M3 控制面                -> /api/mute、/api/surface（volume|mode）、/api/format、/api/commit、/api/abort、
  *                              /api/device/retry（prepare → commit/abort 单草稿槽；fixtures: wired | unavailable，
  *                              见 scripts/control-fixtures.mjs）；写操作要求 CSRF
- *   M4 方案与声道            -> /api/channels（GET/PUT）、/api/plan/upload|history|inspect、/api/prepare、
- *                              /api/rollback；channels commit 在 M3b/T52 完成前返回 501 host_link_unsupported
- *                              （fixtures: wired | degraded | unavailable，见 scripts/channels-fixtures.mjs）
+ *   M4 方案与声道            -> /api/channels（GET/PUT）、POST /api/plan/upload|inspect、GET /api/plan/history、
+ *                              POST /api/prepare|rollback；channels commit 在 M3b/T52 完成前返回 501
+ *                              host_link_unsupported。**T60 起按 daemon 真实形态**：上传回执带
+ *                              segments:[区段名]/segment_count/stored_path；inspect 是
+ *                              POST {plan_path, plan_sha256?}（plan_path = 上传回执的 stored_path）；
+ *                              prepare 是 {plan_path, plan_sha256}；history 是
+ *                              {current:{version,graph_id}, entries:[{recorded_at,...}]}。
+ *                              （fixtures: wired | partial | degraded | unavailable，见 scripts/channels-fixtures.mjs）
  *   GET  /healthz           -> {ok, version, uptime_s}（匿名；version = release 版本，缺失回退 crate 版本）
  *   GET  /__mock/status     -> {fixture, fixtures}                     (dev-only switch helper)
  *   POST /__mock/status-fixture {fixture} -> switch /api/status fixture (dev-only)
@@ -501,26 +506,60 @@ export function createMockAuthServer(options = {}) {
     })
   }
 
-  /** 从上传字节派生稳定的 graph_id / 段数 / 延迟（mock 用；真实 daemon 解码 ABI v3）。 */
+  /** ABI v3 的五个可选区段名（crates/daemon/src/plan_store.rs section_names）。 */
+  const PLAN_SECTIONS = ['content', 'crossover', 'matrix', 'protection', 'routing']
+
+  /** 上传方案的 mock 落盘路径（真实 daemon 是 <KHAEN_STATE_DIR>/plans/<sha256>.plan）。 */
+  function planStoredPath(sha) {
+    return '/var/lib/khaen/plans/' + sha + '.plan'
+  }
+
+  /** 从上传字节派生稳定的方案元数据（mock 用；真实 daemon 解码 ABI v3）。 */
   function planFacts(sha, bytes) {
+    const segmentCount = 1 + (bytes.length % PLAN_SECTIONS.length)
     return {
       graph_id: sha,
-      segments: 1 + (bytes.length % 5),
-      latency_samples: 1023 + (Number.parseInt(sha.slice(0, 2), 16) % 17)
+      segments: PLAN_SECTIONS.slice(0, segmentCount),
+      latency_samples: 1023 + (Number.parseInt(sha.slice(0, 2), 16) % 17),
+      sample_rate: control.format.sample_rate,
+      block_size: control.format.block_size
     }
   }
 
+  /** 按 stored_path 查已上传的 plan（POST /api/plan/inspect 与 /api/prepare 的 plan_path）。 */
+  function findUploadByStoredPath(storedPath) {
+    for (const upload of planUploads.values()) {
+      if (upload.stored_path === storedPath) {
+        return upload
+      }
+    }
+    return undefined
+  }
+
+  /** GET /api/plan/history：daemon 真实形态（current 对象 + entries，最新在前，时间字段 recorded_at）。 */
   function planHistoryJson() {
+    const entries = control.history
+      .map((entry) => ({
+        version: entry.version,
+        graph_id: entry.graph_id ?? null,
+        applied_block: entry.applied_block ?? null,
+        recorded_at: entry.applied_at ?? null,
+        source: entry.source ?? null,
+        sha256: entry.sha256 ?? null,
+        latency_samples: entry.latency_samples ?? null,
+        // daemon 亲自记录过的 commit 回执才有 observed:true（plan_api.rs commit_entry）。
+        observed: true
+      }))
+      .sort((left, right) => right.version - left.version)
     return {
       schema: 'khaen-plan-history/v1',
-      current_version: control.version,
-      versions: control.history.map((entry) => ({
-        version: entry.version,
-        graph_id: entry.graph_id,
-        sha256: entry.sha256 ?? null,
-        applied_at: entry.applied_at ?? null,
-        source: entry.source ?? null
-      })),
+      source: 'daemon-process',
+      current: {
+        version: control.version,
+        graph_id: control.basePlan === null ? null : control.basePlan.graph_id
+      },
+      entries,
+      pagination: { limit: 20, offset: 0, total: entries.length, has_more: false },
       reasons: {}
     }
   }
@@ -640,8 +679,58 @@ export function createMockAuthServer(options = {}) {
       sendJson(res, 200, planHistoryJson())
       return
     }
-    if (method === 'GET' && path === '/api/plan/inspect') {
-      sendJson(res, 200, channelsSeed.inspect)
+    if (method === 'POST' && path === '/api/plan/inspect') {
+      // daemon 真实契约：POST {plan_path, plan_sha256?}（只读试运行，读的是已落盘的方案文件；
+      // plan_path 来自上传回执的 stored_path）。GET 在本 mock 里落到 405（与 axum 的 POST-only 路由一致）。
+      const body = await readJsonBody(req)
+      if (typeof body.plan_path !== 'string' || body.plan_path.length === 0) {
+        sendError(res, 400, 'bad_request', 'missing field: plan_path')
+        return
+      }
+      if (body.plan_sha256 !== undefined && typeof body.plan_sha256 !== 'string') {
+        sendError(res, 400, 'bad_request', 'field plan_sha256 must be a string')
+        return
+      }
+      const upload = findUploadByStoredPath(body.plan_path)
+      if (upload === undefined) {
+        sendError(
+          res,
+          400,
+          'bad_request',
+          'cannot read plan file ' + body.plan_path + ': no such uploaded plan (upload it first)'
+        )
+        return
+      }
+      if (typeof body.plan_sha256 === 'string' && body.plan_sha256 !== upload.sha256) {
+        sendError(
+          res,
+          400,
+          'bad_request',
+          'plan sha256 mismatch: request ' + body.plan_sha256 + ', file ' + body.plan_path + ' is ' + upload.sha256
+        )
+        return
+      }
+      const fixtureInspect = channelsSeed.inspect
+      if (fixtureInspect !== null && fixtureInspect.admission && fixtureInspect.admission.accepted === false) {
+        // degraded fixture：如实报告试运行不可用（rejection + message），不编造已编译结果。
+        sendJson(res, 200, { ...fixtureInspect, sha256: upload.sha256, graph_id: upload.graph_id })
+        return
+      }
+      sendJson(res, 200, {
+        ok: true,
+        staged: false,
+        sha256: upload.sha256,
+        graph_id: upload.graph_id,
+        plan: {
+          block_size: upload.block_size,
+          sample_rate: upload.sample_rate,
+          in_channels: 2,
+          lanes: 22,
+          dac_channels: channelsSeed.channels === null ? null : channelsSeed.channels.output.channels
+        },
+        admission: { accepted: true, rejections: [], budget: {} },
+        compile: { compiled: true, latency_samples: upload.latency_samples }
+      })
       return
     }
     if (method === 'POST' && path === '/api/plan/upload') {
@@ -664,55 +753,82 @@ export function createMockAuthServer(options = {}) {
         return
       }
       const sha = createHash('sha256').update(bytes).digest('hex')
-      let upload = planUploads.get(sha)
+      const existing = planUploads.get(sha)
+      let upload = existing
       if (upload === undefined) {
         const facts = planFacts(sha, bytes)
         upload = {
-          upload_id: sha,
           sha256: sha,
           graph_id: facts.graph_id,
-          version: control.version + 1,
+          size_bytes: bytes.length,
+          sample_rate: facts.sample_rate,
+          block_size: facts.block_size,
           segments: facts.segments,
+          segment_count: facts.segments.length,
           latency_samples: facts.latency_samples,
-          filename: typeof req.headers['x-khaen-filename'] === 'string' ? req.headers['x-khaen-filename'] : null,
-          bytes: bytes.length
+          stored_path: planStoredPath(sha),
+          recorded_at: '2026-11-26T07:00:00.000Z',
+          filename: typeof req.headers['x-khaen-filename'] === 'string' ? req.headers['x-khaen-filename'] : null
         }
         planUploads.set(sha, upload)
       }
-      sendJson(res, 200, {
-        upload_id: upload.upload_id,
+      // daemon 真实回执（plan_api.rs upload）：record.to_json() + ok/schema/created/deduplicated。
+      // 首次写入 201、同内容幂等复用 200（不假装重新解码）。mock 不解码 mock 字节：routing/admission 给 null。
+      sendJson(res, existing === undefined ? 201 : 200, {
+        ok: true,
+        schema: 'khaen-plan/v1',
+        created: existing === undefined,
+        deduplicated: existing !== undefined,
         sha256: upload.sha256,
         graph_id: upload.graph_id,
-        version: upload.version,
+        size_bytes: upload.size_bytes,
+        sample_rate: upload.sample_rate,
+        block_size: upload.block_size,
         segments: upload.segments,
-        latency_samples: upload.latency_samples
+        segment_count: upload.segment_count,
+        latency_samples: upload.latency_samples,
+        routing: null,
+        layout: { in_channels: null, out_lanes: null },
+        admission: { accepted: null, rejections: [] },
+        source: 'upload',
+        recorded_at: upload.recorded_at,
+        stored_path: upload.stored_path
       })
       return
     }
     if (method === 'POST' && path === '/api/prepare') {
+      // daemon 真实契约（lib.rs prepare → 控制面 prepare_json）：{plan_path, plan_sha256}
+      // 两个字符串；读文件 + 校验 sha + 解码 + 编译图，返回草稿（不含 preview/版本递增语义）。
       const body = await readJsonBody(req)
-      if (typeof body.upload_id !== 'string' || body.upload_id.length === 0) {
-        sendError(res, 400, 'bad_request', 'field upload_id must be a non-empty string')
+      if (typeof body.plan_path !== 'string' || typeof body.plan_sha256 !== 'string') {
+        sendError(res, 400, 'bad_request', 'fields plan_path and plan_sha256 must be strings')
         return
       }
-      const sha = typeof body.sha256 === 'string' ? body.sha256 : typeof body.plan_sha256 === 'string' ? body.plan_sha256 : null
-      if (sha === null || sha.length === 0) {
-        sendError(res, 400, 'bad_request', 'field sha256 must be a non-empty string')
-        return
-      }
-      const upload = planUploads.get(body.upload_id)
+      const upload = findUploadByStoredPath(body.plan_path)
       if (upload === undefined) {
-        sendError(res, 404, 'upload_not_found', 'uploaded plan does not exist: upload it again')
+        sendError(
+          res,
+          400,
+          'bad_request',
+          'cannot read plan file ' + body.plan_path + ': no such uploaded plan (upload it first)'
+        )
         return
       }
+      const sha = body.plan_sha256.trim().toLowerCase()
       if (upload.sha256 !== sha) {
-        sendError(res, 409, 'sha_mismatch', 'plan sha256 mismatch: request does not match the uploaded bytes')
+        sendError(
+          res,
+          400,
+          'bad_request',
+          'plan sha256 mismatch: request ' + body.plan_sha256 + ', file ' + body.plan_path + ' is ' + upload.sha256
+        )
         return
       }
       const version = control.version + 1
       const token = stableControlToken('plan', version, sha)
       const response = {
         ok: true,
+        surface: 'plan',
         engine_token: token,
         planned_version: version,
         graph_id: upload.graph_id,
@@ -728,7 +844,6 @@ export function createMockAuthServer(options = {}) {
         version,
         graph_id: upload.graph_id,
         sha256: sha,
-        upload_id: upload.upload_id,
         response
       }
       sendJson(res, 200, response)

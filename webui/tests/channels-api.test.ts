@@ -15,10 +15,16 @@ import {
   parsePlanHistory,
   parsePlanInspect,
   parsePlanUploadAck,
+  reasonForPlanHistoryPath,
   sha256Hex,
   validateChannelsPatch
 } from '../src/api/channels.ts'
 import { buildChannelsSeed } from '../scripts/channels-fixtures.mjs'
+import {
+  ROUTING_GRAPH_ID,
+  buildRealChannelsDocument,
+  buildRealHistoryDocument
+} from './routing-fixtures.ts'
 import { createRecordingFetch, jsonResponse } from '../scripts/mock-test-support.mjs'
 
 function clone<T>(value: T): T {
@@ -68,8 +74,9 @@ test('parseChannelsInfo accepts null groups with reasons (degraded shape) and re
   assert.equal(info.output.channels, null)
   assert.equal(info.output.dac_map, null)
   assert.equal(info.input.source, null)
-  assert.equal(info.mapping.length, 0)
-  assert.match(String(info.reasons['output.channels']), /unavailable/)
+  // routing 段未知时 daemon 上报 mapping: null（不是空数组：空数组会被误读成「已知 0 条路由」）。
+  assert.equal(info.mapping, null)
+  assert.match(String(info.reasons['output.channels']), /does not report channels/)
   assert.throws(() => parseChannelsInfo({ ...clone(WIRED_DOC), schema: 'nope' }), /schema must be/)
   assert.throws(() => parseChannelsInfo({ ...clone(WIRED_DOC), mapping: [{ lane: 'x', dac: 0 }] }), /mapping/)
   assert.throws(() => parseChannelsInfo({ ...clone(WIRED_DOC), reasons: { x: 1 } }), /reasons\.x/)
@@ -94,6 +101,26 @@ test('MOTU output labels only cover the known positions', () => {
   assert.equal(formatChannelMap(null), null)
 })
 
+test('parseChannelsInfo accepts the real daemon document (dac_map null items, mapping null when unknown)', () => {
+  const partial = parseChannelsInfo(clone(buildRealChannelsDocument('partial')))
+  assert.equal(partial.output.channels, 4)
+  // dac_map 的 null 项 = 该 DAC 没有 lane 喂入（合法形态），不能被当成畸形响应。
+  assert.deepEqual(partial.output.dac_map, [0, null, 1, null])
+  assert.deepEqual(partial.mapping, [
+    { lane: 0, dac: 0 },
+    { lane: 1, dac: 2 }
+  ])
+  assert.equal(formatChannelMap(partial.output.dac_map), '0,-,1,-')
+  assert.equal(formatChannelMap([0, 1]), '0,1')
+
+  const degraded = parseChannelsInfo(clone(buildRealChannelsDocument('degraded')))
+  assert.equal(degraded.output.channels, null)
+  assert.equal(degraded.output.dac_map, null)
+  // mapping:null = routing 段未知；不能归一化成 []（那会被页面当成「已知 0 条路由」）。
+  assert.equal(degraded.mapping, null)
+  assert.match(String(degraded.reasons['mapping']), /not known/)
+})
+
 test('parsePlanUploadAck requires a lowercase 64-hex sha256', () => {
   const ack = parsePlanUploadAck({
     upload_id: 'abc',
@@ -105,8 +132,44 @@ test('parsePlanUploadAck requires a lowercase 64-hex sha256', () => {
   })
   assert.equal(ack.upload_id, 'abc')
   assert.equal(ack.version, 8)
+  // 旧 T54 mock 契约：segments 是数字（段数）-> 归一化到 segment_count，不伪造区段名。
+  assert.equal(ack.segments, null)
+  assert.equal(ack.segment_count, 3)
+  assert.equal(ack.stored_path, null)
   assert.throws(() => parsePlanUploadAck({ sha256: 'ABC' }), /sha256/)
   assert.throws(() => parsePlanUploadAck({ sha256: undefined }), /sha256/)
+})
+
+test('parsePlanUploadAck accepts the real daemon receipt (segments array, segment_count, stored_path)', () => {
+  const sha = 'a'.repeat(64)
+  const ack = parsePlanUploadAck({
+    ok: true,
+    schema: 'khaen-plan/v1',
+    created: true,
+    deduplicated: false,
+    sha256: sha,
+    graph_id: 'b'.repeat(64),
+    size_bytes: 4096,
+    sample_rate: 48000,
+    block_size: 128,
+    segments: ['content', 'matrix', 'protection', 'routing'],
+    segment_count: 4,
+    latency_samples: 1023,
+    routing: null,
+    layout: { in_channels: 2, out_lanes: 22 },
+    admission: { accepted: true, rejections: [] },
+    source: 'upload',
+    recorded_at: '2026-11-26T07:00:00.000Z',
+    stored_path: '/var/lib/khaen/plans/' + sha + '.plan'
+  })
+  assert.deepEqual(ack.segments, ['content', 'matrix', 'protection', 'routing'])
+  assert.equal(ack.segment_count, 4)
+  assert.equal(ack.stored_path, '/var/lib/khaen/plans/' + sha + '.plan')
+  // 真实 daemon 不上报 upload_id / 目标版本：如实 null，不拿 sha/别的数字冒充。
+  assert.equal(ack.upload_id, null)
+  assert.equal(ack.version, null)
+  assert.throws(() => parsePlanUploadAck({ sha256: sha, segments: [1] }), /segments/)
+  assert.throws(() => parsePlanUploadAck({ sha256: sha, segments: {} }), /segments/)
 })
 
 test('parsePlanHistory accepts object and array shapes and sorts by version', () => {
@@ -127,6 +190,52 @@ test('parsePlanHistory accepts object and array shapes and sorts by version', ()
   assert.deepEqual(array.versions.map((entry) => entry.version), [2, 3])
   assert.throws(() => parsePlanHistory({ versions: {} }), /array/)
   assert.throws(() => parsePlanHistory({ versions: [{ version: 'x' }] }), /version/)
+})
+
+test('parsePlanHistory accepts the real daemon shape (current object, entries, recorded_at, reasons)', () => {
+  const history = parsePlanHistory(clone(buildRealHistoryDocument()))
+  assert.equal(history.current_version, 7)
+  assert.equal(history.current_graph_id, ROUTING_GRAPH_ID)
+  assert.equal(history.source, 'rt-host')
+  // 条目按版本升序归一化（daemon 是版本降序 + 分页；页面用升序表格）。
+  assert.deepEqual(history.versions.map((entry) => entry.version), [6, 7])
+  const latest = history.versions[1]
+  // daemon 的 commit 记录只有 recorded_at；页面「应用时间」归一化到 applied_at，同时保留原字段。
+  assert.equal(latest.recorded_at, '2026-11-26T06:20:00.000Z')
+  assert.equal(latest.applied_at, '2026-11-26T06:20:00.000Z')
+  assert.equal(latest.applied_block, 897)
+  assert.equal(latest.latency_samples, 1023)
+  assert.equal(latest.observed, true)
+  assert.equal(latest.graph_id, ROUTING_GRAPH_ID)
+  assert.equal(history.versions[0].applied_at, '2026-11-26T05:40:00.000Z')
+  assert.equal(history.versions[0].observed, null)
+  assert.deepEqual(history.reasons, {})
+
+  // 控制面没报 graph_id 的条目不猜（如实 null）。
+  assert.equal(history.versions[0].graph_id, null)
+})
+
+test('parsePlanHistory does not invent current_version when the daemon reports current:{version:null}', () => {
+  const history = parsePlanHistory({
+    schema: 'khaen-plan-history/v1',
+    source: 'file',
+    current: { version: null, graph_id: null },
+    entries: [
+      { version: 5, graph_id: null, recorded_at: null, source: 'file', sha256: null, latency_samples: null }
+    ],
+    pagination: { limit: 20, offset: 0, total: 1, has_more: false },
+    reasons: { 'history.current': 'the live control plane does not report an applied plan version' }
+  })
+  // 显式 current.version=null：不拿条目里最大的版本冒充当前版本（旧数据里这条会变成 5）。
+  assert.equal(history.current_version, null)
+  assert.equal(history.current_graph_id, null)
+  assert.equal(history.source, 'file')
+  assert.equal(history.versions.length, 1)
+  assert.equal(
+    reasonForPlanHistoryPath(history, 'history.current'),
+    'the live control plane does not report an applied plan version'
+  )
+  assert.equal(reasonForPlanHistoryPath(history, 'history.available_versions'), null)
 })
 
 test('parsePlanInspect accepts the control-plane nested shape and flat fallbacks', () => {
@@ -206,12 +315,33 @@ test('channels API uses the documented paths, methods and CSRF header', async ()
     if (path === CHANNELS_PATHS.planUpload) {
       // 原始字节上传：body 不是 JSON，不能按 JSON 解析。
       bodies.push({ path, body: call.body })
-      return jsonResponse(200, { sha256: 'a'.repeat(64), upload_id: 'a'.repeat(64), graph_id: 'b'.repeat(64), version: 8, segments: 2, latency_samples: 1023 })
+      // daemon 真实回执：segments 是区段名数组 + segment_count，另有 stored_path（inspect/prepare 的 plan_path）。
+      return jsonResponse(201, {
+        ok: true,
+        schema: 'khaen-plan/v1',
+        created: true,
+        deduplicated: false,
+        sha256: 'a'.repeat(64),
+        graph_id: 'b'.repeat(64),
+        size_bytes: 128,
+        sample_rate: 48000,
+        block_size: 128,
+        segments: ['content', 'matrix'],
+        segment_count: 2,
+        latency_samples: 1023,
+        routing: null,
+        layout: { in_channels: 2, out_lanes: 22 },
+        admission: { accepted: true, rejections: [] },
+        source: 'upload',
+        recorded_at: '2026-11-26T07:00:00.000Z',
+        stored_path: '/var/lib/khaen/plans/' + 'a'.repeat(64) + '.plan'
+      })
     }
     const body = call.body === undefined || call.body === null ? undefined : JSON.parse(String(call.body))
     bodies.push({ path, body })
     if (path === CHANNELS_PATHS.channels && call.method === 'GET') {
-      return jsonResponse(200, clone(WIRED_DOC))
+      // 真实 daemon 的部分路由文档（dac_map 含 null 项）。
+      return jsonResponse(200, clone(buildRealChannelsDocument('partial')))
     }
     if (path === CHANNELS_PATHS.channels && call.method === 'PUT') {
       return jsonResponse(200, { ok: true, engine_token: 't', planned_version: 9, changed: true, preview: null, warnings: [], blockers: [] })
@@ -220,7 +350,7 @@ test('channels API uses the documented paths, methods and CSRF header', async ()
       return jsonResponse(200, { ok: true, engine_token: 'plan-token', planned_version: 8, graph_id: 'b'.repeat(64), admission: { accepted: true } })
     }
     if (path === CHANNELS_PATHS.planHistory) {
-      return jsonResponse(200, { versions: [] })
+      return jsonResponse(200, clone(buildRealHistoryDocument()))
     }
     if (path === CHANNELS_PATHS.planInspect) {
       return jsonResponse(200, clone(buildChannelsSeed('wired').inspect))
@@ -237,8 +367,10 @@ test('channels API uses the documented paths, methods and CSRF header', async ()
     return jsonResponse(404, { error: { code: 'not_found', message: 'nope' } })
   })
 
+  // 真实 daemon 的部分路由文档：dac_map 含 null 项也必须解析成功（T60 第 4 处）。
   const info = await api.fetchChannels()
-  assert.equal(info.output.channels, 22)
+  assert.equal(info.output.channels, 4)
+  assert.deepEqual(info.output.dac_map, [0, null, 1, null])
 
   const prepared = await api.prepareChannels({ output: { channels: 20 } })
   assert.equal(prepared.engine_token, 't')
@@ -246,13 +378,17 @@ test('channels API uses the documented paths, methods and CSRF header', async ()
 
   const upload = await api.uploadPlan(new Uint8Array(128).fill(7), 'demo.bin')
   assert.equal(upload.sha256, 'a'.repeat(64))
+  assert.deepEqual(upload.segments, ['content', 'matrix'])
+  assert.equal(upload.segment_count, 2)
+  assert.equal(upload.stored_path, '/var/lib/khaen/plans/' + 'a'.repeat(64) + '.plan')
   assert.equal(calls.at(-1).method, 'POST')
   assert.equal(calls.at(-1).headers['Content-Type'], 'application/octet-stream')
   assert.equal(calls.at(-1).headers['X-KHAEN-Filename'], 'demo.bin')
   assert.equal(calls.at(-1).body.length, 128)
 
-  await api.preparePlan({ upload_id: 'a'.repeat(64), sha256: 'a'.repeat(64) })
-  assert.deepEqual(bodies.at(-1).body, { upload_id: 'a'.repeat(64), sha256: 'a'.repeat(64) })
+  // daemon 真实 /api/prepare 只接受 {plan_path, plan_sha256}（upload_id 是 T54 旧契约）。
+  await api.preparePlan({ plan_path: upload.stored_path!, sha256: upload.sha256 })
+  assert.deepEqual(bodies.at(-1).body, { plan_path: upload.stored_path, plan_sha256: upload.sha256 })
 
   await api.rollbackPlan(5)
   assert.deepEqual(bodies.at(-1).body, { target: 5 })
@@ -263,8 +399,27 @@ test('channels API uses the documented paths, methods and CSRF header', async ()
   assert.deepEqual(bodies.at(-1).body, { engine_token: 'token-9' })
   await api.abort('token-9')
   assert.deepEqual(bodies.at(-1).body, { engine_token: 'token-9' })
-  await api.fetchPlanHistory()
-  await api.fetchPlanInspect()
+
+  const history = await api.fetchPlanHistory()
+  assert.equal(history.current_version, 7)
+  assert.deepEqual(history.versions.map((entry) => entry.version), [6, 7])
+
+  // daemon 真实 /api/plan/inspect 是 POST + {plan_path, plan_sha256}（不是 GET/query）。
+  const inspect = await api.fetchPlanInspect(upload.stored_path!, upload.sha256)
+  assert.equal(inspect.compiled, true)
+  assert.equal(calls.at(-1).method, 'POST')
+  assert.deepEqual(bodies.at(-1), {
+    path: CHANNELS_PATHS.planInspect,
+    body: { plan_path: upload.stored_path, plan_sha256: upload.sha256 }
+  })
+
+  // 没有 plan_path 时直接拒绝，不发网络请求（不猜路径）。
+  const callsBefore = calls.length
+  const missingPath = await captureError(() => api.fetchPlanInspect(''))
+  assert.equal(missingPath.code, 'invalid_request')
+  const missingPrepare = await captureError(() => api.preparePlan({ plan_path: '', sha256: upload.sha256 }))
+  assert.equal(missingPrepare.code, 'invalid_request')
+  assert.equal(calls.length, callsBefore)
 
   for (const call of calls) {
     assert.equal(call.credentials, 'include')

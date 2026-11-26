@@ -111,8 +111,10 @@ test('mock routing: wired fixture composes the 22-lane chain, DAC map, plan summ
 
     assert.equal(channels.output.channels, 22)
     assert.equal(channels.mapping?.length, 22)
-    // mock 的 /api/channels 是 T54 契约形态（没有真实 daemon 的 plan 段）：如实 null，不猜。
-    assert.equal(channels.plan.routing_known, null)
+    // T60 起 mock 也按真实 daemon 形态给出 plan 段（routing_known=true：routing 段已关联）。
+    assert.equal(channels.plan.routing_known, true)
+    assert.equal(channels.plan.version, 7)
+    assert.equal(channels.plan.graph_id, mock.control.history.at(-1)?.graph_id)
     assert.equal(channels.input.source, 'sdp')
     assert.deepEqual(channels.input.map, [0, 1])
     assert.deepEqual(history.entries.map((entry) => entry.version), [5, 6, 7])
@@ -148,6 +150,36 @@ test('mock routing: wired fixture composes the 22-lane chain, DAC map, plan summ
   })
 })
 
+test('mock routing: partial fixture keeps the nullable dac_map and the real lane→DAC mapping', async () => {
+  await withMock(async ({ mock, baseUrl }) => {
+    const h = createHarness(baseUrl)
+    await signIn(h)
+    mock.setChannelsFixture('partial')
+    const status = await h.status.fetchStatus()
+    const channels = await h.routing.fetchChannels()
+    // 真实 daemon 的部分路由：dac_map 的 null 项 = 该 DAC 没有 lane 喂入（合法），不补 0、不报 invalid_response。
+    assert.deepEqual(channels.output.dac_map, [0, null, 1, null])
+    assert.deepEqual(channels.mapping, [
+      { lane: 0, dac: 0 },
+      { lane: 1, dac: 2 }
+    ])
+    const chain = buildRoutingChain(status, channels)
+    assert.equal(chain.output.channels.value, 4)
+    assert.deepEqual(chain.output.dacMap.value, [0, null, 1, null])
+    assert.equal(chain.matrix.routes.value, 2)
+    const rows = laneRows(channels)
+    assert.deepEqual(
+      rows.map((row) => ({ lane: row.lane, dac: row.dac, physical: row.physical })),
+      [
+        { lane: 0, dac: 0, physical: 1 },
+        { lane: 1, dac: 2, physical: 3 }
+      ]
+    )
+    // 1-based 物理输出 3 = SL（已知位置标签），不是猜出来的。
+    assert.equal(rows[1].labelKey, 'channels.label.sl')
+  })
+})
+
 test('mock routing: degraded channels fixture yields nulls + reasons and never invents a mapping', async () => {
   await withMock(async ({ mock, baseUrl }) => {
     const h = createHarness(baseUrl)
@@ -159,7 +191,7 @@ test('mock routing: degraded channels fixture yields nulls + reasons and never i
     assert.equal(channels.output.channels, null)
     assert.equal(channels.output.dac_map, null)
     assert.equal(channels.mapping, null)
-    assert.match(channels.reasons['output.channels'] ?? '', /rt-host control status is unavailable/)
+    assert.match(channels.reasons['output.channels'] ?? '', /does not report channels/)
 
     const rows = laneRows(channels)
     assert.equal(rows.length, 0)
@@ -167,13 +199,15 @@ test('mock routing: degraded channels fixture yields nulls + reasons and never i
     assert.equal(chain.matrix.routedLanes.value, null)
     assert.equal(chain.matrix.routes.value, null)
     assert.equal(chain.output.channels.value, null)
-    assert.match(chain.matrix.routes.reason ?? '', /rt-host control status is unavailable/)
+    assert.match(chain.matrix.routes.reason ?? '', /routing section is not known/)
 
     const summary = buildPlanSummary(status, channels, await h.routing.fetchPlanHistory())
     assert.equal(summary.version, 3)
     assert.equal(summary.dacChannels, null)
     assert.equal(summary.routes, null)
-    assert.equal(summary.routingKnown, null)
+    // T60 起 mock 也上报真实 plan 段：routingKnown=false（daemon 明确说不认识 routing），不是猜测。
+    assert.equal(summary.routingKnown, false)
+    assert.equal(summary.routingKnownReason, null)
   })
 })
 
@@ -182,7 +216,7 @@ test('mock routing: unavailable channels fixture is NOT_AVAILABLE (501 not_wired
     const h = createHarness(baseUrl)
     await signIn(h)
     mock.setChannelsFixture('unavailable')
-    assert.deepEqual(CHANNELS_FIXTURES, ['wired', 'degraded', 'unavailable'])
+    assert.deepEqual(CHANNELS_FIXTURES, ['wired', 'partial', 'degraded', 'unavailable'])
 
     const state = createInitialRoutingState()
     const controller = createRoutingController(state, { api: h.routing })
@@ -227,8 +261,11 @@ test('mock routing: missing status fixture degrades input/matrix while history k
 
     const summary = buildPlanSummary(status, channels, history)
     assert.equal(summary.version, 7)
-    assert.equal(summary.versionSource, 'history')
-    assert.equal(summary.latencySamples, null)
+    // status 缺 plan.version 时回退 /api/channels.plan（T60 起 mock 有真实 plan 段），再回退 history。
+    assert.equal(summary.versionSource, 'channels')
+    // status 缺 latency 时回退当前历史条目的 latency_samples（daemon entries 会带该字段）。
+    assert.equal(summary.latencySamples, 1023)
+    assert.equal(summary.latencySource, 'history')
     assert.equal(summary.historyCurrentVersion, 7)
   })
 })

@@ -228,6 +228,8 @@ const messages = {
       server: 'daemon 返回服务器错误，请稍后重试。',
       invalidResponse: 'daemon 返回的方案/声道结构不合法，已拒绝显示（不把畸形响应当成功）。',
       shaUnavailable: '浏览器不支持 WebCrypto SHA-256：无法完成上传校验（不支持降级为不校验）。',
+      planPathUnavailable:
+        '上传回执没有 plan_path（stored_path）：daemon 未返回方案的落盘路径，无法调用 POST /api/plan/inspect 或 /api/prepare；页面不猜路径、不伪造预览/草稿。',
       unknown: '方案/声道操作失败，请重试。'
     }
   },
@@ -1227,7 +1229,9 @@ const messages = {
         label: '标签'
       },
       unknownLabel: 'OUT {channel}',
-      empty: 'daemon 未上报输出通道/映射（/api/channels 未接入或 rt-host 状态不可用）。'
+      empty: 'daemon 未上报输出通道/映射（/api/channels 未接入或 rt-host 状态不可用）。',
+      mappingUnknown:
+        '当前方案的 routing 段未知（mapping=null）：daemon 关联不到已生效方案的路由，页面不画 lane → DAC 映射、不假设直通。'
     },
     input: {
       title: 'AES67 输入',
@@ -1262,7 +1266,7 @@ const messages = {
     },
     upload: {
       title: '方案上传（plan ABI v3）',
-      desc: '原始 plan 字节（≤ 4 MiB）→ 浏览器算 sha256 → 服务端校验后返回 graph_id/版本/段数/延迟 → prepare → commit。上传不会自动应用。',
+      desc: '原始 plan 字节（≤ 4 MiB）→ 浏览器算 sha256 → 服务端校验后返回 graph_id/区段名/段数/延迟/落盘路径（stored_path）→ inspect → prepare → commit。上传不会自动应用。',
       select: '选择 plan 文件',
       noFile: '尚未选择文件',
       tooLarge: '文件超过上传上限 {limit}',
@@ -1271,11 +1275,14 @@ const messages = {
       uploaded: 'plan 已上传并通过 sha256 校验',
       prepare: '准备应用（prepare）',
       ackTitle: '上传回执（服务端）',
+      versionUnavailable: '真实 daemon 的上传回执不含目标版本（版本号在 commit 回执 / 历史里产生）。',
+      segmentsUnavailable: '该后端只回报区段数（segments 为数字），不回报区段名：不拿数字伪造区段列表。',
       field: {
         sha256: 'sha256（服务端）',
         graphId: 'graph_id',
         version: '目标版本',
-        segments: '段数（sections）',
+        segments: '区段（sections）',
+        segmentCount: '区段数',
         latency: '延迟（samples）'
       }
     },
@@ -1285,6 +1292,7 @@ const messages = {
       current: '当前',
       rollback: '回滚到此版本',
       empty: '尚无已生效的历史版本。',
+      noSource: '历史接口没有可用数据源（daemon 未上报当前版本/可用版本）：不编造历史。',
       unavailable: '方案历史未接入（{task}）：{message}。页面不编造历史。',
       rollbackNote: '回滚 = 版本号递增的新提交：历史保留，回滚后仍需在「两阶段」卡提交（commit）才生效。',
       rollbackPrepared: '已准备回滚到 v{version} 的草稿：提交后生效',

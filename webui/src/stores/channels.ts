@@ -6,8 +6,11 @@
  *   M3b 热重配未完成时 commit 返回 501 host_link_unsupported：页面如实显示 NOT_AVAILABLE + 原因；
  *   此前 prepare 的 preview/warnings/blockers 照实展示（不假装已应用）。
  * - 方案（plan）：客户端 sha256（WebCrypto）→ POST /api/plan/upload → 服务端 sha 双侧比对 →
- *   GET /api/plan/inspect 预览（失败降级为上传摘要，不编造）→ POST /api/prepare → commit/abort；
- *   历史 GET /api/plan/history；回滚 POST /api/rollback（版本号递增，仍需 commit）。
+ *   POST /api/plan/inspect {plan_path} 预览（plan_path = 上传回执的 stored_path；失败降级为上传摘要，
+ *   不编造）→ POST /api/prepare {plan_path, plan_sha256} → commit/abort；
+ *   历史 GET /api/plan/history（daemon 真实形态 current:{version},entries[]）；回滚 POST /api/rollback
+ *   （版本号递增，仍需 commit）。上传回执没有 stored_path（旧后端/mock）时 inspect/prepare 显示
+ *   NOT_AVAILABLE + 稳定码 plan_path_unavailable，不猜路径、不假成功。
  *
  * 纪律：
  * - 同一时刻只允许一个写操作（busy 互斥）；失败保留已有数据并记录稳定错误码；
@@ -115,7 +118,8 @@ export interface ChannelsController {
   load(): Promise<void>
   refresh(): Promise<void>
   loadHistory(): Promise<void>
-  loadInspect(): Promise<void>
+  /** plan_path 缺省 = 最近一次上传回执的 stored_path；没有则记 NOT_AVAILABLE（不猜路径）。 */
+  loadInspect(planPath?: string | null): Promise<void>
   /** 选择本地 plan 文件：算客户端 sha256（不发网络）。 */
   selectPlanFile(name: string, bytes: Uint8Array): Promise<void>
   /** 上传已选文件并与后端 sha256 双侧比对。 */
@@ -178,9 +182,29 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
     }
   }
 
-  async function runInspect(): Promise<void> {
+  /** 上传回执没有 plan_path 时的诚实降级（不猜路径、不伪造预览）。 */
+  function planPathUnavailableError(detail: string): ChannelsErrorInfo {
+    return {
+      category: 'plan_path_unavailable',
+      status: 0,
+      code: 'plan_path_unavailable',
+      i18nKey: 'error.channels.planPathUnavailable',
+      detail,
+      retryable: false
+    }
+  }
+
+  /** POST /api/plan/inspect {plan_path}：plan_path 来自上传回执的 stored_path。 */
+  async function runInspect(planPath: string | null, planSha256: string | null): Promise<void> {
     try {
-      const inspect = await deps.api.fetchPlanInspect()
+      if (planPath === null) {
+        state.plan.inspect = null
+        state.plan.inspectError = planPathUnavailableError(
+          'the upload ack has no stored_path: POST /api/plan/inspect needs plan_path (old backend / mock)'
+        )
+        return
+      }
+      const inspect = await deps.api.fetchPlanInspect(planPath, planSha256)
       state.plan.inspect = inspect
       planInspectErrorClear()
     } catch (error) {
@@ -193,13 +217,14 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
     state.plan.inspectError = null
   }
 
-  async function loadInspect(): Promise<void> {
+  async function loadInspect(planPath?: string | null): Promise<void> {
     if (state.plan.busy !== null) {
       return
     }
     state.plan.busy = 'inspect'
     try {
-      await runInspect()
+      const resolved = planPath !== undefined ? planPath : (state.plan.upload.ack?.stored_path ?? null)
+      await runInspect(resolved, state.plan.upload.ack?.sha256 ?? null)
     } finally {
       state.plan.busy = null
     }
@@ -259,7 +284,8 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
       }
       state.plan.upload.ack = ack
       state.plan.upload.error = null
-      await runInspect()
+      // 真实 daemon 的回执带 stored_path：inspect/prepare 都用它；没有时如实降级（不猜路径）。
+      await runInspect(ack.stored_path, ack.sha256)
       return ack
     } catch (error) {
       state.plan.upload.error = classifyChannelsError(error)
@@ -274,11 +300,17 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
     if (ack === null || state.plan.busy !== null) {
       return null
     }
+    if (ack.stored_path === null) {
+      state.plan.error = planPathUnavailableError(
+        'the upload ack has no stored_path: POST /api/prepare needs plan_path (old backend / mock)'
+      )
+      return null
+    }
     state.plan.busy = 'prepare'
     state.plan.error = null
     try {
       const draft = await deps.api.preparePlan({
-        upload_id: ack.upload_id ?? ack.sha256,
+        plan_path: ack.stored_path,
         sha256: ack.sha256
       })
       state.plan.draft = draft
@@ -306,8 +338,9 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
       state.plan.draft = null
       state.plan.inspect = null
       // 生效后刷新历史、预览与声道/方案概览（失败不清空旧数据，只记录错误）。
+      // 预览仍针对这次上传的落盘文件（stored_path）；没有该字段时如实 NOT_AVAILABLE。
       await loadHistory()
-      await runInspect()
+      await runInspect(state.plan.upload.ack?.stored_path ?? null, state.plan.upload.ack?.sha256 ?? null)
       await load()
       return ack
     } catch (error) {
@@ -456,8 +489,8 @@ export function loadChannelsHistory(): Promise<void> {
   return controller.loadHistory()
 }
 
-export function loadChannelsInspect(): Promise<void> {
-  return controller.loadInspect()
+export function loadChannelsInspect(planPath?: string | null): Promise<void> {
+  return controller.loadInspect(planPath)
 }
 
 export function selectChannelPlanFile(name: string, bytes: Uint8Array): Promise<void> {

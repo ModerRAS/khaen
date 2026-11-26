@@ -51,13 +51,17 @@ function commitAck(overrides: Partial<ControlCommitAck> = {}): ControlCommitAck 
 }
 
 function uploadAck(sha: string): PlanUploadAck {
+  // daemon 真实上传回执形态：没有 upload_id/version，segments 是区段名数组 + segment_count，
+  // 并有 stored_path（POST /api/plan/inspect 与 /api/prepare 的 plan_path 来源）。
   return {
-    upload_id: sha,
+    upload_id: null,
     sha256: sha,
     graph_id: sha,
-    version: 8,
-    segments: 3,
-    latency_samples: 1023
+    version: null,
+    segments: ['content', 'matrix', 'protection'],
+    segment_count: 3,
+    latency_samples: 1023,
+    stored_path: '/var/lib/khaen/plans/' + sha + '.plan'
   }
 }
 
@@ -65,10 +69,33 @@ const CHANNELS_INFO: ChannelsInfo = JSON.parse(JSON.stringify(buildChannelsSeed(
 const INSPECT: PlanInspect = JSON.parse(JSON.stringify(buildChannelsSeed('wired').inspect))
 const HISTORY: PlanHistory = {
   current_version: 7,
+  current_graph_id: null,
+  source: 'daemon-process',
   versions: [
-    { version: 5, graph_id: 'g5', sha256: 's5', applied_at: 't5', source: 'upload' },
-    { version: 7, graph_id: 'g7', sha256: 's7', applied_at: 't7', source: 'upload' }
-  ]
+    {
+      version: 5,
+      graph_id: 'g5',
+      sha256: 's5',
+      applied_at: 't5',
+      recorded_at: 't5',
+      applied_block: null,
+      latency_samples: null,
+      observed: true,
+      source: 'upload'
+    },
+    {
+      version: 7,
+      graph_id: 'g7',
+      sha256: 's7',
+      applied_at: 't7',
+      recorded_at: 't7',
+      applied_block: 897,
+      latency_samples: 1023,
+      observed: true,
+      source: 'upload'
+    }
+  ],
+  reasons: {}
 }
 
 interface Calls {
@@ -130,7 +157,7 @@ function fakeApi(partial: Partial<ChannelsApi> = {}): { api: ChannelsApi; calls:
       calls.history += 1
       return HISTORY
     },
-    async fetchPlanInspect(): Promise<PlanInspect> {
+    async fetchPlanInspect(_planPath: string, _planSha256?: string | null): Promise<PlanInspect> {
       calls.inspect += 1
       return INSPECT
     },
@@ -207,7 +234,8 @@ test('plan history and inspect failures clear the data and keep a stable error',
   await controller.loadHistory()
   assert.equal(state.history, null)
   assert.equal(state.historyError?.category, 'not_wired')
-  await controller.loadInspect()
+  // 显式传 plan_path 才会发请求；没有 plan_path 是 store 的 NOT_AVAILABLE（另测）。
+  await controller.loadInspect('/var/lib/khaen/plans/whatever.plan')
   assert.equal(state.plan.inspect, null)
   assert.equal(state.plan.inspectError?.category, 'not_wired')
 })
@@ -228,7 +256,9 @@ test('selectPlanFile computes the client sha256 and upload verifies both sides',
 
   const ack = await controller.uploadPlan()
   assert.equal(ack?.sha256, SHA_A)
-  assert.equal(state.plan.upload.ack?.upload_id, SHA_A)
+  // 真实 daemon 不回 upload_id：用 sha256/stored_path；upload_id 如实 null（不拿 sha 冒充新字段）。
+  assert.equal(state.plan.upload.ack?.upload_id, null)
+  assert.equal(state.plan.upload.ack?.stored_path, '/var/lib/khaen/plans/' + SHA_A + '.plan')
   // 上传后自动尝试 inspect（失败不影响上传回执）。
   assert.equal(state.plan.inspect?.sha256, INSPECT.sha256)
   assert.equal(state.plan.busy, null)
@@ -265,6 +295,75 @@ test('upload failure records the stable code and keeps the local file selection'
   assert.equal(await controller.uploadPlan(), null)
   assert.equal(state.plan.upload.error?.category, 'invalid_plan')
   assert.equal(state.plan.upload.name, 'bad.bin')
+})
+
+test('plan inspect and prepare use the upload stored_path (daemon POST contract)', async () => {
+  const state = createInitialChannelsState()
+  const inspectArgs: Array<{ planPath: string; sha256: string | null | undefined }> = []
+  const prepareArgs: Array<{ plan_path: string; sha256: string }> = []
+  const { api, calls } = fakeApi({
+    async fetchPlanInspect(planPath: string, planSha256?: string | null): Promise<PlanInspect> {
+      inspectArgs.push({ planPath, sha256: planSha256 })
+      calls.inspect += 1
+      return INSPECT
+    },
+    async preparePlan(input: { plan_path: string; sha256: string }): Promise<ControlDraft> {
+      prepareArgs.push(input)
+      calls.preparePlan += 1
+      return planDraft()
+    }
+  })
+  const controller = createChannelsController(state, { api, sha256: shaStub(SHA_A) })
+  await controller.selectPlanFile('demo.bin', new Uint8Array(128))
+  await controller.uploadPlan()
+  // 上传回执的 stored_path + 服务端 sha256 是 inspect 的两个入参（真实 daemon：POST {plan_path, plan_sha256}）。
+  assert.deepEqual(inspectArgs, [
+    { planPath: '/var/lib/khaen/plans/' + SHA_A + '.plan', sha256: SHA_A }
+  ])
+
+  const draft = await controller.preparePlan()
+  assert.equal(draft?.engine_token, 'plan-token')
+  assert.deepEqual(prepareArgs, [
+    { plan_path: '/var/lib/khaen/plans/' + SHA_A + '.plan', sha256: SHA_A }
+  ])
+})
+
+test('upload ack without stored_path degrades inspect/prepare to NOT_AVAILABLE (no fake path)', async () => {
+  const state = createInitialChannelsState()
+  const { api, calls } = fakeApi({
+    async uploadPlan(): Promise<PlanUploadAck> {
+      calls.upload += 1
+      return {
+        upload_id: null,
+        sha256: SHA_A,
+        graph_id: null,
+        version: null,
+        segments: null,
+        segment_count: null,
+        latency_samples: null,
+        stored_path: null
+      }
+    }
+  })
+  const controller = createChannelsController(state, { api, sha256: shaStub(SHA_A) })
+  await controller.selectPlanFile('demo.bin', new Uint8Array(128))
+  const ack = await controller.uploadPlan()
+  assert.equal(ack?.sha256, SHA_A)
+  // 没有 stored_path：不猜路径、不发 inspect 请求，如实 NOT_AVAILABLE。
+  assert.equal(calls.inspect, 0)
+  assert.equal(state.plan.inspect, null)
+  assert.equal(state.plan.inspectError?.category, 'plan_path_unavailable')
+  assert.equal(state.plan.inspectError?.retryable, false)
+  assert.equal(await controller.preparePlan(), null)
+  assert.equal(calls.preparePlan, 0)
+  assert.equal(state.plan.error?.category, 'plan_path_unavailable')
+
+  // 没有上传回执时直接 loadInspect 同样如实 NOT_AVAILABLE（不伪造预览）。
+  const fresh = createInitialChannelsState()
+  const freshController = createChannelsController(fresh, { api: fakeApi().api })
+  await freshController.loadInspect()
+  assert.equal(fresh.plan.inspect, null)
+  assert.equal(fresh.plan.inspectError?.category, 'plan_path_unavailable')
 })
 
 test('plan prepare/commit/abort drive the two-phase state machine', async () => {

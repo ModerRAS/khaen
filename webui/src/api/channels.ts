@@ -6,11 +6,18 @@
  * - PUT  /api/channels      -> 两阶段 prepare（校验并返回 engine_token/planned diff；M3b 热重配未完成时 commit 501）
  * - POST /api/commit        -> 共享两阶段提交（channels 草稿在 M3b 前返回 501 host_link_unsupported）
  * - POST /api/abort         -> 丢弃草稿
- * - POST /api/plan/upload   -> 原始 plan 字节（≤ 4 MiB）→ {upload_id?, sha256, graph_id, version, segments, latency_samples}
- * - POST /api/prepare       -> {upload_id | plan_path, sha256} → 方案草稿（engine_token/planned_version/graph_id）
+ * - POST /api/plan/upload   -> 原始 plan 字节（≤ 4 MiB）→ daemon 真实回执
+ *   {sha256, graph_id, segments:[区段名], segment_count, latency_samples, stored_path, ...}
+ * - POST /api/prepare       -> {plan_path, plan_sha256} → 方案草稿（engine_token/planned_version/graph_id）
  * - POST /api/rollback      -> {target?} → 回滚草稿（rolled_back_to）；仍需 commit 生效
- * - GET  /api/plan/history  -> 已生效历史（版本/图/来源/时间）
- * - GET  /api/plan/inspect  -> 当前/上传方案的只读预览（失败时页面降级为上传摘要，不伪造）
+ * - GET  /api/plan/history  -> daemon 真实形态 {schema, source, current:{version,graph_id}|null,
+ *   entries:[{version, graph_id, applied_block, recorded_at, source, sha256, latency_samples}], pagination, reasons}
+ * - POST /api/plan/inspect  -> {plan_path, plan_sha256?} → 只读预览（控制面 inspect 嵌套形态；失败时页面降级为上传摘要，不伪造）
+ *
+ * T60 契约对齐：本文件按 crates/daemon/src（plan_api.rs / plan_store.rs / channels.rs / lib.rs 的
+ * inspect 路由）的**真实响应形态**解析，同时保留旧 T54 mock 契约（current_version/versions、
+ * 数字 segments、applied_at）的宽松兼容；缺失字段是合法形态（null + reasons），不编假值。
+ * 真实 daemon 的上传回执没有 upload_id/version，但给出 stored_path（inspect/prepare 的 plan_path 来源）。
  *
  * 纪律：
  * - 所有响应运行时校验（schema/字段类型/结构漂移 -> invalid_response），不把畸形响应当成功；
@@ -72,7 +79,12 @@ export type InputSource = 'sdp' | 'manual'
 /** 输出侧：物理输出通道数 + DAC 映射（dac 为 0-based 物理输出下标）。 */
 export interface ChannelsOutput {
   channels: number | null
-  dac_map: number[] | null
+  /**
+   * 长度 = output.channels：第 i 项是喂给 DAC i 的 lane（0-based）。
+   * null 项表示该 DAC 没有 lane 喂入（静音/未路由）——真实 daemon 的部分路由是合法形态；
+   * 整个数组为 null 表示未知（不补 0）。
+   */
+  dac_map: Array<number | null> | null
 }
 
 /** 输入侧：AES67 接收通道数/映射/来源/SDP sha256。 */
@@ -100,34 +112,56 @@ export interface ChannelsInfo {
   schema: typeof CHANNELS_SCHEMA
   output: ChannelsOutput
   input: ChannelsInput
-  mapping: ChannelMappingEntry[]
+  /** lane -> dac；null = 当前方案 routing 段未知（不是「已知 0 条路由」）。 */
+  mapping: ChannelMappingEntry[] | null
   reasons: Record<string, string>
   not_wired: ChannelsNotWiredEntry[]
 }
 
-/** 方案上传回执（T54 契约；upload_id 可能与 sha256 相同，缺失时用 sha256）。 */
+/** 方案上传回执（daemon 真实形态 + 旧 T54 mock 契约的宽松兼容）。 */
 export interface PlanUploadAck {
+  /** 旧 mock 契约字段；真实 daemon 不回 upload_id（用 sha256/stored_path）。 */
   upload_id: string | null
   sha256: string
   graph_id: string | null
+  /** 真实 daemon 的上传回执不带目标版本（版本在 commit 回执里才产生）——通常 null。 */
   version: number | null
-  segments: number | null
+  /** 真实 daemon：方案区段名数组（content/crossover/matrix/protection/routing）。 */
+  segments: string[] | null
+  /** 区段数：真实 daemon 的 segment_count；旧 mock 的 segments 数字归一化到这里。 */
+  segment_count: number | null
   latency_samples: number | null
+  /** 真实 daemon：内容寻址落盘路径——POST /api/plan/inspect 与 /api/prepare 的 plan_path 来源。 */
+  stored_path: string | null
 }
 
-/** 已生效方案历史条目。 */
+/** 已生效方案历史条目（daemon entries[] + 旧 mock versions[] 的并集）。 */
 export interface PlanHistoryEntry {
   version: number
   graph_id: string | null
   sha256: string | null
+  /** 应用/记录时间：旧 mock 的 applied_at 优先，回退 daemon 的 recorded_at。 */
   applied_at: string | null
+  /** daemon 原始字段 recorded_at（保留原值便于核对来源；旧 mock 形态为 null）。 */
+  recorded_at: string | null
+  /** daemon commit 回执里的生效块号（拿不到为 null）。 */
+  applied_block: number | null
+  latency_samples: number | null
+  /** daemon 标记该条目来自自己记录过的 commit 回执（observed:true）。 */
+  observed: boolean | null
   source: string | null
 }
 
 /** GET /api/plan/history 归一化响应。 */
 export interface PlanHistory {
   current_version: number | null
+  /** daemon 的 current.graph_id（旧 mock 形态没有该字段时为 null，不猜）。 */
+  current_graph_id: string | null
+  /** daemon 上报的历史数据源（daemon-process / rt-host / file / none）。 */
+  source: string | null
   versions: PlanHistoryEntry[]
+  /** daemon 上报的缺失原因（history.current / history.available_versions / history.historic_graph_ids）。 */
+  reasons: Record<string, string>
 }
 
 /** 方案预览（GET /api/plan/inspect 或控制面 inspect 的并集）。 */
@@ -239,6 +273,38 @@ function readNumberArray(record: Record<string, unknown>, field: string, path: s
   })
 }
 
+/** number|null 数组：dac_map 的 null 项表示「该 DAC 没有 lane 喂入」，是合法值（不补 0）。 */
+function readNullableNumberArray(
+  record: Record<string, unknown>,
+  field: string,
+  path: string
+): Array<number | null> | null {
+  const value = record[field]
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!Array.isArray(value)) {
+    throw invalidResponse(path + '.' + field + ' must be an array of numbers/nulls or null')
+  }
+  return value.map((item, index) => {
+    if (item === null || item === undefined) {
+      return null
+    }
+    if (typeof item !== 'number' || !Number.isFinite(item)) {
+      throw invalidResponse(path + '.' + field + '[' + String(index) + '] must be a finite number or null')
+    }
+    return item
+  })
+}
+
+function readInteger(record: Record<string, unknown>, field: string, path: string): number | null {
+  const value = readNumber(record, field, path)
+  if (value !== null && !Number.isInteger(value)) {
+    throw invalidResponse(path + '.' + field + ' must be an integer or null')
+  }
+  return value
+}
+
 function group(value: unknown, path: string): Record<string, unknown> {
   if (value === null || value === undefined) {
     return {}
@@ -287,9 +353,10 @@ function parseNotWired(value: unknown): ChannelsNotWiredEntry[] {
   })
 }
 
-function parseMapping(value: unknown): ChannelMappingEntry[] {
+function parseMapping(value: unknown): ChannelMappingEntry[] | null {
   if (value === null || value === undefined) {
-    return []
+    // 真实 daemon 在 routing 段未知时上报 null（不是空数组：空数组会被误读成「已知 0 条路由」）。
+    return null
   }
   if (!Array.isArray(value)) {
     throw invalidResponse('mapping must be an array or null')
@@ -325,7 +392,7 @@ export function parseChannelsInfo(body: unknown): ChannelsInfo {
     schema: CHANNELS_SCHEMA,
     output: {
       channels: readNumber(output, 'channels', 'output'),
-      dac_map: readNumberArray(output, 'dac_map', 'output')
+      dac_map: readNullableNumberArray(output, 'dac_map', 'output')
     },
     input: {
       channels: readNumber(input, 'channels', 'input'),
@@ -339,7 +406,13 @@ export function parseChannelsInfo(body: unknown): ChannelsInfo {
   }
 }
 
-/** 校验并归一化 POST /api/plan/upload 响应（sha256 必须是 64 位小写十六进制）。 */
+/**
+ * 校验并归一化 POST /api/plan/upload 响应（sha256 必须是 64 位小写十六进制）。
+ *
+ * 真实 daemon 的 segments 是区段名数组且另有 segment_count；旧 T54 mock 的 segments 是数字（段数）。
+ * 两者都接受：数字归一化到 segment_count，区段名保留在 segments（旧形态没有名字时如实 null，
+ * 不拿数字伪造名字列表）。
+ */
 export function parsePlanUploadAck(body: unknown): PlanUploadAck {
   const record = asRecord(body)
   if (record === null) {
@@ -349,20 +422,84 @@ export function parsePlanUploadAck(body: unknown): PlanUploadAck {
   if (sha === null || !/^[0-9a-f]{64}$/.test(sha)) {
     throw invalidResponse('sha256 must be a 64-char lowercase hex string')
   }
+  const rawSegments = record.segments
+  let segments: string[] | null = null
+  let legacySegmentCount: number | null = null
+  if (rawSegments !== null && rawSegments !== undefined) {
+    if (typeof rawSegments === 'number') {
+      if (!Number.isFinite(rawSegments)) {
+        throw invalidResponse('upload.segments must be a finite number or an array of section names')
+      }
+      legacySegmentCount = rawSegments
+    } else if (Array.isArray(rawSegments)) {
+      segments = rawSegments.map((item, index) => {
+        if (typeof item !== 'string') {
+          throw invalidResponse('upload.segments[' + String(index) + '] must be a string')
+        }
+        return item
+      })
+    } else {
+      throw invalidResponse('upload.segments must be an array of section names, a number (legacy) or null')
+    }
+  }
   return {
     upload_id: readString(record, 'upload_id', 'upload'),
     sha256: sha,
     graph_id: readString(record, 'graph_id', 'upload'),
     version: readNumber(record, 'version', 'upload'),
-    segments: readNumber(record, 'segments', 'upload'),
-    latency_samples: readNumber(record, 'latency_samples', 'upload')
+    segments,
+    segment_count: readNumber(record, 'segment_count', 'upload') ?? legacySegmentCount,
+    latency_samples: readNumber(record, 'latency_samples', 'upload'),
+    stored_path: readString(record, 'stored_path', 'upload')
   }
 }
 
-/** 校验并归一化 GET /api/plan/history 响应（兼容数组 / versions / history / items 形态）。 */
+/** 单条历史条目：daemon entries[] 与旧 mock versions[] 的字段并集（缺失一律 null，不编值）。 */
+function parsePlanHistoryEntry(item: unknown, index: number): PlanHistoryEntry {
+  const path = 'versions[' + String(index) + ']'
+  const record = asRecord(item)
+  if (record === null) {
+    throw invalidResponse(path + ' must be an object')
+  }
+  const version = readNumber(record, 'version', path)
+  if (version === null || !Number.isInteger(version)) {
+    throw invalidResponse(path + '.version must be an integer')
+  }
+  const appliedAt = readString(record, 'applied_at', path)
+  const recordedAt = readString(record, 'recorded_at', path)
+  return {
+    version,
+    graph_id: readString(record, 'graph_id', path),
+    sha256: readString(record, 'sha256', path),
+    // daemon 的 commit 记录只有 recorded_at（记录时刻）；旧 mock 契约用 applied_at。
+    applied_at: appliedAt ?? recordedAt,
+    recorded_at: recordedAt,
+    applied_block: readNumber(record, 'applied_block', path),
+    latency_samples: readNumber(record, 'latency_samples', path),
+    observed: readBoolean(record, 'observed', path),
+    source: readString(record, 'source', path)
+  }
+}
+
+/**
+ * 校验并归一化 GET /api/plan/history 响应。
+ *
+ * 接受三种形态（T60：以 daemon 真实形态为主，旧 mock 契约保留兼容）：
+ * - daemon 真实形态：`{schema, source, current:{version,graph_id}, entries:[{version,graph_id,
+ *   applied_block,recorded_at,source,sha256,latency_samples,observed}], pagination, reasons}`；
+ * - 旧 T54 mock 契约：`{current_version, versions:[{version,graph_id,sha256,applied_at,source}]}`；
+ * - 纯数组：`[{version,...}]`（更旧兼容）。
+ *
+ * current_version 只在**接口没有明确上报**时才从条目推导（旧兼容）；daemon 显式上报
+ * current:{version:null} 时如实保持 null + reasons，不用「最大的条目版本」冒充当前版本。
+ */
 export function parsePlanHistory(body: unknown): PlanHistory {
   let rawVersions: unknown
   let currentVersion: number | null = null
+  let currentGraphId: string | null = null
+  let source: string | null = null
+  let reasons: Record<string, string> = {}
+  let explicitCurrent = false
   if (Array.isArray(body)) {
     rawVersions = body
   } else {
@@ -370,35 +507,37 @@ export function parsePlanHistory(body: unknown): PlanHistory {
     if (record === null) {
       throw invalidResponse('plan history body must be an object or array')
     }
-    rawVersions = record.versions ?? record.history ?? record.items
-    currentVersion = readNumber(record, 'current_version', 'history') ?? readNumber(record, 'current', 'history')
+    rawVersions = record.versions ?? record.entries ?? record.history ?? record.items
+    source = readString(record, 'source', 'history')
+    reasons = readReasons(record.reasons)
+    const current = record.current
+    const currentObject = asRecord(current)
+    if (currentObject !== null) {
+      // daemon 真实形态：current:{version, graph_id}（version=null = 控制面不报当前版本，不猜）。
+      explicitCurrent = true
+      currentVersion = readInteger(currentObject, 'version', 'history.current')
+      currentGraphId = readString(currentObject, 'graph_id', 'history.current')
+    } else if (Object.prototype.hasOwnProperty.call(record, 'current_version')) {
+      explicitCurrent = true
+      currentVersion = readInteger(record, 'current_version', 'history')
+    } else if (current !== null && current !== undefined) {
+      // 旧兼容：current 是数字。
+      explicitCurrent = true
+      currentVersion = readInteger(record, 'current', 'history')
+    } else if (Object.prototype.hasOwnProperty.call(record, 'current')) {
+      // 显式 current:null = 未知；不从条目推导。
+      explicitCurrent = true
+    }
   }
   if (!Array.isArray(rawVersions)) {
-    throw invalidResponse('history versions must be an array')
+    throw invalidResponse('history versions/entries must be an array')
   }
-  const versions = rawVersions.map((item, index) => {
-    const path = 'versions[' + String(index) + ']'
-    const record = asRecord(item)
-    if (record === null) {
-      throw invalidResponse(path + ' must be an object')
-    }
-    const version = readNumber(record, 'version', path)
-    if (version === null || !Number.isInteger(version)) {
-      throw invalidResponse(path + '.version must be an integer')
-    }
-    return {
-      version,
-      graph_id: readString(record, 'graph_id', path),
-      sha256: readString(record, 'sha256', path),
-      applied_at: readString(record, 'applied_at', path),
-      source: readString(record, 'source', path)
-    }
-  })
+  const versions = rawVersions.map((item, index) => parsePlanHistoryEntry(item, index))
   versions.sort((a, b) => a.version - b.version)
-  if (currentVersion === null && versions.length > 0) {
+  if (!explicitCurrent && currentVersion === null && versions.length > 0) {
     currentVersion = versions[versions.length - 1].version
   }
-  return { current_version: currentVersion, versions }
+  return { current_version: currentVersion, current_graph_id: currentGraphId, source, versions, reasons }
 }
 
 /** 校验并归一化 GET /api/plan/inspect（控制面 inspect 的嵌套 plan/compile/compile 形态也接受）。 */
@@ -517,17 +656,36 @@ export function reasonForChannelsPath(info: ChannelsInfo | null | undefined, pat
   return null
 }
 
+/** 读取 /api/plan/history 缺失原因（完整路径优先，回退末段扁平键）。 */
+export function reasonForPlanHistoryPath(history: PlanHistory | null | undefined, path: string): string | null {
+  if (!history) {
+    return null
+  }
+  const direct = history.reasons[path]
+  if (typeof direct === 'string' && direct.length > 0) {
+    return direct
+  }
+  const dot = path.lastIndexOf('.')
+  if (dot >= 0) {
+    const flat = history.reasons[path.slice(dot + 1)]
+    if (typeof flat === 'string' && flat.length > 0) {
+      return flat
+    }
+  }
+  return null
+}
+
 /** 已知位置的 i18n 标签键；未知位置返回 null（页面显示输出序号，不猜）。 */
 export function motuOutputLabelKey(channel: number): string | null {
   return MOTU_OUTPUT_LABEL_KEYS[channel] ?? null
 }
 
-/** 通道映射 [0,1] -> "0,1"；null/空返回 null。 */
-export function formatChannelMap(map: readonly number[] | null | undefined): string | null {
+/** 通道映射 [0,1] -> "0,1"；null 项（该 DAC 没有 lane 喂入）显示 "-"（不编造 0）；null/空返回 null。 */
+export function formatChannelMap(map: readonly (number | null)[] | null | undefined): string | null {
   if (!map || map.length === 0) {
     return null
   }
-  return map.join(',')
+  return map.map((value) => (value === null ? '-' : String(value))).join(',')
 }
 
 /** 校验声道补丁（返回前端 error 码；null = 合法）。 */
@@ -606,11 +764,12 @@ export interface ChannelsApi {
   commit(engineToken: string): Promise<ControlCommitAck>
   abort(engineToken: string): Promise<ControlAbortAck>
   fetchPlanHistory(): Promise<PlanHistory>
-  fetchPlanInspect(): Promise<PlanInspect>
+  /** 只读试运行：POST {plan_path, plan_sha256}（plan_path 来自上传回执的 stored_path）。 */
+  fetchPlanInspect(planPath: string, planSha256?: string | null): Promise<PlanInspect>
   /** 原始 plan 字节上传（≤ PLAN_UPLOAD_MAX_BYTES；X-KHAEN-Filename 只作提示）。 */
   uploadPlan(bytes: Uint8Array, filename: string): Promise<PlanUploadAck>
-  /** 用已上传的 upload_id/sha256 准备方案（两阶段：commit 才生效）。 */
-  preparePlan(upload: { upload_id: string; sha256: string }): Promise<ControlDraft>
+  /** 用 daemon 落盘路径 prepare 方案（POST {plan_path, plan_sha256}；两阶段：commit 才生效）。 */
+  preparePlan(input: { plan_path: string; sha256: string }): Promise<ControlDraft>
   /** 历史回滚准备（版本号递增；仍需 commit）。 */
   rollbackPlan(target?: number): Promise<ControlDraft>
 }
@@ -638,8 +797,20 @@ export function createChannelsApi(client: ApiClient): ChannelsApi {
       const body = await client.get<unknown>(CHANNELS_PATHS.planHistory)
       return parsePlanHistory(body)
     },
-    async fetchPlanInspect(): Promise<PlanInspect> {
-      const body = await client.get<unknown>(CHANNELS_PATHS.planInspect)
+    async fetchPlanInspect(planPath: string, planSha256?: string | null): Promise<PlanInspect> {
+      // 真实 daemon 是 POST + {plan_path}（只读试运行：读文件 → 解码 → 准入 → 图编译，不建草稿）。
+      if (typeof planPath !== 'string' || planPath.trim().length === 0) {
+        throw new ApiError({
+          status: 400,
+          code: 'invalid_request',
+          message: 'plan_path is required: upload the plan first and use the stored_path from the upload ack'
+        })
+      }
+      const payload: Record<string, string> = { plan_path: planPath }
+      if (typeof planSha256 === 'string' && planSha256.length > 0) {
+        payload.plan_sha256 = planSha256
+      }
+      const body = await client.post<unknown>(CHANNELS_PATHS.planInspect, payload)
       return parsePlanInspect(body)
     },
     async uploadPlan(bytes: Uint8Array, filename: string): Promise<PlanUploadAck> {
@@ -665,10 +836,21 @@ export function createChannelsApi(client: ApiClient): ChannelsApi {
       })
       return parsePlanUploadAck(body)
     },
-    async preparePlan(upload: { upload_id: string; sha256: string }): Promise<ControlDraft> {
+    async preparePlan(input: { plan_path: string; sha256: string }): Promise<ControlDraft> {
+      // 真实 daemon 的 /api/prepare 只接受 plan_path + plan_sha256（两个字符串；upload_id 是 T54 旧契约）。
+      if (typeof input.plan_path !== 'string' || input.plan_path.trim().length === 0) {
+        throw new ApiError({
+          status: 400,
+          code: 'invalid_request',
+          message: 'plan_path is required: the daemon did not report stored_path for the uploaded plan'
+        })
+      }
+      if (typeof input.sha256 !== 'string' || input.sha256.length === 0) {
+        throw new ApiError({ status: 400, code: 'invalid_request', message: 'plan_sha256 is required' })
+      }
       const body = await client.post<unknown>(CHANNELS_PATHS.planPrepare, {
-        upload_id: upload.upload_id,
-        sha256: upload.sha256
+        plan_path: input.plan_path,
+        plan_sha256: input.sha256
       })
       return parseControlDraft(body)
     },
@@ -700,6 +882,8 @@ export type ChannelsErrorCategory =
   | 'sha_mismatch'
   | 'admission_rejected'
   | 'no_history'
+  /** 上传回执没有 stored_path（旧后端/mock）：inspect/prepare 无 plan_path，页面显示 NOT_AVAILABLE。 */
+  | 'plan_path_unavailable'
   | 'conflict'
   | 'server'
   | 'invalid_response'
@@ -729,6 +913,7 @@ const CHANNELS_ERROR_KEYS: Record<ChannelsErrorCategory, string> = {
   sha_mismatch: 'error.channels.shaMismatch',
   admission_rejected: 'error.channels.admissionRejected',
   no_history: 'error.channels.noHistory',
+  plan_path_unavailable: 'error.channels.planPathUnavailable',
   conflict: 'error.channels.conflict',
   server: 'error.channels.server',
   invalid_response: 'error.channels.invalidResponse',

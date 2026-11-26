@@ -7,9 +7,11 @@
  * - GET /api/channels：khaen-channels/v1（output.channels/dac_map、input.channels/map/source/sdp_sha256、
  *   mapping、reasons、not_wired）；
  * - PUT /api/channels（prepare）→ POST /api/commit（热重配提交；M3b/T52 未完成前返回 501 host_link_unsupported）；
- * - POST /api/plan/upload（客户端 sha256 + 服务端 sha 双侧比对）→ GET /api/plan/inspect（失败降级为上传摘要）
- *   → POST /api/prepare → POST /api/commit / POST /api/abort；
- * - GET /api/plan/history → POST /api/rollback {target} → 回滚草稿 → commit（版本号递增，历史不改写）。
+ * - POST /api/plan/upload（客户端 sha256 + 服务端 sha 双侧比对）→ POST /api/plan/inspect {plan_path}
+ *   （plan_path = 上传回执的 stored_path；失败降级为上传摘要）→ POST /api/prepare {plan_path, plan_sha256}
+ *   → POST /api/commit / POST /api/abort；
+ * - GET /api/plan/history（daemon 真实形态 current:{version},entries[]）→ POST /api/rollback {target}
+ *   → 回滚草稿 → commit（版本号递增，历史不改写）。
  *
  * 诚实边界：
  * - 后端端点未实现/不可用时整块显示 NOT_AVAILABLE + 稳定码 + 原因 + 任务号（T55 / T52），不编造历史/映射；
@@ -36,6 +38,7 @@ import {
   formatChannelMap,
   motuOutputLabelKey,
   reasonForChannelsPath,
+  reasonForPlanHistoryPath,
   validateChannelsPatch,
   type ChannelsPatch
 } from '@/api/channels'
@@ -165,7 +168,12 @@ const currentPlanRows = computed<KvRow[]>(() => {
     {
       label: t('channels.plan.field.version'),
       value: current === null ? null : formatInteger(current, localeId.value),
-      reason: current === null ? reasonForPath(data.value, 'plan.version') ?? t('channels.plan.noPlan') : null
+      reason:
+        current === null
+          ? reasonForPath(data.value, 'plan.version') ??
+            reasonForPlanHistoryPath(history.value, 'history.current') ??
+            t('channels.plan.noPlan')
+          : null
     },
     {
       label: t('channels.plan.field.latency'),
@@ -191,7 +199,8 @@ const historyTruth = computed(() => (history.value !== null && history.value.ver
 
 const outputRows = computed(() => {
   const info = channels.value
-  if (info === null) {
+  if (info === null || info.mapping === null) {
+    // mapping=null = 当前方案 routing 段未知（不是「已知 0 条路由」）：不画 lane → DAC 表。
     return []
   }
   return info.mapping.map((entry) => {
@@ -206,7 +215,14 @@ const outputRows = computed(() => {
   })
 })
 
+/** /api/channels 上报了 mapping:null（daemon 关联不到当前方案 routing 段）：显示 NOT_AVAILABLE + 原因。 */
+const mappingUnknown = computed(() => channels.value !== null && channels.value.mapping === null)
+const mappingReason = computed(() =>
+  channels.value === null ? null : reasonForChannelsPath(channels.value, 'mapping')
+)
+
 const outputCount = computed(() => channels.value?.output.channels ?? null)
+/** dac_map 的 null 项 = 该 DAC 没有 lane 喂入（页面显示 "-"，不补 0）。 */
 const dacMapText = computed(() => formatChannelMap(channels.value?.output.dac_map ?? null))
 const knownLabelsText = computed(() =>
   MOTU_KNOWN_OUTPUT_NUMBERS.map((channel) => channel + ' ' + t(motuOutputLabelKey(channel) ?? 'channels.output.unknownLabel'))
@@ -285,6 +301,7 @@ const uploadRows = computed<KvRow[]>(() => {
   if (ack === null) {
     return []
   }
+  const segmentNames = ack.segments === null ? null : ack.segments.join(', ')
   return [
     {
       label: t('channels.upload.field.sha256'),
@@ -296,8 +313,20 @@ const uploadRows = computed<KvRow[]>(() => {
       value: shortenId(ack.graph_id, 10, 6),
       copy: ack.graph_id
     },
-    { label: t('channels.upload.field.version'), value: intText(ack.version) },
-    { label: t('channels.upload.field.segments'), value: intText(ack.segments) },
+    {
+      label: t('channels.upload.field.version'),
+      value: intText(ack.version),
+      // 真实 daemon 的上传回执不含目标版本：如实 NOT_AVAILABLE，不拿别的数字冒充。
+      reason: ack.version === null ? t('channels.upload.versionUnavailable') : null
+    },
+    {
+      label: t('channels.upload.field.segments'),
+      value: segmentNames,
+      copy: segmentNames,
+      reason:
+        segmentNames === null && ack.segment_count !== null ? t('channels.upload.segmentsUnavailable') : null
+    },
+    { label: t('channels.upload.field.segmentCount'), value: intText(ack.segment_count) },
     { label: t('channels.upload.field.latency'), value: intText(ack.latency_samples) }
   ]
 })
@@ -450,6 +479,20 @@ const historyRows = computed(() =>
 
 const currentVersion = computed(() => history.value?.current_version ?? null)
 
+/** 历史为空且 daemon 上报了「没有数据源」原因（history.current / history.available_versions / history）：
+ *  显示 NOT_AVAILABLE + 原因，而不是「尚无历史」。 */
+const historyNoSourceReason = computed(() => {
+  const snapshot = history.value
+  if (snapshot === null || snapshot.versions.length > 0) {
+    return null
+  }
+  return (
+    reasonForPlanHistoryPath(snapshot, 'history.current') ??
+    reasonForPlanHistoryPath(snapshot, 'history.available_versions') ??
+    reasonForPlanHistoryPath(snapshot, 'history')
+  )
+})
+
 async function onRollback(target: number): Promise<void> {
   if (planBusy.value !== null) {
     return
@@ -497,7 +540,14 @@ const channelsPatch = computed<ChannelsPatch>(() => {
   const output = outputDraft.value
   if (output !== null && output !== (channels.value?.output.channels ?? null)) {
     const previous = channels.value?.output.dac_map ?? null
-    if (previous !== null && previous.length === output) {
+    // daemon 的 dac_map 允许 null 项（该 DAC 静音/没有 lane 喂入）：T54 的补丁契约只接受
+    // number[]（每个输出通道的 DAC 序号），null 项无法原样复用 -> 退回按新通道数的 identity 草稿
+    // （只是草稿，仍需 prepare 校验 + commit；提交在 M3b/T52 前恒 501，不假装生效）。
+    const reusable =
+      previous !== null &&
+      previous.length === output &&
+      previous.every((value): value is number => value !== null)
+    if (reusable && previous !== null) {
       patch.output = { channels: output, dac_map: previous }
     } else {
       const dacMap: number[] = []
@@ -761,6 +811,10 @@ void loadChannelsHistory()
             </tbody>
           </table>
         </div>
+        <p v-else-if="mappingUnknown" class="aux-text">
+          <TruthTag kind="notWired" :reason="mappingReason" />
+          {{ t('channels.output.mappingUnknown') }}
+        </p>
         <p v-else class="aux-text">{{ t('channels.output.empty') }}</p>
       </PanelCard>
 
@@ -847,7 +901,7 @@ void loadChannelsHistory()
               :label="row.label"
               :value="row.value"
               :copy="row.copy ?? null"
-              :reason="null"
+              :reason="row.reason ?? null"
             />
           </ul>
         </template>
@@ -882,7 +936,13 @@ void loadChannelsHistory()
           <TruthTag kind="notWired" :reason="historyError.detail ?? null" />
           {{ t('channels.history.unavailable', { message: t(historyError.i18nKey), task: 'T55' }) }}
         </p>
-        <div v-else-if="historyRows.length === 0" class="aux-text">{{ t('channels.history.empty') }}</div>
+        <div v-else-if="historyRows.length === 0" class="aux-text channels-history__unavailable">
+          <template v-if="historyNoSourceReason !== null">
+            <TruthTag kind="notWired" :reason="historyNoSourceReason" />
+            {{ t('channels.history.noSource') }}
+          </template>
+          <template v-else>{{ t('channels.history.empty') }}</template>
+        </div>
         <div v-else class="channels-history__table-wrap">
           <table class="channels-table">
             <thead>

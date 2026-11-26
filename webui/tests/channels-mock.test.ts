@@ -137,8 +137,8 @@ test('mock M4: wired fixture exposes 22 output channels, mapping, AES67 input an
     await signIn(h)
     const info = await h.channels.fetchChannels()
     assert.equal(info.output.channels, 22)
-    assert.equal(info.mapping.length, 22)
-    assert.deepEqual(info.mapping[0], { lane: 0, dac: 0 })
+    assert.equal(info.mapping?.length, 22)
+    assert.deepEqual(info.mapping?.[0], { lane: 0, dac: 0 })
     assert.equal(info.input.channels, 2)
     assert.deepEqual(info.input.map, [0, 1])
     assert.equal(info.input.source, 'sdp')
@@ -146,14 +146,23 @@ test('mock M4: wired fixture exposes 22 output channels, mapping, AES67 input an
     assert.equal(info.not_wired.length, 1)
     assert.match(info.not_wired[0].reason, /M3b/)
 
+    // daemon 真实 history 形态（current 对象 + entries + recorded_at）：页面归一化为 current_version/versions。
     const history = await h.channels.fetchPlanHistory()
     assert.equal(history.current_version, 7)
+    assert.equal(history.current_graph_id, mock.control.history.at(-1)?.graph_id)
+    assert.equal(history.source, 'daemon-process')
     assert.deepEqual(history.versions.map((entry) => entry.version), [5, 6, 7])
+    assert.equal(history.versions.at(-1)?.recorded_at, '2026-11-26T06:20:00.000Z')
+    assert.equal(history.versions.at(-1)?.applied_at, '2026-11-26T06:20:00.000Z')
 
-    const inspect = await h.channels.fetchPlanInspect()
+    // POST /api/plan/inspect {plan_path}：plan_path 来自上传回执的 stored_path（只读试运行已落盘的方案）。
+    const upload = await h.channels.uploadPlan(planBytes(11), 'inspect.bin')
+    const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, upload.sha256)
     assert.equal(inspect.compiled, true)
     assert.equal(inspect.admission_accepted, true)
     assert.equal(inspect.lanes, 22)
+    assert.equal(inspect.sha256, upload.sha256)
+    assert.equal(inspect.graph_id, upload.graph_id)
 
     const dev = await fetch(baseUrl + '/__mock/channels')
     const devBody = await dev.json()
@@ -211,16 +220,20 @@ test('mock M4: plan upload verifies sha, prepare/commit apply a new plan version
 
     const upload = await h.channels.uploadPlan(bytes, 'demo.bin')
     assert.equal(upload.sha256, sha)
-    assert.equal(upload.upload_id, sha)
+    // daemon 真实回执：没有 upload_id/version；segments 是区段名数组 + segment_count + stored_path。
+    assert.equal(upload.upload_id, null)
+    assert.equal(upload.version, null)
     assert.equal(upload.graph_id, sha)
-    assert.equal(upload.version, 8)
-    assert.equal(upload.segments, 1 + (bytes.length % 5))
-    // 幂等：同一字节再上传返回同一记录。
+    assert.equal(upload.segment_count, 1 + (bytes.length % 5))
+    assert.equal(upload.segments?.length, upload.segment_count)
+    assert.equal(upload.segments?.[0], 'content')
+    assert.equal(upload.stored_path, '/var/lib/khaen/plans/' + sha + '.plan')
+    // 幂等：同一字节再上传返回同一记录（created=false）。
     const again = await h.channels.uploadPlan(bytes, 'demo.bin')
     assert.deepEqual(again, upload)
     assert.equal(mock.m4.uploads.length, 1)
 
-    const draft = await h.channels.preparePlan({ upload_id: upload.upload_id ?? sha, sha256: sha })
+    const draft = await h.channels.preparePlan({ plan_path: upload.stored_path!, sha256: sha })
     assert.equal(draft.surface, 'plan')
     assert.equal(draft.graph_id, sha)
     assert.equal(draft.planned_version, 8)
@@ -231,6 +244,7 @@ test('mock M4: plan upload verifies sha, prepare/commit apply a new plan version
 
     const history = await h.channels.fetchPlanHistory()
     assert.equal(history.current_version, 8)
+    assert.equal(history.current_graph_id, sha)
     assert.equal(history.versions.at(-1)?.version, 8)
     assert.equal(history.versions.at(-1)?.sha256, sha)
 
@@ -238,7 +252,7 @@ test('mock M4: plan upload verifies sha, prepare/commit apply a new plan version
     assert.equal(status.plan.version, 8)
     assert.equal(status.plan.graph_id, sha)
 
-    const inspect = await h.channels.fetchPlanInspect()
+    const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, sha)
     assert.equal(inspect.sha256, sha)
     assert.equal(inspect.graph_id, sha)
   })
@@ -259,17 +273,22 @@ test('mock M4: upload errors are honest (too small / rejected bytes / unknown up
     assert.equal(rejected.status, 400)
     assert.equal(rejected.code, 'invalid_plan')
 
-    const unknown = await expectApiError(() => h.channels.preparePlan({ upload_id: 'f'.repeat(64), sha256: 'f'.repeat(64) }))
-    assert.equal(unknown.status, 404)
-    assert.equal(unknown.code, 'upload_not_found')
+    // daemon 真实 prepare 读 plan_path：读不到文件 -> 400 bad_request（不是 upload_not_found）。
+    const unknown = await expectApiError(() =>
+      h.channels.preparePlan({ plan_path: '/var/lib/khaen/plans/' + 'f'.repeat(64) + '.plan', sha256: 'f'.repeat(64) })
+    )
+    assert.equal(unknown.status, 400)
+    assert.equal(unknown.code, 'bad_request')
+    assert.match(unknown.message, /cannot read plan file/)
 
     const bytes = planBytes(9)
     const upload = await h.channels.uploadPlan(bytes, 'demo.bin')
     const mismatch = await expectApiError(() =>
-      h.channels.preparePlan({ upload_id: upload.upload_id ?? upload.sha256, sha256: 'e'.repeat(64) })
+      h.channels.preparePlan({ plan_path: upload.stored_path!, sha256: 'e'.repeat(64) })
     )
-    assert.equal(mismatch.status, 409)
-    assert.equal(mismatch.code, 'sha_mismatch')
+    assert.equal(mismatch.status, 400)
+    assert.equal(mismatch.code, 'bad_request')
+    assert.match(mismatch.message, /sha256 mismatch/)
 
     // 4 MiB 上限：mock 用 raw body 限制，超出即 413。
     const cookie = h.jar.cookie() ?? ''
@@ -319,17 +338,21 @@ test('mock M4: degraded fixture reports null fields with reasons, plan endpoints
       const info = await h.channels.fetchChannels()
       assert.equal(info.output.channels, null)
       assert.equal(info.output.dac_map, null)
-      assert.equal(info.mapping.length, 0)
-      assert.match(String(info.reasons['output.channels']), /unavailable/)
+      // 真实 daemon 的 routing 未知形态是 mapping=null（不是空数组）。
+      assert.equal(info.mapping, null)
+      assert.match(String(info.reasons['output.channels']), /does not report channels/)
 
       const prepare = await expectApiError(() => h.channels.prepareChannels({ output: { channels: 20 } }))
       assert.equal(prepare.status, 409)
       assert.equal(prepare.code, 'channel_layout_unavailable')
 
-      const inspect = await h.channels.fetchPlanInspect()
+      // inspect 仍是 POST {plan_path}：degraded 下上传可用，试运行如实报不可用（不是假成功）。
+      const upload = await h.channels.uploadPlan(planBytes(6), 'degraded.bin')
+      const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, upload.sha256)
       assert.equal(inspect.admission_accepted, false)
       assert.equal(inspect.compiled, false)
       assert.equal(inspect.rejections[0]?.code, 'rt_host_unavailable')
+      assert.equal(inspect.sha256, upload.sha256)
 
       // daemon 自己的计划历史仍可读（只有 rt-host 现场字段不可用）。
       const history = await h.channels.fetchPlanHistory()
@@ -337,6 +360,57 @@ test('mock M4: degraded fixture reports null fields with reasons, plan endpoints
     },
     { channelsFixture: 'degraded' }
   )
+})
+
+test('mock M4: partial fixture exposes the real nullable dac_map (partial routing) without invalid_response', async () => {
+  await withMock(async ({ mock, baseUrl }) => {
+    const h = createHarness(baseUrl)
+    await signIn(h)
+    mock.setChannelsFixture('partial')
+    assert.equal(mock.channelsFixture, 'partial')
+    const info = await h.channels.fetchChannels()
+    assert.equal(info.output.channels, 4)
+    // 真实 daemon 的部分路由：dac_map 里 null = 该 DAC 没有 lane 喂入（合法形态，不是畸形响应）。
+    assert.deepEqual(info.output.dac_map, [0, null, 1, null])
+    assert.deepEqual(info.mapping, [
+      { lane: 0, dac: 0 },
+      { lane: 1, dac: 2 }
+    ])
+    // 该 fixture 下上传 + inspect 照常可用（POST {plan_path} 契约）。
+    const upload = await h.channels.uploadPlan(planBytes(12), 'partial.bin')
+    const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, upload.sha256)
+    assert.equal(inspect.compiled, true)
+    assert.equal(inspect.dac_channels, 4)
+  })
+})
+
+test('mock M4: POST /api/plan/inspect requires plan_path (GET is 405, unknown stored path is 400)', async () => {
+  await withMock(async ({ baseUrl }) => {
+    const h = createHarness(baseUrl)
+    await signIn(h)
+    const cookie = h.jar.cookie() ?? ''
+    const csrf = h.state.csrfToken ?? ''
+    const getResponse = await fetch(baseUrl + '/api/plan/inspect', { headers: { Cookie: cookie } })
+    assert.equal(getResponse.status, 405)
+
+    const headers = { Cookie: cookie, 'X-KHAEN-CSRF': csrf, 'Content-Type': 'application/json' }
+    const missing = await fetch(baseUrl + '/api/plan/inspect', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({})
+    })
+    assert.equal(missing.status, 400)
+    assert.equal((await missing.json()).error.code, 'bad_request')
+
+    const unknown = await fetch(baseUrl + '/api/plan/inspect', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ plan_path: '/var/lib/khaen/plans/' + 'f'.repeat(64) + '.plan' })
+    })
+    assert.equal(unknown.status, 400)
+    const body = await unknown.json()
+    assert.match(body.error.message, /cannot read plan file/)
+  })
 })
 
 test('mock M4: unavailable fixture answers 501 not_wired for every M4 endpoint', async () => {
@@ -347,7 +421,7 @@ test('mock M4: unavailable fixture answers 501 not_wired for every M4 endpoint',
       for (const run of [
         () => h.channels.fetchChannels(),
         () => h.channels.fetchPlanHistory(),
-        () => h.channels.fetchPlanInspect(),
+        () => h.channels.fetchPlanInspect('/var/lib/khaen/plans/whatever.plan'),
         () => h.channels.prepareChannels({ output: { channels: 20 } }),
         () => h.channels.uploadPlan(planBytes(3), 'demo.bin'),
         () => h.channels.rollbackPlan(5)
@@ -371,7 +445,7 @@ test('mock M4: fixture switching resets upload/pending state and rejects unknown
     await signIn(h)
     const bytes = planBytes(4)
     const upload = await h.channels.uploadPlan(bytes, 'demo.bin')
-    await h.channels.preparePlan({ upload_id: upload.upload_id ?? upload.sha256, sha256: upload.sha256 })
+    await h.channels.preparePlan({ plan_path: upload.stored_path!, sha256: upload.sha256 })
     assert.equal(mock.control.pending, 'plan')
 
     const response = await fetch(baseUrl + '/__mock/channels-fixture', {

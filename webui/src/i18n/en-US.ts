@@ -226,6 +226,8 @@ const messages: Messages = {
       server: 'The daemon returned a server error. Please retry later.',
       invalidResponse: 'The daemon returned an invalid plan/channel document; it was rejected instead of treated as success.',
       shaUnavailable: 'This browser does not support WebCrypto SHA-256, so the upload cannot be verified (there is no "verify nothing" fallback).',
+      planPathUnavailable:
+        'The upload receipt has no plan_path (stored_path): the daemon did not report where the plan was stored, so POST /api/plan/inspect and /api/prepare cannot be called; the page does not guess a path or invent a preview/draft.',
       unknown: 'The plan/channel action failed. Please retry.'
     }
   },
@@ -1230,7 +1232,9 @@ const messages: Messages = {
         label: 'Label'
       },
       unknownLabel: 'OUT {channel}',
-      empty: 'The daemon reports no output channels/mapping (either /api/channels is not wired or the rt-host status is unavailable).'
+      empty: 'The daemon reports no output channels/mapping (either /api/channels is not wired or the rt-host status is unavailable).',
+      mappingUnknown:
+        'The routing section of the running plan is unknown (mapping=null): the daemon cannot associate the applied plan routing, so the page draws no lane → DAC mapping and assumes no passthrough.'
     },
     input: {
       title: 'AES67 input',
@@ -1265,7 +1269,7 @@ const messages: Messages = {
     },
     upload: {
       title: 'Plan upload (plan ABI v3)',
-      desc: 'Raw plan bytes (≤ 4 MiB) → browser computes sha256 → the server validates and returns graph_id/version/segments/latency → prepare → commit. Upload never applies anything automatically.',
+      desc: 'Raw plan bytes (≤ 4 MiB) → browser computes sha256 → the server validates and returns graph_id/section names/segment count/latency/stored_path → inspect → prepare → commit. Upload never applies anything automatically.',
       select: 'Choose plan file',
       noFile: 'No file selected yet',
       tooLarge: 'The file exceeds the upload limit {limit}',
@@ -1274,11 +1278,14 @@ const messages: Messages = {
       uploaded: 'Plan uploaded and sha256 verified',
       prepare: 'Prepare to apply',
       ackTitle: 'Upload receipt (server)',
+      versionUnavailable: 'The real daemon upload receipt has no target version (versions are produced by the commit receipt / history).',
+      segmentsUnavailable: 'This backend reports only the segment count (a numeric segments field), not the section names: no fake section list is derived from the number.',
       field: {
         sha256: 'sha256 (server)',
         graphId: 'graph_id',
         version: 'Target version',
         segments: 'Sections',
+        segmentCount: 'Segment count',
         latency: 'Latency (samples)'
       }
     },
@@ -1288,6 +1295,7 @@ const messages: Messages = {
       current: 'current',
       rollback: 'Roll back to this version',
       empty: 'No applied version in history yet.',
+      noSource: 'The history endpoint has no data source (the daemon reports neither the current nor the available versions): no history is invented.',
       unavailable: 'Plan history is not wired ({task}): {message}. The page does not invent history.',
       rollbackNote: 'Rollback is a forward commit: history is kept, and it still needs a commit in the two-phase card to take effect.',
       rollbackPrepared: 'Prepared a rollback draft to v{version}: commit it to apply',

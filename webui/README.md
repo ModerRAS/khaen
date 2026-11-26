@@ -4,10 +4,10 @@ khaen DSP 引擎的 Web 控制台：Vue 3 + TypeScript + Element Plus + Vite + v
 由 khaen-daemon 同源托管（编译期 `include_bytes!` 内嵌 `webui/dist`），运行期不需要 Node / Python / 反代。
 
 > 规划：`HANDOFF/20261126-khaen-webui-plan/PLAN.md`（仓库外）§4 API、§5 路由、§6.1 登录、§6.2 概览、§11 UI 布局、§12 主题与 i18n。
-> 当前里程碑：**M3b（路由矩阵只读页，任务 T58）**；M1–M6 已落地。
+> 当前里程碑：**T60（前端与 daemon 真实契约对齐）**；M1–M6 已落地（M3b 路由矩阵只读页 T58 已合并）。
 > 概览页（M2）接 `GET /api/status`；校准页/向导（M5）接 `/api/calibration/*`；系统信息页/日志页接 `/api/system/*`；
 > 音量/格式/工作模式页接 `/api/mute`、`/api/surface`、`/api/format`（prepare → commit 两阶段，T70f-b 代理到 rt-host）；
-> 方案与声道页接 `/api/channels`、`/api/plan/*`、`/api/prepare|commit|abort|rollback`（M4 后端 T55 / 热重配 T52 仍在并行实现）；
+> 方案与声道页接 `/api/channels`、`/api/plan/*`、`/api/prepare|commit|abort|rollback`（M4 后端 T55 已落地；T60 按 daemon 真实契约对齐读路径与上传/预览/准备流程）；
 > 路由矩阵页只读组合 `/api/status` + `/api/channels` + `/api/plan/history`（编辑/重排需 PlanGraph 编辑器 T59，页面 NOT_AVAILABLE）。
 > 真实 Rust 后端联调与真机热切换由 lead 在合并后执行（本任务 NOT_RUN，前端用契约 mock + 单测 + 浏览器断言验证）。
 
@@ -110,24 +110,36 @@ src/components/control/ControlErrorNotice.vue  错误条（稳定码 + 本地化
 数据链路：
 
 ```
-src/api/channels.ts        khaen-channels/v1 校验 + 方案上传/历史/预览解析（兼容控制面 inspect 嵌套形态）+ MOTU 标签纯函数
+src/api/channels.ts        khaen-channels/v1 校验 + 方案上传/历史/预览解析（T60：daemon 真实形态 segments 数组/
+                          current 对象/recorded_at/可空 dac_map + 旧 T54 mock 兼容；inspect 是 POST plan_path）+ MOTU 标签纯函数
                           + 客户端 WebCrypto sha256 + 声道补丁校验 + 错误归类
 src/stores/channels.ts     声道读取控制器 + 方案上传/预览/两阶段（prepare→commit/abort）+ 回滚草稿 + 历史；单写操作互斥
+                          （inspect/prepare 用上传回执的 stored_path；没有时如实 NOT_AVAILABLE plan_path_unavailable）
 src/views/ChannelsView.vue 方案摘要 / 输出映射表 / AES67 输入 / 上传卡 / 历史回滚表 / 热重配卡 / 两阶段草稿回执
 ```
 
-契约（T54/T55 任务契约；后端 T55 并行实现，前端按契约 mock + 单测开发）：
+契约（**T60 已按 `crates/daemon/src` 真实实现对齐**；旧 T54 mock 契约仍在解析层保留宽松兼容）：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/channels` | `khaen-channels/v1`：`{output:{channels,dac_map}, input:{channels,map,source,sdp_sha256}, mapping:[{lane,dac}], reasons, not_wired}`；缺失字段 null + reason |
-| PUT | `/api/channels` | 两阶段 prepare：校验并返回 `{engine_token,planned_version,changed,preview{old,new,audio_gap_ms_estimate},warnings,blockers}`；commit 走 `POST /api/commit` |
-| POST | `/api/plan/upload` | 原始 plan 字节（≤ 4 MiB）→ `{upload_id,sha256,graph_id,version,segments,latency_samples}`；同 sha 幂等 |
-| POST | `/api/prepare` | `{upload_id,sha256}` → 方案草稿（engine_token/planned_version/graph_id） |
-| GET | `/api/plan/history` | `{schema,current_version,versions:[{version,graph_id,sha256,applied_at,source}]}`（前端兼容数组/versions/history/items 形态） |
-| GET | `/api/plan/inspect` | 只读预览（plan {block_size,sample_rate,in_channels,lanes,dac_channels} + admission + compile）；不可用时页面降级为上传摘要 |
+| GET | `/api/channels` | `khaen-channels/v1`：`{output:{channels,dac_map}, input:{channels,map,source,sdp_sha256}, mapping, plan:{source,version,graph_id,routing_known}, reasons, not_wired}`；`dac_map` 允许 null 项（该 DAC 无 lane 喂入，**合法**），`mapping:null` = 当前方案 routing 段未知（≠「已知 0 条路由」）；缺失字段 null + reason |
+| PUT | `/api/channels` | **T60 未对齐（未做项）**：真实 daemon 是 `{stage:"prepare"\|"commit", mapping:[{lane,dac}]}`（commit 在 M3b 前 501 `host_link_unsupported`），与 T54 的 `{output:{channels,dac_map},input:{...}}` 补丁形态不同；页面把该写入口明示为 NOT_AVAILABLE（T52/T55），不假成功 |
+| POST | `/api/plan/upload` | 原始 plan 字节（≤ 4 MiB）→ daemon 真实回执 `{ok,schema,sha256,graph_id,segments:[区段名],segment_count,latency_samples,stored_path,...}`（首次 201 / 同 sha 200 幂等；**无 upload_id/version**） |
+| POST | `/api/prepare` | `{plan_path,plan_sha256}` → 方案草稿（engine_token/planned_version/graph_id；plan_path 来自上传回执的 `stored_path`） |
+| GET | `/api/plan/history` | daemon 真实形态 `{schema,source,current:{version,graph_id},entries:[{version,graph_id,applied_block,recorded_at,source,sha256,latency_samples,observed}],pagination,reasons}`；前端兼容旧 `{current_version,versions}`/数组形态，页面把 `recorded_at` 归一化为应用时间 |
+| POST | `/api/plan/inspect` | **POST** `{plan_path,plan_sha256?}`（不是 GET/query；plan_path = 上传回执的 stored_path）→ 只读预览（plan + admission + compile）；no path 时页面如实 NOT_AVAILABLE（`plan_path_unavailable`） |
 | POST | `/api/rollback` | `{target?}` → 回滚草稿（rolled_back_to；版本号递增，历史不改写），仍需 commit |
 | POST | `/api/commit` / `/api/abort` | 共享两阶段提交/丢弃（channels 草稿在 M3b/T52 完成前 commit 返回 501 `host_link_unsupported`） |
+
+T60 契约对齐要点（前端解析层，单测覆盖真实形态 + 旧 mock 兼容）：
+
+1. `/api/plan/history`：接受 daemon 的 `current:{version,graph_id}` + `entries[]`（`recorded_at`）与旧 `current_version/versions`；
+   daemon 显式上报 `current.version=null` 时**不拿条目最大版本冒充**当前版本，原因来自 `reasons['history.current']`；
+2. `/api/plan/upload` 回执：`segments` 是区段名数组 + `segment_count`；旧 mock 的「数字 segments」归一化为段数，
+   不拿数字伪造区段名；上传回执的 `stored_path` 是后续 inspect/prepare 的唯一 plan_path 来源，缺失时页面 NOT_AVAILABLE；
+3. `/api/plan/inspect`：改为 POST `{plan_path,plan_sha256}`；没有 plan_path 时本地就拒绝（不发猜测请求）；
+4. `/api/channels` 的 `dac_map` 允许 `(number|null)[]`（null = 该 DAC 静音/无 lane），`mapping:null` 如实显示
+   「routing 未知」而不是「空映射」；页面逐字段 NOT_AVAILABLE + 后端 reason。
 
 诚实边界（页面逐条明示）：
 
@@ -474,13 +486,18 @@ mock 的 `/healthz` 返回 **release 版本**（mismatch/consistent 为 v0.1.2�
 
 | fixture | 形态 | 用途 |
 |---|---|---|
-| `wired`（默认） | `khaen-channels/v1` 22 输入/22 输出 + MOTU 映射 + AES67 输入；plan upload/history/inspect/prepare 可用；**channels commit 返回 501 `host_link_unsupported`**（M3b/T52 未完成，与真实后端同形） | 方案摘要/映射表/上传/历史回滚/热重配 prepare + 诚实 501 |
-| `degraded` | 部分字段 null + reasons（dac_map/input.sdp_sha256 缺失等），history 可用 | 逐字段「未接入」+ 不编映射 |
-| `unavailable` | 全部 503 `not_wired`（T55 未合并） | 整块 NOT_AVAILABLE + 任务号 |
+| `wired`（默认） | `khaen-channels/v1` 22 输入/22 输出 + MOTU 映射 + AES67 输入 + 真实 `plan` 段（routing_known=true）；plan upload/history/inspect/prepare 可用；**channels commit 返回 501 `host_link_unsupported`**（M3b/T52 未完成，与真实后端同形） | 方案摘要/映射表/上传/历史回滚/热重配 prepare + 诚实 501 |
+| `partial` | **真实部分路由形态**（T60）：4 DAC，lane0→dac0、lane1→dac2，`dac_map=[0,null,1,null]`；mapping 非空 | 覆盖 `dac_map` 的 null 项（该 DAC 静音/无 lane）不被误判 invalid_response |
+| `degraded` | 部分字段 null + reasons（dac_map/input.sdp_sha256 缺失、`mapping:null`=routing 未知、plan.routing_known=false） | 逐字段「未接入」+ 不编映射/history |
+| `unavailable` | 全部 503 `not_wired`（T55 未实现形态） | 整块 NOT_AVAILABLE + 任务号 |
 
 运行时切换：`GET /__mock/channels` / `POST /__mock/channels-fixture {fixture}`（dev-only）。
-方案上传使用真实字节流（`POST /api/plan/upload` 原始 body，≤ 4 MiB），mock 返回 `sha256/graph_id/version`；
-`inspect` 返回 plan+compile 摘要；`history` 含 v5..v7 三条记录；`rollback` 生成新版本草稿（需 commit，mock 会验证）。
+方案上传使用真实字节流（`POST /api/plan/upload` 原始 body，≤ 4 MiB），mock 返回 daemon 真实回执形态
+（`segments` 区段名数组 + `segment_count` + `stored_path`，首次 201/幂等 200，无 upload_id/version）；
+`POST /api/plan/inspect {plan_path,plan_sha256?}` 返回 plan+compile 摘要（GET 为 405，未知 plan_path 为 400）；
+`POST /api/prepare {plan_path,plan_sha256}` 读落盘路径准备草稿；
+`GET /api/plan/history` 是 daemon 真实形态（`current:{version,graph_id}` + `entries[]`，含 v5..v7）；
+`rollback` 生成新版本草稿（需 commit，mock 会验证）。
 /dev-only 端点 `GET /__mock/control`、`/__mock/channels` 返回当前 fixture 与服务端状态，便于 QA 断言与 fixture 切换。
 
 mock 只实现 PLAN §4.1/§4.2/§4.4 与 M3/M4 控制面契约（M3b/T58 路由页不新增端点：复用上述 status/channels/history fixture 组合），
@@ -548,6 +565,7 @@ tests/channels-api.test.ts       M4：khaen-channels/v1 校验、plan 上传/历
 tests/channels-store.test.ts     M4 控制器：方案上传（本地/服务端 sha 比对）、prepare/commit/abort、回滚草稿、
                                  声道 prepare/commit（501 保留草稿）、busy 互斥、加载去重
 tests/channels-mock.test.ts      契约 mock 端到端：channels GET/PUT+commit 501、plan upload 幂等/sha 校验、
+                                 POST inspect（plan_path/405/400）、prepare plan_path、partial fixture 的 dac_map null 项、
                                  history/inspect、rollback 草稿、degraded/unavailable fixture
 tests/routing-api.test.ts        M3b 路由页：/api/channels 宽松解析（dac_map null 项 / mapping null / plan 段）、
                                  /api/plan/history 双向形态（daemon current+entries / mock current_version+versions）、
@@ -558,7 +576,7 @@ tests/routing-mock.test.ts       契约 mock 端到端：401、wired 22 lane 路
                                  unavailable 501 not_wired、stale/missing status fixture 降级
 ```
 
-当前共 **337** 个测试（Node 内置 test runner；基线 306 + M3b/T58 路由页 31），全部通过。
+当前共 **346** 个测试（Node 内置 test runner；T58 基线 337 + T60 契约对齐 9），全部通过。
 
 ## 视觉验收（浏览器实测，evidence 在 `artifacts/browser/`）
 
@@ -651,7 +669,7 @@ webui/
 │  ├─ calibration-fixtures.mjs 校准四种 fixture（empty/success/failed/unavailable）+ mock job 状态机
 │  ├─ system-fixtures.mjs     系统信息三种 fixture（mismatch/consistent/degraded）+ 日志/诊断 mock 数据
 │  ├─ control-fixtures.mjs    M3 控制面两种 fixture（wired/unavailable）
-│  ├─ channels-fixtures.mjs   M4 方案/声道三种 fixture（wired/degraded/unavailable）
+│  ├─ channels-fixtures.mjs   M4 方案/声道四种 fixture（wired/partial/degraded/unavailable；真实 daemon 形态）
 │  └─ mock-test-support.mjs   单测辅助（不进 dist）
 ├─ tests/*.test.ts            Node 内置 test runner 单测（不进 dist）
 ├─ src/
