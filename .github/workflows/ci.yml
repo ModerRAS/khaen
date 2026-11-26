@@ -94,6 +94,13 @@ jobs:
           test -n "${current}"
           sudo test -x "${current}/bin/khaen-daemon"
           sudo test -x "${current}/bin/khaen-analyze"
+          # 发布包 12 个 bin 必须全部可执行；权限回归（tar/cp 丢 mode）会在这里暴露。
+          for bin in "${current}"/bin/*; do
+            if ! sudo test -x "${bin}"; then
+              echo "package binary is not executable: ${bin}" >&2
+              exit 1
+            fi
+          done
           sudo grep -E '^(version|commit):' "${current}/BUILD"
       # 发布包验收：直接用刚安装的最新 release 的 daemon + release 自带的 smoke-test.sh，
       # 在 process 目标（无设备/无声）上建会话并跑只读冒烟；验证“包内二进制 + 包内脚本”组合可用，
