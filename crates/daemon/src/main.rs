@@ -8,7 +8,10 @@
 //! 设备监督器（T70c）在这里接线：
 //! - `KHAEN_DEVICE_ID`：设备标识（在 `/sys/class/sound/card*/id` 里按子串匹配；MOTU 用 `MOTU`）。
 //! - `KHAEN_RATE_READ` / `KHAEN_RATE_ASSERT`：读速率 / 写速率命令（argv 用空格分隔，写命令可用
-//!   `{rate}` 占位符）。不配置时不做速率写操作，`/api/status` 的 `device.wired` 如实为 false。
+//!   `{rate}` 占位符）。不配置时不做速率写操作，`/api/device` 的 `device.wired` 如实为 false。
+//! - `KHAEN_RT_STATUS_FILE`：rt-host 状态文件路径（`/api/status` 聚合读取它；默认
+//!   `/var/lib/khaen/rt-host-status.json`）。这里是唯一读这些环境变量的地方，
+//!   解析结果注入 `DaemonState`，handler 不读环境。
 //! - `KHAEN_CONTROL_COMMAND`：可选的“拉起控制通道”命令（等价 v1 的 tspi-motu-net-up）。
 //! - `KHAEN_DEVICE_POLL_MS`：监督器轮询间隔，默认 500。
 //!
@@ -17,6 +20,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use khaen_daemon::status::DEFAULT_RT_STATUS_FILE;
 use khaen_daemon::{serve, DaemonState, DeviceMonitor};
 use khaen_host::supervisor::{
     CommandRateControl, MonotonicClock, NullStream, SupervisorPolicy, SysfsProbe,
@@ -49,7 +53,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => EngineConfig::default(),
     };
     let plan_rate = config.sample_rate;
-    let state = Arc::new(DaemonState::new(config)?.with_device(device_monitor(plan_rate)));
+    // rt-host 状态文件路径：启动时解析一次并注入 DaemonState（handler 不读环境）。
+    let rt_status_file = std::env::var("KHAEN_RT_STATUS_FILE")
+        .ok()
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_RT_STATUS_FILE));
+    let state = Arc::new(
+        DaemonState::new(config)?
+            .with_bind(bind)
+            .with_device(device_monitor(plan_rate))
+            .with_rt_status_file(rt_status_file),
+    );
 
     let poll_ms = std::env::var("KHAEN_DEVICE_POLL_MS")
         .ok()

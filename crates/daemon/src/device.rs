@@ -36,7 +36,8 @@ struct Wired {
 /// 设备监视器：持有一个可选的生命周期状态机，并缓存最近一次快照。
 pub struct DeviceMonitor {
     wired: Option<Wired>,
-    /// 最近一次 `poll` 的结果快照（`/api/status` 与 `/api/device` 共用）。
+    /// 最近一次 `poll` 的结果快照（`/api/device` 直接返回；`/api/status` 只在 rt-host
+    /// 状态不可用时用它回退 `device.state`）。
     last: Value,
 }
 

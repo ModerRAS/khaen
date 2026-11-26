@@ -20,6 +20,10 @@
 //! - `/api/*`：控制面 REST（语义见各 handler）；未知 `/api` 路径返回结构化 JSON 404
 //!   （`{ok:false,error:"not_found",message}`），不回退成 SPA 页面。
 //! - `/healthz`：无认证探活 `{ok,version,uptime_s}`。
+//! - `/api/status`：M2 聚合状态（PLAN §4.4 的 `khaen-status/v1`，见 `status` 模块）：
+//!   读 rt-host 状态文件（`KHAEN_RT_STATUS_FILE`，启动时注入）+ daemon 自身字段
+//!   （版本/uptime/bind/引擎格式）；状态文件缺失/损坏/过期时 `host_link.connected=false`、
+//!   rt-host 字段全 null + reasons，daemon 字段照常返回，**绝不 500**。
 //! - `/api/meta`：`{api_version,web_version,ops,surfaces,not_wired}`，值与能力来自
 //!   `khaen_host::control` 的既有常量（见 `meta` 模块）。
 //! - `/api/auth/*`：M1 认证（setup/login/session/logout/password），argon2id PHC 存
@@ -34,6 +38,7 @@ pub mod auth;
 pub mod bind;
 pub mod device;
 mod meta;
+pub mod status;
 mod webui;
 pub mod webui_assets;
 
@@ -110,6 +115,10 @@ pub struct DaemonState {
     auth: Mutex<auth::AuthStore>,
     /// 进程启动时刻（`/healthz` 的 `uptime_s`）。
     started: std::time::Instant,
+    /// 启动时解析的监听地址（`/api/status` 的 `daemon.bind`；handler 不读环境变量）。
+    bind: std::net::SocketAddr,
+    /// rt-host 状态文件路径（`/api/status` 聚合读取；生产由 `KHAEN_RT_STATUS_FILE` 注入）。
+    rt_status_file: std::path::PathBuf,
 }
 
 impl DaemonState {
@@ -131,12 +140,28 @@ impl DaemonState {
             )),
             auth: Mutex::new(auth::AuthStore::load(auth_config)?),
             started: std::time::Instant::now(),
+            bind: bind::default_addr(),
+            rt_status_file: std::path::PathBuf::from(status::DEFAULT_RT_STATUS_FILE),
         })
     }
 
     /// 接线设备监督器（由 `main` 按配置构造；测试也用真实监督器 + 假组件）。
     pub fn with_device(mut self, monitor: DeviceMonitor) -> Self {
         self.device = Mutex::new(monitor);
+        self
+    }
+
+    /// 注入启动时解析的监听地址（由 `main` 从 `KHAEN_BIND`/`KHAEN_PORT` 解析后传入）。
+    ///
+    /// `/api/status` 的 `daemon.bind` 用它，handler 里不读环境变量（测试可注入任意值）。
+    pub fn with_bind(mut self, bind: std::net::SocketAddr) -> Self {
+        self.bind = bind;
+        self
+    }
+
+    /// 注入 rt-host 状态文件路径（`/api/status` 聚合读取；测试注入 tempdir）。
+    pub fn with_rt_status_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.rt_status_file = path.into();
         self
     }
 
@@ -182,6 +207,21 @@ impl DaemonState {
     /// 进程启动以来的整秒数（`/healthz` 用；测试里通常为 0）。
     pub fn uptime_s(&self) -> u64 {
         self.started.elapsed().as_secs()
+    }
+
+    /// 启动时解析的监听地址（`/api/status` 的 `daemon.bind`）。
+    pub fn bind(&self) -> std::net::SocketAddr {
+        self.bind
+    }
+
+    /// rt-host 状态文件路径（`/api/status` 聚合读取）。
+    pub fn rt_status_file(&self) -> &std::path::Path {
+        &self.rt_status_file
+    }
+
+    /// 控制面当前的引擎配置（`/api/status` 的 `format.block_frames`/`channels` 来源）。
+    pub fn engine_config(&self) -> EngineConfig {
+        self.control().engine().config().clone()
     }
 }
 
@@ -244,11 +284,12 @@ async fn format_prepare(
     }
 }
 
+/// M2 聚合状态：PLAN §4.4 的 `khaen-status/v1`（页面唯一数据源）。
+///
+/// 从 daemon 自身（版本/uptime/bind/引擎格式）与 rt-host 状态文件聚合；文件缺失/损坏/过期只降级
+/// （`host_link.connected=false` + null + reasons），任何情况下都返回 200（见 `status` 模块）。
 async fn status(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
-    let mut body = state.control().status_json();
-    if let Some(object) = body.as_object_mut() {
-        object.insert("device".to_string(), state.device_json());
-    }
+    let body = status::aggregate(&state, std::time::SystemTime::now());
     (StatusCode::OK, Json(body))
 }
 

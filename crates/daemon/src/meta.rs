@@ -7,8 +7,9 @@
 //!   `webui_assets::WEBUI_PACKAGE_VERSION`；读不到时回退 workspace 版本），即实际被内嵌的
 //!   控制台版本。
 //! - `ops` / `surfaces` / `not_wired` ← `khaen_host::control` 的 `WIRED_OPS` / `WIRED_SURFACES` /
-//!   `NOT_WIRED_OPS` / `NOT_WIRED_SURFACES`，与 `/api/status` 的上报同源，未实现的项如实进
-//!   `not_wired` 并带原因（没有假成功）。
+//!   `NOT_WIRED_OPS` / `NOT_WIRED_SURFACES`，未实现的项如实进 `not_wired` 并带原因（没有假成功）。
+//!   M2 起 `/api/status` 是页面数据源的聚合 schema（`khaen-status/v1`），能力清单只在这里，
+//!   `/api/status` 不再重复。
 //!
 //! `/healthz` 不要求认证（当前进程没有认证层，探活必须永远可用）；`uptime_s` 是进程启动以来的整秒数。
 

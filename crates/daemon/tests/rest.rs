@@ -84,15 +84,19 @@ fn credentials() -> &'static Mutex<HashMap<String, Credentials>> {
 
 async fn spawn() -> (TestServer, Arc<DaemonState>) {
     let state_dir = TempStateDir::new("rest");
+    // 先绑定再构造 state：/api/status 的 daemon.bind 用启动期解析的监听地址。
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
     let state = Arc::new(
         DaemonState::new_with_auth(
             EngineConfig::default(),
             AuthConfig::for_tests(state_dir.path()),
         )
-        .expect("state"),
+        .expect("state")
+        .with_bind(addr)
+        // 测试固定注入一个不存在的 rt-host 状态文件：/api/status 必须可预测地退化。
+        .with_rt_status_file(state_dir.path().join("rt-host-status.json")),
     );
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-    let addr = listener.local_addr().expect("addr");
     let app =
         router(Arc::clone(&state)).into_make_service_with_connect_info::<std::net::SocketAddr>();
     let handle = tokio::spawn(async move {
@@ -290,18 +294,20 @@ async fn surface_two_phase_over_http() {
         );
     }
 
-    // 能力上报：接通/未接通界面逐项如实。
-    let (_, status_json) = request("GET", &format!("{}/api/status", server.base), None).await;
+    // 能力上报：M2 起 /api/status 是聚合 schema，能力清单看 /api/meta（同一份真实常量）。
+    let (_, meta) = request("GET", &format!("{}/api/meta", server.base), None).await;
+    let surfaces: Vec<&str> = meta["surfaces"]
+        .as_array()
+        .expect("surfaces 必须是数组")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
     for surface in ["volume", "routing", "layout", "format", "mode"] {
-        assert_eq!(
-            status_json["surfaces"][surface],
-            Value::Bool(true),
-            "{surface}"
+        assert!(
+            surfaces.contains(&surface),
+            "surfaces 缺 {surface}: {surfaces:?}"
         );
     }
-    assert!(status_json["surface_reasons"]
-        .as_object()
-        .is_some_and(|reasons| reasons.is_empty()));
 }
 fn split_url(url: &str) -> (&str, &str) {
     let rest = url.strip_prefix("http://").expect("scheme");
@@ -311,34 +317,69 @@ fn split_url(url: &str) -> (&str, &str) {
     }
 }
 
+/// M2：/api/status 是 PLAN §4.4 的 `khaen-status/v1` 聚合；rt-host 状态文件缺失时
+/// host_link 断开、rt-host 字段 null + reasons，daemon 自身字段照常返回，仍 200。
 #[tokio::test(flavor = "current_thread")]
-async fn status_reports_capabilities_over_http() {
+async fn status_reports_v1_aggregate_and_degrades_without_rt_host() {
     let (server, _state) = spawn().await;
     let (status, body) = request("GET", &format!("{}/api/status", server.base), None).await;
     assert_eq!(status, 200);
-    assert_eq!(body["ok"], Value::Bool(true));
-    assert_eq!(body["runtime_state"], Value::String("idle".into()));
-    // 全部 op 已接通：wired 完整、not_wired 为空。
-    let wired: Vec<&str> = body["wired"]
-        .as_array()
-        .expect("wired")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect();
-    for op in ["status", "mute", "prepare", "commit", "abort", "coeff"] {
-        assert!(wired.contains(&op), "wired 缺 {op}: {wired:?}");
+    assert_eq!(body["schema"], Value::String("khaen-status/v1".into()));
+
+    // daemon 自身字段真实：版本来自进程、bind 来自启动时解析并注入的地址、格式来自 EngineConfig。
+    assert_eq!(
+        body["daemon"]["version"],
+        Value::String(env!("CARGO_PKG_VERSION").into())
+    );
+    assert_eq!(
+        body["daemon"]["bind"],
+        Value::String(server.base.trim_start_matches("http://").into())
+    );
+    assert!(body["daemon"]["uptime_s"].is_u64());
+    assert_eq!(
+        body["format"]["block_frames"],
+        Value::from(u64::from(BLOCK_FRAMES))
+    );
+    assert_eq!(body["format"]["channels"], Value::from(u64::from(CHANNELS)));
+
+    // rt-host 状态文件不存在：connected=false，rt-host 字段 null + reasons，绝不 500。
+    assert_eq!(body["host_link"]["connected"], Value::Bool(false));
+    assert_eq!(body["host_link"]["socket"], Value::Null);
+    assert_eq!(body["host_link"]["since"], Value::Null);
+    assert_eq!(body["host_link"]["status_age_ms"], Value::Null);
+    for path in [
+        "host_link.connected",
+        "state.value",
+        "plan.graph_id",
+        "format.plan_rate",
+        "input.packets",
+        "output.blocks",
+        "device.rate_readback",
+    ] {
+        assert!(body["reasons"][path].is_string(), "缺原因: {path}");
     }
-    assert!(body["not_wired"]
-        .as_array()
-        .is_some_and(|ops| ops.is_empty()));
-    assert_eq!(body["graph_id"], Value::Null);
-    assert_eq!(body["epoch"], Value::Null);
-    assert!(body["reasons"]["graph_id"].is_string());
-    // 设备监督器默认未接线：如实上报 wired=false + 原因，不编造 device_rate。
-    assert_eq!(body["device"]["wired"], Value::Bool(false));
-    assert!(body["device"]["reason"]
-        .as_str()
-        .is_some_and(|r| !r.is_empty()));
+    assert_eq!(body["state"]["value"], Value::Null);
+    assert_eq!(body["plan"]["graph_id"], Value::Null);
+    // 校准 / 编码 / AES67 / 输出错误恒 null + 原因，不编数值。
+    for path in [
+        "calibration.active_job",
+        "calibration.last_job_id",
+        "calibration.last_verdict",
+        "format.encoding",
+        "format.aes67.pt",
+        "output.out_errors",
+        "device.id",
+        "device.card",
+    ] {
+        assert!(body["reasons"][path].is_string(), "缺原因: {path}");
+    }
+    // not_wired 至少含 T70f 控制通道（元素 {path, reason}）。
+    let not_wired = body["not_wired"].as_array().expect("not_wired 必须是数组");
+    let socket = not_wired
+        .iter()
+        .find(|entry| entry["path"] == Value::String("host_link.socket".into()))
+        .expect("not_wired 必须含 host_link.socket");
+    assert!(socket["reason"].as_str().is_some_and(|r| !r.is_empty()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -481,13 +522,8 @@ async fn prepare_commit_switches_graph_over_http() {
     let output = run_block(&state, &input);
     assert_eq!(output, input);
 
-    let (status, body) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(status, 200);
-    assert_eq!(body["graph_id"], Value::String(identity_id.clone()));
-    assert_eq!(body["epoch"], Value::from(1));
-    assert_eq!(body["actual_version"], Value::from(1));
-    assert_eq!(body["blocks"], Value::from(1));
-
+    // 已生效图/版本/生效块号在 /api/coeff（M2 起 /api/status 是 rt-host 聚合 schema，
+    // 不再暴露 daemon 自己的 SlotEngine 图信息）。
     let (status, coefficients) = request("GET", &format!("{}/api/coeff", server.base), None).await;
     assert_eq!(status, 200);
     assert_eq!(coefficients["version"], Value::from(1));
@@ -526,10 +562,9 @@ async fn prepare_commit_switches_graph_over_http() {
         );
     }
 
-    let (_, body) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(body["graph_id"], Value::String(gain_id.clone()));
-    assert_eq!(body["epoch"], Value::from(2));
-    assert_eq!(body["actual_version"], Value::from(2));
+    let (_, coefficients) = request("GET", &format!("{}/api/coeff", server.base), None).await;
+    assert_eq!(coefficients["graph_id"], Value::String(gain_id.clone()));
+    assert_eq!(coefficients["version"], Value::from(2));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -849,9 +884,14 @@ async fn format_two_phase_over_http() {
     let (server, state) = spawn().await;
     let (status, body) = request("GET", &format!("{}/api/status", server.base), None).await;
     assert_eq!(status, 200);
-    assert_eq!(body["format"]["block_size"], Value::from(BLOCK_FRAMES));
-    assert_eq!(body["format"]["sample_rate"], Value::from(SAMPLE_RATE));
-    assert_eq!(body["format"]["channels"], Value::from(CHANNELS));
+    assert_eq!(
+        body["format"]["block_frames"],
+        Value::from(u64::from(BLOCK_FRAMES))
+    );
+    assert_eq!(body["format"]["channels"], Value::from(u64::from(CHANNELS)));
+    // 没有 rt-host 状态文件：plan_rate/device_rate 没有数据来源 → null + reason（不编数值）。
+    assert_eq!(body["format"]["plan_rate"], Value::Null);
+    assert!(body["reasons"]["format.plan_rate"].is_string());
 
     // 第一阶段：请求块长 64；commit 前不改配置。
     let (status, draft) = request(
@@ -866,7 +906,10 @@ async fn format_two_phase_over_http() {
     assert_eq!(draft["device_restart_required"], Value::Bool(true));
     let token = draft["engine_token"].as_str().expect("token").to_string();
     let (_, before) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(before["format"]["block_size"], Value::from(BLOCK_FRAMES));
+    assert_eq!(
+        before["format"]["block_frames"],
+        Value::from(u64::from(BLOCK_FRAMES))
+    );
 
     // 第二阶段：commit 重建执行器；状态如实显示新格式与“图被丢弃”。
     let body = json!({ "engine_token": token }).to_string();
@@ -876,8 +919,10 @@ async fn format_two_phase_over_http() {
     assert_eq!(committed["changed"], Value::Bool(true));
     assert_eq!(committed["graph_dropped"], Value::Bool(true));
     let (_, after) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(after["format"]["block_size"], Value::from(64));
-    assert_eq!(after["graph_id"], Value::Null);
+    assert_eq!(after["format"]["block_frames"], Value::from(64u64));
+    // 图被丢弃（换格式重建执行器）在 /api/coeff 里如实为 null。
+    let (_, coefficients) = request("GET", &format!("{}/api/coeff", server.base), None).await;
+    assert_eq!(coefficients["graph_id"], Value::Null);
 
     // 非法请求：400 bad_request；空对象要有明确原因。
     let (status, body) = request("POST", &format!("{}/api/format", server.base), Some("{}")).await;
@@ -918,16 +963,14 @@ async fn format_draft_is_abortable_over_http() {
     assert_eq!(body["error"], Value::String("engine_token_invalid".into()));
     let (_, status_body) = request("GET", &format!("{}/api/status", server.base), None).await;
     assert_eq!(
-        status_body["format"]["block_size"],
-        Value::from(BLOCK_FRAMES)
+        status_body["format"]["block_frames"],
+        Value::from(u64::from(BLOCK_FRAMES))
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn mode_off_and_on_over_http() {
     let (server, state) = spawn().await;
-    let (_, status_json) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(status_json["mode"], Value::String("aes67".into()));
     let input = signal((BLOCK_FRAMES * u32::from(CHANNELS)) as usize, 0x31);
     let passthrough = run_block(&state, &input);
     assert_eq!(passthrough, input);
@@ -940,8 +983,6 @@ async fn mode_off_and_on_over_http() {
     assert_eq!(draft["changed"], Value::Bool(true));
     assert_eq!(draft["mode"], Value::String("off".into()));
     let token = draft["engine_token"].as_str().expect("token").to_string();
-    let (_, before) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(before["mode"], Value::String("aes67".into()));
 
     let body = json!({ "engine_token": token }).to_string();
     let (status, committed) =
@@ -950,9 +991,6 @@ async fn mode_off_and_on_over_http() {
     assert_eq!(committed["mode"], Value::String("off".into()));
     let muted = run_block(&state, &input);
     assert!(muted.iter().all(|sample| sample.to_bits() == 0));
-    let (_, after) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(after["mode"], Value::String("off".into()));
-    assert_eq!(after["mute"], Value::Bool(true));
 
     // 切回 aes67：解除静音。
     let body = json!({ "surface": "mode", "data": { "mode": "aes67" } }).to_string();
@@ -963,8 +1001,6 @@ async fn mode_off_and_on_over_http() {
     assert_eq!(status, 200);
     let unmuted = run_block(&state, &input);
     assert_eq!(unmuted, input);
-    let (_, restored) = request("GET", &format!("{}/api/status", server.base), None).await;
-    assert_eq!(restored["mode"], Value::String("aes67".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1028,11 +1064,11 @@ async fn calibration_plan_roundtrips_through_control_plane() {
         .as_str()
         .expect("token")
         .to_string();
-    let (_, before) = request("GET", &format!("{}/api/status", server.base), None).await;
+    let (_, before) = request("GET", &format!("{}/api/coeff", server.base), None).await;
     assert_eq!(
-        before["epoch"],
+        before["version"],
         Value::Null,
-        "还没提交过方案：epoch 如实为 null"
+        "还没提交过方案：coeff.version 如实为 null"
     );
     assert_eq!(before["applied_block"], Value::Null);
     let body = json!({ "engine_token": token }).to_string();

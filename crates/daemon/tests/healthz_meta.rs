@@ -150,8 +150,11 @@ async fn existing_api_routes_survive_the_static_fallback() {
     let response = support::request(&server, "GET", "/api/status").await;
     assert_eq!(response.status, 200);
     let body = response.json();
-    assert_eq!(body["ok"], Value::Bool(true));
-    assert_eq!(body["runtime_state"], Value::String("idle".into()));
+    assert_eq!(body["schema"], Value::String("khaen-status/v1".into()));
+    assert_eq!(
+        body["daemon"]["version"],
+        Value::String(env!("CARGO_PKG_VERSION").into())
+    );
     // /api/device 同样保留。
     let response = support::request(&server, "GET", "/api/device").await;
     assert_eq!(response.status, 200);

@@ -88,6 +88,11 @@ impl TestServer {
     pub fn session(&self) -> Option<&TestSession> {
         self.session.as_ref()
     }
+
+    /// 未自动登录的服务：完成 setup/login 并把会话挂到本测试服务上（M2 状态聚合测试用）。
+    pub async fn sign_in(&mut self) {
+        self.session = Some(bootstrap_session(self).await);
+    }
 }
 
 impl Drop for TestServer {
@@ -112,17 +117,41 @@ pub async fn spawn_at(state_dir: &Path) -> TestServer {
 
 /// 用指定状态目录 + 自定义认证配置（如短会话 TTL）启动服务；不自动登录。
 pub async fn spawn_at_with_config(state_dir: &Path, config: AuthConfig) -> TestServer {
-    let state = Arc::new(
-        DaemonState::new_with_auth(EngineConfig::default(), config).expect("daemon state"),
-    );
+    spawn_custom(state_dir, config, None).await
+}
+
+/// 同 spawn_at_with_config，但注入 rt-host 状态文件路径（测试 M2 聚合的 fixture）。
+pub async fn spawn_at_with_rt_status_file(state_dir: &Path, rt_status_file: PathBuf) -> TestServer {
+    spawn_custom(
+        state_dir,
+        AuthConfig::for_tests(state_dir.to_path_buf()),
+        Some(rt_status_file),
+    )
+    .await
+}
+
+/// 真实监听随机端口；启动时解析的监听地址注入 DaemonState（/api/status 的 daemon.bind 用它）。
+async fn spawn_custom(
+    state_dir: &Path,
+    config: AuthConfig,
+    rt_status_file: Option<PathBuf>,
+) -> TestServer {
+    // 先绑定端口，再构造 state：daemon.bind 必须是启动时解析的真实监听地址。
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-    let addr = listener.local_addr().expect("local addr").to_string();
+    let addr = listener.local_addr().expect("local addr");
+    let mut state = DaemonState::new_with_auth(EngineConfig::default(), config)
+        .expect("daemon state")
+        .with_bind(addr);
+    if let Some(rt_status_file) = rt_status_file {
+        state = state.with_rt_status_file(rt_status_file);
+    }
+    let state = Arc::new(state);
     let app = router(Arc::clone(&state)).into_make_service_with_connect_info::<SocketAddr>();
     let handle = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
     TestServer {
-        addr,
+        addr: addr.to_string(),
         state,
         state_dir: state_dir.to_path_buf(),
         session: None,

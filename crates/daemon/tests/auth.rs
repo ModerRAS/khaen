@@ -499,7 +499,10 @@ async fn token_header_is_a_cookie_equivalent() {
     let with_token = vec![header(TOKEN_HEADER, &session.token)];
     let response = support::request_with(&server, "GET", "/api/status", &with_token, None).await;
     assert_eq!(response.status, 200, "{}", response.body_text());
-    assert_eq!(response.json()["ok"], Value::Bool(true));
+    assert_eq!(
+        response.json()["schema"],
+        Value::String("khaen-status/v1".into())
+    );
 
     // 错误 token 与空 token 都 401。
     for value in ["invalid-token", ""] {
