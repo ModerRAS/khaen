@@ -100,6 +100,84 @@ pub fn rt_status_document() -> Value {
     .expect("rt-host status fixture must be valid JSON")
 }
 
+/// 一份完整的 rt-host channels_status 响应（M3b 热重配；形状与
+/// `crates/rt-host/src/control/reconfigure.rs::ChannelsState::status_json` 同源）。
+pub fn channels_status_document() -> Value {
+    serde_json::from_str(
+        r#"{
+  "ok": true,
+  "op": "channels_status",
+  "generation": 2,
+  "current": {
+    "channels": 4,
+    "sample_rate": 48000,
+    "block_frames": 128,
+    "aes67_group": "239.69.1.1",
+    "aes67_port": 5004,
+    "aes67_payload_type": 96,
+    "aes67_channels": 2,
+    "aes67_map": [0, 1],
+    "jitter_frames": 192,
+    "plan_rate": 48000,
+    "device": "hw:CARD=UltraLite"
+  },
+  "format": { "block_frames": 128, "sample_rate": 48000, "channels": 4 },
+  "device": {
+    "name": "hw:CARD=UltraLite",
+    "state": "present",
+    "probe": { "available": true, "sample_rate": 48000, "channels": 4 }
+  },
+  "pending": null,
+  "busy": false,
+  "last_gap_ms": null,
+  "last_result": null,
+  "reasons": {}
+}"#,
+    )
+    .expect("channels_status fixture must be valid JSON")
+}
+
+/// 一份完整的 rt-host channels_commit 成功响应（graph 未丢弃：只改 AES67 输入/参数）。
+pub fn channels_commit_document() -> Value {
+    serde_json::from_str(
+        r#"{
+  "ok": true,
+  "op": "channels_commit",
+  "applied": true,
+  "changed": true,
+  "idempotent": false,
+  "generation": 3,
+  "gap_ms": 412,
+  "pid": 4242,
+  "format": { "block_frames": 128, "sample_rate": 48000, "channels": 4 },
+  "channels": {
+    "channels": 4,
+    "sample_rate": 48000,
+    "block_frames": 128,
+    "aes67_group": "239.69.1.1",
+    "aes67_port": 5006,
+    "aes67_payload_type": 96,
+    "aes67_channels": 2,
+    "aes67_map": [0, 1],
+    "jitter_frames": 192,
+    "plan_rate": 48000,
+    "device": "hw:CARD=UltraLite"
+  },
+  "device_restarted": true,
+  "pcm_reconfigured": true,
+  "receiver_rebound": false,
+  "engine_rebuilt": false,
+  "graph_dropped": false,
+  "device_was_absent": false,
+  "hw": { "sample_rate": 48000, "channels": 4 },
+  "alsa_stats_reset": true,
+  "input_stats_reset": true,
+  "rolled_back": false
+}"#,
+    )
+    .expect("channels_commit fixture must be valid JSON")
+}
+
 /// 脚本化假传输：记录所有请求；脚本耗尽后按 op 返回与 rt-host ControlState 同形的成功响应。
 #[derive(Debug, Default)]
 pub struct FakeTransport {
@@ -111,6 +189,7 @@ struct FakeState {
     script: VecDeque<Result<WireReply, TransportError>>,
     calls: Vec<Value>,
     status: Option<Value>,
+    channels_status: Option<Value>,
 }
 
 impl FakeTransport {
@@ -124,6 +203,51 @@ impl FakeTransport {
         let transport = Self::new();
         transport.state.lock().expect("fake transport").status = Some(status);
         transport
+    }
+
+    /// channels_status op 返回给定文档（其它 op 仍是默认成功响应）。
+    pub fn with_channels_status(channels_status: Value) -> Arc<Self> {
+        let transport = Self::new();
+        transport
+            .state
+            .lock()
+            .expect("fake transport")
+            .channels_status = Some(channels_status);
+        transport
+    }
+
+    /// 同时预设 status 与 channels_status 文档（/api/channels 的 GET 聚合用）。
+    pub fn with_rt_status_and_channels(status: Value, channels_status: Value) -> Arc<Self> {
+        let transport = Self::with_rt_status(status);
+        transport
+            .state
+            .lock()
+            .expect("fake transport")
+            .channels_status = Some(channels_status);
+        transport
+    }
+
+    /// 预设下一次调用返回完整的 ok=false 响应体（rt-host 回滚失败之类的多字段错误）。
+    pub fn push_error_body(&self, body: Value) {
+        let code = body
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown_op")
+            .to_string();
+        let message = body
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        self.state
+            .lock()
+            .expect("fake transport")
+            .script
+            .push_back(Ok(WireReply::Failure {
+                code,
+                message,
+                body,
+            }));
     }
 
     /// 预设下一次（或之后若干次）调用的结果（成功后脚本耗尽回到默认响应）。
@@ -176,14 +300,14 @@ impl Transport for FakeTransport {
             return next;
         }
         let op = request.get("op").and_then(Value::as_str).unwrap_or("");
-        Ok(default_reply(op, request, state.status.as_ref()))
+        Ok(default_reply(op, request, &state))
     }
 }
 
 /// 默认成功响应：每个 op 与 rt-host 的响应形状一致（字段顺序无关），值固定便于断言透传。
-fn default_reply(op: &str, request: &Value, status: Option<&Value>) -> WireReply {
+fn default_reply(op: &str, request: &Value, state: &FakeState) -> WireReply {
     let body = match op {
-        "status" => status.cloned().unwrap_or_else(|| {
+        "status" => state.status.clone().unwrap_or_else(|| {
             json!({
                 "ok": true,
                 "protocol_version": 1,
@@ -267,6 +391,20 @@ fn default_reply(op: &str, request: &Value, status: Option<&Value>) -> WireReply
             "device_restart_required": true,
             "note": "fake transport: control-plane format only",
         }),
+        // M3b 热重配（T61）：默认应答与 rt-host reconfigure 模块同形。
+        "channels_status" => state
+            .channels_status
+            .clone()
+            .unwrap_or_else(channels_status_document),
+        "channels_prepare" => channels_prepare_reply(request),
+        "channels_commit" => channels_commit_document(),
+        "channels_abort" => json!({
+            "ok": true,
+            "op": "channels_abort",
+            "aborted": true,
+            "aborted_token": request.get("token").cloned().unwrap_or(Value::Null),
+            "note": "fake transport: channels draft discarded",
+        }),
         other => {
             return WireReply::Failure {
                 code: "unknown_op".to_string(),
@@ -280,6 +418,45 @@ fn default_reply(op: &str, request: &Value, status: Option<&Value>) -> WireReply
         }
     };
     WireReply::Success(body)
+}
+
+/// channels_prepare 的默认成功回执：把请求字段原样当作目标（forwarded 字段可在 calls() 里逐字断言）。
+fn channels_prepare_reply(request: &Value) -> Value {
+    let current = channels_status_document()["current"].clone();
+    let mut target = current.clone();
+    if let Some(object) = target.as_object_mut() {
+        if let Some(fields) = request.as_object() {
+            for (key, value) in fields {
+                if key == "op" {
+                    continue;
+                }
+                object.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    json!({
+        "ok": true,
+        "op": "channels_prepare",
+        "token": "channels-token-1",
+        "engine_token": "channels-token-1",
+        "planned_generation": 3,
+        "changed": true,
+        "diff": { "aes67_port": { "from": 5004, "to": request.get("aes67_port").cloned().unwrap_or(json!(5004)) } },
+        "current": current,
+        "target": target,
+        "format": { "block_frames": 128, "sample_rate": 48000, "channels": 4 },
+        "device": {
+            "name": "hw:CARD=UltraLite",
+            "state": "present",
+            "probe": { "available": true, "sample_rate": 48000, "channels": 4 }
+        },
+        "graph": {
+            "action": "kept",
+            "reason": "fake transport: engine format unchanged"
+        },
+        "admission": { "accepted": true },
+        "applies_to": "fake transport",
+    })
 }
 
 /// 一条回环连接的处理方式。

@@ -19,8 +19,10 @@
 //! # 重试语义（一次，且不掩盖歧义）
 //!
 //! 连接失败时请求肯定没送达，所有 op 都重试一次。读到超时/协议错误时请求可能已经被执行：
-//! - 只读 op（status/coeff/inspect）与幂等/可替换 op（mute/prepare/surface/format/rollback/abort）重试一次；
-//! - `commit` **不重试**：第一次 commit 若已生效，重试只会得到 `engine_token_invalid`，
+//! - 只读 op（status/coeff/inspect/channels_status）与幂等/可替换 op
+//!   （mute/prepare/surface/format/rollback/abort/channels_prepare）重试一次；
+//! - `commit`、`channels_commit`、`channels_abort` **不重试**：第一次请求若已生效，
+//!   重试只会得到 `engine_token_invalid` / `no_channels_draft` / `channels_busy`，
 //!   把“已生效”报成失败（比超时更糟）。这里如实返回 503 + 原因，不制造假的成功/失败。
 //!
 //! # 分层
@@ -64,6 +66,17 @@ pub const FORWARDED_OPS: &[&str] = &[
 ];
 /// 只读状态 op。
 pub const STATUS_OP: &str = "status";
+
+/// rt-host M3b 热重配 op（T61）：与 `crates/rt-host/src/control/reconfigure.rs` 的
+/// `CHANNELS_OPS` 同源。它们不在契约 B 的 `khaen_host::control::WIRED_OPS` 里——是 rt-host
+/// 控制层对契约 B 的增量能力（同一行 JSON 通道、同一份传输与编解码），因此单独一份常量，
+/// 不并入 [`FORWARDED_OPS`]（那个断言必须与 `WIRED_OPS` 一一对应）。
+pub const CHANNELS_OPS: &[&str] = &[
+    "channels_status",
+    "channels_prepare",
+    "channels_commit",
+    "channels_abort",
+];
 
 /// 控制目标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -412,9 +425,13 @@ impl HostLink {
     }
 }
 
-/// 请求可能已被执行之后，重试是否安全：只有 `commit` 是“重试会把成功报成失败”的 op。
+/// 请求可能已被执行之后，重试是否安全：提交类 op 重试会把成功报成失败/忙。
+///
+/// - `commit`：重试只会得到 `engine_token_invalid`（草稿已消费）；
+/// - `channels_commit`：重试可能得到 `channels_busy`（首笔仍在飞）或 `no_channels_draft`；
+/// - `channels_abort`：首笔若已丢弃草稿，重试会得到 `no_channels_draft`（把“已 abort”报成错误）。
 fn retry_after_ambiguous_failure(op: &str) -> bool {
-    op != "commit"
+    !matches!(op, "commit" | "channels_commit" | "channels_abort")
 }
 
 #[cfg(test)]
@@ -753,9 +770,63 @@ mod tests {
     }
 
     #[test]
-    fn retry_policy_only_excludes_commit_after_ambiguous_failures() {
-        for op in FORWARDED_OPS.iter().chain(std::iter::once(&STATUS_OP)) {
-            assert_eq!(retry_after_ambiguous_failure(op), *op != "commit", "{op}");
+    fn retry_policy_excludes_commit_like_ops_after_ambiguous_failures() {
+        for op in FORWARDED_OPS
+            .iter()
+            .chain(std::iter::once(&STATUS_OP))
+            .chain(CHANNELS_OPS.iter())
+        {
+            let expected = !matches!(*op, "commit" | "channels_commit" | "channels_abort");
+            assert_eq!(retry_after_ambiguous_failure(op), expected, "{op}");
         }
+    }
+
+    #[test]
+    fn channels_ops_are_a_separate_rt_host_extension_set() {
+        // 热重配 op 是 rt-host 控制层对契约 B 的增量；不能混进 FORWARDED_OPS（它与
+        // WIRED_OPS 一一对应），也不能自造 op（必须 channels_ 前缀且是这四个）。
+        assert_eq!(
+            CHANNELS_OPS,
+            &[
+                "channels_status",
+                "channels_prepare",
+                "channels_commit",
+                "channels_abort"
+            ]
+        );
+        for op in CHANNELS_OPS {
+            assert!(op.starts_with("channels_"), "{op}");
+            assert!(
+                !FORWARDED_OPS.contains(op),
+                "{op} must not be in FORWARDED_OPS"
+            );
+            assert!(
+                !khaen_host::control::WIRED_OPS.contains(op),
+                "{op} is not part of contract B WIRED_OPS"
+            );
+        }
+    }
+
+    #[test]
+    fn channels_commit_and_abort_are_not_retried_after_ambiguous_failures() {
+        for op in ["channels_commit", "channels_abort"] {
+            let (link, transport) = link(vec![Err(TransportError::Timeout("busy".into()))], 50);
+            let error = link
+                .call(json!({ "op": op, "token": "t" }))
+                .expect_err("timeout");
+            assert_eq!(error.code, HOST_LINK_UNAVAILABLE);
+            assert_eq!(transport.call_count(), 1, "{op} must not be retried");
+        }
+        // channels_prepare 可替换：超时后重试一次（幂等，rt-host 返回同一 token）。
+        let (link, transport) = link(
+            vec![
+                Err(TransportError::Timeout("slow probe".into())),
+                Ok(success()),
+            ],
+            50,
+        );
+        link.call(json!({ "op": "channels_prepare", "aes67_port": 5006 }))
+            .expect("retry succeeds");
+        assert_eq!(transport.call_count(), 2);
     }
 }

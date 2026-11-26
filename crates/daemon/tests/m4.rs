@@ -2,8 +2,9 @@
 //!
 //! 真实 TCP 打真实 axum 服务；rt-host status 用脚本化假传输（与生产同一份行协议编解码）。
 //! 覆盖：上传校验（认证/CSRF/sha256/解码/超限/幂等）、history 分页与 commit 关联、channels 的
-//! routing 映射与 null 原因、PUT 两阶段 prepare→commit 的 501 host_link_unsupported（不假成功）、
-//! token 语义与认证守卫。真机热重配属 NOT_RUN。
+//! routing 映射与 null 原因、方案路由（mapping/dac_map）由 channels_commit 之外生效的如实上报、
+//! token 语义与认证守卫。T61 起热重配的真接通（转发/透传/回滚）见 tests/channels_hot.rs；
+//! 真机热重配属 NOT_RUN。
 
 mod support;
 
@@ -285,8 +286,13 @@ async fn channels_maps_the_running_plan_routing_and_reports_real_gaps() {
     assert_eq!(response.status, 200, "{}", response.body_text());
     let body = response.json();
     assert_eq!(body["schema"], Value::String("khaen-channels/v1".into()));
-    // output：routing.dac_channels=4；mapping / dac_map 来自真实 routing 段。
+    assert_eq!(body["target"], Value::String("rt-host".into()));
+    // output：channels_status 的 current.channels（真实数据面）；mapping / dac_map 来自真实 routing 段。
     assert_eq!(body["output"]["channels"], Value::from(4));
+    assert_eq!(
+        body["output"]["channels_source"],
+        Value::String("rt-host-channels-status".into())
+    );
     assert_eq!(
         body["mapping"],
         json!([{"lane": 0, "dac": 0}, {"lane": 1, "dac": 2}])
@@ -295,12 +301,12 @@ async fn channels_maps_the_running_plan_routing_and_reports_real_gaps() {
         body["output"]["dac_map"],
         json!([0, Value::Null, 1, Value::Null])
     );
-    // input：AES67 参数没有数据源 -> null + reasons；source 来自 rt-host 运行模式。
-    assert!(body["input"]["channels"].is_null());
-    assert!(body["input"]["map"].is_null());
+    // input：T61 起来自 channels_status.current 的 AES67 真实配置；source/sdp 仍无数据源。
+    assert_eq!(body["input"]["channels"], Value::from(2));
+    assert_eq!(body["input"]["map"], json!([0, 1]));
+    assert!(body["input"]["source"].is_null());
     assert!(body["input"]["sdp_sha256"].is_null());
-    assert_eq!(body["input"]["source"], Value::String("aes67".into()));
-    for path in ["input.channels", "input.map", "input.sdp_sha256"] {
+    for path in ["input.source", "input.sdp_sha256"] {
         assert!(
             body["reasons"][path]
                 .as_str()
@@ -308,14 +314,20 @@ async fn channels_maps_the_running_plan_routing_and_reports_real_gaps() {
             "{path} 必须有原因: {body}"
         );
     }
-    // 热重配未接通：not_wired 如实上报（前端据此禁用应用）。
-    assert_eq!(
-        body["not_wired"][0]["path"],
-        Value::String("channels.hot_reconfigure".into())
-    );
-    assert!(body["not_wired"][0]["reason"]
-        .as_str()
-        .is_some_and(|reason| reason.contains("hot reconfiguration")));
+    // 热重配已接通：不再列 not_wired；hot_reconfigure.wired=true（能力真实上报）。
+    assert_eq!(body["not_wired"], json!([]));
+    assert_eq!(body["hot_reconfigure"]["wired"], Value::Bool(true));
+    assert_eq!(body["generation"], Value::from(2));
+    assert_eq!(body["busy"], Value::Bool(false));
+    assert_eq!(body["device"]["state"], Value::String("present".into()));
+    assert_eq!(body["device"]["probe"]["available"], Value::Bool(true));
+    assert_eq!(body["format"]["channels"], Value::from(4));
+    assert_eq!(body["format"]["sample_rate"], Value::from(48_000));
+    assert_eq!(body["format"]["block_frames"], Value::from(128));
+    assert_eq!(body["current"]["aes67_port"], Value::from(5_004));
+    // 本地镜像此时为空（本 daemon 还没 commit 过 channels）：null + 原因，不编。
+    assert!(body["applied"].is_null());
+    assert!(body["reasons"]["applied"].as_str().is_some());
     assert_eq!(body["plan"]["graph_id"], json!(graph_id));
     assert_eq!(body["plan"]["routing_known"], Value::Bool(true));
 }
@@ -326,8 +338,12 @@ async fn channels_degrades_to_null_with_reasons_when_the_routing_is_unknown() {
     let response = support::request(&server, "GET", "/api/channels").await;
     assert_eq!(response.status, 200, "{}", response.body_text());
     let body = response.json();
-    // 数据面 channels 仍来自 rt-host status（真实值）。
+    // 数据面 channels 仍来自 rt-host channels_status.current（真实值）。
     assert_eq!(body["output"]["channels"], Value::from(4));
+    assert_eq!(
+        body["output"]["channels_source"],
+        Value::String("rt-host-channels-status".into())
+    );
     // routing 未知：mapping / dac_map null + 原因（不编映射）。
     assert!(body["mapping"].is_null());
     assert!(body["output"]["dac_map"].is_null());
@@ -335,6 +351,8 @@ async fn channels_degrades_to_null_with_reasons_when_the_routing_is_unknown() {
         .as_str()
         .is_some_and(|reason| reason.contains("routing")));
     assert_eq!(body["plan"]["routing_known"], Value::Bool(false));
+    // AES67 输入来自 channels_status，与 routing 是否已知无关。
+    assert_eq!(body["input"]["channels"], Value::from(2));
 }
 
 // ---------------------------------------------------------------------------
@@ -342,12 +360,14 @@ async fn channels_degrades_to_null_with_reasons_when_the_routing_is_unknown() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "current_thread")]
-async fn channels_put_prepare_returns_token_and_diff_and_commit_is_501() {
+async fn channels_put_mapping_only_prepare_reports_the_plan_owned_blocker() {
     let (bytes, graph_id) = plan_bytes();
     let server = spawn_with_graph(&graph_id, 4).await;
     let response = upload_plan(&server, &bytes, "").await;
     assert_eq!(response.status, 201, "{}", response.body_text());
 
+    // mapping/dac_map 是方案 routing：channels_commit 改不了，prepare 如实返回 blocker、
+    // 不签发 token（不假成功）。
     let prepare_body = json!({
         "stage": "prepare",
         "mapping": [{"lane": 0, "dac": 1}, {"lane": 1, "dac": 3}],
@@ -357,41 +377,36 @@ async fn channels_put_prepare_returns_token_and_diff_and_commit_is_501() {
     assert_eq!(response.status, 200, "{}", response.body_text());
     let prepare = response.json();
     assert_eq!(prepare["stage"], Value::String("prepare".into()));
-    assert_eq!(prepare["diff"]["added"].as_array().map(Vec::len), Some(2));
-    assert_eq!(prepare["diff"]["removed"].as_array().map(Vec::len), Some(2));
-    assert_eq!(prepare["diff"]["changed"].as_array().map(Vec::len), Some(2));
+    assert_eq!(prepare["commit_supported"], Value::Bool(false));
+    assert!(prepare["engine_token"].is_null(), "{prepare}");
+    assert_eq!(prepare["mapping"]["changed"], Value::Bool(true));
     assert_eq!(
-        prepare["current"],
+        prepare["mapping"]["diff"]["added"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        prepare["mapping"]["diff"]["removed"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        prepare["mapping"]["diff"]["changed"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        prepare["mapping"]["current"],
         json!([{"lane": 0, "dac": 0}, {"lane": 1, "dac": 2}])
     );
-    assert_eq!(prepare["commit_supported"], Value::Bool(false));
-    let token = prepare["engine_token"].as_str().expect("token").to_string();
-
-    // commit：如实 501 host_link_unsupported + reason（不假成功）。
-    let commit_body = json!({"stage": "commit", "engine_token": token}).to_string();
-    let response = support::request_json(&server, "PUT", "/api/channels", &commit_body).await;
-    assert_eq!(response.status, 501, "{}", response.body_text());
-    let body = response.json();
     assert_eq!(
-        body["error"]["code"],
-        Value::String("host_link_unsupported".into())
+        prepare["mapping"]["applied_by"],
+        Value::String("plan routing section (plan prepare + commit)".into())
     );
-    assert!(body["error"]["details"]["reason"]
+    assert!(prepare["blockers"][0]
         .as_str()
-        .is_some_and(|reason| reason.contains("hot reconfiguration")));
-    assert_eq!(
-        body["error"]["details"]["commit_supported"],
-        Value::Bool(false)
-    );
-
-    // 错 token：409 engine_token_invalid（可重试，不消费草稿）。
-    let commit_body = json!({"stage": "commit", "engine_token": "deadbeef"}).to_string();
-    let response = support::request_json(&server, "PUT", "/api/channels", &commit_body).await;
-    assert_eq!(response.status, 409, "{}", response.body_text());
-    assert_eq!(
-        response.json()["error"]["code"],
-        Value::String("engine_token_invalid".into())
-    );
+        .is_some_and(|reason| reason.contains("plan routing")));
 
     // 越界 mapping（dac 9 >= dac_channels 4）：400 invalid_request。
     let bad_body = json!({"stage": "prepare", "mapping": [{"lane": 0, "dac": 9}]}).to_string();
@@ -415,23 +430,35 @@ async fn channels_put_prepare_without_running_plan_only_does_structural_validati
     let response = support::request_json(&server, "PUT", "/api/channels", &body).await;
     assert_eq!(response.status, 200, "{}", response.body_text());
     let prepare = response.json();
-    assert!(prepare["current"].is_null());
-    assert!(prepare["reasons"]["current"]
+    // 运行 routing 未知：仍然不签发 token（mapping 是方案路由，channels_commit 改不了），
+    // 但 planned diff 与结构校验照做，并如实给原因。
+    assert!(prepare["mapping"]["current"].is_null());
+    assert_eq!(prepare["mapping"]["changed"], Value::Null);
+    assert!(prepare["reasons"].to_string().contains("structure"));
+    assert!(prepare["engine_token"].is_null());
+    assert_eq!(prepare["commit_supported"], Value::Bool(false));
+    assert!(prepare["reasons"]["mapping.current"]
         .as_str()
-        .is_some_and(|reason| reason.contains("routing")));
-    assert!(prepare["engine_token"].as_str().is_some());
+        .is_some_and(|reason| reason.contains("routing") || reason.contains("graph_id")));
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn channels_put_commit_without_prepare_is_409() {
-    let server = spawn_with_graph("unknown-graph", 4).await;
+async fn channels_put_commit_without_prepare_is_409_no_channels_draft() {
+    let fake =
+        support::host_link_fake::FakeTransport::with_rt_status(rt_status("unknown-graph", 4));
+    // rt-host 侧没有草稿：业务错误码原样透传（409，不重试、不编成功）。
+    fake.push_error_reply("no_channels_draft", "no prepared channels draft");
+    let link = support::injected_link(Arc::clone(&fake));
+    let server = support::spawn_with_link(link, None).await;
     let body = json!({"stage": "commit", "engine_token": "aabbccdd"}).to_string();
     let response = support::request_json(&server, "PUT", "/api/channels", &body).await;
     assert_eq!(response.status, 409, "{}", response.body_text());
+    let body = response.json();
     assert_eq!(
-        response.json()["error"]["code"],
-        Value::String("engine_token_invalid".into())
+        body["error"]["code"],
+        Value::String("no_channels_draft".into())
     );
+    assert_eq!(fake.call_count(), 1, "业务错误是有效响应：只发一次");
 }
 
 // ---------------------------------------------------------------------------

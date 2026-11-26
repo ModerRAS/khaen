@@ -46,8 +46,14 @@
 //!   缺失字段 null + reasons；journalctl 不可用 503 `logs_unavailable`；重启需
 //!   `KHAEN_ALLOW_RESTART=1`（否则 403 `restart_disabled`）；daemon 自身重启 501。
 //! - `/api/channels` 与 `/api/plan/upload|history`：T55 M4 后端（见 `channels` / `plan_api` /
-//!   `plan_store` 模块）。PUT /api/channels 两阶段：prepare 真实校验并返回 token/planned diff，
-//!   commit 在 rt-host 热重配接通前返回 501 `host_link_unsupported`（不假成功）。
+//!   `plan_store` 模块）。T61 起 rt-host 目标真正接通 M3b 热重配：GET 优先用
+//!   `channels_status` 的 current/device/probe/generation（拿不到 null + reasons，方案 routing
+//!   作为 mapping 的补充来源）；PUT 两阶段 prepare -> `channels_prepare`、commit ->
+//!   `channels_commit`（成功回执原样透传 applied/changed/generation/gap_ms/format/graph_dropped，
+//!   失败回执的 rolled_back 等回滚真值原样带出）、abort -> `channels_abort`；
+//!   本地镜像记在 `channels_mirror`（最近一次成功 commit + 方案路由失效标记）。
+//!   process 目标（`KHAEN_RT_TARGET=process`）没有数据面热重配，PUT 任何阶段都 501
+//!   `host_link_unsupported` + reason（不假成功）。
 //! - `/api/motu`：T57 MOTU 控制面（见 `motu` 模块）。GET 恒 200：检测对象
 //!   （detected/model/control_reachable/reason）+ mute/vol 现状，设备读不到就 null + reasons，
 //!   Windows/无设备 detected=false 不报错。POST/PUT `/api/motu/volume` 两阶段：prepare 只校验
@@ -71,6 +77,8 @@ pub mod bind;
 pub mod calibration;
 /// M4 方案与声道后端（T55）：/api/channels 两阶段改声道映射 + /api/plan/upload|history。
 pub mod channels;
+/// /api/channels 的 daemon 本地镜像（T61）：草稿路由意图 + 最近一次成功 commit + 方案路由失效标记。
+pub mod channels_mirror;
 pub mod device;
 /// daemon → rt-host 控制通道代理（T70f-b）：契约 B 行 JSON 客户端 + 诚实降级。
 pub mod host_link;
@@ -190,6 +198,9 @@ pub struct DaemonState {
     last_restart: Mutex<Option<String>>,
     /// 方案库（T55）：上传内容寻址存储 + 已 prepare/commit 方案元数据 + 生效历史。
     plans: plan_store::PlanStore,
+    /// /api/channels 的本地镜像（T61）：prepare 记下的 lane -> DAC 路由意图、
+    /// 最近一次成功 channels_commit 的回执快照、方案图被重配丢弃后的 routing 失效标记。
+    channels_mirror: channels_mirror::ChannelsMirror,
     /// MOTU 控制面（T57）：检测 + 两阶段音量草稿 + 设备实现（生产 NativeMotu，测试注入假控制面）。
     motu: motu::MotuHub,
 }
@@ -225,6 +236,7 @@ impl DaemonState {
             restart: system::RestartPolicy::from_env(),
             last_restart: Mutex::new(None),
             plans: plan_store::PlanStore::new(&state_dir),
+            channels_mirror: channels_mirror::ChannelsMirror::new(),
             // 默认实现：crate 默认的 /proc/asound/cards + 默认控制网地址、无密码；
             // Windows/无设备时检测如实 detected=false，不建立任何连接。
             motu: motu::MotuHub::new(std::sync::Arc::new(motu::NativeMotu::default())),
@@ -344,6 +356,11 @@ impl DaemonState {
     /// 方案库（T55：/api/channels 的 routing 段与 /api/plan/history 的来源）。
     pub fn plans(&self) -> &plan_store::PlanStore {
         &self.plans
+    }
+
+    /// /api/channels 的本地镜像（T61；见 `channels_mirror` 模块）。
+    pub fn channels_mirror(&self) -> &channels_mirror::ChannelsMirror {
+        &self.channels_mirror
     }
 
     /// `/api/status` 的 calibration 三字段来源（服务状态 + 进程内事件缓存合并）。
@@ -849,9 +866,12 @@ async fn record_prepared_plan(state: &Arc<DaemonState>, plan_path: String) {
 /// commit 成功后记录已生效历史（T55：/api/plan/history 的真实来源）。
 ///
 /// 只记录真正的方案提交（响应带 graph_id）；format / mode 草稿的 commit 不是方案版本，跳过。
+/// T61：方案重新生效也意味着运行中的图又有已知 routing —— 清除 channels 镜像里的
+/// routing 失效标记（此前 channels_commit 丢图后 /api/channels 如实报 mapping=null）。
 fn record_commit(state: &DaemonState, response: &Value) {
     let now = crate::status::rfc3339_utc(std::time::SystemTime::now());
     state.plans().record_commit(response, "commit", &now);
+    state.channels_mirror().note_plan_commit(response);
 }
 
 /// 控制面错误码 → HTTP 状态码（映射表见模块文档）。
