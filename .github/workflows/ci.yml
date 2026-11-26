@@ -79,6 +79,37 @@ jobs:
           sudo test -x "${current}/bin/khaen-daemon"
           sudo test -x "${current}/bin/khaen-analyze"
           sudo grep -E '^(version|commit):' "${current}/BUILD"
+      # 回滚脚本也是部署安全路径：在临时 runner 上装“上一个 release + 最新 release”，
+      # 写 sentinel 验证 install.sh 不覆盖已有 /etc/khaen/daemon.env，再执行 rollback.sh，
+      # 断言 current 回到上一个版本（rollback 会重启 khaen-daemon；runner 是一次性的）。
+      - name: Validate rollback.sh and env preservation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="$(gh release view --json tagName -q .tagName)"
+          previous="$(gh release list --limit 2 --json tagName -q '.[1].tagName')"
+          echo "latest=${latest} previous=${previous}"
+          rm -rf /tmp/khaen-rollback
+          mkdir -p /tmp/khaen-rollback
+          gh release download "${latest}" --pattern '*linux-x86_64.tar.gz*' --dir /tmp/khaen-rollback
+          gh release download "${previous}" --pattern '*linux-x86_64.tar.gz*' --dir /tmp/khaen-rollback
+          latest_tar="$(ls /tmp/khaen-rollback/khaen-*-linux-x86_64.tar.gz | grep "${latest#v}")"
+          previous_tar="$(ls /tmp/khaen-rollback/khaen-*-linux-x86_64.tar.gz | grep "${previous#v}")"
+          sudo rm -rf /opt/khaen /etc/khaen
+          sudo rm -f /etc/systemd/system/khaen-daemon.service /etc/systemd/system/khaen-rt-host.service
+          sudo bash deploy/install.sh "${previous_tar}" --no-restart
+          test "$(readlink -f /opt/khaen/current)" = "/opt/khaen/releases/${previous#v}"
+          printf '# sentinel: must not be overwritten\n' | sudo tee /etc/khaen/daemon.env >/dev/null
+          sudo bash deploy/install.sh "${latest_tar}" --no-restart
+          test "$(readlink -f /opt/khaen/current)" = "/opt/khaen/releases/${latest#v}"
+          grep -q 'sentinel: must not be overwritten' /etc/khaen/daemon.env
+          sudo bash /opt/khaen/current/deploy/rollback.sh
+          after="$(readlink -f /opt/khaen/current)"
+          echo "after rollback: ${after}"
+          test "${after}" = "/opt/khaen/releases/${previous#v}"
+          sudo grep -E '^(version|commit):' "${after}/BUILD"
+          sudo systemctl stop khaen-daemon || true
 
   webui:
     runs-on: ubuntu-latest
