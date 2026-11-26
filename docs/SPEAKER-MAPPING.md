@@ -34,7 +34,9 @@
 | Custom | 自定义 | Custom | 其它（必须写 custom_label） |
 | None | 未使用 | Unused | 禁用行使用 |
 
-- 唯一性：同一角色最多启用一次（Custom 可多条，但 label 不可重复）；L/R 必须存在；LFE ≤1；None/未启用行不生成 lane。
+- **同一角色允许重复任意多次**（例如 8 只左主箱可以都是 `L`、多个低音炮都是 `LFE`/`Sub`）——这是 MIMO/多执行器抵消的设计输入，不是错误。
+- **缺少角色不报错、不阻塞**：布局声明了某角色但实际没接线，视为"真实缺少"（只做信息提示）。校验只拒绝结构性矛盾（启用了却填 None、DAC 越界、全部禁用、Custom 无名称）。
+- 重复角色在 UI/生成方案里作为**角色组**处理（如 `L ×8`、`LFE ×3`），组内按 DAC 升序排列。
 - 中文/英文显示名统一走 i18n（`speakerRole.*` key），代码里只用 canonical 字符串，禁止把中文写进逻辑。
 
 ## 3. Profile 数据模型（JSON，daemon 状态目录保存）
@@ -44,10 +46,12 @@
   "device": { "channels": 22 },
   "preset": "custom",
   "outputs": [
-    { "dac": 0, "enabled": true,  "role": "L" },
-    { "dac": 1, "enabled": true,  "role": "R" },
-    { "dac": 2, "enabled": false, "role": "None" },
-    { "dac": 3, "enabled": true,  "role": "LFE" }
+    { "dac": 0, "enabled": true,  "role": "L", "gain_db": 0.0 },
+    { "dac": 1, "enabled": true,  "role": "L", "gain_db": 0.0 },
+    { "dac": 2, "enabled": true,  "role": "R", "gain_db": 0.0 },
+    { "dac": 3, "enabled": true,  "role": "R", "gain_db": 0.0 },
+    { "dac": 4, "enabled": true,  "role": "LFE", "gain_db": 0.0 },
+    { "dac": 5, "enabled": false, "role": "None" }
   ],
   "inputs": [
     { "stream_channel": 0, "role": "L" },
@@ -58,13 +62,15 @@
 - `preset`：stereo / 5.1 / 7.1 / 7.1.4 / custom（仅 UI 辅助，最终以 outputs 为准）。
 - `inputs`：AES67 输入流通道 → 角色（当前 2ch，默认 0→L、1→R）；不改变接收侧映射，只决定 content.folds。
 - `outputs` 固定列出全部设备通道（22），`enabled=false` 的行 role 必须为 None。
+- `gain_db`（可选，默认 0）：该物理输出的电平微调；生成方案时写入对应 lane 的 protection gain。
 
 ## 4. 方案生成规则（profile → plan）
-1. 启用行按 canonical 角色顺序排序为 lane 0..N-1（同角色顺序按 DAC 升序）；
-2. `content`: `in_channels=22`，`out_lanes=N`，`folds`: 输入流通道（AES67 map 后的引擎通道）→ 对应角色 lane，增益 1.0；
-3. `crossover`: 每 lane 的滤波器（identity 或校准 FIR）；`matrix`: N×N（identity 或设计结果）；`protection`: N lane；
-4. `routing`: `dac_channels=22`，`routes = [[lane_i, dac_i], ...]`（profile 的启用行）；未启用 DAC 不列，输出为静音；
-5. 生成后必须走 `inspect`（准入预算/图编译）→ `prepare` → `commit`，失败/mismatch 如实报错，不自动回退到旧方案。
+1. 启用行按 canonical 角色顺序排序为 lane 0..N-1（同角色内按 DAC 升序）；同一角色出现多次是正常情况（L×8、R×8、LFE×3 等）；
+2. `content`: `in_channels=22`，`out_lanes=N`，`folds`: 输入流通道（AES67 map 后的引擎通道）→ **该角色的每一条 lane 都连一条 fold**（fan-out，增益 1.0，最终电平再由每 lane 的 protection gain/gain_db 调整）；输入角色缺失时该组静音（不报错）；
+3. MIMO 背景：重复角色 = 同一角色的多个执行器，后续 MIMO/modal 设计可按角色组拿到多条 IR，用于多音箱抵消；plan 本身不需要额外字段。
+4. `crossover`: 每 lane 的滤波器（identity 或校准 FIR）；`matrix`: N×N（identity 或设计结果）；`protection`: N lane（gain = profile gain_db）；
+5. `routing`: `dac_channels=22`，`routes = [[lane_i, dac_i], ...]`（profile 的启用行）；未启用 DAC 不列，输出为静音；
+6. 生成后必须走 `inspect`（准入预算/图编译）→ `prepare` → `commit`，失败/mismatch 如实报错，不自动回退到旧方案。
 
 ## 5. API 增量（加到 docs/API.md，均为加法）
 | 方法 | 路径 | 说明 |
@@ -78,7 +84,8 @@
 ## 6. UI 设计（新页面"输出映射 / Speaker Layout"）
 - 顶部：设备/引擎信息（设备通道数 22、当前引擎 22ch、当前方案 graph/version）、布局预设、输入映射（AES67 ch→角色）。
 - 表格：22 行物理输出，列：物理通道号（1..22）｜当前方案 lane/DAC（来自 /api/channels mapping，未知则"—"）｜启用开关｜角色下拉（中文显示）｜自定义名称（仅 Custom）｜备注。
-- 实时校验区：重复角色、缺 L/R、LFE>1、启用数 0/N 超限、DAC 越界；显示"将生成 N lane 方案，未选通道静音"。
+- 实时校验区：**重复角色是正常的**（不报错，显示组统计如「左 ×8 / 右 ×8 / 低音炮 ×3」）；只报结构性矛盾（启用但角色为未使用、DAC 越界、全部禁用、Custom 无名称）；缺少角色只做信息提示；显示「将生成 N lane 方案，未选通道静音」。
+- 角色分组视图：按角色汇总（L、R、LFE…）列出各组的物理输出号与数量，方便确认「8 只左主箱都标成 L」这类配置。
 - 底部：保存草稿（PUT prepare → 展示 diff/校验）→ 应用（POST output-profile/plan → inspect 预览 → prepare/commit/abort）；取消/丢弃。
 - routing 页：显示角色名（如"左环绕 → MOTU 输出 5"），并标注当前值来源（plan mirror/未知）。
 - 未来：通道识别测试音（需出声窗口，≤10 s/次、结束静音）。
@@ -95,3 +102,4 @@
 2. 应用方式：保存 profile 后必须手动"应用"才重建方案（建议）；还是保存自动重建？
 3. 输入映射（AES67 2ch→L/R）是否同页（建议是）？
 4. 通道识别测试音是否纳入首版（需窗口）？
+5. 同角色 fan-out 的默认电平：每条 lane 都拿满电平（1.0，靠 gain_db 微调，适合 MIMO 单独驱动），还是按组做 1/√N 归一化（适合被动并联音箱）？（建议默认 1.0，保留 group 归一化作为可选项）
