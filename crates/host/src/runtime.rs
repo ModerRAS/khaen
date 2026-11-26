@@ -871,6 +871,42 @@ impl PlanDraft {
     pub fn latency_samples(&self) -> u64 {
         self.latency_samples
     }
+
+    /// 拆出草稿部件（版本号、graph_id、处理链）。
+    ///
+    /// 跨进程控制通道用：控制线程编译草稿，块线程把处理链交给自己的 SlotEngine
+    /// （见 Runtime::stage_plan_draft）。普通单进程路径用 Runtime::commit_plan，
+    /// 它会额外校验草稿版本，不需要拆件。
+    pub fn into_parts(self) -> (u64, String, Box<dyn Processor + Send>) {
+        (self.version, self.graph_id, self.processor)
+    }
+}
+
+/// 在控制线程编译一份方案草稿（不持有 Runtime、不碰执行器）：准入 + 图编译。
+///
+/// 这是跨进程控制通道（rt-host）的 prepare 基元：调用方已读文件、校验 sha256 并用
+/// Plan::decode 解码出方案，这里只做准入与图编译；版本号由控制面单调分配后传入。
+/// 错误映射与 Runtime::prepare_plan 一致：准入拒绝是 RuntimeError::Admission，
+/// 结构非法/与运行时格式不匹配是 RuntimeError::Compile。不改变任何正在跑的音频。
+pub fn compile_plan_draft(
+    plan: &Plan,
+    engine_config: &EngineConfig,
+    limits: &AdmissionLimits,
+    version: u64,
+) -> Result<PlanDraft, RuntimeError> {
+    let graph = match PlanGraph::compile(plan, engine_config, limits) {
+        Ok(graph) => graph,
+        Err(CompileError::AdmissionRejected(admission)) => {
+            return Err(RuntimeError::Admission(admission));
+        }
+        Err(err) => return Err(RuntimeError::Compile(err)),
+    };
+    Ok(PlanDraft {
+        version,
+        graph_id: plan.graph_id_hex(),
+        latency_samples: graph.estimated_latency_samples(),
+        processor: Box::new(graph),
+    })
 }
 
 impl fmt::Debug for PlanDraft {
@@ -1390,21 +1426,8 @@ impl<P: PcmOutput> Runtime<P> {
         limits: &AdmissionLimits,
     ) -> Result<PlanDraft, RuntimeError> {
         let plan = Plan::decode(bytes).map_err(RuntimeError::Plan)?;
-        let engine_config = self.engine.config().clone();
-        let graph = match PlanGraph::compile(&plan, &engine_config, limits) {
-            Ok(graph) => graph,
-            Err(CompileError::AdmissionRejected(admission)) => {
-                return Err(RuntimeError::Admission(admission));
-            }
-            Err(err) => return Err(RuntimeError::Compile(err)),
-        };
-        let latency_samples = graph.estimated_latency_samples();
-        Ok(PlanDraft {
-            version: self.pending_plan_version(),
-            graph_id: plan.graph_id_hex(),
-            latency_samples,
-            processor: Box::new(graph),
-        })
+        let version = self.pending_plan_version();
+        compile_plan_draft(&plan, self.engine.config(), limits, version)
     }
 
     /// 方案加载第二步：把草稿排入 SlotEngine 的下一块边界，返回将生效的块号。
@@ -1421,6 +1444,16 @@ impl<P: PcmOutput> Runtime<P> {
         Ok(self
             .engine
             .stage_processor(draft.processor, draft.version, draft.graph_id))
+    }
+
+    /// 控制通道：把控制线程编译好的草稿排入下一块边界（版本由控制面分配，这里不重复校验）。
+    ///
+    /// 与 Runtime::commit_plan 的区别：后者校验"草稿版本 == 下一个版本"（单 owner 控制面用），
+    /// 跨进程控制通道的版本由控制核心单调分配，因此直接交给执行器。返回新图将生效的块号
+    /// （与 SlotEngine::stage_processor 一致）。
+    pub fn stage_plan_draft(&mut self, draft: PlanDraft) -> u64 {
+        let (version, graph_id, processor) = draft.into_parts();
+        self.engine.stage_processor(processor, version, graph_id)
     }
 
     /// 一步完成 prepare + commit（控制面简单路径）；返回将生效的块号。

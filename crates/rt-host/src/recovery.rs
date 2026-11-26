@@ -46,6 +46,9 @@ pub const REOPEN_BASE_DELAY_MS: u64 = 2_000;
 pub const REOPEN_MAX_DELAY_MS: u64 = 5_000;
 /// 设备缺失期间日志限频：每 N 次重开尝试打印一条（首次失败与状态变化总是打印）。
 pub const REOPEN_LOG_EVERY: u64 = 10;
+/// 设备缺失期间控制命令轮询片长（毫秒）：块循环在退避睡眠中按该片长醒来处理控制命令，
+/// 所以设备 absent 时 mute/commit 仍会被受理（在恢复出块后的块边界生效）。
+pub const CONTROL_POLL_SLICE_MS: u64 = 50;
 
 /// 第 `attempt` 次重开失败后的退避（毫秒）：2 s、4 s，之后封顶 5 s。
 pub fn reopen_delay_ms(attempt: u64) -> u64 {
@@ -285,19 +288,39 @@ fn persist_status<P: PcmOutput>(
 
 /// 数据面主循环（平台无关；`P` 为 PCM 设备类型，真机是 AlsaPcm，测试用脚本化假设备）。
 ///
-/// 行为（顺序即优先级）：
-/// 1. 设备已打开 → `run_block`；成功则块计数 +1，按需轮询设备监督器/打印统计/落状态文件；
-/// 2. `run_block` 报设备不可用 → 关句柄、把故障交给安全监督器（立刻 faulted + 安全静音）、
-///    进入 absent；**不退出**；
-/// 3. 设备未打开 → 绝不调用 `run_block`（fail-closed）；到点按退避调 `open_device` 重开，
-///    成功后清设备丢失故障、记录恢复日志、继续块循环；
-/// 4. 不可恢复错误（引擎/配置类后端错误等）→ 返回退出码 1（稳定），并停收包线程。
-///
-/// 返回退出码与最终设备生命周期快照（测试/诊断用；状态文件也已落过盘）。
+/// 无控制通道的入口：等价于 [drive_loop_with_control] + 一个 disabled 的控制桥
+/// （既有 T42o 行为与测试不变）。
 pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
     runtime: &mut Runtime<P>,
     options: &LoopOptions,
     pacer: &mut C,
+) -> (ExitCode, DeviceLifecycle) {
+    let mut bridge = crate::control::ControlBridge::disabled();
+    drive_loop_with_control(runtime, options, pacer, &mut bridge)
+}
+
+/// 数据面主循环 + 跨进程控制通道（T70f-a）。
+///
+/// 行为（顺序即优先级）：
+/// 1. 每轮块边界前 poll 控制命令（mute/换图）并回执；命令后用一次性 ack 唤醒控制线程；
+/// 2. 设备已打开 → `run_block`；成功则块计数 +1，按需轮询设备监督器/打印统计/落状态文件，
+///    并按 `stats_every` 发布控制通道状态快照；
+/// 3. `run_block` 报设备不可用 → 关句柄、把故障交给安全监督器（立刻 faulted + 安全静音）、
+///    进入 absent；**不退出**；
+/// 4. 设备未打开 → 绝不调用 `run_block`（fail-closed）；到点按退避调 `open_device` 重开，
+///    成功后清设备丢失故障、记录恢复日志、继续块循环；
+/// 5. 不可恢复错误（引擎/配置类后端错误等）→ 返回退出码 1（稳定），并停收包线程。
+///
+/// 控制通道的约束：`Runtime::run_block` 一行不改；命令只在块边界执行，快照在块边界发布，
+/// 控制线程只读快照。设备 absent 期间用 [CONTROL_POLL_SLICE_MS] 小片睡眠轮询命令，
+/// 所以 status/mute/commit 照常响应（图在恢复后的第一个块边界生效）。
+///
+/// 返回退出码与最终设备生命周期快照（测试/诊断用；状态文件也已落过盘）。
+pub fn drive_loop_with_control<P: PcmOutput + 'static, C: LoopPacer>(
+    runtime: &mut Runtime<P>,
+    options: &LoopOptions,
+    pacer: &mut C,
+    bridge: &mut crate::control::ControlBridge,
 ) -> (ExitCode, DeviceLifecycle) {
     let (plan_rate, block_frames, sample_rate) = {
         let engine = &runtime.config().engine;
@@ -314,6 +337,8 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
     };
     let mut blocks: u64 = 0;
     let mut lifecycle = DeviceLifecycle::new();
+    // 控制通道：先发布一份初始快照（设备尚未打开也如实报告），status 不必等第一个块。
+    bridge.publish(runtime, &lifecycle);
 
     // 启动时先试一次打开：设备不在位/打不开不退出，进入 absent 按退避重试。
     if let Err(error) = open_output(runtime, options, plan_rate) {
@@ -325,9 +350,12 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
         runtime.report_device_loss(format!("output device unavailable at startup: {error}"));
         lifecycle.note_absent(pacer.now_ms(), error);
         persist_status(runtime, options, &lifecycle);
+        bridge.publish(runtime, &lifecycle);
     }
 
     loop {
+        // 块边界：先执行控制线程排队的命令（mute / 换图），再用 ack 唤醒等待中的控制线程。
+        bridge.poll_commands(runtime, &lifecycle);
         if target_blocks != 0 && blocks >= target_blocks {
             break;
         }
@@ -360,6 +388,7 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
                         }
                         persist_status(runtime, options, &lifecycle);
                     }
+                    bridge.maybe_publish(runtime, &lifecycle);
                 }
                 Err(error) => {
                     if !is_recoverable_device_loss(&error) {
@@ -367,6 +396,7 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
                             "khaen-rt-host: run_block failed at block {blocks}: [{:?}] {error}; exiting (unrecoverable)",
                             error.code()
                         );
+                        bridge.publish(runtime, &lifecycle);
                         let _ = runtime.stop_receiver();
                         return (ExitCode::from(1), lifecycle);
                     }
@@ -380,6 +410,7 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
                     );
                     lifecycle.note_absent(pacer.now_ms(), error.to_string());
                     persist_status(runtime, options, &lifecycle);
+                    bridge.publish(runtime, &lifecycle);
                 }
             }
         } else {
@@ -387,7 +418,10 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
             let now = pacer.now_ms();
             if !lifecycle.should_attempt(now) {
                 let wait = lifecycle.next_attempt_at_ms().saturating_sub(now).max(1);
-                pacer.sleep_ms(wait);
+                // 设备缺失期间也照常响应控制命令：按小片睡，片间 poll 一次（
+                // absent 时 mute/commit 仍会被受理，图在恢复后的第一个块边界生效）。
+                pacer.sleep_ms(wait.min(CONTROL_POLL_SLICE_MS));
+                bridge.poll_commands(runtime, &lifecycle);
                 continue;
             }
             let attempt = lifecycle.note_attempt(now);
@@ -404,6 +438,7 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
                         graph.version, graph.graph_id
                     );
                     persist_status(runtime, options, &lifecycle);
+                    bridge.publish(runtime, &lifecycle);
                 }
                 Err(error) => {
                     let now = pacer.now_ms();
@@ -417,12 +452,14 @@ pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
                         );
                     }
                     persist_status(runtime, options, &lifecycle);
+                    bridge.publish(runtime, &lifecycle);
                 }
             }
         }
     }
 
     // 结束：打印最终状态、落盘、停收包线程。
+    bridge.publish(runtime, &lifecycle);
     let status = runtime.status();
     print_status(&status, &lifecycle);
     persist_status(runtime, options, &lifecycle);
@@ -867,5 +904,81 @@ mod tests {
             runtime.status().state,
             khaen_host::safety::RuntimeState::Running
         );
+    }
+
+    /// T70f-a：控制通道与 T42o 恢复循环共存——设备 absent 期间命令照常受理，
+    /// 图/静音在恢复出块后的第一个块边界生效；status 快照照常发布（设备字段如实 absent）。
+    #[test]
+    fn drive_loop_with_control_serves_commands_while_device_absent() {
+        let device = format!("rt-host-test-control-absent-{}", std::process::id());
+        let state = ScriptState::default();
+        state.fail_opens.store(2, Ordering::SeqCst); // 启动 absent + 首次重开失败
+        register_scripted_pcm(&device, &state);
+
+        let (source, handle) = test_source();
+        for index in 0..64u16 {
+            handle.send(packet(index, u32::from(index) * BLOCK_FRAMES as u32));
+        }
+        let mut runtime =
+            Runtime::<ScriptedPcm>::with_source_deferred(runtime_config(&device), source)
+                .expect("deferred runtime");
+
+        let (command_tx, command_rx) = std::sync::mpsc::channel();
+        let snapshot: std::sync::Arc<
+            std::sync::Mutex<Option<crate::control::snapshot::RuntimeSnapshot>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut bridge = crate::control::ControlBridge::new(command_rx, snapshot.clone(), 0);
+        let options = LoopOptions {
+            alsa_device: "hw:99".to_string(),
+            proc_asound: std::env::temp_dir().join("khaen-rt-host-tests-no-asound"),
+            status_file: None,
+            run_seconds: 1,
+            stats_every: 0,
+        };
+        let mut pacer = TestPacer::default();
+
+        // 设备还没打开就排入静音命令：absent 退避睡眠的小片轮询必须把它受理并回执。
+        let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+        command_tx
+            .send(crate::control::command::ControlCommand::Mute {
+                mute: true,
+                ack: ack_tx,
+            })
+            .expect("queue mute");
+
+        let (exit, lifecycle) =
+            drive_loop_with_control(&mut runtime, &options, &mut pacer, &mut bridge);
+        assert_eq!(exit, ExitCode::SUCCESS);
+        assert!(!lifecycle.is_absent());
+        match ack_rx.recv().expect("mute acked while device absent") {
+            crate::control::command::CommandReply::Mute {
+                mute,
+                applied_block,
+                idempotent,
+            } => {
+                assert!(mute);
+                assert_eq!(applied_block, 1, "no block had run when the mute was taken");
+                assert!(!idempotent);
+            }
+            other => panic!("unexpected reply: {other:?}"),
+        }
+        assert!(
+            runtime.muted(),
+            "mute must take effect at the first recovered block"
+        );
+
+        let snapshot = snapshot
+            .lock()
+            .expect("snapshot lock")
+            .clone()
+            .expect("block loop published a snapshot");
+        assert_eq!(
+            snapshot.status.blocks, 375,
+            "1 s @ 48 kHz / 128 = 375 blocks"
+        );
+        assert!(snapshot.status.muted);
+        // 最终状态：设备已恢复（present），快照是恢复后发布的。
+        assert!(!snapshot.lifecycle.is_absent());
+        assert!(!snapshot.status.switch_pending);
     }
 }

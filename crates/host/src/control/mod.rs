@@ -123,7 +123,10 @@ fn token_invalid(message: impl Into<String>) -> ControlError {
 }
 
 /// 从请求对象里取字符串字段；缺失或类型不对都给 `bad_request`。
-fn string_field<'a>(object: &'a Map<String, Value>, name: &str) -> Result<&'a str, ControlError> {
+pub fn string_field<'a>(
+    object: &'a Map<String, Value>,
+    name: &str,
+) -> Result<&'a str, ControlError> {
     match object.get(name) {
         Some(Value::String(value)) => Ok(value.as_str()),
         Some(_) => Err(bad_request(format!("field {name} must be a string"))),
@@ -160,14 +163,14 @@ impl core::fmt::Debug for DraftPlan {
 }
 
 /// 确定性 engine_token：版本号 16 位十六进制 + 文件内容 sha256 前 16 位十六进制。
-fn engine_token(version: u64, sha: &[u8; 32]) -> String {
+pub fn engine_token(version: u64, sha: &[u8; 32]) -> String {
     let mut prefix = [0u8; 8];
     prefix.copy_from_slice(&sha[..8]);
     format!("{:016x}{:016x}", version, u64::from_be_bytes(prefix))
 }
 
 /// 准入预算序列化（字段与 [`Budget`] 一一对应）。
-fn budget_json(budget: &Budget) -> Value {
+pub fn budget_json(budget: &Budget) -> Value {
     json!({
         "plan_bytes": budget.plan_bytes,
         "coefficients": budget.coefficients,
@@ -189,7 +192,7 @@ fn budget_json(budget: &Budget) -> Value {
 /// - **bad_request**：方案与本次运行的运行时配置不匹配——块大小 / 采样率 / 通道数 / lane 链
 ///   不衔接。换一份匹配配置的方案即可，属于请求内容问题（`Engine` 表示运行时配置非法，
 ///   构造时已校验过，正常不可达）。
-fn compile_error_to_control(err: CompileError) -> ControlError {
+pub fn compile_error_to_control(err: CompileError) -> ControlError {
     let message = format!("plan graph compile failed: {err}");
     match err {
         CompileError::AdmissionRejected(_)
@@ -229,7 +232,7 @@ fn finite_f64_field(object: &Map<String, Value>, name: &str) -> Result<f64, Cont
 
 /// 把一段 `data` 对象应用到基线上，产出打了补丁的方案（只做字段搬运与类型检查，
 /// 校验交给随后的 `encode_checked` / 准入 / 图编译——不在这一层重复实现契约校验）。
-fn apply_surface_patch(base: &Plan, surface: &str, data: &Value) -> Result<Plan, ControlError> {
+pub fn apply_surface_patch(base: &Plan, surface: &str, data: &Value) -> Result<Plan, ControlError> {
     let object = data
         .as_object()
         .ok_or_else(|| bad_request("field data must be a json object"))?;
@@ -374,7 +377,7 @@ fn apply_surface_patch(base: &Plan, surface: &str, data: &Value) -> Result<Plan,
     Ok(plan)
 }
 /// 格式快照（status / format 响应用同一份字段名）。
-fn format_json(config: &EngineConfig) -> Value {
+pub fn format_json(config: &EngineConfig) -> Value {
     json!({
         "sample_rate": config.sample_rate,
         "block_size": config.block_frames,

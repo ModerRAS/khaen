@@ -1,11 +1,14 @@
+#![recursion_limit = "256"]
 //! khaen 实时主机进程（T70f）：AES67 RTP 输入 → 方案图 → ALSA 播放。
 //!
 //! 这个进程是**验证工具 + 实时数据面**，不是最终形态：
 //! - 它独占音频设备（ALSA PCM），**不要**和 MOTU keeper / prod_bridge / aplay 同时跑；
 //! - 设备监督器的生产装配留到与 daemon 的联动（T70f 后续），本进程默认
 //!   `SupervisorOptions::enabled = false`（状态如实为 absent，不假装断言过速率）；
-//! - 方案切换：启动时读一次方案文件（`KHAEN_PLAN`）；运行期不换图。
-//!   运行期换图需要跨进程控制通道（T70f 未实现），本进程不宣称支持。
+//! - 方案切换：启动时读一次方案文件（`KHAEN_PLAN`）；运行期可经 Unix socket 控制通道
+//!   （T70f-a 已实现服务端：status/mute/prepare/commit/abort/coeff/inspect/surface/rollback/format）
+//!   在块边界换图/静音。daemon 侧的代理客户端（把 REST 转发成本协议）是 T70f-b，尚未实现；
+//!   在它接上之前，daemon 的 `/api/*` 仍只作用于 daemon 自己的控制面副本，不代表已作用于本进程。
 //! - 采样率回读：打开 PCM 前后回读 `/proc/asound/.../hw_params` 的 `rate:`；若与方案速率
 //!   不一致（例如 MOTU 被外部改到 192 kHz），fail-closed 不播放、关掉设备并按退避重试，
 //!   状态文件记录 `last_device_error`（不带着错速播放，也不退出进程）。回读依赖 `hw:`
@@ -19,6 +22,24 @@
 //! 恢复后重建输入抖动缓冲（重新预填）、显式清除设备丢失故障、当前方案 version/graph_id 保持
 //! 不变，块计数继续增长回到 running。设备缺失永不导致退出；只有配置/方案准入类错误与无法
 //! 恢复的内部错误才退出（稳定退出码）。
+//!
+//! # 跨进程控制通道（T70f-a）
+//!
+//! 进程内跑契约 B 的行 JSON 服务端（`control` 模块）：Unix domain socket，一行 JSON 请求 /
+//! 一行 JSON 响应，每连接一个处理线程；路径取 `KHAEN_CONTROL_SOCKET`（默认
+//! `/run/khaen/rt-host.sock`），`KHAEN_CONTROL=off` 关闭。控制线程**不直接碰 Runtime**：
+//! 静音/换图通过 mpsc 命令交给块线程、在块边界执行并回一次性 ack；status 读块线程发布的
+//! 状态快照（附 `age_ms`/`stale`），不阻塞块线程。`Runtime::run_block` 一行未改。
+//!
+//! 如实边界：
+//! - 控制通道起不来（路径不可写/已被占用等）只打印原因、数据面继续跑，**不退出进程**；
+//! - `format` 只改控制面的编译格式：数据面执行器/设备格式在进程生命周期内固定，commit 如实报
+//!   `device_restart_required=true` / `pcm_reconfigured=false`（M3b 热重配未实现）；之后
+//!   格式不匹配的方案 commit 回 `not_applied`，不会把不匹配的图塞进引擎；
+//! - 传输层不做认证（本机可信连接，socket 权限由部署/umask 决定）；跨机/多用户部署需要另外的
+//!   鉴权层，不在本任务；
+//! - 设备缺失（T42o absent）时控制通道照常响应 status，mute/commit 仍受理，图在恢复出块后的
+//!   第一个块边界生效（如实上报 `applied_block`）。
 //!
 //! # 环境变量
 //!
@@ -39,6 +60,8 @@
 //! | `KHAEN_RUN_SECONDS` | `0` | 按块数换算的运行秒数；0 = 一直跑（Ctrl-C 结束）。设备缺失期间块不增长，进程保持运行 |
 //! | `KHAEN_STATS_EVERY_BLOCKS` | `4000` | 每 N 块打印一次统计并轮询设备监督器（0 = 不打印） |
 //! | `KHAEN_STATUS_FILE` | 未设置 | 状态 JSON 落盘路径（每统计周期与设备状态变化时原子替换；soak 无人值守时用来取证） |
+//! | `KHAEN_CONTROL` | `on` | 控制通道开关：`off`/`0`/`false` 关闭；其它非法值按配置错误退出 2 |
+//! | `KHAEN_CONTROL_SOCKET` | `/run/khaen/rt-host.sock` | 控制通道 Unix socket 路径 |
 //!
 //! # 状态文件字段（schema 仍是 `khaen-rt-status/v1`，T42o 为向后兼容的纯增量）
 //!
@@ -54,15 +77,19 @@
 //! # 实时约束说明（重要）
 //!
 //! `Runtime::run_block` 本身是零分配/无锁/无 IO 的；但本验证工具的**主循环**等于块线程：
-//! 每 `KHAEN_STATS_EVERY_BLOCKS` 块会打印统计并轮询设备监督器（sysfs/命令 = IO）。
-//! 这是为了在没有控制线程的今天先把真机链路跑通；**生产形态必须把监控移到独立线程/进程**，
+//! 每 `KHAEN_STATS_EVERY_BLOCKS` 块会打印统计并轮询设备监督器（sysfs/命令 = IO），每个块前方
+//! 用 try_recv 处理控制命令（无锁等待）、按统计周期克隆状态快照发布。
+//! 控制通道把"重活"（读方案、解码、准入、图编译、surface 补丁）放在控制线程，但**命令执行与
+//! 状态采集仍在块线程**上（这是验证工具的让步）；**生产形态必须把监控移到独立线程/进程**，
 //! 这一点在 `docs/DESIGN.md` 的线程模型里明确写着，不在这里假装满足 RT 认证。
 //!
 //! # 平台说明
 //!
-//! 除 `AlsaPcm` 外，本文件的配置解析/状态文件/设备监督循环都在 `app` / `recovery` 模块里、
-//! 与平台无关地编译，这样 Windows 上 `cargo clippy`/测试期就能检查这些逻辑的**类型正确性**
-//! （运行期仍需要 Linux + ALSA 才能出声；Windows 只打一条说明并退出 2）。
+//! 除 `AlsaPcm` 外，本文件的配置解析/状态文件/设备监督循环/控制协议核心都在 `app` /
+//! `recovery` / `control` 模块里、与平台无关地编译，这样 Windows 上 `cargo clippy`/测试期
+//! 就能检查这些逻辑的**类型正确性**；Unix socket 传输是 `cfg(unix)` 的（Windows 无传输实现，
+//! 控制核心与内存双工/回环夹具仍参与测试）。运行期仍需要 Linux + ALSA 才能出声；
+//! Windows 只打一条说明并退出 2。
 #[cfg(target_os = "linux")]
 fn main() -> std::process::ExitCode {
     app::run::<khaen_host::alsa_backend::AlsaPcm>()
@@ -82,6 +109,11 @@ fn main() -> std::process::ExitCode {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod recovery;
 
+// 跨进程控制通道（T70f-a）：契约 B 的行 JSON 服务端。协议核心/命令/快照平台无关
+// （Windows 上同样参与编译与单元测试）；Unix socket 传输只在 cfg(unix) 下编译。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod control;
+
 // Windows 上 main 不实例化 app（没有 ALSA），但模块仍参与编译以检查逻辑类型；
 // 因此非 Linux 目标允许这些“只被 Linux 调用者使用”的项为 dead_code。
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -90,6 +122,10 @@ mod app {
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
 
+    use std::sync::{mpsc, Arc, Mutex};
+
+    use crate::control::snapshot::SharedSnapshot;
+    use crate::control::{ControlBridge, ControlConfig, ControlCore, ControlCoreConfig};
     use crate::recovery::DeviceLifecycle;
     use khaen_core::plan::Plan;
     use khaen_host::admission::admit;
@@ -172,6 +208,8 @@ mod app {
         pub status_file: Option<PathBuf>,
         pub run_seconds: u64,
         pub stats_every: u64,
+        /// 控制通道配置（KHAEN_CONTROL / KHAEN_CONTROL_SOCKET）。
+        pub control: ControlConfig,
     }
 
     /// 设备实际速率与方案速率不一致（退出码 1：运行期拒绝，不带着错速播放）。
@@ -393,6 +431,8 @@ mod app {
         let stats_every: u64 = env_parse("KHAEN_STATS_EVERY_BLOCKS", 4000)?;
         let status_file = env_optional("KHAEN_STATUS_FILE").map(PathBuf::from);
         let plan_path = env_optional("KHAEN_PLAN").map(PathBuf::from);
+        // 控制通道：非法值按配置错误处理（不静默回退，避免"以为开了其实没开"）。
+        let control = ControlConfig::from_env().map_err(|err| ConfigError::new(err.message()))?;
         let unloaded = match env_string("KHAEN_UNLOADED", "silence")?.as_str() {
             "silence" => UnloadedPolicy::Silence,
             "passthrough" => UnloadedPolicy::Passthrough,
@@ -455,6 +495,7 @@ mod app {
             status_file,
             run_seconds,
             stats_every,
+            control,
         })
     }
 
@@ -632,6 +673,7 @@ mod app {
 
         // 方案先于设备校验/加载：文件/ABI/准入错误属于不可恢复的配置类错误，必须退出
         // （即使声卡此刻不在位）；设备缺失不影响方案加载与 version/graph_id 语义。
+        let mut initial_plan: Option<(Plan, u64)> = None;
         if let Some(path) = settings.plan_path.as_deref() {
             let startup = match load_startup_plan(path) {
                 Ok(startup) => startup,
@@ -649,15 +691,71 @@ mod app {
                 startup.graph_id, startup.latency_samples
             );
             match runtime.apply_plan(&startup.bytes, &AdmissionLimits::default()) {
-                Ok(version) => println!(
-                    "khaen-rt-host: plan applied at version {version} (graph_id {})",
-                    startup.graph_id
-                ),
+                Ok(version) => {
+                    // 控制通道的 surface 补丁需要"最近一次已生效方案"作基线：这里按预检结果
+                    // 再解码一次（启动期一次性开销；预检已证明能解码）。
+                    match Plan::decode(&startup.bytes) {
+                        Ok(plan) => initial_plan = Some((plan, version)),
+                        Err(err) => {
+                            eprintln!(
+                                "khaen-rt-host: startup plan cannot be decoded for the control channel: {err}"
+                            );
+                            return ExitCode::from(2);
+                        }
+                    }
+                    println!(
+                        "khaen-rt-host: plan applied at version {version} (graph_id {})",
+                        startup.graph_id
+                    );
+                }
                 Err(err) => {
                     eprintln!("khaen-rt-host: plan rejected: [{:?}] {err}", err.code());
                     return ExitCode::from(1);
                 }
             }
+        }
+
+        // 跨进程控制通道（T70f-a）：数据面优先——控制通道起不来只打印原因并继续，不退出进程。
+        // 块线程是 Runtime 的唯一 owner；控制线程只发块边界命令并读状态快照。
+        let mut bridge = ControlBridge::disabled();
+        let mut control_server: Option<crate::control::ControlServer> = None;
+        if settings.control.enabled {
+            let (command_tx, command_rx) = mpsc::channel();
+            let snapshot: SharedSnapshot = Arc::new(Mutex::new(None));
+            let (initial_plan_value, initial_version) = match initial_plan {
+                Some((plan, version)) => (Some(plan), version),
+                None => (None, 0),
+            };
+            let core = ControlCore::new(ControlCoreConfig {
+                data_plane_format: runtime.config().engine.clone(),
+                limits: AdmissionLimits::default(),
+                commands: command_tx,
+                snapshot: Arc::clone(&snapshot),
+                mode: khaen_host::control::RuntimeMode::Aes67,
+                initial_plan: initial_plan_value,
+                initial_version,
+                command_timeout: crate::control::core::COMMAND_ACK_TIMEOUT,
+            });
+            let core = Arc::new(Mutex::new(core));
+            match crate::control::start(&settings.control, core) {
+                Ok(server) => {
+                    if let Some(path) = server.socket_path() {
+                        println!(
+                            "khaen-rt-host: control channel listening on {} (KHAEN_CONTROL=off disables it)",
+                            path.display()
+                        );
+                    }
+                    control_server = Some(server);
+                    bridge = ControlBridge::new(command_rx, snapshot, settings.stats_every);
+                }
+                Err(err) => {
+                    eprintln!(
+                        "khaen-rt-host: control channel unavailable ({err}); data plane continues without runtime control"
+                    );
+                }
+            }
+        } else {
+            println!("khaen-rt-host: control channel disabled by KHAEN_CONTROL=off");
         }
 
         let options = crate::recovery::LoopOptions {
@@ -668,7 +766,25 @@ mod app {
             stats_every: settings.stats_every,
         };
         let mut pacer = crate::recovery::RealPacer::new();
-        crate::recovery::drive_loop(&mut runtime, &options, &mut pacer).0
+        // control_server 必须活到块循环结束（Drop 时停止 accept 并移除 socket）。
+        let exit = if bridge.enabled() {
+            crate::recovery::drive_loop_with_control(
+                &mut runtime,
+                &options,
+                &mut pacer,
+                &mut bridge,
+            )
+            .0
+        } else {
+            // 没有控制通道：走既有 T42o 主循环（行为与 T70f-a 之前完全一致）。
+            crate::recovery::drive_loop(&mut runtime, &options, &mut pacer).0
+        };
+        // 控制通道句柄活到数据面循环结束；Drop 停止 accept 并移除 socket 文件。
+        #[cfg(unix)]
+        drop(control_server);
+        #[cfg(not(unix))]
+        let _ = control_server;
+        exit
     }
 }
 
