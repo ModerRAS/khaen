@@ -37,6 +37,9 @@ pub const DEFAULT_READBACK_TIMEOUT: Duration = Duration::from_millis(1500);
 pub const DEFAULT_IDLE_DRAIN: Duration = Duration::from_millis(150);
 /// Default datastore collection window for save-snapshot.
 pub const DEFAULT_SNAPSHOT_DRAIN: Duration = Duration::from_secs(3);
+
+/// 状态就绪后等待设备身份字段（DEV_NAME）的宽限（慢调度机器上身份帧可能稍晚）。
+const IDENTITY_GRACE: Duration = Duration::from_millis(250);
 /// Hard cap on one idle drain, so a continuously talking device cannot stall a call.
 const MAX_IDLE_DRAIN: Duration = Duration::from_secs(2);
 
@@ -618,11 +621,29 @@ impl CueMixClient {
 
     fn sync(&mut self) -> Result<(), CueMixError> {
         let deadline = Instant::now() + self.cfg.sync_timeout;
+        let mut state_ready = false;
+        // 设备身份字段（DEV_NAME 等）通常紧跟在状态 burst 的后续帧里；在慢调度机器上
+        // 可能晚于状态键到达。只给一个短宽限（不拖慢“设备不报名字”的合法场景）。
+        let mut identity_deadline: Option<Instant> = None;
         loop {
-            if self.has_state_keys() {
-                return Ok(());
+            if !state_ready && self.has_state_keys() {
+                state_ready = true;
+                if self.mirror.get(keys::DEV_NAME, 0).is_none() {
+                    identity_deadline = Some(Instant::now() + IDENTITY_GRACE);
+                }
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            if state_ready {
+                let identity_done = self.mirror.get(keys::DEV_NAME, 0).is_some()
+                    || identity_deadline.is_none_or(|limit| Instant::now() >= limit);
+                if identity_done {
+                    return Ok(());
+                }
+            }
+            let mut limit = deadline;
+            if let (false, Some(grace)) = (state_ready, identity_deadline) {
+                limit = limit.min(grace);
+            }
+            let remaining = limit.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 break;
             }
@@ -1097,6 +1118,18 @@ mod tests {
         assert_eq!(client.stats().messages, 9);
         assert!(client.stats().authenticated);
         assert_eq!(client.transport_description(), "fake:test");
+    }
+
+    #[test]
+    fn connect_waits_for_device_identity_after_state_keys() {
+        // 状态键（前 6 帧）先到、设备名（后 2 帧）晚到：sync 必须等到身份字段，不能
+        // 一见到状态键就返回（CI 上曾因此偶发 device_info.name=None）。
+        let (fake, handles) = FakeTransport::new();
+        handles.push_state_burst();
+        let client = connect_with(fake).expect("connect");
+        let info = client.device_info();
+        assert_eq!(info.name.as_deref(), Some("UltraLite-mk5"));
+        assert_eq!(info.model_id.as_deref(), Some("UL5L"));
     }
 
     #[test]
