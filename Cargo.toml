@@ -17,6 +17,7 @@ members = [
   "crates/khaen-bench",
   "crates/motu-cuemix",
   "crates/asrc",
+  "crates/analyze",
 ]
 
 [workspace.package]

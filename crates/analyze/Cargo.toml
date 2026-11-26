@@ -1,0 +1,15 @@
+[package]
+name = "khaen-analyze"
+description = "khaen analysis toolchain: WAV spectrum / envelope / band-level comparison (pure Rust, deterministic JSON)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+khaen-calibration = { path = "../calibration" }
+realfft = "3"
+serde_json = "1"
+
+[[bin]]
+name = "khaen-analyze"
+path = "src/bin/khaen-analyze.rs"
