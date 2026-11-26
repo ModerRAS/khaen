@@ -68,11 +68,15 @@ jobs:
           set -euo pipefail
           latest="$(gh release view --json tagName -q .tagName)"
           echo "latest release: ${latest}"
-          mkdir -p /tmp/khaen-installer
+          rm -rf /tmp/khaen-installer
+          mkdir -p /tmp/khaen-installer/extract
           gh release download "${latest}" --pattern '*linux-x86_64.tar.gz*' --dir /tmp/khaen-installer
           tarfile="$(ls /tmp/khaen-installer/khaen-*-linux-x86_64.tar.gz)"
-          echo "installing ${tarfile}"
-          sudo bash deploy/install.sh "${tarfile}" --no-restart
+          tar -xzf "${tarfile}" -C /tmp/khaen-installer/extract
+          stage="$(find /tmp/khaen-installer/extract -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+          test -n "${stage}"
+          echo "installing ${tarfile} with the package's own installer: ${stage}/deploy/install.sh"
+          sudo bash "${stage}/deploy/install.sh" "${tarfile}" --no-restart
           current="$(readlink -f /opt/khaen/current)"
           echo "current: ${current}"
           test -n "${current}"
@@ -146,10 +150,16 @@ jobs:
           previous_tar="$(ls /tmp/khaen-rollback/khaen-*-linux-x86_64.tar.gz | grep "${previous#v}")"
           sudo rm -rf /opt/khaen /etc/khaen
           sudo rm -f /etc/systemd/system/khaen-daemon.service /etc/systemd/system/khaen-rt-host.service
-          sudo bash deploy/install.sh "${previous_tar}" --no-restart
+          mkdir -p /tmp/khaen-rollback/extract-prev /tmp/khaen-rollback/extract-latest
+          tar -xzf "${previous_tar}" -C /tmp/khaen-rollback/extract-prev
+          tar -xzf "${latest_tar}" -C /tmp/khaen-rollback/extract-latest
+          prev_stage="$(find /tmp/khaen-rollback/extract-prev -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+          latest_stage="$(find /tmp/khaen-rollback/extract-latest -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+          test -n "${prev_stage}" && test -n "${latest_stage}"
+          sudo bash "${prev_stage}/deploy/install.sh" "${previous_tar}" --no-restart
           test "$(readlink -f /opt/khaen/current)" = "/opt/khaen/releases/${previous#v}"
           printf 'KHAEN_BIND=127.0.0.1:18756\n# sentinel: must not be overwritten\n' | sudo tee /etc/khaen/daemon.env >/dev/null
-          sudo bash deploy/install.sh "${latest_tar}" --no-restart
+          sudo bash "${latest_stage}/deploy/install.sh" "${latest_tar}" --no-restart
           test "$(readlink -f /opt/khaen/current)" = "/opt/khaen/releases/${latest#v}"
           sudo grep -q 'sentinel: must not be overwritten' /etc/khaen/daemon.env
           sudo bash /opt/khaen/current/deploy/rollback.sh
