@@ -40,12 +40,21 @@ if [[ "${TARGET}" != "${HOST}" ]]; then
       fi
       export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${LINKER}"
       # 让 alsa-sys 的 pkg-config 走 arm64 multiarch 的 .pc 与库路径
+      # arm64 头/库位置：本机多架构安装在 /usr/lib/aarch64-linux-gnu；
+      # CI 用解包的交叉 sysroot（AARCH64_SYSROOT=/opt/arm64-sysroot）避开 apt 版本错位。
+      if [[ -n "${AARCH64_SYSROOT:-}" ]]; then
+        ARM_LIB_DIR="${AARCH64_SYSROOT}/usr/lib/aarch64-linux-gnu"
+        ARM_SYSROOT="${AARCH64_SYSROOT}"
+      else
+        ARM_LIB_DIR="/usr/lib/aarch64-linux-gnu"
+        ARM_SYSROOT="/"
+      fi
       export PKG_CONFIG_ALLOW_CROSS=1
-      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig}"
-      export PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR:-/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig}"
-      export PKG_CONFIG_SYSROOT_DIR="${PKG_CONFIG_SYSROOT_DIR:-/}"
-      # Debian multiarch 的 arm64 库不在交叉 gcc 默认 sysroot 里，显式给链接器搜索路径
-      CPU_FLAGS="${CPU_FLAGS} -C link-arg=-L/usr/lib/aarch64-linux-gnu"
+      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-${ARM_LIB_DIR}/pkgconfig:/usr/share/pkgconfig}"
+      export PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR:-${ARM_LIB_DIR}/pkgconfig:/usr/share/pkgconfig}"
+      export PKG_CONFIG_SYSROOT_DIR="${PKG_CONFIG_SYSROOT_DIR:-${ARM_SYSROOT}}"
+      # 交叉 gcc 默认 sysroot 里没有 arm64 的 ALSA 库，显式给链接器搜索路径
+      CPU_FLAGS="${CPU_FLAGS} -C link-arg=-L${ARM_LIB_DIR}"
       ;;
     *)
       echo "no cross recipe for ${TARGET} (only aarch64 from x86_64 is supported)" >&2

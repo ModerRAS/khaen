@@ -25,7 +25,7 @@ jobs:
         with:
           key: release-cross-two-arch
 
-      - name: System deps (x86_64 + arm64 multiarch)
+      - name: System deps (amd64 ALSA + arm64 cross sysroot)
         run: |
           set -euo pipefail
           sudo dpkg --add-architecture arm64
@@ -40,9 +40,16 @@ jobs:
           Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
           EOF
           sudo apt-get update
+          # amd64 原生依赖：pkg-config 找本机 ALSA；gcc-aarch64-linux-gnu 带交叉 libc。
           sudo apt-get install -y --no-install-recommends \
-            libasound2-dev:amd64 libasound2-dev:arm64 \
-            pkg-config gcc-aarch64-linux-gnu
+            pkg-config gcc-aarch64-linux-gnu libasound2-dev:amd64
+          # arm64 ALSA 头/库不装进 dpkg multiarch：amd64 与 ports 的版本偶发错位会让 apt 报
+          # “Unable to satisfy dependencies”。只解包到独立交叉 sysroot（AARCH64_SYSROOT）。
+          mkdir -p /tmp/arm64-debs
+          ( cd /tmp/arm64-debs && apt-get download libasound2-dev:arm64 libasound2t64:arm64 )
+          sudo mkdir -p /opt/arm64-sysroot
+          for deb in /tmp/arm64-debs/*.deb; do sudo dpkg -x "${deb}" /opt/arm64-sysroot; done
+          ls /opt/arm64-sysroot/usr/lib/aarch64-linux-gnu/libasound* >/dev/null
 
       # 版本唯一事实源 = git tag。Cargo.toml 版本必须与 tag 完全一致，否则不发布。
       # 版本/commit 通过环境变量在编译期注入二进制（build.rs option_env!），
@@ -60,6 +67,8 @@ jobs:
           fi
 
       - name: Build both targets (cpu-tuned release)
+        env:
+          AARCH64_SYSROOT: /opt/arm64-sysroot
         run: |
           set -euo pipefail
           export KHAEN_BUILD_VERSION="${GITHUB_REF_NAME#v}"
