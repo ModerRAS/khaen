@@ -104,9 +104,11 @@ printf '%s' "${STATUS}" | "${PYTHON}" -c '
 import json, sys
 doc = json.load(sys.stdin)
 assert doc.get("schema") == "khaen-status/v1", "schema must be khaen-status/v1"
-top = {"schema", "daemon", "host_link", "state", "plan", "format", "input", "output",
-       "device", "calibration", "not_wired", "reasons"}
-assert set(doc.keys()) == top, "unexpected top-level keys: %s" % sorted(set(doc) ^ top)
+required = {"schema", "daemon", "host_link", "state", "plan", "format", "input", "output",
+            "device", "calibration", "not_wired", "reasons"}
+missing = required - set(doc)
+assert not missing, "missing top-level keys: %s" % sorted(missing)
+# 加法字段（ok/mode/muted/safe/reconfigure/speaker_test 等）按 docs/API.md §3 允许，不判失败。
 daemon = doc["daemon"]
 for key in ("version", "uptime_s", "bind"):
     assert key in daemon, f"status.daemon missing: {key}"
