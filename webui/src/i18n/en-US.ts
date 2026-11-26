@@ -990,6 +990,15 @@ const messages: Messages = {
       noReceipt: 'No mute receipt yet',
       successMuted: 'Muted (readback in /api/status)',
       successUnmuted: 'Unmuted (readback in /api/status)',
+      motu: {
+        field: 'MOTU device side effect',
+        failedField: 'MOTU device write failed',
+        applied: 'Written to the device and read back',
+        skipped: 'Device unavailable: no device write (skipped)',
+        notApplied: 'No device-write receipt',
+        failedToast: 'The engine is muted, but the MOTU device write failed: {code} {message}',
+        skippedToast: 'The engine is muted; the MOTU side effect was skipped: {reason}'
+      },
       recoveryNote:
         'Recovering from a latched device safety state means explicitly unmuting: that is why the mute switch stays available in safe/faulted states while other writes are disabled.'
     },
