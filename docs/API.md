@@ -45,7 +45,7 @@
 ## 3. 状态与只读视图
 | 方法 | 路径 | 成功响应要点 |
 |---|---|---|
-| GET | `/api/status` | `{daemon:{version,uptime_s,bind}, host_link:{connected,mode,target,age_ms}, format:{...}, input:{...}, output:{...}, plan:{version,graph_id,...}, muted?, safe, reconfigure:{generation,...}, not_wired:[], reasons:{}}`（`ok` 可缺省；拿不到的部分为 null + reasons） |
+| GET | `/api/status` | `{daemon:{version,uptime_s,bind}, host_link:{connected,mode,target,age_ms}, format:{...}, input:{...}, output:{...}, plan:{version,graph_id,...}, muted?, safe, reconfigure:{generation,...}, not_wired:[], reasons:{}}`（`ok` 可缺省；拿不到的部分为 null + reasons）。**注意：本响应不含音频模式当前值**（§9.7 G3）；`host_link.mode` 是控制通道传输模式 `socket/file/none`，不是音频模式；rt-host 控制协议 status 里的 `mode` 未投影到 daemon，前端显示“当前模式不可读（无数据源）”。 |
 | GET | `/api/device` | 设备监督器快照 `{wired, state, source, ...}`（process 目标时才有 `target`；`ok` 可缺省），不可用给 null+reason |
 | GET | `/api/coeff` | 当前已生效方案 `{ok, version, graph_id, ...}` |
 | GET | `/api/plan/history` | `{schema:"khaen-plan-history/v1", current:{...}, entries:[{version,graph_id,sha256,committed_at?},...]}`；**加法目标**：补 `ok:true` 与 `versions`（= entries 别名，不改旧字段） |
