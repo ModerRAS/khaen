@@ -645,10 +645,22 @@ pub fn default_state() -> Vec<(u16, u16, Vec<u8>)> {
 /// N150 /proc/asound/cards text used by CLI info tests.
 pub const N150_CARDS: &str = " 0 [UltraLitemk5   ]: USB-Audio - UltraLite-mk5\n                      MOTU UltraLite-mk5 at usb-0000:00:14.0-2.1, high speed\n 1 [U18dB          ]: USB-Audio - Umik-1  Gain: 18dB\n 3 [PCH            ]: HDA-Intel - HDA Intel PCH\n";
 
+/// Monotonic suffix so parallel tests can never collide even when two
+/// `SystemTime::now()` calls land on the same nanosecond (observed CI flake:
+/// one test read another test's file between truncate and write).
+static UNIQUE_TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join(format!("{}-{}-{}.tmp", prefix, std::process::id(), nanos))
+    let seq = UNIQUE_TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "{}-{}-{}-{}.tmp",
+        prefix,
+        std::process::id(),
+        nanos,
+        seq
+    ))
 }
