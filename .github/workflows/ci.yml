@@ -109,6 +109,12 @@ jobs:
           echo "after rollback: ${after}"
           test "${after}" = "/opt/khaen/releases/${previous#v}"
           sudo systemctl is-active khaen-daemon
+          # 诊断：服务 active 但端口未监听时，多半是 daemon 以非零码退出后 Restart 循环；
+          # 打印 unit 状态/日志/env/监听端口，让失败可解释。
+          sudo systemctl status khaen-daemon --no-pager -l || true
+          sudo journalctl -u khaen-daemon --no-pager -n 80 || true
+          sudo cat /etc/khaen/daemon.env || true
+          sudo ss -ltnp || true
           healthz="$(curl -fsS --retry 20 --retry-delay 1 --retry-connrefused http://127.0.0.1:18756/healthz)"
           echo "healthz=${healthz}"
           PREV_VERSION="${previous#v}" python3 -c 'import json,os,sys; v=json.loads(sys.argv[1])["version"]; assert v.lstrip("vV")==os.environ["PREV_VERSION"], (v, os.environ["PREV_VERSION"])' "${healthz}"
