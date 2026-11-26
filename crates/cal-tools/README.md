@@ -240,3 +240,20 @@ mimo 一次运行会同时写出 B2/B3 两套 FIR；手动把全部 `fir/*.csv` 
 - 与 `khaen-fir-plan` 的关系：本工具是推荐路径（变体与 lane 语义正确）；`khaen-fir-plan`
   是逐文件手动指定 lane 的兜底。
 - ⚠ 诚实边界同 `khaen-fir-plan`：只按幅度参与预测，不含群延迟；真机测量/下发仍 NOT_RUN。
+
+---
+
+# 相关：khaen-analyze（离线诊断工具链）
+
+本 README 里的工具是**判定/证据路径**；测量前后的诊断（录音是否中途掉音、各带绝对电平、两段
+录音的逐带 Δ）用 `crates/analyze` 的 `khaen-analyze`（纯 Rust，无 Python/numpy）：
+
+    khaen-analyze envelope --wav baseline.wav --out envelope.json    # 前置质量门：先确认无掉音
+    khaen-analyze spectrum --wav applied.wav  --out spectrum.json    # 各带绝对电平（dBFS）
+    khaen-analyze compare --reference baseline.wav --measured applied.wav --out compare.json
+
+- 口径：`compare` 的 `delta_db` 与 `khaen-band-levels` 的 `level_db` 逐位相同（同一份
+  `khaen-calibration` 带功率实现）；本 README 的判定工具口径未变。
+- ⚠ 顺序：2026-11-26 真机复测的首次基线录音在 4.3–4.9 s 中途掉音，导致全频 FAIL（最大 Δ 30.7 dB）。
+  有掉音的录音不应进入 `khaen-band-levels` / `khaen-closed-loop-run` 判定；先跑 `envelope`。
+- 用法 / 输出 schema / 限制见 `docs/ANALYSIS.md`。
