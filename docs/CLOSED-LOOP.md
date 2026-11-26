@@ -160,7 +160,7 @@ sha256sum baseline.wav > baseline.wav.sha256
 两条合法路径，二选一：
 
 1. **rt-host 启动时读方案文件**（推荐用于测量，简单可回滚）：把校准方案文件放到 `/var/lib/khaen/plans/calibrated.bin`，`export KHAEN_PLAN=/var/lib/khaen/plans/calibrated.bin` 后重启 `khaen-rt-host`；启动日志必须出现 `plan applied at version N`。
-2. **daemon 两阶段**（用于热切换/回滚演练）：`POST /api/prepare` → `POST /api/commit`；确认 `/api/status` 的版本与 graph_id 后，再做测量。
+2. **daemon 两阶段**（用于热切换/回滚演练）：`POST /api/prepare` → `POST /api/commit`；确认 `/api/coeff` 的版本与 graph_id 后，再做测量（`/api/status` 是聚合视图，版本/graph_id 以 `/api/coeff` 为准；两者都需要登录会话）。
 
    FIR 方案（2048 taps）经 daemon 的 inspect → prepare → commit → 换回恒等 → rollback → commit
    已在离线测试里验证：图内脉冲按预期延迟 1024 帧出现，rollback 后行为逐帧恢复
@@ -169,7 +169,7 @@ sha256sum baseline.wav > baseline.wav.sha256
 `khaen-rt-host` 启动时会先做方案预检（ABI v3 解码 + 准入预算），再交给运行时；失败时
 退出码与稳定码可区分问题：读失败 / 解码失败 = 退出 2（`startup_plan_read` / `startup_plan_decode`），
 准入拒绝 = 退出 1（`startup_plan_admission_rejected`，消息里带具体预算项）。成功日志会打印
-`plan applied at version N (graph_id ...)`，与 daemon 的 `/api/status` 对照即可确认同一方案。
+`plan applied at version N (graph_id ...)`，与 daemon 的 `/api/coeff` 对照即可确认同一方案。
 
 禁止：在未确认版本与 graph_id 前开始录音；禁止批量 CueMix 写入。
 

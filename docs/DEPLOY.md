@@ -73,14 +73,15 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 - 安全联动 fail-closed：监督器锁存后 `safety.requires_mute=true`，daemon 每次轮询重新下发静音；用户在锁存期间解除静音也会在下一轮被压回去，恢复必须先把链路拉回 `Streaming`。
 - 真实 MOTU 辅助脚本（读/写速率、拉起控制通道）属于装机产物，**当前仓库未提供，设备侧为 NOT_RUN**；本机测试覆盖的是监督器语义 + daemon 接线（假组件）。
 
-### 4.2 控制面冒烟测试（只读）
+### 4.2 控制面冒烟测试（只读 + 一次登录）
 
-    bash deploy/smoke-test.sh                     # 默认 http://127.0.0.1:8730
-    bash deploy/smoke-test.sh http://127.0.0.1:8730 1
+    KHAEN_SMOKE_PASSWORD='<管理员密码>' bash deploy/smoke-test.sh
+    KHAEN_SMOKE_PASSWORD='<管理员密码>' bash deploy/smoke-test.sh http://127.0.0.1:8730 1
+    # 也可用会话 token：KHAEN_SMOKE_TOKEN='<token>' bash deploy/smoke-test.sh
 
 （Windows 检出把脚本记成 644，没有执行位；用 `bash` 调用即可。）
 
-检查 `/api/status` / `/api/device` / `/api/coeff` 的结构与协议版本，**不做任何设备写入、不 prepare/commit、不出声**。`device.wired=false` 属合法状态（未配置监督器），只打印原因；设备 `faulted` 同样只打印，是否升级处理由人工判断。
+脚本先匿名 GET `/healthz` 与 `/api/auth/status`；认证未初始化时提示去 WebUI 走 setup 并以 0 退出。随后用 `KHAEN_SMOKE_PASSWORD` 登录（只建会话）或用 `KHAEN_SMOKE_TOKEN`，再带会话 GET `/api/meta` / `/api/status`（`khaen-status/v1`）/ `/api/device` / `/api/coeff`，校验结构与 API 版本。**不做任何设备写入、不 prepare/commit、不出声**；`device.wired=false` 或 rt-host 未连接属合法状态，只打印原因。
 
 ### 4.3 实时主机进程 `khaen-rt-host`（T70f）
 
