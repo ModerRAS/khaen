@@ -195,7 +195,7 @@ export interface PlanSummary {
 /** GET /api/audio-profile 归一化快照。 */
 export interface AudioProfileSnapshot {
   schema: string | null
-  /** null = 后端尚未实现/未保存 profile（read-only 200 + reasons）。 */
+  /** null = profile 不可读/未保存（read-only 200 + reasons）。 */
   profile: AudioProfile | null
   validation: ProfileValidation
   capability: ProfileCapability

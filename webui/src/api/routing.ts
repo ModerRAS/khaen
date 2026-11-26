@@ -62,7 +62,7 @@ export interface RoutingChannelsPlan {
 }
 
 /**
- * GET /api/channels 的【加法】字段 speaker_roles 条目（docs/API.md §12.2；后端尚未实现，
+ * GET /api/channels 的【加法】字段 speaker_roles 条目（docs/API.md §12.2；后端已实现，
  * 缺失/null 是合法形态）：某个 0-based DAC 的 canonical 角色（L/R/C/LFE/Tfl…）。
  *
  * 纪律：role 原样展示（代码不维护中文映射表、不猜测），enabled 未知时为 null。
@@ -824,7 +824,7 @@ export function currentRoutingSource(info: RoutingChannelsInfo | null): RoutingC
 /**
  * 查询某个 0-based DAC 的 canonical 角色（GET /api/channels 的【加法】字段 speaker_roles）。
  *
- * - 字段缺失/null（后端尚未实现，docs/API.md §12）→ null：页面不显示角色，也不编造；
+ * - 字段缺失/null（旧后端/不可读，docs/API.md §12）→ null：页面不显示角色，也不编造；
  * - role 原样返回 canonical 字符串（显示层不做中文映射，避免两套角色表漂移）；
  * - enabled 未知时同样返回（页面按需显示），不推断。
  */

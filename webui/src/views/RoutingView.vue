@@ -6,7 +6,7 @@
  * 镜像，不是数据面实时回读）；页面标注来源/语义/版本/读取时间。mapping=null 时显示「当前值未知」+
  * 原因，不用 dac_map / 旧值 / 默认值冒充当前值（docs/API.md §5 末条、§9.7、§11 G3/G6）。
  * mapping 非 null 时预填编辑表（lane → 0-based DAC）。speaker_roles 是 /api/channels 的【加法】字段
- * （§12.2，后端尚未实现）：有就原样显示 canonical 角色，没有/null 就不显示，不编造。
+ * （§12.2，后端已实现）：有就原样显示 canonical 角色，没有/null 就不显示，不编造。
  *
  * 可编辑两阶段（写入口复用控制面，docs/API.md §1/§4）：
  * - 本地 validateRoutingPatch（api/control.ts；本页再补 dac 上界）校验；

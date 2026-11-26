@@ -7,7 +7,7 @@
  *          ② 应用（POST /api/audio-profile/plan → /api/plan/inspect → /api/prepare → /api/commit）。
  *
  * 诚实边界（不假数据、不假成功）：
- * - 后端 profile 存储尚未实现时 GET 返回 profile=null + reasons：页面显示「未接线」+原因，
+ * - 后端 profile 不可读时 GET 返回 profile=null + reasons（storage 损坏/未初始化）：页面显示「未接线」+原因，
  *   编辑区退化为本地草稿（明示），写操作 503 not_wired 如实展示；
  * - 声卡输入能力来自 GET /api/device/inputs，取不到 available:false + 原因，不编通道数；
  * - 每个 enable 项都要显式操作；未使用 DAC 保持无信号（本页不做任何 CueMix 写入）；
