@@ -14,8 +14,22 @@
 //! - `no_base_plan` → 409：surface 补丁前还没有已生效方案。
 //! - `no_history` → 409：rollback 前还没有任何已生效版本。
 //! - 其余 → 500。
+//!
+//! # 路由（M0 静态托管）
+//!
+//! - `/api/*`：控制面 REST（语义见各 handler）；未知 `/api` 路径返回结构化 JSON 404
+//!   （`{ok:false,error:"not_found",message}`），不回退成 SPA 页面。
+//! - `/healthz`：无认证探活 `{ok,version,uptime_s}`。
+//! - `/api/meta`：`{api_version,web_version,ops,surfaces,not_wired}`，值与能力来自
+//!   `khaen_host::control` 的既有常量（见 `meta` 模块）。
+//! - 其余 `GET`：内嵌 `webui/dist` 静态资源；未知路径回退 `index.html`（SPA fallback），
+//!   路径查找只命中编译期内嵌表、从不读文件系统，目录穿越被显式拒绝（见 `webui` 模块）。
 
+pub mod bind;
 pub mod device;
+mod meta;
+mod webui;
+pub mod webui_assets;
 
 use std::sync::{Arc, Mutex};
 
@@ -31,11 +45,24 @@ use khaen_host::{ControlState, EngineConfig};
 
 pub use device::DeviceMonitor;
 
+/// daemon 版本（workspace `version`，即 `CARGO_PKG_VERSION`）。
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// 控制台版本：构建期从 `webui/package.json` 的 `version` 读取
+/// （`build.rs` 生成 `webui_assets::WEBUI_PACKAGE_VERSION`；`webui/package.json` 读不到时
+/// 回退 workspace 版本）。`/api/meta` 的 `web_version` 直接用它，不另编一个数字。
+pub const WEB_VERSION: &str = webui_assets::WEBUI_PACKAGE_VERSION;
+
+/// REST API 版本：与契约 B 的主机控制协议版本同源（`khaen_host::PROTOCOL_VERSION` 是版本事实源）。
+pub const API_VERSION: u32 = khaen_host::PROTOCOL_VERSION as u32;
+
 /// daemon 共享状态。
 #[derive(Debug)]
 pub struct DaemonState {
     control: Mutex<ControlState>,
     device: Mutex<DeviceMonitor>,
+    /// 进程启动时刻（`/healthz` 的 `uptime_s`）。
+    started: std::time::Instant,
 }
 
 impl DaemonState {
@@ -46,6 +73,7 @@ impl DaemonState {
             device: Mutex::new(DeviceMonitor::disabled(
                 "device supervisor is not wired: no probe/rate-control configured in this process",
             )),
+            started: std::time::Instant::now(),
         })
     }
 
@@ -86,11 +114,18 @@ impl DaemonState {
     pub fn device_json(&self) -> Value {
         self.device().status()
     }
+
+    /// 进程启动以来的整秒数（`/healthz` 用；测试里通常为 0）。
+    pub fn uptime_s(&self) -> u64 {
+        self.started.elapsed().as_secs()
+    }
 }
 
 /// 组装路由。
 pub fn router(state: Arc<DaemonState>) -> Router {
     Router::new()
+        .route("/healthz", get(meta::healthz))
+        .route("/api/meta", get(meta::api_meta))
         .route("/api/status", get(status))
         .route("/api/mute", post(mute))
         .route("/api/prepare", post(prepare))
@@ -103,6 +138,8 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/api/format", post(format_prepare))
         .route("/api/device", get(device_status))
         .route("/api/device/retry", post(device_retry))
+        // 非 /api 的 GET/HEAD 走内嵌静态资源 + SPA 回退；未知 /api/* 返回结构化 JSON 404。
+        .fallback(webui::fallback)
         .with_state(state)
 }
 

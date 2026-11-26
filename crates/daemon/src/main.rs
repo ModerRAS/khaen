@@ -1,4 +1,9 @@
-//! daemon 入口：绑 127.0.0.1:<PORT>，只服务本机（公网暴露由前置代理负责）。
+//! daemon 入口：按 `KHAEN_BIND` / `KHAEN_PORT` 绑定监听地址（默认 `127.0.0.1:8730`，只服务本机）。
+//!
+//! - `KHAEN_BIND`：完整 socket 地址（如生产 `0.0.0.0:80`）；默认 `127.0.0.1:8730`。
+//! - `KHAEN_PORT`（兼容旧配置）/ `PORT`：只给端口，绑定 `127.0.0.1`。
+//! - 非法值**启动即失败**：stderr 打印稳定错误并以退出码 2 退出，不再静默回退默认值
+//!   （解析规则与优先级见 `khaen_daemon::bind`）。
 //!
 //! 设备监督器（T70c）在这里接线：
 //! - `KHAEN_DEVICE_ID`：设备标识（在 `/sys/class/sound/card*/id` 里按子串匹配；MOTU 用 `MOTU`）。
@@ -19,16 +24,18 @@ use khaen_host::supervisor::{
 use khaen_host::EngineConfig;
 use tokio::net::TcpListener;
 
-const DEFAULT_PORT: u16 = 8730;
 const DEFAULT_POLL_MS: u64 = 500;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let port = std::env::var("KHAEN_PORT")
-        .or_else(|_| std::env::var("PORT"))
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(DEFAULT_PORT);
+    // 先解析监听地址：配置非法时立刻退出（稳定错误 + 退出码 2），不做任何设备/线程初始化。
+    let bind = match khaen_daemon::bind::from_env() {
+        Ok(bind) => bind,
+        Err(error) => {
+            eprintln!("khaen-daemon: {error}");
+            std::process::exit(2);
+        }
+    };
     let config = match (
         std::env::var("KHAEN_BLOCK_FRAMES").ok(),
         std::env::var("KHAEN_SAMPLE_RATE").ok(),
@@ -63,8 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         device["reason"].as_str().unwrap_or("-")
     );
 
-    let listener = TcpListener::bind(("127.0.0.1", port)).await?;
-    println!("khaen-daemon listening on http://127.0.0.1:{port}");
+    let listener = TcpListener::bind(bind).await?;
+    println!("khaen-daemon listening on http://{bind}");
     serve(listener, state).await?;
     Ok(())
 }
