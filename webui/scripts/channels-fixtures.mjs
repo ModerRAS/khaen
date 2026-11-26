@@ -69,10 +69,12 @@ export function buildChannelsSeed(fixture) {
         schema: 'khaen-channels/v1',
         output: { channels: null, dac_map: null },
         input: { channels: null, map: null, source: null, sdp_sha256: null },
-        mapping: [],
+        // 真实 daemon 在 routing 段未知时上报 mapping: null（不是空数组：空数组会被当成「已知 0 条路由」）。
+        mapping: null,
         reasons: {
           'output.channels': 'rt-host control status is unavailable (host_link.mode=none); the daemon cannot read the current output layout',
           'output.dac_map': 'rt-host control status is unavailable',
+          mapping: 'rt-host control status is unavailable (host_link.mode=none); the applied plan routing section cannot be associated',
           'input.channels': 'rt-host control status is unavailable',
           'input.map': 'rt-host control status is unavailable',
           'input.source': 'rt-host control status is unavailable',

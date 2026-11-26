@@ -1,0 +1,166 @@
+/**
+ * 路由矩阵页 store（M3b / 任务 T58）。
+ *
+ * 只读控制器：并行拉取 /api/channels（lane -> DAC 映射 / 输出声道 / plan 段）与
+ * /api/plan/history（当前版本 / latency 回退来源）。/api/status 由共享轮询 store
+ * （stores/status.ts + useStatusPolling）提供，本模块不重复拉取。
+ *
+ * 纪律（与 M4 声道 store 一致）：
+ * - 并发去重：同一时刻只有一趟读取在途（刷新按钮/自动加载共用）；
+ * - 失败保留最后一次成功数据并记录稳定错误码（不把旧数据冒充最新，也不清空）；
+ * - /api/channels 整块不可用（501/503 not_wired）时 channels 为 null，页面显示 NOT_AVAILABLE + 任务号；
+ * - /api/plan/history 只是补充来源：失败时清空 history（避免用旧版本冒充当前版本），
+ *   但不清空 channels 数据，页面给出「历史不可用」提示；
+ * - 401 交给共享 ApiClient（会话 store 清态跳登录）。
+ *
+ * 可测试性：createRoutingController(state, deps) 注入 api/时钟，模块底部组装 reactive 单例。
+ */
+import { reactive } from 'vue'
+import {
+  classifyChannelsError,
+  type ChannelsErrorInfo
+} from '../api/channels.ts'
+import {
+  createRoutingApi,
+  type RoutingApi,
+  type RoutingChannelsInfo,
+  type RoutingPlanHistory
+} from '../api/routing.ts'
+import { apiClient } from './session.ts'
+
+export type RoutingChannelsPhase = 'loading' | 'ready' | 'error'
+
+export interface RoutingState {
+  /** GET /api/channels 的最近成功快照；null = 尚未成功获取。 */
+  channels: RoutingChannelsInfo | null
+  /** loading = 首次加载；ready = 有数据（可能带刷新错误）；error = 无数据且请求失败。 */
+  channelsPhase: RoutingChannelsPhase
+  /** /api/channels 最近一次失败（成功后清空；保留 channels 时表示「显示最后成功数据」）。 */
+  channelsError: ChannelsErrorInfo | null
+  /** GET /api/plan/history 的最近成功快照；失败时清空（避免旧版本冒充当前版本）。 */
+  history: RoutingPlanHistory | null
+  historyError: ChannelsErrorInfo | null
+  /** 是否有读取在途（刷新按钮 loading / 禁重入）。 */
+  refreshing: boolean
+  /** 最近一次成功读取的本地时钟（毫秒）。 */
+  loadedAt: number | null
+}
+
+export function createInitialRoutingState(): RoutingState {
+  return {
+    channels: null,
+    channelsPhase: 'loading',
+    channelsError: null,
+    history: null,
+    historyError: null,
+    refreshing: false,
+    loadedAt: null
+  }
+}
+
+export interface RoutingDeps {
+  api: RoutingApi
+  now?: () => number
+}
+
+export interface RoutingController {
+  /** 读取 channels + history（并发去重）；重复调用返回同一在途 Promise。 */
+  load(): Promise<void>
+  refresh(): Promise<void>
+  reset(): void
+}
+
+export function createRoutingController(state: RoutingState, deps: RoutingDeps): RoutingController {
+  const now = deps.now ?? (() => Date.now())
+  let inflight: Promise<void> | null = null
+
+  /** 返回是否成功（loadedAt 只在至少一侧成功时推进）。 */
+  async function loadChannels(): Promise<boolean> {
+    if (state.channels === null) {
+      state.channelsPhase = 'loading'
+    }
+    try {
+      const channels = await deps.api.fetchChannels()
+      state.channels = channels
+      state.channelsPhase = 'ready'
+      state.channelsError = null
+      return true
+    } catch (error) {
+      state.channelsError = classifyChannelsError(error)
+      state.channelsPhase = state.channels === null ? 'error' : 'ready'
+      return false
+    }
+  }
+
+  /** 返回是否成功（失败清空 history，避免用旧版本冒充当前版本；channels 数据保持不动）。 */
+  async function loadHistory(): Promise<boolean> {
+    try {
+      state.history = await deps.api.fetchPlanHistory()
+      state.historyError = null
+      return true
+    } catch (error) {
+      state.history = null
+      state.historyError = classifyChannelsError(error)
+      return false
+    }
+  }
+
+  async function runLoad(): Promise<void> {
+    state.refreshing = true
+    try {
+      // 两个只读端点互不依赖：并行拉取；各自失败互不牵连。
+      const [channelsOk, historyOk] = await Promise.all([loadChannels(), loadHistory()])
+      if (channelsOk || historyOk) {
+        state.loadedAt = now()
+      }
+    } catch (error) {
+      // 两个子任务内部已捕获自己的错误；这里只兜住不可预期异常（不静默吞掉、不假成功）。
+      state.channelsError = classifyChannelsError(error)
+      state.channelsPhase = state.channels === null ? 'error' : state.channelsPhase
+    } finally {
+      state.refreshing = false
+      inflight = null
+    }
+  }
+
+  function load(): Promise<void> {
+    if (inflight !== null) {
+      return inflight
+    }
+    const started = runLoad()
+    inflight = started
+    return started
+  }
+
+  return {
+    load,
+    refresh: load,
+    reset(): void {
+      Object.assign(state, createInitialRoutingState())
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- 单例装配 */
+
+export const routingState = reactive<RoutingState>(createInitialRoutingState())
+
+const routingApi = createRoutingApi(apiClient)
+
+const controller = createRoutingController(routingState, { api: routingApi })
+
+/** 页面挂载时调用（并发去重，重复调用安全）。 */
+export function loadRouting(): Promise<void> {
+  return controller.load()
+}
+
+/** 手动刷新（与自动加载共用同一在途请求）。 */
+export function refreshRouting(): Promise<void> {
+  return controller.refresh()
+}
+
+export function resetRoutingState(): void {
+  controller.reset()
+}
+
+export { routingApi, controller as routingController }

@@ -2,10 +2,9 @@
  * 路由表与全局守卫（PLAN §5.1 / §5.2）。
  *
  * 已落地：/login（登录/初始化，公开）、/（概览）、/volume（音量与静音，M3）、/format（音频格式，M3）、
- * /channels（方案与声道，M4）、/calibration（校准列表）、/calibration/wizard（8 步向导）、
- * /calibration/jobs/:id（job 详情）、/system（系统信息）、/system/logs（日志）。
- * 其余页面（routing M3）在菜单里灰显并标注计划里程碑，
- * 尚未注册路由——深链由 catch-all 重定向回 /（后续里程碑逐个接入时再补 route record）。
+ * /channels（方案与声道，M4）、/routing（路由矩阵只读诊断，M3b/T58）、/calibration（校准列表）、
+ * /calibration/wizard（8 步向导）、/calibration/jobs/:id（job 详情）、/system（系统信息）、/system/logs（日志）。
+ * 菜单里已没有灰显页面；未注册的深链由 catch-all 重定向回 /（后续里程碑接入时再补 route record）。
  *
  * 守卫（M1 起真实生效）：
  * - 每次导航先 ensureSession()（结果缓存，401 由 store 清态）；
@@ -20,6 +19,7 @@ import OverviewView from '@/views/OverviewView.vue'
 import VolumeView from '@/views/VolumeView.vue'
 import FormatView from '@/views/FormatView.vue'
 import ChannelsView from '@/views/ChannelsView.vue'
+import RoutingView from '@/views/RoutingView.vue'
 import CalibrationView from '@/views/CalibrationView.vue'
 import CalibrationWizardView from '@/views/CalibrationWizardView.vue'
 import CalibrationJobView from '@/views/CalibrationJobView.vue'
@@ -60,7 +60,7 @@ export const navItems: NavItem[] = [
   { name: 'overview', path: '/', titleKey: 'nav.overview', icon: 'Odometer', group: 'main', implemented: true },
   { name: 'volume', path: '/volume', titleKey: 'nav.volume', icon: 'Headset', group: 'main', implemented: true },
   { name: 'channels', path: '/channels', titleKey: 'nav.channels', icon: 'Files', group: 'main', implemented: true },
-  { name: 'routing', path: '/routing', titleKey: 'nav.routing', icon: 'Share', group: 'main', implemented: false, milestone: 'M3' },
+  { name: 'routing', path: '/routing', titleKey: 'nav.routing', icon: 'Share', group: 'main', implemented: true },
   { name: 'format', path: '/format', titleKey: 'nav.format', icon: 'DataLine', group: 'main', implemented: true },
   { name: 'calibration', path: '/calibration', titleKey: 'nav.calibration', icon: 'Timer', group: 'main', implemented: true },
   { name: 'system', path: '/system', titleKey: 'nav.system', icon: 'Monitor', group: 'system', implemented: true },
@@ -107,6 +107,12 @@ const routes: RouteRecordRaw[] = [
         name: 'channels',
         component: ChannelsView,
         meta: { requiresAuth: true, titleKey: 'nav.channels' }
+      },
+      {
+        path: 'routing',
+        name: 'routing',
+        component: RoutingView,
+        meta: { requiresAuth: true, titleKey: 'nav.routing' }
       },
       {
         path: 'calibration',

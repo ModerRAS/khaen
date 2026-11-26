@@ -48,7 +48,7 @@ const messages: Messages = {
     menu: 'Open navigation',
     navDisabled: 'This page is not wired yet (planned {milestone})',
     stubBanner:
-      'T53/T54 (M3/M4): volume/mute, format and run mode use /api/mute, /api/surface and /api/format (prepare → commit); the plan & channels page uses /api/channels, /api/plan/upload / history / inspect and /api/prepare / commit / abort / rollback; calibration uses /api/calibration/*, system uses /api/system/* and the overview uses /api/status. Unwired capabilities (routing matrix, channel hot-swap commit, ...) always show "not wired" plus the reason and task id, with no fake data and no fake success.',
+      'T53/T54/T58 (M3/M4/M3b): volume/mute, format and run mode use /api/mute, /api/surface and /api/format (prepare → commit); the plan & channels page uses /api/channels, /api/plan/upload / history / inspect and /api/prepare / commit / abort / rollback; the routing matrix page composes read-only /api/status, /api/channels and /api/plan/history; calibration uses /api/calibration/*, system uses /api/system/* and the overview uses /api/status. Unwired capabilities (routing edits/reorders, channel hot-swap commit, ...) always show "not wired" plus the reason and task id, with no fake data and no fake success.',
     hostLink: 'Control link',
     hostLinkNotWired: 'Control link not wired',
     hostLinkConnected: 'Control link connected',
@@ -1355,6 +1355,141 @@ const messages: Messages = {
       tf: 'TF',
       tfr: 'TFR',
       lfe: 'LFE'
+    }
+  },
+  routing: {
+    pageTitle: 'Routing matrix',
+    subtitle:
+      'Read-only diagnosis of input → 22-lane matrix → DAC physical outputs: composed from /api/channels (lane → DAC mapping, output channels, plan section), /api/status (AES67/format/plan/control link) and /api/plan/history. Missing fields show "not wired" plus the reason; routing edits/reorders need the PlanGraph editor (T59), so this page exposes no write entry and never fakes success.',
+    actions: {
+      refresh: 'Refresh'
+    },
+    updated: {
+      last: 'Last updated {time}',
+      never: 'Not refreshed yet'
+    },
+    band: {
+      hostLink: 'Control link',
+      hostLinkOk: 'Connected',
+      hostLinkStale: 'Status stale',
+      hostLinkUnknown: 'Not wired',
+      runState: 'Run state',
+      planVersion: 'Plan version',
+      matrixLanes: 'Matrix lanes',
+      outputChannels: 'DAC outputs',
+      routedLanes: 'Routed lanes'
+    },
+    notice: {
+      statusRefreshFailed: '/api/status refresh failed: {message} (showing the last successful snapshot)',
+      channelsRefreshFailed: '/api/channels refresh failed: {message} (showing the last successful snapshot)',
+      historyUnavailable: 'Plan history is unavailable: {message} (current version / latency fallback missing)',
+      hostLinkDown:
+        'The control link is unavailable or stale: rt-host data-plane facts cannot be read back, so this page only shows the last successful snapshot; routing write access does not become available either.',
+      noPlan: 'No applied plan has been read: there is no source of truth for the matrix/output routing (this page does not guess an identity mapping).'
+    },
+    statusUnavailable: '/api/status is not wired: the routing page cannot read input/format/control-link facts; check the session and the daemon.',
+    unavailable: {
+      title: '/api/channels is not wired (M4 / T55)',
+      desc: 'The daemon does not provide the channel/routing mapping API yet (task {task}): {message}. This page never shows a fake mapping.',
+      reason: 'not reported by the daemon (/api/channels not wired, T55)'
+    },
+    chain: {
+      title: 'Current routing chain (input → matrix → DAC output)',
+      desc: 'Read-only: AES67 input (/api/status.format.aes67) → 22-lane matrix (format.channels) → DAC physical outputs (/api/channels.output + mapping). Fields without a data source show "not wired" plus the reason; no lane i → DAC i identity mapping is assumed.',
+      input: {
+        title: 'Input · AES67',
+        channels: 'Receive channels',
+        map: 'Channel map',
+        source: 'Input source',
+        sourceSdp: 'SDP descriptor (sdp)',
+        sourceManual: 'Manual configuration (manual)'
+      },
+      matrix: {
+        title: 'Matrix domain',
+        lanes: 'Lanes',
+        expectedSuffix: '({lanes} designed)',
+        routedLanes: 'Routed lanes',
+        routes: 'Routes'
+      },
+      output: {
+        title: 'Output · DAC',
+        channels: 'DAC channels',
+        dacMap: 'DAC map (0-based)',
+        knownLabels: 'Known physical positions',
+        knownLabelsValue: '{count} known label positions'
+      },
+      note: 'The matrix lane count comes from the data-plane format (/api/status.format.channels); output channels / DAC map come from /api/channels (actual rt-host configuration + the running plan routing section). When both are missing this page does not draw an identity path.'
+    },
+    lanes: {
+      title: 'lane → DAC mapping',
+      desc: 'Same convention as the /channels page (lane / 0-based DAC / 1-based MOTU physical output); read-only here, the edit entry is on /channels (M4).',
+      openChannels: 'Open /channels to view/edit the mapping',
+      routedLanes: 'Routed lanes',
+      routes: 'Routes',
+      empty: '/api/channels does not report a lane → DAC mapping (rt-host status unavailable or the plan routing section unknown): this page does not invent a mapping.',
+      unknownLabel: 'OUT {channel}',
+      editHint:
+        'Mapping edits (output channels / DAC map) live on the Plan & channels page (M4/T54 two-phase prepare → commit); the daemon /api/channels commit still returns 501 host_link_unsupported (the hot-reconfig entry is not wired), which the page reports as not wired instead of duplicating a write entry here.',
+      table: {
+        lane: 'lane',
+        dac: 'DAC (0-based)',
+        physical: 'MOTU output',
+        label: 'Physical label'
+      }
+    },
+    plan: {
+      title: 'Plan routing section summary',
+      desc: 'Composed from /api/status.plan and /api/plan/history; routing details come from /api/channels (mapping / dac_channels).',
+      field: {
+        version: 'Plan version',
+        latency: 'Latency (samples)',
+        segments: 'Segments',
+        graphId: 'graph_id',
+        appliedAt: 'Applied at',
+        source: 'Plan source',
+        routingKnown: 'Routing section known',
+        dacChannels: 'DAC channels',
+        routes: 'Routes',
+        historyCurrent: 'History current version'
+      },
+      versionReason: 'The running plan version is unreadable (neither /api/status nor /api/plan/history has a value)',
+      latencyReason: 'The plan latency is unreadable (neither status nor history has a value)',
+      historyReason: 'Plan history has not been read or is unavailable',
+      segmentsReason:
+        'No read-only endpoint reports the applied plan section list/count: the daemon reports segments/segment_count only in the POST /api/plan/upload ack (T55); /api/status and /api/plan/history do not contain it. This page never passes the route count off as the segment count; the upload/view entry is on /channels.',
+      segmentsNote:
+        'The segment count (number of content/crossover/matrix/protection/routing sections) can currently only be seen in the /channels plan upload ack; this page honestly shows "not wired" instead of guessing.'
+    },
+    edit: {
+      title: 'Routing edit and reorder (NOT_AVAILABLE)',
+      desc: 'Matrix crosspoint editing / lane reordering / applying a routing: this milestone exposes no write entry and never performs an operation that looks successful.',
+      notAvailableTitle: 'Routing write operations are not wired ({task})',
+      notAvailableDesc:
+        'The PlanGraph editor/designer (task {task}) is required to edit matrix crosspoints and lane order on the graph and compile the patch into Plan sections; this page is read-only diagnostics and does not expose the low-level patch endpoint, so no fake success.',
+      reason: 'The PlanGraph editor/designer (T59) is not implemented; this page exposes no routing write entry.',
+      action: {
+        reorder: 'Reorder lanes',
+        crosspoint: 'Edit matrix crosspoints',
+        apply: 'Apply routing',
+        channels: 'Open /channels (read-only mapping)'
+      },
+      disabledHint: 'Not wired (T59): button disabled, no fake success',
+      requirement: {
+        editor: 'Editor/designer ({task}): visual editing of matrix crosspoints and lane order + Plan section compilation.',
+        patch:
+          'The control plane already has a low-level POST /api/surface (surface=routing) Plan-section patch (route lane→dac list); it is not a graph editor and does not validate the complete reordered routing semantics, so this page does not expose it.',
+        commit:
+          'Committing depends on the block-boundary swap / hot reconfiguration (M3b/T52): before the routing is really switched, a control-plane ack does not mean the device is already rendering the new routing.'
+      }
+    },
+    notWired: {
+      title: 'Capabilities reported as not wired by the backend',
+      desc: 'Verbatim entries from /api/channels.not_wired and /api/status.not_wired (capability gaps declared by the daemon itself).',
+      empty: 'The backend reported no not-wired entries.',
+      source: {
+        channels: '/api/channels',
+        status: '/api/status'
+      }
     }
   },
   unit: {

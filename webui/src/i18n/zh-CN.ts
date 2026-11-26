@@ -50,7 +50,7 @@ const messages = {
     menu: '打开导航',
     navDisabled: '该页面尚未接入（计划 {milestone}）',
     stubBanner:
-      'T53/T54（M3/M4）：音量与静音、音频格式/工作模式接 /api/mute、/api/surface、/api/format（prepare → commit 两阶段）；方案与声道页接 /api/channels、/api/plan/upload / history / inspect 与 /api/prepare / commit / abort / rollback；校准页接 /api/calibration/*，系统信息页接 /api/system/*，概览页接 /api/status。未接入的能力（路由矩阵、声道热重配 commit 等）一律显示「未接入」+ 原因 + 任务号，不展示假数据、不假成功。',
+      'T53/T54/T58（M3/M4/M3b）：音量与静音、音频格式/工作模式接 /api/mute、/api/surface、/api/format（prepare → commit 两阶段）；方案与声道页接 /api/channels、/api/plan/upload / history / inspect 与 /api/prepare / commit / abort / rollback；路由矩阵页只读组合 /api/status、/api/channels 与 /api/plan/history；校准页接 /api/calibration/*，系统信息页接 /api/system/*，概览页接 /api/status。未接入的能力（路由编辑/重排、声道热重配 commit 等）一律显示「未接入」+ 原因 + 任务号，不展示假数据、不假成功。',
     hostLink: '控制通道',
     hostLinkNotWired: '控制通道未接入',
     hostLinkConnected: '控制通道已连接',
@@ -1352,6 +1352,141 @@ const messages = {
       tf: 'TF',
       tfr: 'TFR',
       lfe: 'LFE'
+    }
+  },
+  routing: {
+    pageTitle: '路由矩阵',
+    subtitle:
+      '输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断：组合 /api/channels（lane → DAC 映射、输出声道、plan 段）、/api/status（AES67/格式/方案/控制通道）与 /api/plan/history。缺失字段显示「未接入」+ 原因；路由编辑/重排需 PlanGraph 编辑器（T59），本页不提供写入口、不假成功。',
+    actions: {
+      refresh: '刷新'
+    },
+    updated: {
+      last: '最后更新 {time}',
+      never: '尚未刷新'
+    },
+    band: {
+      hostLink: '控制通道',
+      hostLinkOk: '已连接',
+      hostLinkStale: '状态过期',
+      hostLinkUnknown: '未接入',
+      runState: '运行状态',
+      planVersion: '方案版本',
+      matrixLanes: '矩阵 lane',
+      outputChannels: 'DAC 输出',
+      routedLanes: '已路由 lane'
+    },
+    notice: {
+      statusRefreshFailed: '/api/status 刷新失败：{message}（显示的是最后一次成功数据）',
+      channelsRefreshFailed: '/api/channels 刷新失败：{message}（显示的是最后一次成功数据）',
+      historyUnavailable: '方案历史不可用：{message}（当前版本/latency 回退来源缺失）',
+      hostLinkDown:
+        '控制通道不可达或状态过期：rt-host 数据面事实无法回读，本页只显示最后成功快照；路由写入口也不会因此变得可用。',
+      noPlan: '尚未读到已应用的方案：矩阵域/输出路由没有事实来源（本页不猜直通映射）。'
+    },
+    statusUnavailable: '/api/status 未接入：路由页拿不到输入/格式/控制通道事实；请检查会话与 daemon。',
+    unavailable: {
+      title: '/api/channels 未接入（M4 / T55）',
+      desc: 'daemon 尚未提供声道/路由映射 API（任务 {task}）：{message}。本页不展示假映射。',
+      reason: 'daemon 未上报（/api/channels 未接入，T55）'
+    },
+    chain: {
+      title: '当前路由链（输入 → 矩阵域 → DAC 输出）',
+      desc: '只读诊断：AES67 输入（/api/status.format.aes67）→ 22 lane 矩阵域（format.channels）→ DAC 物理输出（/api/channels.output + mapping）。没有数据源的字段显示「未接入」+ 原因，不假设 lane i → DAC i 的直通映射。',
+      input: {
+        title: '输入 · AES67',
+        channels: '接收声道数',
+        map: '通道映射',
+        source: '输入来源',
+        sourceSdp: 'SDP 描述符（sdp）',
+        sourceManual: '手工配置（manual）'
+      },
+      matrix: {
+        title: '矩阵域',
+        lanes: 'lane 数',
+        expectedSuffix: '（设计 {lanes} lane）',
+        routedLanes: '已路由 lane',
+        routes: '路由条目'
+      },
+      output: {
+        title: '输出 · DAC',
+        channels: 'DAC 声道数',
+        dacMap: 'DAC 映射（0-based）',
+        knownLabels: '已知物理位置',
+        knownLabelsValue: '{count} 个已知标签位置'
+      },
+      note: '矩阵域 lane 数来自数据面格式（/api/status.format.channels）；输出声道/DAC 映射来自 /api/channels（rt-host 实际配置 + 当前方案 routing 段）。两者都缺失时本页不画「直通」。'
+    },
+    lanes: {
+      title: 'lane → DAC 映射',
+      desc: '与 /channels 页同一口径（lane / 0-based DAC / 1-based MOTU 物理输出）；只读展示，编辑入口在 /channels（M4）。',
+      openChannels: '去 /channels 查看/编辑映射',
+      routedLanes: '已路由 lane',
+      routes: '路由条目',
+      empty: '/api/channels 未上报 lane → DAC 映射（rt-host 状态不可用或方案 routing 段未知）：本页不编造映射。',
+      unknownLabel: 'OUT {channel}',
+      editHint:
+        '映射编辑（输出通道数 / DAC 映射）在「方案与声道」页（M4/T54 两阶段 prepare → commit）；daemon 的 /api/channels commit 目前仍返回 501 host_link_unsupported（热重配入口未接通），页面如实显示「未接入」，不在此页重复写入口。',
+      table: {
+        lane: 'lane',
+        dac: 'DAC（0-based）',
+        physical: 'MOTU 输出',
+        label: '物理标签'
+      }
+    },
+    plan: {
+      title: '计划内 routing 段摘要',
+      desc: '组合 /api/status.plan 与 /api/plan/history；routing 段明细来自 /api/channels（mapping / dac_channels）。',
+      field: {
+        version: '方案版本',
+        latency: '延迟（samples）',
+        segments: '区段数（segments）',
+        graphId: 'graph_id',
+        appliedAt: '应用时间',
+        source: '方案来源',
+        routingKnown: 'routing 段已知',
+        dacChannels: 'DAC 声道数',
+        routes: '路由条目数',
+        historyCurrent: '历史当前版本'
+      },
+      versionReason: '运行中方案版本不可读（/api/status 与 /api/plan/history 都没有值）',
+      latencyReason: '方案延迟不可读（status 与历史都没有值）',
+      historyReason: '方案历史尚未读取或不可用',
+      segmentsReason:
+        '当前生效方案的区段清单/区段数没有任何只读接口上报：daemon 只在 POST /api/plan/upload 的回执里报告 segments/segment_count（T55），/api/status 与 /api/plan/history 都不含它。本页不把路由条目数冒充区段数；上传/查看入口在 /channels。',
+      segmentsNote:
+        '区段数（content/crossover/matrix/protection/routing 的条数）目前只能在 /channels 的方案上传回执里看到；本页如实显示「未接入」，不猜。'
+    },
+    edit: {
+      title: '路由编辑与重排（NOT_AVAILABLE）',
+      desc: '矩阵交叉点编辑 / lane 重排 / 路由应用：本里程碑不提供写入口，也不做看起来成功的操作。',
+      notAvailableTitle: '路由写操作未接入（{task}）',
+      notAvailableDesc:
+        '需要 PlanGraph 编辑器/designer（任务 {task}）：在图上安全编辑矩阵交叉点、lane 重排并把补丁编译成 Plan 区段；本页只有只读诊断，不暴露低级补丁接口，避免假成功。',
+      reason: 'PlanGraph 编辑器/designer（T59）未实现；本页不提供路由写入口。',
+      action: {
+        reorder: '重排 lane',
+        crosspoint: '编辑矩阵交叉点',
+        apply: '应用路由',
+        channels: '打开 /channels（只读映射）'
+      },
+      disabledHint: '未接入（T59）：按钮禁用，不做假成功',
+      requirement: {
+        editor: '编辑器/designer（{task}）：矩阵交叉点与 lane 重排的可视化编辑 + Plan 区段编译。',
+        patch:
+          '控制面已有一个低层 POST /api/surface（surface=routing）的 Plan 片段补丁（route lane→dac 列表）；它不是图形编辑器，也不校验重排后的完整路由语义，本页因此不暴露它。',
+        commit:
+          '提交生效依赖块边界换图/热重配（M3b/T52）：路由变更真正切换前，控制面回执不等于设备已按新路由出声。'
+      }
+    },
+    notWired: {
+      title: '后端上报的未接入能力',
+      desc: '来自 /api/channels.not_wired 与 /api/status.not_wired 的原始条目（daemon 自己声明的能力缺口）。',
+      empty: '后端没有上报未接入条目。',
+      source: {
+        channels: '/api/channels',
+        status: '/api/status'
+      }
     }
   },
   unit: {

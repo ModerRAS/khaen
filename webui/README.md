@@ -4,10 +4,11 @@ khaen DSP 引擎的 Web 控制台：Vue 3 + TypeScript + Element Plus + Vite + v
 由 khaen-daemon 同源托管（编译期 `include_bytes!` 内嵌 `webui/dist`），运行期不需要 Node / Python / 反代。
 
 > 规划：`HANDOFF/20261126-khaen-webui-plan/PLAN.md`（仓库外）§4 API、§5 路由、§6.1 登录、§6.2 概览、§11 UI 布局、§12 主题与 i18n。
-> 当前里程碑：**M3（音量/格式/模式，任务 T53）+ M4（方案与声道，任务 T54）**；M2/M5/M6 已落地。
+> 当前里程碑：**M3b（路由矩阵只读页，任务 T58）**；M1–M6 已落地。
 > 概览页（M2）接 `GET /api/status`；校准页/向导（M5）接 `/api/calibration/*`；系统信息页/日志页接 `/api/system/*`；
 > 音量/格式/工作模式页接 `/api/mute`、`/api/surface`、`/api/format`（prepare → commit 两阶段，T70f-b 代理到 rt-host）；
-> 方案与声道页接 `/api/channels`、`/api/plan/*`、`/api/prepare|commit|abort|rollback`（M4 后端 T55 / 热重配 T52 仍在并行实现）。
+> 方案与声道页接 `/api/channels`、`/api/plan/*`、`/api/prepare|commit|abort|rollback`（M4 后端 T55 / 热重配 T52 仍在并行实现）；
+> 路由矩阵页只读组合 `/api/status` + `/api/channels` + `/api/plan/history`（编辑/重排需 PlanGraph 编辑器 T59，页面 NOT_AVAILABLE）。
 > 真实 Rust 后端联调与真机热切换由 lead 在合并后执行（本任务 NOT_RUN，前端用契约 mock + 单测 + 浏览器断言验证）。
 
 ## 当前状态
@@ -139,6 +140,56 @@ src/views/ChannelsView.vue 方案摘要 / 输出映射表 / AES67 输入 / 上�
 - **历史/预览不编造**：/api/plan/history 不可用时清空历史并显示原因；inspect 不可用时只显示上传摘要；
 - 回滚 = 版本号递增的新提交（历史保留），必须 commit 才生效；提交/回滚均有二次确认。
 
+### M3b：路由矩阵只读页（本任务 T58）
+
+页面与路由：
+
+| 路由 | 名称 | 页面 |
+|---|---|---|
+| `/routing` | routing | 输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断：路由链 3 节点、lane → DAC 映射表（与 /channels 同口径 + 跳转）、计划内 routing 段摘要、编辑/重排 NOT_AVAILABLE（T59）、降级/未接线诚实展示 |
+
+数据链路（**不新增后端端点**，只组合现有只读接口）：
+
+```
+src/api/routing.ts        宽松解析（真实 daemon 形态：dac_map 允许 null、mapping null = routing 段未知、
+                          /api/plan/history 兼容 {current:{version},entries} 与 {current_version,versions}）
+                          + 组合纯函数（buildRoutingChain / buildPlanSummary / laneRows / reasons 查询）
+src/stores/routing.ts     channels + history 只读控制器（并行拉取、并发去重、失败保留最后成功数据、
+                          history 失败清空，不用旧版本冒充当前版本）
+src/views/RoutingView.vue 路由链 / lane→DAC 表 / 计划摘要 / 编辑 NOT_AVAILABLE / 未接入条目
+```
+
+数据来源（页面唯一事实源）：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/status` | 5s 共享轮询：`format.channels`（矩阵 lane 数）、`format.aes67.{channels,map}`（输入）、`plan.{version,latency_samples,applied_at,source,graph_id}`、`host_link`、`not_wired/reasons` |
+| GET | `/api/channels` | `output.channels/dac_map`（DAC 输出）、`mapping[{lane,dac}]`（lane→DAC；null = routing 段未知）、`input.{channels,map,source,sdp_sha256}`、`plan.{source,version,graph_id,routing_known}`、`reasons/not_wired` |
+| GET | `/api/plan/history` | `current_version` + entries（版本交叉核对、latency 回退来源、applied_at） |
+
+诚实边界（页面逐条明示）：
+
+- **没有 mapping 不假设直通**：routing 段未知时 daemon 上报 `mapping: null` → 表格空 + 「未接入」+ 原因，
+  绝不画 lane i → DAC i；`dac_map` 的 null 项表示该 DAC 无 lane 喂入（合法形态），不补 0；
+- **segments（区段数）没有只读数据源**：daemon 只在 `POST /api/plan/upload` 回执里报告 `segments/segment_count`，
+  `/api/status` 与 `/api/plan/history` 都不含它；页面如实 NOT_AVAILABLE + 原因，绝不拿路由条目数冒充区段数
+  （上传/查看入口在 `/channels`）；
+- **路由编辑/重排 NOT_AVAILABLE（T59）**：需要 PlanGraph 编辑器/designer（交叉点编辑、lane 重排、Plan 区段编译）；
+  三个写按钮禁用 + 原因；控制面低层 `POST /api/surface {surface:"routing"}` 片段补丁不暴露
+  （不是图形编辑器，且提交依赖块边界换图/热重配 M3b/T52），不假成功；
+- **降级诚实**：rt-host 不可达 / `host_link` 断开或状态过期 → 警示条 + 只显示最后成功快照；
+  `/api/channels` 501 `not_wired` → 整块 NOT_AVAILABLE + 稳定码 + 任务号 T55；历史不可用 → 清空历史并提示；
+- 与 `/channels` 页映射口径一致（lane / 0-based DAC / 1-based MOTU 物理输出 + 已知位置 L/R/SL/SR/TF/TFR/LFE，
+  未知位置显示 OUT n）；编辑入口不重复，页面提供跳转。
+
+契约 mock（复用现有 fixture，**无新增后端端点/fixture**）：
+
+- `/routing` 的数据来自现有 mock 的 `/api/status`（present | stale | missing）+ `/api/channels`
+  （wired | degraded | unavailable）+ `/api/plan/history`；浏览器 QA 用 `POST /__mock/status-fixture` 与
+  `POST /__mock/channels-fixture` 组出正常/降级/未接线三态（`artifacts/qa/qa-routing.mjs`，DEV-ONLY）；
+- mock 的 degraded 声道 fixture 把 `mapping` 上报为 `null`（与真实 daemon 同形）、`reasons.mapping` 带原因；
+  history 保持 T54 mock 契约形态；路由页解析同时覆盖真实 daemon history 形状（单测双向断言）。
+
 ### M5：校准页 + 8 步向导（本任务 T37，P1 离线闭环）
 
 页面与路由：
@@ -236,7 +287,9 @@ src/views/SystemView.vue / SystemLogsView.vue
 
 ### 明确未接入（不展示假数据）
 
-- **路由矩阵 `/routing`** -> 菜单灰显并标注 M3（本任务 T53 未包含路由页）；
+- **路由编辑/重排** -> 只读路由矩阵页已接入（T58：`/routing`，输入 → 矩阵域 → DAC 输出诊断）；
+  写操作（交叉点编辑/lane 重排/应用路由）需要 PlanGraph 编辑器/designer（T59），页面 NOT_AVAILABLE + 原因；
+  控制面低层 `POST /api/surface {surface:"routing"}` 片段补丁不是图形编辑器，本页不暴露（不假成功）；
 - **主音量 / 当前逐 lane 增益回读** -> 控制协议无对应 op（T70f-a/b），音量页 NOT_AVAILABLE + 原因 + 任务号；
 - **工作模式 analog（模拟/本地输入）** -> 控制面只接通 off/aes67（analog/toslink/dante 未实现），页面禁用并标注 T70f/T70g；
 - **声道热重配 commit** -> M3b 热重配状态机（T52）与 daemon M4 接口（T55）未完成，页面 prepare 保留、commit 501 如实显示；
@@ -430,7 +483,8 @@ mock 的 `/healthz` 返回 **release 版本**（mismatch/consistent 为 v0.1.2�
 `inspect` 返回 plan+compile 摘要；`history` 含 v5..v7 三条记录；`rollback` 生成新版本草稿（需 commit，mock 会验证）。
 /dev-only 端点 `GET /__mock/control`、`/__mock/channels` 返回当前 fixture 与服务端状态，便于 QA 断言与 fixture 切换。
 
-mock 只实现 PLAN §4.1/§4.2/§4.4 与 M3/M4 控制面契约，用于前端自测，**不能替代真实 Rust/axum 后端**。
+mock 只实现 PLAN §4.1/§4.2/§4.4 与 M3/M4 控制面契约（M3b/T58 路由页不新增端点：复用上述 status/channels/history fixture 组合），
+用于前端自测，**不能替代真实 Rust/axum 后端**。
 
 ## 构建与 dist 入库
 
@@ -495,9 +549,16 @@ tests/channels-store.test.ts     M4 控制器：方案上传（本地/服务端 
                                  声道 prepare/commit（501 保留草稿）、busy 互斥、加载去重
 tests/channels-mock.test.ts      契约 mock 端到端：channels GET/PUT+commit 501、plan upload 幂等/sha 校验、
                                  history/inspect、rollback 草稿、degraded/unavailable fixture
+tests/routing-api.test.ts        M3b 路由页：/api/channels 宽松解析（dac_map null 项 / mapping null / plan 段）、
+                                 /api/plan/history 双向形态（daemon current+entries / mock current_version+versions）、
+                                 路由链与计划摘要组合（不猜直通、segments 恒 NOT_AVAILABLE + 原因）、reasons 回退
+tests/routing-store.test.ts      路由页只读控制器：并行拉取/并发去重、失败保留最后成功数据、history 失败清空、
+                                 401/501 归类、loadedAt 只在成功时推进、reset
+tests/routing-mock.test.ts       契约 mock 端到端：401、wired 22 lane 路由链/映射/计划摘要、degraded 逐字段「未接入」、
+                                 unavailable 501 not_wired、stale/missing status fixture 降级
 ```
 
-当前共 **306** 个测试（Node 内置 test runner；基线 239 + M3 34 + M4 33），全部通过。
+当前共 **337** 个测试（Node 内置 test runner；基线 306 + M3b/T58 路由页 31），全部通过。
 
 ## 视觉验收（浏览器实测，evidence 在 `artifacts/browser/`）
 
@@ -535,6 +596,18 @@ tests/channels-mock.test.ts      契约 mock 端到端：channels GET/PUT+commit
   `m3m4_channels_zh-CN_dark_390x844.png`、`m3m4_channels_en-US_light_1440x900.png`、
   `m3m4_channels_committed_zh_dark_1440x900.png`、`m3m4_channels_degraded_zh_dark_1440x900.png`、
   `m3m4_channels_unavailable_zh_dark_1440x900.png`；
+- M3b 路由矩阵页同矩阵浏览器实测 **128 项断言全通过**（`artifacts/qa/qa-routing.mjs`，DEV-ONLY）：
+  390x844 / 1440x900 × 深/浅 × zh-CN/en-US 8 组无横向溢出、无页面报错、标题/主题/语言生效；
+  3 节点路由链（输入 2ch → 矩阵 22 lane → DAC 22）、22 行 lane→DAC 表 + 已知标签 + 未知 OUT 7、
+  计划摘要 v3 / latency 1,023 / segments NOT_AVAILABLE + 原因、编辑 NOT_AVAILABLE（T59 + 3 个禁用按钮 + 1 个跳转）、
+  侧栏条目已启用/高亮（移动端抽屉同断言）、「去 /channels」真实跳转；
+  channels degraded 逐字段「未接入」+ 后端原因（tooltip）、unavailable 501 not_wired + T55、
+  status stale 控制通道警示、status missing 矩阵 lane「未接入」+ 无方案提示；
+- M3b 截图：`m3b_routing_zh-CN_dark_1440x900.png`、`m3b_routing_zh-CN_dark_390x844.png`、
+  `m3b_routing_en-US_light_1440x900.png`、`m3b_routing_en-US_light_390x844.png`、
+  `m3b_routing_degraded_zh_dark_1440x900.png`、`m3b_routing_degraded_zh_dark_390x844.png`、
+  `m3b_routing_unavailable_zh_dark_1440x900.png`、`m3b_routing_stale_zh_dark_1440x900.png`、
+  `m3b_routing_missing_zh_dark_1440x900.png`；
 - 系统页截图：`system_{zh-CN,en-US}_{dark,light}_{1440x900,390x844}.png`、`system_consistent_zh_dark_1440x900.png`、
   `system_degraded_zh_dark_1440x900.png`、`system_logs_restart_zh_dark_1440x900.png`、
   `system_logs_en_light_390x844.png`（`artifacts/` 不入库）。
@@ -583,11 +656,12 @@ webui/
 ├─ tests/*.test.ts            Node 内置 test runner 单测（不进 dist）
 ├─ src/
 │  ├─ main.ts App.vue config.ts env.d.ts
-│  ├─ api/{client.ts,auth.ts,errors.ts,status.ts,calibration.ts,system.ts,control.ts,channels.ts}
+│  ├─ api/{client.ts,auth.ts,errors.ts,status.ts,calibration.ts,system.ts,control.ts,channels.ts,routing.ts}
 │  │                           REST 客户端 / 认证 / 错误码映射 / 状态聚合 / 校准 REST + gate 纯函数
 │  │                           / 系统信息 REST + 版本一致性/设备识别/错误归类
 │  │                           / M3 控制面（mute/surface/format/commit/abort/device retry + 增益模型）
 │  │                           / M4 方案与声道（khaen-channels/v1 + plan upload/history/inspect + sha256）
+│  │                           / M3b 路由页组合（channels/status/history 宽松解析 + 路由链/计划摘要纯函数）
 │  ├─ auth/validation.ts      表单本地校验
 │  ├─ components/             AppShell / PageHeader / PanelCard / StatusBadge / TruthTag / StatRow
 │  │  ├─ calibration/         WizardStepper / GateCard / JobTimeline / VerdictBadge / UploadCard /
@@ -602,13 +676,14 @@ webui/
 │  │                          + system.ts（系统信息/日志控制器）+ version.ts（release 版本）
 │  │                          + control.ts（M3 单草稿槽两阶段 + 静音/设备重试 + 操作历史）
 │  │                          + channels.ts（M4 方案上传/预览/历史/回滚 + 声道两阶段）
+│  │                          + routing.ts（M3b 路由页 channels + history 只读控制器）
 │  ├─ styles/                 tokens.css + main.css
 │  ├─ types/                  ui.ts + auth.ts
 │  ├─ utils/                  format.ts（Intl/单位/省略）+ wav.ts（WAV 头解析/格式校验）
 │  └─ views/                  LoginView / OverviewView / CalibrationView /
 │                             CalibrationWizardView / CalibrationJobView /
 │                             SystemView / SystemLogsView / VolumeView / FormatView /
-│                             ChannelsView
+│                             ChannelsView / RoutingView
 ├─ dist/                      **构建产物，提交入库**
 └─ vite.config.ts tsconfig.json package.json pnpm-lock.yaml
 ```
@@ -625,4 +700,5 @@ pnpm test && pnpm typecheck && node scripts/i18n-check.mjs && pnpm build
 #   node artifacts/qa/qa-system.mjs        # DEV-ONLY；系统信息页/日志页 73 项浏览器断言
 #   node scripts/mock-auth-server.mjs --port 8790 --control-fixture wired --channels-fixture wired
 #   node artifacts/qa/qa-m3m4.mjs          # DEV-ONLY；M3/M4 88 项浏览器断言（音量/格式/声道）
+#   node artifacts/qa/qa-routing.mjs       # DEV-ONLY；M3b 路由页浏览器断言（正常/降级/未接线三态 + 主题/视口）
 ```
