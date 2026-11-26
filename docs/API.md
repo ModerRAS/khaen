@@ -97,21 +97,23 @@
 ## 6. 方案文件上传
 - POST `/api/plan/upload`：请求体为二进制 plan 与 sha 校验头（见 daemon 实现）；201 首次、200 已存在（dedup）、400 sha 不符。响应 `{ok, stored_path, sha256, dedup}`。
 
-## 7. 校准（calibration）——实际形状 + 目标增量
-现状：uploads/wizard 可用；job 后端当前默认注入 NotWired（写 503 `not_wired`、列表 200 空+reason）；backend-lead 正在接 JobManager/OfflineJobBackend。**下表“实际形状”是前端现在必须适配的**；标【加法】的字段后端接线时一并加，旧字段不删不改义。
+## 7. 校准（calibration）——实际形状（backend 已实现并被测试锁定，本表即 canonical）
+现状：uploads/wizard/jobs/artifacts 已可用；生产后端为 JobManager + OfflineJobBackend（`KHAEN_CAL_BACKEND=off` 可关；初始化失败 → not_wired + 真实 reason）。**下表是前端必须适配的实际形状**；标【加法】的字段是已落地的增量。
+
+**字段命名（2026-11-26 裁决 H）**：job 对象用 `id`/`status`（crates/daemon tests 已锁定）；只有创建响应与 cancel 回执用 `job_id`，cancel 同时回 `status` 和 `state` 两字段（同源别名）。前端解析可对 job_id|id、state|status 双接受做防御，但契约测试必须断言本表的实际 canonical 形状。
 
 | 方法 | 路径 | 请求 | 成功响应 |
 |---|---|---|---|
-| POST | `/api/calibration/uploads` | multipart WAV（48k/16-24bit/1-2ch） | `{schema, upload_id, sha256, bytes, created}`；格式不符 400 M1 |
-| GET | `/api/calibration/jobs` | — | `{schema, available, reason?, engine?, active_job_id?, total, limit, offset, jobs:[{job_id, kind, state, created_at, started_at?, finished_at?, duration_ms?, steps?, apply?, error?}], reasons}` |
-| POST | `/api/calibration/jobs` | `{kind:"single_point_offline", inputs:{plan_sha, baseline_upload_id, applied_upload_id, centers_hz:[...], tolerance_db, min_bands}}` | 202 `{job_id, location}`【加法】`ok:true, state` |
-| GET | `/api/calibration/jobs/{id}` | — | `{schema, job:{...}, reasons?}`【加法】`ok, result, artifacts` |
-| POST | `/api/calibration/jobs/{id}/cancel` | — | `{job_id, status}`（状态字符串 `cancelled`） |
+| POST | `/api/calibration/uploads` | 原始字节 body（不是 multipart；Content-Type 需受支持，WAV 48k/16-24bit/1-2ch，≤64 MiB） | `{upload_id, sha256, bytes, created}`（201 首次 / 200 已存在去重；**无 schema 字段**）；格式不符 400 M1 |
+| GET | `/api/calibration/jobs` | `?limit=&offset=`（1..=200） | `{ok, schema, available, reason?, engine?, active_job_id?, total, limit, offset, jobs:[{id, kind, status, verdict?, created_at, created_unix, started_at?, finished_at?, updated_unix, progress, duration_ms?, error?:{code,message}, reason?}], reasons}` |
+| POST | `/api/calibration/jobs` | `{kind:"single_point_offline", inputs:{plan_sha, baseline_upload_id, applied_upload_id, centers_hz:[...], tolerance_db, min_bands}}`（同刻只允许一个 active job，冲突 409 `switch_busy`） | 202 `{ok, job_id, state, location}` |
+| GET | `/api/calibration/jobs/{id}` | — | `{ok, schema, job:{id, kind, status, step?, verdict?, created_at, created_unix, started_at?, finished_at?, updated_unix, progress, duration_ms?, engine?, steps:[{name,status,started_at?,finished_at?,sha256?,detail?}], artifacts:[{name,sha256,bytes,content_type,downloadable}], inputs?, result?, error?:{code,message}, reason?, apply_state, applied_version?, apply}, result, artifacts, error, reasons}`（顶层 result/artifacts/error 与 job 内同源【加法】） |
+| POST | `/api/calibration/jobs/{id}/cancel` | — | `{ok, job_id, status, state}`（状态字符串 `cancelled`；status/state 同源别名） |
 | POST | `/api/calibration/jobs/{id}/apply` | 当前单发 `{}` / `{stage?:...}`；【目标】`{stage:"prepare"|"commit"|"abort", engine_token?}` | prepare 返回草稿+token；commit 生效并记录版本；旧单发语义保留 |
 | POST | `/api/calibration/jobs/{id}/rollback` | 同 apply | 同 apply |
 | GET | `/api/calibration/jobs/{id}/artifacts/{name}` | — | 二进制/JSON 产物（白名单 + manifest sha 重算，校验失败 400/404） |
 | GET/PUT | `/api/calibration/wizard` | 配置对象 | `{schema, config, state, ...}`（实际字段以 daemon 实现为准） |
-| POST | `/api/calibration/wizard/apply` | `{...}` | `{job_id, location}`（有 job 时）或配置草稿 |
+| POST | `/api/calibration/wizard/apply` | `{job_id?}`（缺省用 last_job_id） | **apply 回执**（与 `/jobs/{id}/apply` 旧单发同形：`{ok, applied:true, job_id, applied_version?, applied_block?, graph_id?, sha256?, snapshot, ack, readback, applied_at, job, reasons}`）；无可用 job 409 `no_applicable_job`，未接线 503 not_wired |
 
 - 状态枚举（canonical）：`queued|running|succeeded|failed|cancelled`（双 l，与实现/现有测试一致；旧文档的 `canceled` 作废）。
 - job 审计字段：`job_id, kind, state, created_at/started_at/finished_at`（RFC3339）、`duration_ms, steps, apply, error`；【加法】`created_unix, updated_unix, progress`。
@@ -140,7 +142,7 @@
 - lead 维护本文件；backend/frontend 子任务发现缺失端点或字段，先在任务中记录“合同缺口”，lead 裁决后更新本文件，再到代码落地。
 - 合同测试要求：后端 `crates/daemon/tests/` 断言各端点 shape/错误码；前端 `webui/tests/` 断言所调用的 path/method/body 与本文件一致；两边都跑 fmt/clippy/test。
 
-## 11. 裁决记录（2026-11-26，v1.1）
+## 11. 裁决记录（2026-11-26，v1.1–v1.2）
 - **A 错误体**：保持 M1 `{error:{code,message,details}}` 为 daemon 规范；host_link 转发错误体照旧；新增端点沿用 M1；不做全站 breaking 改造。
 - **B 状态拼写**：canonical=`cancelled`（双 l）。
 - **C job 创建**：kind=`single_point_offline`，inputs 为 plan_sha/baseline_upload_id/applied_upload_id/centers_hz/tolerance_db/min_bands；`repeats/drive_level_dbfs/holdout_points` 对离线 job 无意义，不进请求。
@@ -151,6 +153,7 @@
 - **G3 当前值**：暂不新增 GET /api/surface 读接口；除 routing 可用 `/api/channels.mapping`（标注来源/降级）外，其余显示“当前值不可读”。可读 surface 状态列为后续独立任务。
 - **G5**：以本文件 §7 的“实际形状 + 加法目标”为准（前端先适配实际形状）。
 - **G6**：routing 当前值来源与降级口径见 §5 末条与 §9.7。
+- **H（v1.2，校准 §7 字段）**：以**后端实际形状**为准修正 §7——job 对象 canonical=`id`/`status`（backend tests 已锁定，不改后端加别名）；创建响应=`{ok, job_id, state, location}`、cancel=`{ok, job_id, status, state}`（status/state 同源别名）；job 详情顶层 result/artifacts/error；uploads 返回 `{upload_id,sha256,bytes,created}`（无 schema）；wizard/apply 返回 apply 回执（无 location）。前端解析保持宽容（job_id|id、state|status）但契约测试断言实际 canonical 形状；本修正不改任何实际行为，不升 api_version。
 
 ## 12. 音频通道 profile（输入/输出映射与布局）——v1.2 新增
 状态：设计定稿见 `docs/SPEAKER-MAPPING.md`；后端尚未实现。未实现前 GET 返回 null + reasons，写端点返回 503 `not_wired` + reason（不假成功）。新增端点一律 M1 错误体、成功带 `ok:true`。
