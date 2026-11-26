@@ -91,7 +91,7 @@
   - target=rt-host：行为完全不变（无 `motu` 字段）。
 
 ## 5. /api/channels（数据面热重配，两阶段）
-- GET `/api/channels`：恒 200；`{ok, schema:"khaen-channels/v1", target, runtime_mode, current:{channels,sample_rate,block_frames,aes67_group,aes67_port,aes67_payload_type,aes67_channels,aes67_map,jitter_frames,device}, device:{name,probe,state}, format:{...}, generation, busy, pending, last_gap_ms, last_result, input:{channels,map}, output:{channels,dac_map,channels_source}, mapping, plan:{graph_id,...}, hot_reconfigure:{wired,reason}, not_wired, reasons}`（`target`/`runtime_mode` 是 v0.1.11 真 daemon 实际字段：控制目标与 process/rt-host 运行时模式）。
+- GET `/api/channels`：恒 200；`{ok, schema:"khaen-channels/v1", target, runtime_mode, current:{channels,sample_rate,block_frames,aes67_group,aes67_port,aes67_payload_type,aes67_channels,aes67_map,jitter_frames,device}, device:{name,probe,state}, format:{...}, generation, busy, pending, last_gap_ms, last_result, applied:{...}, input:{channels,map}, output:{channels,dac_map,channels_source}, mapping, plan:{graph_id,...}, hot_reconfigure:{wired,reason}, not_wired, reasons}`（`target`/`runtime_mode` 是 v0.1.11 真 daemon 实际字段：控制目标与 process/rt-host 运行时模式）。
 - PUT `/api/channels` 请求 `{stage:"prepare"|"commit"|"abort", ...}`：
   - prepare 可带 `channels`/`sample_rate`/`aes67_group`/`aes67_port`/`aes67_payload_type`/`aes67_channels`/`aes67_map`/`jitter_frames`/`mapping`/`dac_map`；响应 `{ok, changed, diff, current, target, engine_token, token, commit_supported, blockers, admission, graph:{action,reason}, warnings}`。
   - commit `{stage:"commit", engine_token}` 响应 `{ok, applied, changed, generation, gap_ms, format, graph_dropped, rolled_back?, routing:{...}, idempotent?}`；失败按 §1 错误码 + `details.rolled_back`。
@@ -203,7 +203,7 @@
 ### 12.2 端点
 | 方法 | 路径 | 请求 | 成功响应 |
 |---|---|---|---|
-| GET | `/api/audio-profile` | — | `{ok, schema, profile, validation:{ok, errors[], warnings[]}, capability:{aes67:{channels, map, channel_order?, channel_order_source:"sdp"|"manual"|"none"}, device_inputs:{available, optical_mode:"spdif"|"adat"|null, sample_rate, channels:[{index, label?}], reason?}}, plan:{lanes, enabled_outputs, dac_channels, graph_id?}}`；read-only 永远 200，不可用字段 null + reasons |
+| GET | `/api/audio-profile` | — | `{ok, schema, profile, validation:{ok, errors[], warnings[]}, capability:{aes67:{channels, map, channel_order?, channel_order_source:"sdp"|"manual"|"none"}, device_inputs:{available, optical_mode:"spdif"|"adat"|null, sample_rate, channels:[{index, label?}], reason?}}, plan:{lanes, enabled_outputs, dac_channels, graph_id?}, revision, saved, reasons}`；read-only 永远 200，不可用字段 null + reasons |
 | PUT | `/api/audio-profile` | `{stage:"prepare", profile}` → `{ok, stage:"prepare", profile, validation, diff:{outputs_changed, inputs_changed, downmix_changed, fanout_changed}, token, expires_in_s}`（不碰引擎）；`{stage:"commit", token}` → `{ok, applied:true, saved:true, profile, revision}`；`{stage:"abort", token}` → `{ok, aborted:true}` |
 | POST | `/api/audio-profile/plan` | `{}` | `{ok, plan_path, sha256, lane_count, inspect, folds_preview:[{source, channel, role, lane}], downmix_applied:[{kind:"center"|"lfe", gain_db, lanes:[...]}]}`；之后走现有 `/api/prepare` + `/api/commit`（不自动提交） |
 | GET | `/api/device/inputs` | — | `{ok, available, optical_mode, sample_rate, channels:[{index,label?,kind:"analog"|"optical"}], source:"motu-alsa", reason?}`（模拟 + 光口全部算声卡输入通道）；拿不到 available:false + reason，不编数值 |
