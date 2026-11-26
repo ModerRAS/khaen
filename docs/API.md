@@ -45,7 +45,7 @@
 ## 3. 状态与只读视图
 | 方法 | 路径 | 成功响应要点 |
 |---|---|---|
-| GET | `/api/status` | `{daemon:{version,uptime_s,bind}, host_link:{connected,mode,target,age_ms}, format:{...}, input:{...}, output:{...}, plan:{version,graph_id,...}, muted?, safe, reconfigure:{generation,...}, not_wired:[], reasons:{}}`（`ok` 可缺省；拿不到的部分为 null + reasons）。**注意：本响应不含音频模式当前值**（§9.7 G3）；`host_link.mode` 是控制通道传输模式 `socket/file/none`，不是音频模式；rt-host 控制协议 status 里的 `mode` 未投影到 daemon，前端显示“当前模式不可读（无数据源）”。 |
+| GET | `/api/status` | `{daemon:{version,uptime_s,bind}, host_link:{connected,mode,target,age_ms}, format:{...}, input:{...}, output:{...}, plan:{version,graph_id,...}, mode?, muted?, safe, reconfigure:{generation,...}, not_wired:[], reasons:{}}`（`ok` 可缺省；拿不到的部分为 null + reasons）。**`mode` 为【加法】字段**：来自 rt-host 控制 status 顶层 `mode`（如 `aes67`），仅 socket 主路径有真值；file 回退/process 目标/链路不可用/旧 socket 缺字段时 `null` + 非空 `reasons.mode`，不编造。**`host_link.mode` 是控制通道传输模式 `socket/file/none`，与音频模式不是一回事**。 |
 | GET | `/api/device` | 设备监督器快照 `{wired, state, source, ...}`（process 目标时才有 `target`；`ok` 可缺省），不可用给 null+reason |
 | GET | `/api/coeff` | 当前已生效方案 `{ok, version, graph_id, ...}` |
 | GET | `/api/plan/history` | `{schema:"khaen-plan-history/v1", current:{...}, entries:[{version,graph_id,sha256,committed_at?},...]}`；**加法目标**：补 `ok:true` 与 `versions`（= entries 别名，不改旧字段） |
@@ -150,7 +150,7 @@
 - **E 过期项**：mute 字段=`mute`；diagnostics=附件下载；restart 已实现（见 §8）；history 形状按实际。
 - **F prepare**：`plan_sha256` 必填（不做缺省自动计算）。
 - **G2 surface prepare**：`changed/diff/current/target` 可选，缺省 UI 如实显示“服务端未上报”。
-- **G3 当前值**：暂不新增 GET /api/surface 读接口；除 routing 可用 `/api/channels.mapping`（标注来源/降级）外，其余显示“当前值不可读”。可读 surface 状态列为后续独立任务。
+- **G3 当前值**：暂不新增 GET /api/surface 读接口；除 routing 可用 `/api/channels.mapping`（标注来源/降级）外，其余显示“当前值不可读”。**例外（v1.2 加法）**：音频模式当前值现可从 `GET /api/status.mode` 读到（来源=rt-host 控制 status 顶层 mode，仅 socket；file/process/不可用时 null+reason）；UI 有真值显示真值，null 时如实显示“不可读+原因”。可读 surface 状态其余项仍为后续独立任务。
 - **G5**：以本文件 §7 的“实际形状 + 加法目标”为准（前端先适配实际形状）。
 - **G6**：routing 当前值来源与降级口径见 §5 末条与 §9.7。
 - **H（v1.2，校准 §7 字段）**：以**后端实际形状**为准修正 §7——job 对象 canonical=`id`/`status`（backend tests 已锁定，不改后端加别名）；创建响应=`{ok, job_id, state, location}`、cancel=`{ok, job_id, status, state}`（status/state 同源别名）；job 详情顶层 result/artifacts/error；uploads 返回 `{upload_id,sha256,bytes,created}`（无 schema）；wizard/apply 返回 apply 回执（无 location）。前端解析保持宽容（job_id|id、state|status）但契约测试断言实际 canonical 形状；本修正不改任何实际行为，不升 api_version。

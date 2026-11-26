@@ -156,7 +156,7 @@
 - 支持值：`off`（整链静音）、`on` / `aes67`（解除静音；当前唯一实现的输入源固定为 aes67）。其它值 `bad_request`，消息里写明 "not wired"，不返回假成功。
 - 两阶段与其它界面一致：`surface=mode` 只准备草稿（`engine_token` / `planned_version` / `mode` / `changed` / `applies_to="control-plane engine (output enable)"`）；`commit` 才在下一块边界调用引擎静音（`off`）或解除静音（`aes67`），响应带 `applied_block`。同值请求 `changed=false`，commit 为空操作。
 - `abort` 可丢弃模式草稿（`aborted_surface="mode"`）；错 token 不销毁草稿；与方案/格式草稿互斥。
-- `status.mode` 是**rt-host 控制协议 status 的顶层字段**（运行时模式，如 `playback`），不是 daemon `/api/status` 的字段；daemon 当前不投影它（见 docs/API.md §9.7/G3，前端显示“当前模式不可读”）。`status.surfaces.mode=true` 表示该入口可用，不代表采集源切换已实现。
+- `status.mode` 是**rt-host 控制协议 status 的顶层字段**（运行时模式，如 `playback`/`aes67`）；daemon `GET /api/status` 现已**加法投影**该字段（仅 socket 主路径有真值；file/process/链路不可用 → null + `reasons.mode`，不编造）。`host_link.mode` 仍是控制通道传输模式（socket/file/none），不要混用。`status.surfaces.mode=true` 表示该入口可用，不代表采集源切换已实现。
 
 ### B.2 语义
 
