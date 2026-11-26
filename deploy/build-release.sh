@@ -54,6 +54,18 @@ if [[ "${TARGET}" != "${HOST}" ]]; then
   esac
 fi
 
+# 构建期版本注入（daemon/build.rs → /healthz 的 version；CI tag 构建会预先导出）：
+# 本地默认取根 Cargo.toml 的 workspace version 与 git HEAD，保证 /healthz 报 release 版本而不是 crate 版本。
+if [[ -z "${KHAEN_BUILD_VERSION:-}" ]]; then
+  KHAEN_BUILD_VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d'\"' -f2)"
+  export KHAEN_BUILD_VERSION
+fi
+if [[ -z "${KHAEN_BUILD_COMMIT:-}" ]]; then
+  KHAEN_BUILD_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+  export KHAEN_BUILD_COMMIT
+fi
+echo "==> build version ${KHAEN_BUILD_VERSION} commit ${KHAEN_BUILD_COMMIT:0:12}"
+
 echo "==> build ${TARGET} on ${HOST} with RUSTFLAGS='${CPU_FLAGS}'"
 export RUSTFLAGS="${CPU_FLAGS}${RUSTFLAGS:+ ${RUSTFLAGS}}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT}/target}"
