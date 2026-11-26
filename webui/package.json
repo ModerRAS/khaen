@@ -1,0 +1,27 @@
+{
+  "name": "khaen-webui",
+  "private": true,
+  "version": "0.3.0",
+  "description": "khaen web console (Vue 3 + TypeScript + Element Plus)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "preview": "vite preview",
+    "i18n:check": "node scripts/i18n-check.mjs"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "2.3.2",
+    "element-plus": "2.14.8",
+    "vue": "3.5.46",
+    "vue-i18n": "11.4.24",
+    "vue-router": "4.6.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.4",
+    "typescript": "5.9.3",
+    "vite": "6.4.6",
+    "vue-tsc": "2.2.12"
+  }
+}

@@ -1,0 +1,111 @@
+/**
+ * 路由表与守卫骨架（PLAN §5.1 / §5.2）。
+ *
+ * 本轮只落地两条路由：/login（公开，静态壳）与 /（概览占位壳）。
+ * 其余页面（volume / channels / routing / format / calibration / system / logs）在菜单里灰显并标注计划里程碑，
+ * 尚未注册路由——深链会由 catch-all 重定向回 /（M3+ 逐个接入时再补 route record）。
+ *
+ * 守卫：未登录 → /login?next=...（next 只接受站内相对路径，防开放重定向）。
+ * 骨架阶段 ensureSession() 返回 'unknown'（API 未接入），因此不会真的拦截——M1 落地即生效。
+ */
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import AppShell from '@/components/AppShell.vue'
+import LoginView from '@/views/LoginView.vue'
+import OverviewView from '@/views/OverviewView.vue'
+import { ensureSession } from '@/stores/session'
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    /** true = 无需会话即可访问（仅登录页）。 */
+    public?: boolean
+    /** true = 需要会话（守卫骨架，M1 前不拦截）。 */
+    requiresAuth?: boolean
+    /** 页面标题 i18n 键（document.title / 顶栏标题）。 */
+    titleKey?: string
+  }
+}
+
+/** 侧栏导航项（未落地的项 implemented=false，灰显 + 里程碑提示）。 */
+export interface NavItem {
+  /** 路由名（落地后与 route name 一致）。 */
+  name: string
+  path: string
+  /** 菜单文案 i18n 键。 */
+  titleKey: string
+  /** @element-plus/icons-vue 的组件名（AppShell 内映射）。 */
+  icon: string
+  group: 'main' | 'system'
+  implemented: boolean
+  /** 计划里程碑（未落地时展示，如 'M3'）。 */
+  milestone?: string
+}
+
+export const navItems: NavItem[] = [
+  { name: 'overview', path: '/', titleKey: 'nav.overview', icon: 'Odometer', group: 'main', implemented: true },
+  { name: 'volume', path: '/volume', titleKey: 'nav.volume', icon: 'Headset', group: 'main', implemented: false, milestone: 'M3' },
+  { name: 'channels', path: '/channels', titleKey: 'nav.channels', icon: 'Files', group: 'main', implemented: false, milestone: 'M4' },
+  { name: 'routing', path: '/routing', titleKey: 'nav.routing', icon: 'Share', group: 'main', implemented: false, milestone: 'M3' },
+  { name: 'format', path: '/format', titleKey: 'nav.format', icon: 'DataLine', group: 'main', implemented: false, milestone: 'M3' },
+  { name: 'calibration', path: '/calibration', titleKey: 'nav.calibration', icon: 'Timer', group: 'main', implemented: false, milestone: 'M5' },
+  { name: 'system', path: '/system', titleKey: 'nav.system', icon: 'Monitor', group: 'system', implemented: false, milestone: 'M6' },
+  { name: 'logs', path: '/system/logs', titleKey: 'nav.logs', icon: 'Document', group: 'system', implemented: false, milestone: 'M6' }
+]
+
+/** 侧栏分组（与 PLAN §11.2 一致：主功能 / 系统）。 */
+export const navGroups: Array<{ key: 'main' | 'system'; labelKey: string; items: NavItem[] }> = [
+  { key: 'main', labelKey: 'navGroup.main', items: navItems.filter((item) => item.group === 'main') },
+  { key: 'system', labelKey: 'navGroup.system', items: navItems.filter((item) => item.group === 'system') }
+]
+
+const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'login',
+    component: LoginView,
+    meta: { public: true, titleKey: 'login.pageTitle' }
+  },
+  {
+    path: '/',
+    component: AppShell,
+    children: [
+      {
+        path: '',
+        name: 'overview',
+        component: OverviewView,
+        meta: { requiresAuth: true, titleKey: 'nav.overview' }
+      }
+    ]
+  },
+  { path: '/:pathMatch(.*)*', redirect: '/' }
+]
+
+export const router = createRouter({
+  history: createWebHistory(),
+  scrollBehavior: () => ({ top: 0 }),
+  routes
+})
+
+/** 只允许站内相对路径作为登录后回跳目标（防开放重定向）。 */
+export function safeNext(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return '/'
+  }
+  // 必须单斜杠开头；拒绝 //host、/\host、绝对 URL 与协议相对地址。
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) {
+    return '/'
+  }
+  return raw
+}
+
+router.beforeEach(async (to) => {
+  if (to.meta.public) {
+    return true
+  }
+  if (to.meta.requiresAuth) {
+    const status = await ensureSession()
+    if (status === 'unauthenticated') {
+      return { name: 'login', query: { next: to.fullPath } }
+    }
+  }
+  return true
+})

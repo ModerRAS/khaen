@@ -1,0 +1,11 @@
+# pnpm 11：依赖的 build/postinstall 脚本默认被拦截；vite 构建依赖的 esbuild 需要放行。
+allowBuilds:
+  esbuild: true
+# 精确 pin 的 vue-i18n 相关包比 pnpm 默认 minimumReleaseAge 新，显式放行以保持 lock 可复现。
+minimumReleaseAgeExclude:
+  - '@intlify/core-base@11.4.24'
+  - '@intlify/devtools-types@11.4.24'
+  - '@intlify/message-compiler@11.4.24'
+  - '@intlify/shared@11.4.24'
+  - vue-i18n@11.4.24
+verifyDepsBeforeRun: false
