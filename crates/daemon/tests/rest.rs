@@ -4,12 +4,14 @@
 //! 错误码 → HTTP 状态码映射（bad_request→400、admission_rejected→409、
 //! engine_token_invalid→409、unknown_op→404）。
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use khaen_calibration::fir_plan::{compile_fir_plan, FirPlanConfig, LaneFir};
 use khaen_calibration::{compile_peq_design, PlanCompileOptions};
+use khaen_daemon::auth::{AuthConfig, SESSION_COOKIE};
 use khaen_daemon::{router, DaemonState};
 use khaen_designer::modal_peq::{BandType, ChannelPeq, DesignMode, ModalBand, PeqDesign};
 use khaen_host::plan::{
@@ -26,9 +28,40 @@ const CHANNELS: u16 = 2;
 /// +6 dB 的线性增益（10^(6/20)）；断言容差 1e-6。
 const GAIN_6DB: f32 = 1.995_262;
 
+/// 测试固定密码（临时状态目录内使用；>=8 字符）。
+const REST_PASSWORD: &str = "khaen-rest-test-password";
+
+/// 测试用临时状态目录（auth.json 落这里；Drop 时递归删除）。
+struct TempStateDir(PathBuf);
+
+impl TempStateDir {
+    fn new(tag: &str) -> Self {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "khaen-daemon-rest-{}-{tag}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).expect("create temp state dir");
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempStateDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 struct TestServer {
     base: String,
     handle: tokio::task::JoinHandle<()>,
+    _state_dir: TempStateDir,
 }
 
 impl Drop for TestServer {
@@ -37,30 +70,113 @@ impl Drop for TestServer {
     }
 }
 
+/// 已签发的会话凭据（按 host:port 记账，request() 自动带 Cookie/CSRF）。
+#[derive(Clone)]
+struct Credentials {
+    token: String,
+    csrf: String,
+}
+
+fn credentials() -> &'static Mutex<HashMap<String, Credentials>> {
+    static CREDENTIALS: OnceLock<Mutex<HashMap<String, Credentials>>> = OnceLock::new();
+    CREDENTIALS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 async fn spawn() -> (TestServer, Arc<DaemonState>) {
-    let state = Arc::new(DaemonState::new(EngineConfig::default()).expect("state"));
+    let state_dir = TempStateDir::new("rest");
+    let state = Arc::new(
+        DaemonState::new_with_auth(
+            EngineConfig::default(),
+            AuthConfig::for_tests(state_dir.path()),
+        )
+        .expect("state"),
+    );
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
     let addr = listener.local_addr().expect("addr");
-    let app = router(Arc::clone(&state));
+    let app =
+        router(Arc::clone(&state)).into_make_service_with_connect_info::<std::net::SocketAddr>();
     let handle = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
-    (
-        TestServer {
-            base: format!("http://{addr}"),
-            handle,
-        },
-        state,
-    )
+    let server = TestServer {
+        base: format!("http://{addr}"),
+        handle,
+        _state_dir: state_dir,
+    };
+    let session = sign_in(&server.base).await;
+    let (host, _) = split_url(&server.base);
+    credentials()
+        .lock()
+        .expect("credentials")
+        .insert(host.to_string(), session);
+    (server, state)
 }
 
+/// setup 一个管理员密码并返回会话（每个 rest 测试服务只做一次）。
+async fn sign_in(base: &str) -> Credentials {
+    let url = format!("{base}/api/auth/setup");
+    let body = format!(r#"{{"password":"{REST_PASSWORD}","confirm":"{REST_PASSWORD}"}}"#);
+    let (status, json, headers) = request_with("POST", &url, Some(&body), &[]).await;
+    assert_eq!(status, 201, "auth setup 必须成功: {json}");
+    let csrf = json["csrf"].as_str().expect("csrf").to_string();
+    let set_cookie = headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+        .map(|(_, value)| value.clone())
+        .expect("set-cookie");
+    let token = set_cookie
+        .split(';')
+        .next()
+        .and_then(|pair| pair.split_once('='))
+        .filter(|(name, _)| *name == SESSION_COOKIE)
+        .map(|(_, value)| value.trim().to_string())
+        .expect("khaen_session cookie");
+    Credentials { token, csrf }
+}
+
+/// 自动带会话认证的请求（M1：/api 全部要求会话；写方法带 CSRF）。
 async fn request(method: &str, url: &str, body: Option<&str>) -> (u16, Value) {
+    let (host, _) = split_url(url);
+    let credentials = credentials()
+        .lock()
+        .expect("credentials")
+        .get(host)
+        .cloned();
+    let mut headers: Vec<(String, String)> = Vec::new();
+    if let Some(credentials) = credentials {
+        headers.push((
+            "Cookie".to_string(),
+            format!("{SESSION_COOKIE}={}", credentials.token),
+        ));
+        if matches!(method, "POST" | "PUT" | "PATCH" | "DELETE") {
+            headers.push(("X-KHAEN-CSRF".to_string(), credentials.csrf));
+        }
+    }
+    let (status, json, _headers) = request_with(method, url, body, &headers).await;
+    (status, json)
+}
+
+/// 原始请求：显式请求头，不自动加认证。
+async fn request_with(
+    method: &str,
+    url: &str,
+    body: Option<&str>,
+    headers: &[(String, String)],
+) -> (u16, Value, Vec<(String, String)>) {
     let (host, path) = split_url(url);
     let mut stream = tokio::net::TcpStream::connect(host).await.expect("connect");
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut text = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        text.push_str(&format!("{name}: {value}\r\n"));
+    }
     if let Some(body) = body {
-        text.push_str("Content-Type: application/json\r\n");
+        if !headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        {
+            text.push_str("Content-Type: application/json\r\n");
+        }
         text.push_str(&format!("Content-Length: {}\r\n", body.len()));
     }
     text.push_str("\r\n");
@@ -77,8 +193,16 @@ async fn request(method: &str, url: &str, body: Option<&str>) -> (u16, Value) {
         .nth(1)
         .and_then(|code| code.parse().ok())
         .expect("status code");
+    let headers: Vec<(String, String)> = head
+        .split("\r\n")
+        .skip(1)
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            Some((name.trim().to_string(), value.trim().to_string()))
+        })
+        .collect();
     let json: Value = serde_json::from_str(body).unwrap_or(Value::Null);
-    (status, json)
+    (status, json, headers)
 }
 
 #[tokio::test(flavor = "current_thread")]

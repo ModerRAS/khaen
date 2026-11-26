@@ -22,9 +22,15 @@
 //! - `/healthz`：无认证探活 `{ok,version,uptime_s}`。
 //! - `/api/meta`：`{api_version,web_version,ops,surfaces,not_wired}`，值与能力来自
 //!   `khaen_host::control` 的既有常量（见 `meta` 模块）。
+//! - `/api/auth/*`：M1 认证（setup/login/session/logout/password），argon2id PHC 存
+//!   `${KHAEN_STATE_DIR:-/var/lib/khaen}/auth.json`（见 `auth` 模块）。除 `/healthz` 与
+//!   `/api/auth/status|setup|login` 外，全部 `/api` 要求会话；写方法（Cookie 会话）额外要求
+//!   `X-KHAEN-CSRF`；`/api` 响应统一带 `X-KHAEN-API-Version: 1` / `X-KHAEN-Web-Version` /
+//!   `Cache-Control: no-store`。
 //! - 其余 `GET`：内嵌 `webui/dist` 静态资源；未知路径回退 `index.html`（SPA fallback），
 //!   路径查找只命中编译期内嵌表、从不读文件系统，目录穿越被显式拒绝（见 `webui` 模块）。
 
+pub mod auth;
 pub mod bind;
 pub mod device;
 mod meta;
@@ -56,23 +62,74 @@ pub const WEB_VERSION: &str = webui_assets::WEBUI_PACKAGE_VERSION;
 /// REST API 版本：与契约 B 的主机控制协议版本同源（`khaen_host::PROTOCOL_VERSION` 是版本事实源）。
 pub const API_VERSION: u32 = khaen_host::PROTOCOL_VERSION as u32;
 
+/// daemon 启动错误：引擎配置错误或认证存储不可用（两者都 fail-closed，不静默降级）。
+#[derive(Debug)]
+pub enum DaemonError {
+    /// 引擎/控制面构造失败。
+    Engine(khaen_host::EngineError),
+    /// 认证存储（auth.json）不可用或内容损坏。
+    Auth(auth::AuthError),
+}
+
+impl std::fmt::Display for DaemonError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Engine(error) => write!(f, "engine: {error}"),
+            Self::Auth(error) => write!(f, "auth: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for DaemonError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Engine(error) => Some(error),
+            Self::Auth(error) => Some(error),
+        }
+    }
+}
+
+impl From<khaen_host::EngineError> for DaemonError {
+    fn from(error: khaen_host::EngineError) -> Self {
+        Self::Engine(error)
+    }
+}
+
+impl From<auth::AuthError> for DaemonError {
+    fn from(error: auth::AuthError) -> Self {
+        Self::Auth(error)
+    }
+}
+
 /// daemon 共享状态。
 #[derive(Debug)]
 pub struct DaemonState {
     control: Mutex<ControlState>,
     device: Mutex<DeviceMonitor>,
+    /// 认证/会话存储（argon2id PHC + 会话 + 登录限速）。
+    auth: Mutex<auth::AuthStore>,
     /// 进程启动时刻（`/healthz` 的 `uptime_s`）。
     started: std::time::Instant,
 }
 
 impl DaemonState {
-    /// 用主机默认配置新建；设备监督器默认未接线（原因随 status 一起上报）。
-    pub fn new(config: EngineConfig) -> Result<Self, khaen_host::EngineError> {
+    /// 用主机默认配置新建；设备监督器默认未接线（原因随 status 一起上报）；
+    /// 认证状态目录取 `KHAEN_STATE_DIR`（缺省 `/var/lib/khaen`）。
+    pub fn new(config: EngineConfig) -> Result<Self, DaemonError> {
+        Self::new_with_auth(config, auth::AuthConfig::from_env())
+    }
+
+    /// 用显式认证配置新建（测试注入临时目录/低成本 KDF 参数；生产由 `new` 走环境变量）。
+    pub fn new_with_auth(
+        config: EngineConfig,
+        auth_config: auth::AuthConfig,
+    ) -> Result<Self, DaemonError> {
         Ok(Self {
             control: Mutex::new(ControlState::new(config)?),
             device: Mutex::new(DeviceMonitor::disabled(
                 "device supervisor is not wired: no probe/rate-control configured in this process",
             )),
+            auth: Mutex::new(auth::AuthStore::load(auth_config)?),
             started: std::time::Instant::now(),
         })
     }
@@ -93,6 +150,13 @@ impl DaemonState {
     /// 设备监督器（测试与内部使用）。
     pub fn device(&self) -> std::sync::MutexGuard<'_, DeviceMonitor> {
         self.device
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 认证/会话存储（中间件与 auth handler 使用）。
+    pub(crate) fn auth(&self) -> std::sync::MutexGuard<'_, auth::AuthStore> {
+        self.auth
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -125,6 +189,13 @@ impl DaemonState {
 pub fn router(state: Arc<DaemonState>) -> Router {
     Router::new()
         .route("/healthz", get(meta::healthz))
+        // M1 认证（PLAN §4.2）：status/setup/login 匿名可访问，其余要求会话。
+        .route("/api/auth/status", get(auth::status))
+        .route("/api/auth/setup", post(auth::setup))
+        .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/session", get(auth::session))
+        .route("/api/auth/logout", post(auth::logout))
+        .route("/api/auth/password", post(auth::password))
         .route("/api/meta", get(meta::api_meta))
         .route("/api/status", get(status))
         .route("/api/mute", post(mute))
@@ -140,15 +211,23 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .route("/api/device/retry", post(device_retry))
         // 非 /api 的 GET/HEAD 走内嵌静态资源 + SPA 回退；未知 /api/* 返回结构化 JSON 404。
         .fallback(webui::fallback)
+        // 认证守卫包住全部路由（含 fallback）：只对 /api 生效，并给 /api 响应补版本/缓存头。
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::guard,
+        ))
         .with_state(state)
 }
 
 /// 启动 HTTP 服务（阻塞直到 listener 关闭）。
+///
+/// 用 `into_make_service_with_connect_info` 让中间件拿到对端 IP：登录限速按来源（IP）隔离。
 pub async fn serve(
     listener: tokio::net::TcpListener,
     state: Arc<DaemonState>,
 ) -> std::io::Result<()> {
-    axum::serve(listener, router(state)).await
+    let app = router(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
+    axum::serve(listener, app).await
 }
 
 async fn format_prepare(
