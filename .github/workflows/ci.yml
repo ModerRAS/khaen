@@ -108,6 +108,10 @@ jobs:
           after="$(readlink -f /opt/khaen/current)"
           echo "after rollback: ${after}"
           test "${after}" = "/opt/khaen/releases/${previous#v}"
+          sudo systemctl is-active khaen-daemon
+          healthz="$(curl -fsS --retry 20 --retry-delay 1 --retry-connrefused http://127.0.0.1:18756/healthz)"
+          echo "healthz=${healthz}"
+          PREV_VERSION="${previous#v}" python3 -c 'import json,os,sys; v=json.loads(sys.argv[1])["version"]; assert v.lstrip("vV")==os.environ["PREV_VERSION"], (v, os.environ["PREV_VERSION"])' "${healthz}"
           sudo grep -E '^(version|commit):' "${after}/BUILD"
           sudo systemctl stop khaen-daemon || true
 
