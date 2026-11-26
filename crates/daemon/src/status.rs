@@ -65,6 +65,10 @@ const CALIBRATION_REASON: &str = "calibration jobs are not wired";
 const OUT_ERRORS_FILE_REASON: &str = "rt-host status file (khaen-rt-status/v1) does not report output errors: write_status_file omits RuntimeStatus.output_errors";
 /// socket status 也没有 output errors 时的原因（正常不会出现：rt-host status 有该字段）。
 const OUT_ERRORS_SOCKET_REASON: &str = "rt-host control status does not report output_errors";
+/// rt-host 控制 status 没有顶层 mode（旧版本/协议违规）时的原因。
+const RT_HOST_MODE_MISSING_REASON: &str = "rt-host control status does not report a string top-level mode: the running runtime mode cannot be read";
+/// 状态文件 schema 不落运行时 mode 的原因（mode 只由控制 status op 报告）。
+const RT_STATUS_FILE_MODE_REASON: &str = "rt-host status file (khaen-rt-status/v1) does not report the runtime mode (mode comes from the control status op only); no value is fabricated";
 /// AES67 接收参数没有数据源（rt-host 进程的启动输入；控制通道 status 也不报它们）。
 const AES67_REASON: &str = "AES67 receive parameters are rt-host process inputs: neither the rt-host control status (op status) nor the status file reports them";
 /// 编码没有数据源（daemon 不打开 ALSA，rt-host status/文件都不写采样格式）。
@@ -284,6 +288,45 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         }
     };
 
+    // rt-host 运行时模式（CONTRACTS B.1.5 的 status.mode，docs/API.md §9.7/G3）：
+    // 只来自 rt-host 控制 status 的顶层 mode（如 "aes67"/"off"）；状态文件 schema 不落它，
+    // process 目标没有 rt-host。取不到一律 null + reasons["mode"]，不用 host_link.mode（传输模式）冒充。
+    let runtime_mode = if matches!(sources.target, Target::Process) {
+        insert_reason(&mut reasons, "mode", PROCESS_TARGET_REASON);
+        Value::Null
+    } else {
+        match source {
+            Source::Socket => match sources.link {
+                LinkSnapshot::Socket { status, .. } => {
+                    match status.get("mode").and_then(Value::as_str) {
+                        Some(mode) => Value::String(mode.to_string()),
+                        None => {
+                            insert_reason(&mut reasons, "mode", RT_HOST_MODE_MISSING_REASON);
+                            Value::Null
+                        }
+                    }
+                }
+                _ => {
+                    insert_reason(&mut reasons, "mode", RT_HOST_MODE_MISSING_REASON);
+                    Value::Null
+                }
+            },
+            Source::File => {
+                insert_reason(&mut reasons, "mode", RT_STATUS_FILE_MODE_REASON);
+                Value::Null
+            }
+            Source::None => {
+                let reason = reasons
+                    .get("host_link.connected")
+                    .and_then(Value::as_str)
+                    .unwrap_or("rt-host runtime mode is unavailable")
+                    .to_string();
+                insert_reason(&mut reasons, "mode", reason);
+                Value::Null
+            }
+        }
+    };
+
     // 只读能力/数据源固定缺口：与 rt-host 在不在线无关。
     insert_reason(&mut reasons, "format.encoding", ENCODING_REASON);
     for path in [
@@ -468,6 +511,8 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         "muted": state_muted,
         "safe": state_safe,
         "reconfigure": reconfigure,
+        // 运行时模式（加法字段）：rt-host 控制 status 顶层 mode；file/none/process 为 null+原因。
+        "mode": runtime_mode,
         "speaker_test": speaker_test,
         "plan": {
             "graph_id": rt.graph_id,
@@ -1453,6 +1498,7 @@ mod tests {
 
     /// rt-host 状态不可用时，所有 rt-host 字段路径（测试断言用）。
     const RT_HOST_PATHS: &[&str] = &[
+        "mode",
         "state.value",
         "state.muted",
         "state.safe",
@@ -1864,6 +1910,7 @@ mod tests {
             "format",
             "host_link",
             "input",
+            "mode",
             "muted",
             "not_wired",
             "ok",
@@ -1885,6 +1932,9 @@ mod tests {
 
         assert_eq!(body["host_link"]["connected"], json!(true));
         assert_eq!(body["host_link"]["mode"], json!("file"));
+        // 运行时 mode 只来自控制 status op：状态文件回退时 null + 原因（不拿传输模式冒充）。
+        assert_eq!(body["mode"], Value::Null);
+        assert!(reason_of(&body, "mode").contains("status file"));
         assert_eq!(body["host_link"]["target"], json!("rt-host"));
         assert_eq!(
             body["host_link"]["socket"],
@@ -2247,6 +2297,13 @@ mod tests {
         assert_eq!(body["host_link"]["target"], json!("rt-host"));
         assert_eq!(body["host_link"]["socket"], json!(TEST_SOCKET));
         assert_eq!(body["host_link"]["age_ms"], json!(42));
+        // 运行时 mode：socket status 顶层 mode 原样投影（与 host_link.mode=传输模式无关）。
+        assert_eq!(body["mode"], json!("aes67"));
+        assert!(
+            body["reasons"].get("mode").is_none(),
+            "socket status 有真实 mode，不该登记缺口原因: {}",
+            body["reasons"]
+        );
         assert_eq!(body["host_link"]["status_age_ms"], json!(42));
         assert_eq!(body["host_link"]["since"], Value::Null);
         assert!(reason_of(&body, "host_link.since").contains("snapshot age"));
@@ -2341,6 +2398,9 @@ mod tests {
         assert_eq!(body["host_link"]["connected"], json!(true));
         assert_eq!(body["host_link"]["mode"], json!("socket"));
         assert_eq!(body["host_link"]["age_ms"], Value::Null);
+        // 这个旧/裁剪的 status 响应没有顶层 mode：null + 原因，不编造。
+        assert_eq!(body["mode"], Value::Null);
+        assert!(reason_of(&body, "mode").contains("does not report"));
         assert!(reason_of(&body, "host_link.age_ms").contains("first runtime snapshot"));
         assert_eq!(body["state"]["value"], json!("starting"));
         assert_eq!(body["state"]["muted"], Value::Null);
@@ -2376,6 +2436,9 @@ mod tests {
         );
         assert_eq!(body["host_link"]["connected"], json!(true));
         assert_eq!(reason_of(&body, "host_link.socket"), PROCESS_TARGET_REASON);
+        // process 目标没有 rt-host：运行时 mode null + 同一条目标原因。
+        assert_eq!(body["mode"], Value::Null);
+        assert_eq!(reason_of(&body, "mode"), PROCESS_TARGET_REASON);
         let not_wired = body["not_wired"].as_array().expect("not_wired");
         let control = not_wired
             .iter()

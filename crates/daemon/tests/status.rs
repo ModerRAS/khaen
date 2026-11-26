@@ -101,6 +101,9 @@ async fn status_aggregates_a_fresh_rt_host_status_file() {
     );
     assert_eq!(body["host_link"]["mode"], Value::String("file".into()));
     assert_eq!(body["host_link"]["socket"], Value::Null);
+    // 运行时 mode（加法字段）：process 目标没有 rt-host，且状态文件不落 mode -> null + 原因。
+    assert_eq!(body["mode"], Value::Null);
+    assert!(body["reasons"]["mode"].is_string());
     assert!(body["not_wired"].as_array().is_some_and(|items| items
         .iter()
         .any(|item| item["path"] == json!("host_link.control"))));
@@ -121,6 +124,8 @@ async fn status_degrades_to_null_reasons_and_never_500() {
     assert_eq!(status, 200, "损坏的状态文件不能变成 500");
     assert_eq!(body["schema"], Value::String("khaen-status/v1".into()));
     assert_eq!(body["host_link"]["connected"], Value::Bool(false));
+    assert_eq!(body["mode"], Value::Null);
+    assert!(body["reasons"]["mode"].is_string());
     assert!(
         body["host_link"]["since"].is_string(),
         "文件存在时 mtime 仍然真实"
@@ -169,5 +174,34 @@ async fn status_degrades_to_null_reasons_and_never_500() {
     assert_eq!(
         body["daemon"]["version"],
         Value::String(env!("CARGO_PKG_VERSION").into())
+    );
+}
+
+/// task-74：rt-host 运行时 mode 的加法投影——socket status 顶层 mode 原样进 daemon
+/// /api/status.mode（与 host_link.mode=传输模式无关）；有真实值时不登记 reasons["mode"]。
+#[tokio::test(flavor = "current_thread")]
+async fn status_projects_rt_host_runtime_mode_from_the_socket() {
+    use support::host_link_fake::{rt_status_document, FakeTransport};
+
+    let transport = FakeTransport::with_rt_status(rt_status_document());
+    let mut server = support::spawn_with_link(support::injected_link(transport), None).await;
+    server.sign_in().await;
+
+    let (status, body) = get_status(&server).await;
+    assert_eq!(status, 200, "{}", body);
+    assert_eq!(
+        body["host_link"]["mode"],
+        Value::String("socket".into()),
+        "socket 是主路径"
+    );
+    assert_eq!(
+        body["mode"],
+        Value::String("aes67".into()),
+        "rt-host status.mode 必须原样投影: {body}"
+    );
+    assert!(
+        body["reasons"].get("mode").is_none(),
+        "有真实 mode 时不该登记缺口原因: {}",
+        body["reasons"]
     );
 }

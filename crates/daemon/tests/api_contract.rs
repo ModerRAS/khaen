@@ -336,6 +336,21 @@ async fn status_is_always_200_with_schema_and_honest_not_wired() {
     assert!(body["host_link"]["connected"].is_boolean());
     assert!(body["host_link"]["target"].is_string());
 
+    // 运行时 mode（CONTRACTS B.1.5 / §9.7 G3 的加法投影）：process 目标下无 rt-host，
+    // 必须是 null + 原因，不编造、也不拿 host_link.mode（传输模式）冒充。
+    assert!(
+        body["mode"].is_null() || body["mode"].is_string(),
+        "mode 必须是 null 或字符串: {body}"
+    );
+    if body["mode"].is_null() {
+        assert!(
+            body["reasons"]["mode"]
+                .as_str()
+                .is_some_and(|reason| !reason.is_empty()),
+            "mode 为 null 时必须给原因: {body}"
+        );
+    }
+
     // 诚实降级：not_wired 每项恰好 {path, reason}，reason 非空。
     let not_wired = body["not_wired"].as_array().expect("not_wired 必须是数组");
     assert!(!not_wired.is_empty(), "process 目标下应有未接线项");
