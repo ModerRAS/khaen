@@ -597,7 +597,9 @@ pub(crate) fn internal_failure_body(state: &DaemonState, message: &str) -> Value
 }
 
 /// rt-host 状态文件的判定结果。
-enum RtFile {
+///
+/// T46 起 system 模块复用同一份读取/新鲜度判定（/api/system/info 与 /api/status 同口径）。
+pub(crate) enum RtFile {
     /// 文件不存在或 stat 失败（连 mtime 都拿不到）。
     Missing {
         /// 人看的稳定原因。
@@ -625,7 +627,7 @@ enum RtFile {
 
 impl RtFile {
     /// 文件 mtime（文件不存在时为 None）。
-    fn mtime(&self) -> Option<SystemTime> {
+    pub(crate) fn mtime(&self) -> Option<SystemTime> {
         match self {
             Self::Missing { .. } => None,
             Self::Invalid { mtime, .. } | Self::Fresh { mtime, .. } => Some(*mtime),
@@ -633,7 +635,7 @@ impl RtFile {
     }
 
     /// mtime 与 now 之差（毫秒；文件不存在时为 None）。
-    fn age_ms(&self) -> Option<u64> {
+    pub(crate) fn age_ms(&self) -> Option<u64> {
         match self {
             Self::Missing { .. } => None,
             Self::Invalid { age_ms, .. } | Self::Fresh { age_ms, .. } => Some(*age_ms),
@@ -641,7 +643,7 @@ impl RtFile {
     }
 
     /// 不可用原因（可用时为 None）。
-    fn unavailable_reason(&self) -> Option<&str> {
+    pub(crate) fn unavailable_reason(&self) -> Option<&str> {
         match self {
             Self::Missing { reason } | Self::Invalid { reason, .. } => Some(reason),
             Self::Fresh { .. } => None,
@@ -650,7 +652,7 @@ impl RtFile {
 }
 
 /// 读并校验 rt-host 状态文件；任何异常都只降级，不向调用方报错（handler 绝不 500）。
-fn read_rt_status(path: &Path, now: SystemTime) -> RtFile {
+pub(crate) fn read_rt_status(path: &Path, now: SystemTime) -> RtFile {
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) => {

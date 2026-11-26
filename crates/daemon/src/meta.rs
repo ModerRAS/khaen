@@ -26,15 +26,19 @@ use serde_json::{json, Value};
 
 use khaen_host::control::{NOT_WIRED_OPS, NOT_WIRED_SURFACES, WIRED_OPS, WIRED_SURFACES};
 
-use crate::{DaemonState, API_VERSION, VERSION, WEB_VERSION};
+use crate::{DaemonState, API_VERSION, WEB_VERSION};
 
 /// 无认证探活：`{ok, version, uptime_s}`（字段集固定，供部署/负载均衡轮询）。
+///
+/// T46 起 version 是**部署 release 版本**（构建期 `KHAEN_BUILD_VERSION`，如 v0.1.2），
+/// 未注入时如实回退 crate 版本（开发构建）——不再把 crate 版本冒充成发布版本。
 pub(crate) async fn healthz(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
+    let version = state.build_info().healthz_version();
     (
         StatusCode::OK,
         Json(json!({
             "ok": true,
-            "version": VERSION,
+            "version": version,
             "uptime_s": state.uptime_s(),
         })),
     )

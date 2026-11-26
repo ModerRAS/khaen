@@ -1138,7 +1138,7 @@ fn clear_session_cookie() -> String {
     format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
 }
 
-fn session_response(status: StatusCode, issued: &Issued) -> Response {
+pub(crate) fn session_response(status: StatusCode, issued: &Issued) -> Response {
     let body = json!({
         "csrf": issued.csrf,
         "expires_in": issued.expires_in,

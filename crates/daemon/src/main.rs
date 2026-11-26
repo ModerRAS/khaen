@@ -72,11 +72,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_RT_STATUS_FILE));
+    // 系统页重启能力（T46）：只有 KHAEN_ALLOW_RESTART=1 才允许 POST /api/system/restart
+    // 重启 khaen-rt-host；handler 不读环境，解析后注入 DaemonState。
+    let restart_policy = khaen_daemon::system::RestartPolicy::from_env();
     let state = Arc::new(
         DaemonState::new(config)?
             .with_bind(bind)
             .with_device(device_monitor(plan_rate))
             .with_rt_status_file(rt_status_file)
+            .with_restart_policy(restart_policy.clone())
             .with_host_link(host_link),
     );
 
@@ -100,6 +104,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "-".to_string()),
         host_link.config().timeout.as_millis()
+    );
+    println!(
+        "khaen-daemon system restart rt-host allowed={} reason={}",
+        restart_policy.allowed(),
+        restart_policy.reason().unwrap_or("-")
     );
     let device = state.device_json();
     println!(

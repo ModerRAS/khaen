@@ -83,6 +83,248 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     fs::write(out_dir.join("webui_assets_table.rs"), table).expect("写 webui_assets_table.rs");
+
+    // T46 构建信息：release 版本 / commit / rustc / profile / target。
+    // 只读环境变量与 git；缺失时如实生成原因，不编造发布信息（由 src/system/build_info.rs 使用）。
+    println!("cargo:rerun-if-env-changed=KHAEN_BUILD_VERSION");
+    println!("cargo:rerun-if-env-changed=KHAEN_BUILD_COMMIT");
+    write_build_info(&manifest_dir, &out_dir);
+}
+
+/// 生成 `$OUT_DIR/build_info.rs`：构建期版本事实（T46）。
+///
+/// - release 版本：`KHAEN_BUILD_VERSION`（release workflow 注入）；缺失时 `None` + 原因。
+/// - commit：`KHAEN_BUILD_COMMIT` 优先，否则构建期 `git rev-parse HEAD`；都拿不到时 `None` + 原因。
+///   commit 来源也一并生成，便于诊断区分“发布流水线注入”与“开发者本机 git”。
+/// - rustc：构建期 `$RUSTC --version`（拿不到时 `None` + 原因）。
+/// - profile / target：来自 cargo 的 `PROFILE` / `TARGET` 环境变量（恒有真实值）。
+fn write_build_info(manifest_dir: &Path, out_dir: &Path) {
+    let release = env_trimmed("KHAEN_BUILD_VERSION");
+    let release_reason = match &release {
+        Some(_) => None,
+        None => Some(format!(
+            "KHAEN_BUILD_VERSION is not set at build time: this is an unversioned build (crate version {})",
+            env!("CARGO_PKG_VERSION")
+        )),
+    };
+
+    let (commit, commit_source, commit_reason) = match env_trimmed("KHAEN_BUILD_COMMIT") {
+        Some(value) => (
+            Some(value),
+            Some("KHAEN_BUILD_COMMIT (injected at build time)".to_string()),
+            None,
+        ),
+        None => match git_commit(manifest_dir) {
+            Some(sha) => (
+                Some(sha),
+                Some("git rev-parse HEAD at build time".to_string()),
+                None,
+            ),
+            None => (
+                None,
+                None,
+                Some(
+                    "KHAEN_BUILD_COMMIT is not set and git metadata is not available in this build"
+                        .to_string(),
+                ),
+            ),
+        },
+    };
+
+    let (rustc, rustc_reason) = match rustc_version() {
+        Some(version) => (Some(version), None),
+        None => (
+            None,
+            Some("rustc --version failed at build time".to_string()),
+        ),
+    };
+
+    let build_profile = env::var("PROFILE").unwrap_or_else(|_| "unknown".to_string());
+    let target = env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
+
+    let mut generated = String::from(
+        "// 由 crates/daemon/build.rs 生成（构建信息，T46；不要手改）。
+",
+    );
+    generated.push_str(
+        "/// 部署 release 版本（`KHAEN_BUILD_VERSION`，如 v0.1.2；未注入时为 None）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const RELEASE_VERSION: Option<&str> = {};
+",
+        option_literal(release.as_deref())
+    ));
+    generated.push_str(
+        "/// release 版本缺失的原因（仅有缺失时）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const RELEASE_VERSION_REASON: Option<&str> = {};
+",
+        option_literal(release_reason.as_deref())
+    ));
+    generated.push_str(
+        "/// 构建 commit（`KHAEN_BUILD_COMMIT` 或构建期 git HEAD；都没有时为 None）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const COMMIT: Option<&str> = {};
+",
+        option_literal(commit.as_deref())
+    ));
+    generated.push_str(
+        "/// commit 的来源（发布流水线注入 / 本机 git）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const COMMIT_SOURCE: Option<&str> = {};
+",
+        option_literal(commit_source.as_deref())
+    ));
+    generated.push_str(
+        "/// commit 缺失的原因（仅有缺失时）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const COMMIT_REASON: Option<&str> = {};
+",
+        option_literal(commit_reason.as_deref())
+    ));
+    generated.push_str(
+        "/// 构建用 rustc 版本（`rustc --version` 第一行）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const RUSTC_VERSION: Option<&str> = {};
+",
+        option_literal(rustc.as_deref())
+    ));
+    generated.push_str(
+        "/// rustc 版本缺失的原因（仅有缺失时）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const RUSTC_REASON: Option<&str> = {};
+",
+        option_literal(rustc_reason.as_deref())
+    ));
+    generated.push_str(
+        "/// cargo 构建 profile（debug/release）。
+",
+    );
+    generated.push_str(&format!(
+        "pub const BUILD_PROFILE: &str = {:?};
+",
+        build_profile
+    ));
+    generated.push_str(
+        "/// 交叉编译目标三元组。
+",
+    );
+    generated.push_str(&format!(
+        "pub const TARGET: &str = {:?};
+",
+        target
+    ));
+
+    fs::write(out_dir.join("build_info.rs"), generated).expect("写 build_info.rs");
+}
+
+/// 去空白后的环境变量值；空串视为未设置（与 main 的其它配置解析一致）。
+fn env_trimmed(key: &str) -> Option<String> {
+    let value = env::var(key).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// `Option<&str>` → Rust 源码字面量（`None` / `Some("...")`）。
+fn option_literal(value: Option<&str>) -> String {
+    match value {
+        Some(text) => format!("Some({text:?})"),
+        None => "None".to_string(),
+    }
+}
+
+/// 构建期 git HEAD（仓库在工作树内时有效）；拿不到返回 None（不报错）。
+///
+/// 同时登记 `.git/HEAD` / `refs` / `packed-refs` 为 rerun 依赖：切换 commit 后重新构建
+/// 会重新采集，而不是一直用旧的 sha。
+fn git_commit(manifest_dir: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(manifest_dir)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() || !sha.chars().all(|character| character.is_ascii_hexdigit()) {
+        return None;
+    }
+    if let Some(git_dir) = git_dir(manifest_dir) {
+        for path in [
+            git_dir.join("HEAD"),
+            git_dir.join("refs"),
+            git_dir.join("packed-refs"),
+        ] {
+            if path.exists() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
+    Some(sha)
+}
+
+/// `.git` 目录的绝对路径（`git rev-parse --git-dir`；worktree/子模块下也可能是相对路径）。
+fn git_dir(manifest_dir: &Path) -> Option<PathBuf> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(manifest_dir)
+        .args(["rev-parse", "--git-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        Some(manifest_dir.join(path))
+    }
+}
+
+/// 构建期 rustc 版本（`$RUSTC --version` 的第一行）。
+fn rustc_version() -> Option<String> {
+    let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let output = std::process::Command::new(rustc)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let line = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()?
+        .trim()
+        .to_string();
+    if line.is_empty() {
+        None
+    } else {
+        Some(line)
+    }
 }
 
 /// 递归收集 dist 下的普通文件（相对路径统一 `/` 分隔；排序由调用方做）。

@@ -22,6 +22,7 @@ use std::time::Duration;
 use khaen_daemon::auth::{AuthConfig, SESSION_COOKIE};
 use khaen_daemon::calibration::service::CalibrationService;
 use khaen_daemon::host_link::{HostLink, HostLinkConfig, Transport};
+use khaen_daemon::system::{BuildInfo, RestartPolicy, SystemProbe};
 use khaen_daemon::{router, DaemonState};
 use khaen_host::EngineConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -190,6 +191,54 @@ pub async fn spawn_with_link(link: Arc<HostLink>, rt_status_file: Option<PathBuf
     server.owned_dir = Some(Arc::clone(&dir));
     server.session = Some(bootstrap_session(&server).await);
     server
+}
+
+/// 用临时状态目录 + 注入系统采集/构建信息/重启能力启动服务（T46 系统页测试；自动 setup/login）。
+pub async fn spawn_with_system(
+    probe: Arc<dyn SystemProbe>,
+    build: BuildInfo,
+    restart: RestartPolicy,
+) -> TestServer {
+    let dir = Arc::new(TempStateDir::new("system"));
+    let mut server = spawn_at_with_system(dir.path(), probe, build, restart).await;
+    server.owned_dir = Some(Arc::clone(&dir));
+    server.session = Some(bootstrap_session(&server).await);
+    server
+}
+
+/// 同 spawn_at_with_system，但不自动登录（匿名 /setup 前状态测试用）。
+pub async fn spawn_at_with_system(
+    state_dir: &Path,
+    probe: Arc<dyn SystemProbe>,
+    build: BuildInfo,
+    restart: RestartPolicy,
+) -> TestServer {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    let state = DaemonState::new_with_auth(
+        EngineConfig::default(),
+        AuthConfig::for_tests(state_dir.to_path_buf()),
+    )
+    .expect("daemon state")
+    .with_bind(addr)
+    .with_rt_status_file(state_dir.join("rt-host-status.json"))
+    .with_host_link(process_link())
+    .with_system_probe(probe)
+    .with_build_info(build)
+    .with_restart_policy(restart);
+    let state = Arc::new(state);
+    let app = router(Arc::clone(&state)).into_make_service_with_connect_info::<SocketAddr>();
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    TestServer {
+        addr: addr.to_string(),
+        state,
+        state_dir: state_dir.to_path_buf(),
+        session: None,
+        handle,
+        owned_dir: None,
+    }
 }
 
 /// 用临时状态目录 + 注入校准 job 服务启动服务（自动 setup/login）。

@@ -42,6 +42,12 @@
 //!   `khaen_host::control` 的既有常量（见 `meta` 模块）。
 //! - `/api/calibration/*`：T36 校准 REST（uploads/jobs/artifacts/wizard，见 `calibration` 模块）。
 //!   默认后端未接线：写操作 503 `not_wired`、job 列表 200 空 + reason，上传与向导配置照常可用。
+//! - `/api/system/*`：T46 系统页后端（info/logs/diagnostics/password/restart，见 `system` 模块）。
+//!   缺失字段 null + reasons；journalctl 不可用 503 `logs_unavailable`；重启需
+//!   `KHAEN_ALLOW_RESTART=1`（否则 403 `restart_disabled`）；daemon 自身重启 501。
+//! - `/api/channels` 与 `/api/plan/upload|history`：T55 M4 后端（见 `channels` / `plan_api` /
+//!   `plan_store` 模块）。PUT /api/channels 两阶段：prepare 真实校验并返回 token/planned diff，
+//!   commit 在 rt-host 热重配接通前返回 501 `host_link_unsupported`（不假成功）。
 //! - `/api/auth/*`：M1 认证（setup/login/session/logout/password），argon2id PHC 存
 //!   `${KHAEN_STATE_DIR:-/var/lib/khaen}/auth.json`（见 `auth` 模块）。除 `/healthz` 与
 //!   `/api/auth/status|setup|login` 外，全部 `/api` 要求会话；写方法（Cookie 会话）额外要求
@@ -57,11 +63,19 @@ pub mod auth;
 pub mod bind;
 /// 校准 REST 层（T36）：jobs / uploads / artifacts / wizard。
 pub mod calibration;
+/// M4 方案与声道后端（T55）：/api/channels 两阶段改声道映射 + /api/plan/upload|history。
+pub mod channels;
 pub mod device;
 /// daemon → rt-host 控制通道代理（T70f-b）：契约 B 行 JSON 客户端 + 诚实降级。
 pub mod host_link;
 mod meta;
+/// M4 方案 REST（T55）：POST /api/plan/upload、GET /api/plan/history。
+pub mod plan_api;
+/// 方案库（T55）：上传内容寻址存储 + 已 prepare/commit 方案元数据与生效历史。
+pub mod plan_store;
 pub mod status;
+/// 系统信息 / 日志 / 诊断 / 改密 / 重启 API（T46，M6 系统页后端提前）。
+pub mod system;
 mod webui;
 pub mod webui_assets;
 
@@ -81,7 +95,12 @@ use crate::host_link::{HostLink, LinkError, Target, WireReply};
 
 pub use device::DeviceMonitor;
 
-/// daemon 版本（workspace `version`，即 `CARGO_PKG_VERSION`）。
+/// daemon 的 crate 版本（workspace `version`，即 `CARGO_PKG_VERSION`）。
+///
+/// 注意：这是编译进二进制的 crate 版本，**不是**部署 release 版本。`/healthz` 与
+/// `/api/system/info` 的 `release_version` 来自构建期 `KHAEN_BUILD_VERSION`（T46，
+/// 见 `system::build_info`）；两者不一致时系统页会醒目提示。`/api/status` 的
+/// `daemon.version` 保持 crate 版本口径不变。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 控制台版本：构建期从 `webui/package.json` 的 `version` 读取
@@ -153,6 +172,16 @@ pub struct DaemonState {
     state_dir: std::path::PathBuf,
     /// 校准 REST 层（服务 + 事件缓存 + 上传/向导存储）。
     calibration: calibration::CalibrationHub,
+    /// 系统采集实现（T46）：/proc、systemctl、journalctl；生产为 NativeProbe，测试注入假实现。
+    system: Arc<dyn system::SystemProbe>,
+    /// 构建信息（T46）：crate / release / commit 三口径（默认来自 build.rs 构建期常量）。
+    build: system::BuildInfo,
+    /// rt-host 重启开关（T46：KHAEN_ALLOW_RESTART，启动时解析；handler 不读环境）。
+    restart: system::RestartPolicy,
+    /// 最近一次成功重启 rt-host 的时刻（RFC3339；进程内，不持久化）。
+    last_restart: Mutex<Option<String>>,
+    /// 方案库（T55）：上传内容寻址存储 + 已 prepare/commit 方案元数据 + 生效历史。
+    plans: plan_store::PlanStore,
 }
 
 impl DaemonState {
@@ -181,6 +210,11 @@ impl DaemonState {
             rt_status_file: std::path::PathBuf::from(status::DEFAULT_RT_STATUS_FILE),
             host_link: HostLink::new(host_link::HostLinkConfig::default()),
             calibration: calibration::CalibrationHub::new(state_dir.clone()),
+            system: Arc::new(system::NativeProbe::default()),
+            build: system::BuildInfo::from_build(),
+            restart: system::RestartPolicy::from_env(),
+            last_restart: Mutex::new(None),
+            plans: plan_store::PlanStore::new(&state_dir),
             state_dir,
         })
     }
@@ -231,6 +265,60 @@ impl DaemonState {
     /// 校准 REST 共享状态（handler / status 聚合使用）。
     pub fn calibration(&self) -> &calibration::CalibrationHub {
         &self.calibration
+    }
+
+    /// 注入系统采集实现（T46；生产默认 NativeProbe，测试注入假实现）。
+    pub fn with_system_probe(mut self, probe: Arc<dyn system::SystemProbe>) -> Self {
+        self.system = probe;
+        self
+    }
+
+    /// 注入构建信息（T46；测试注入 release 版本，验证 crate / release / commit 三口径）。
+    pub fn with_build_info(mut self, build: system::BuildInfo) -> Self {
+        self.build = build;
+        self
+    }
+
+    /// 注入重启能力（T46；生产由 main 从 KHAEN_ALLOW_RESTART 解析，fail-closed）。
+    pub fn with_restart_policy(mut self, policy: system::RestartPolicy) -> Self {
+        self.restart = policy;
+        self
+    }
+
+    /// 系统采集实现（/api/system/* handler 使用）。
+    pub fn system_probe(&self) -> &Arc<dyn system::SystemProbe> {
+        &self.system
+    }
+
+    /// 构建信息（/api/system/info 与 /healthz 的版本来源）。
+    pub fn build_info(&self) -> &system::BuildInfo {
+        &self.build
+    }
+
+    /// 重启能力（/api/system/info 的 restart，/api/system/restart 的守卫）。
+    pub fn restart_policy(&self) -> &system::RestartPolicy {
+        &self.restart
+    }
+
+    /// 最近一次成功重启 rt-host 的时刻（RFC3339；从未重启为 None）。
+    pub fn last_restarted_at(&self) -> Option<String> {
+        self.last_restart
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// 记录一次成功的 rt-host 重启（进程内状态；不持久化）。
+    pub(crate) fn record_restart(&self, at: String) {
+        *self
+            .last_restart
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(at);
+    }
+
+    /// 方案库（T55：/api/channels 的 routing 段与 /api/plan/history 的来源）。
+    pub fn plans(&self) -> &plan_store::PlanStore {
+        &self.plans
     }
 
     /// `/api/status` 的 calibration 三字段来源（服务状态 + 进程内事件缓存合并）。
@@ -344,6 +432,11 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         // T36 校准 REST（uploads/jobs/artifacts/wizard）：登录会话与写操作 CSRF 由下面的
         // 全局 auth 中间件统一守，这里只注册路由。
         .merge(calibration::api::routes())
+        // T46 系统页后端（info/logs/diagnostics/password/restart）。
+        .merge(system::routes())
+        // T55 M4 后端（channels 两阶段、plan upload/history）。
+        .merge(channels::routes())
+        .merge(plan_api::routes())
         // 非 /api 的 GET/HEAD 走内嵌静态资源 + SPA 回退；未知 /api/* 返回结构化 JSON 404。
         .fallback(webui::fallback)
         // 认证守卫包住全部路由（含 fallback）：只对 /api 生效，并给 /api 响应补版本/缓存头。
@@ -545,20 +638,29 @@ async fn prepare(
     };
     if state.host_link().target() == Target::Process {
         // prepare 会读文件、解码、编译图：非实时路径。这里串行化控制面（音频线程不碰这把锁）。
-        return match state.control().prepare_json(&plan_path, &plan_sha256) {
-            Ok(body) => (StatusCode::OK, Json(process_marker(body))),
+        let result = state.control().prepare_json(&plan_path, &plan_sha256);
+        return match result {
+            Ok(body) => {
+                // T55：旁路记录方案 routing 段（best-effort，失败不影响 prepare 响应）。
+                record_prepared_plan(&state, plan_path.clone()).await;
+                (StatusCode::OK, Json(process_marker(body)))
+            }
             Err(err) => error_response(err),
         };
     }
-    forward(
+    let reply = forward(
         &state,
         serde_json::json!({
             "op": "prepare",
-            "plan_path": plan_path,
+            "plan_path": plan_path.clone(),
             "plan_sha256": plan_sha256,
         }),
     )
-    .await
+    .await;
+    if reply.0.is_success() {
+        record_prepared_plan(&state, plan_path).await;
+    }
+    reply
 }
 
 async fn commit(
@@ -570,16 +672,25 @@ async fn commit(
         _ => return bad_request("field engine_token must be a string"),
     };
     if state.host_link().target() == Target::Process {
-        return match state.control().commit_json(&engine_token) {
-            Ok(body) => (StatusCode::OK, Json(process_marker(body))),
+        let result = state.control().commit_json(&engine_token);
+        return match result {
+            Ok(body) => {
+                record_commit(&state, &body);
+                (StatusCode::OK, Json(process_marker(body)))
+            }
             Err(err) => error_response(err),
         };
     }
-    forward(
+    let reply = forward(
         &state,
         serde_json::json!({ "op": "commit", "engine_token": engine_token }),
     )
-    .await
+    .await;
+    if reply.0.is_success() {
+        // rt-host 的 commit 响应同样带 version/graph_id/applied_block，按真实回执记录。
+        record_commit(&state, &reply.1 .0);
+    }
+    reply
 }
 
 async fn abort(
@@ -695,6 +806,25 @@ async fn inspect(
         request["plan_sha256"] = Value::String(sha256);
     }
     forward(&state, request).await
+}
+
+/// prepare 成功后旁路记录方案元数据（T55：/api/channels 需要当前已生效方案的 routing 段）。
+///
+/// best-effort：读文件/解码失败不影响 prepare 的响应（prepare 已由控制面完成真实校验）；
+/// 记录不到时 /api/channels 如实给 null + 原因。读盘与解码放 blocking 线程池，不堵 reactor。
+async fn record_prepared_plan(state: &Arc<DaemonState>, plan_path: String) {
+    let plans = state.plans().clone();
+    let path = std::path::PathBuf::from(plan_path);
+    let now = crate::status::rfc3339_utc(std::time::SystemTime::now());
+    let _ = tokio::task::spawn_blocking(move || plans.remember_local_plan(&path, &now)).await;
+}
+
+/// commit 成功后记录已生效历史（T55：/api/plan/history 的真实来源）。
+///
+/// 只记录真正的方案提交（响应带 graph_id）；format / mode 草稿的 commit 不是方案版本，跳过。
+fn record_commit(state: &DaemonState, response: &Value) {
+    let now = crate::status::rfc3339_utc(std::time::SystemTime::now());
+    state.plans().record_commit(response, "commit", &now);
 }
 
 /// 控制面错误码 → HTTP 状态码（映射表见模块文档）。
