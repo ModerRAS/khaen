@@ -89,7 +89,13 @@ jobs:
             local stage="khaen-${VERSION}-linux-${arch}"
             local bin_dir="target/${target}/release"
             mkdir -p "dist/${stage}/bin" "dist/${stage}/deploy" "dist/${stage}/docs"
-            find "${bin_dir}" -maxdepth 1 -type f -name 'khaen-*' -perm -u+x -exec cp {} "dist/${stage}/bin/" +
+            # 逐个复制可执行文件（不用 find -exec ... +：CI 的 bash 环境曾报
+            # “missing argument to -exec”，逐文件循环语义等价且无解析歧义）。
+            for binary in "${bin_dir}"/khaen-*; do
+              if [[ -f "${binary}" && -x "${binary}" ]]; then
+                cp "${binary}" "dist/${stage}/bin/"
+              fi
+            done
             cp deploy/install.sh deploy/rollback.sh deploy/closed-loop-verdict.sh deploy/smoke-test.sh deploy/build-release.sh deploy/khaen-daemon.service deploy/khaen-rt-host.service deploy/daemon.env.example deploy/rt-host.env.example "dist/${stage}/deploy/"
             cp docs/CLOSED-LOOP.md "dist/${stage}/docs/"
             cp crates/cal-tools/README.md "dist/${stage}/docs/calibration-cli.md"
