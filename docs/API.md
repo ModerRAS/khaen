@@ -104,12 +104,12 @@
 
 | 方法 | 路径 | 请求 | 成功响应 |
 |---|---|---|---|
-| POST | `/api/calibration/uploads` | 原始字节 body（不是 multipart；Content-Type 需受支持，WAV 48k/16-24bit/1-2ch，≤64 MiB） | `{upload_id, sha256, bytes, created}`（201 首次 / 200 已存在去重；**无 schema 字段**）；格式不符 400 M1 |
+| POST | `/api/calibration/uploads` | 原始字节 body（不是 multipart；Content-Type 只接受 `application/octet-stream` / `audio/wav`；≤64 MiB）。**上传不解析内容**：plan 字节与 WAV 都走这里，内容格式在使用它的 job 阶段校验 | `{upload_id, sha256, bytes, created}`（201 首次 / 200 已存在去重；`upload_id` = 内容 sha256；**无 schema 字段**）；不支持的 Content-Type 400 M1 |
 | GET | `/api/calibration/jobs` | `?limit=&offset=`（1..=200） | `{ok, schema, available, reason?, engine?, active_job_id?, total, limit, offset, jobs:[{id, kind, status, verdict?, created_at, created_unix, started_at?, finished_at?, updated_unix, progress, duration_ms?, error?:{code,message}, reason?}], reasons}` |
-| POST | `/api/calibration/jobs` | `{kind:"single_point_offline", inputs:{plan_sha, baseline_upload_id, applied_upload_id, centers_hz:[...], tolerance_db, min_bands}}`（同刻只允许一个 active job，冲突 409 `switch_busy`） | 202 `{ok, job_id, state, location}` |
+| POST | `/api/calibration/jobs` | `{kind:"single_point_offline", inputs:{plan_sha, baseline_upload_id, applied_upload_id, centers_hz:[...], tolerance_db, min_bands}}`（同刻只允许一个 active job，冲突 409 `switch_busy`；`plan_sha` = plan 字节上传到 `/api/calibration/uploads` 得到的 upload_id，不是文件路径） | 202 `{ok, job_id, state, location}` |
 | GET | `/api/calibration/jobs/{id}` | — | `{ok, schema, job:{id, kind, status, step?, verdict?, created_at, created_unix, started_at?, finished_at?, updated_unix, progress, duration_ms?, engine?, steps:[{name,status,started_at?,finished_at?,sha256?,detail?}], artifacts:[{name,sha256,bytes,content_type,downloadable}], inputs?, result?, error?:{code,message}, reason?, apply_state, applied_version?, apply}, result, artifacts, error, reasons}`（顶层 result/artifacts/error 与 job 内同源【加法】） |
 | POST | `/api/calibration/jobs/{id}/cancel` | — | `{ok, job_id, status, state}`（状态字符串 `cancelled`；status/state 同源别名） |
-| POST | `/api/calibration/jobs/{id}/apply` | 当前单发 `{}` / `{stage?:...}`；【目标】`{stage:"prepare"|"commit"|"abort", engine_token?}` | prepare 返回草稿+token；commit 生效并记录版本；旧单发语义保留 |
+| POST | `/api/calibration/jobs/{id}/apply` | 旧单发 `{}` / 两阶段 `{stage:"prepare"}`、`{stage:"commit" 或 "abort", engine_token}`（stage 缺省 = 旧单发；未知字段 400；token 只能消费一次） | prepare 200 = 控制面 prepare 体 + 【加法】`{stage:"prepare", job_id, plan_sha256, previous_version, engine_token}`；commit 200 = `{stage:"commit", applied:true, job_id, applied_version, applied_block, graph_id, sha256, previous_version, readback, job, reasons}`；abort 200 = `{stage:"abort", aborted:true, job_id, plan_sha256, control}`；未知/已消费 token 409 `engine_token_invalid` |
 | POST | `/api/calibration/jobs/{id}/rollback` | 同 apply | 同 apply |
 | GET | `/api/calibration/jobs/{id}/artifacts/{name}` | — | 二进制/JSON 产物（白名单 + manifest sha 重算，校验失败 400/404） |
 | GET/PUT | `/api/calibration/wizard` | 配置对象 | `{schema, config, state, ...}`（实际字段以 daemon 实现为准） |
@@ -119,6 +119,9 @@
 - job 审计字段：`job_id, kind, state, created_at/started_at/finished_at`（RFC3339）、`duration_ms, steps, apply, error`；【加法】`created_unix, updated_unix, progress`。
 - `measured`/`simulated` 必须如实标记；**模拟结果不得写成实测**。
 - 离线 job（`single_point_offline`）不开设备、不出声：JobRequest 对它的 `audible_sweep_authorized` 要求为 false（诚实标注）；真实 UMIK 采集 job 属 T70f-c，NOT_RUN。
+- 离线 job 输入校验（2026-11-27 真 daemon 实测）：plan 的 `sample_rate` 必须等于两段 WAV 的采样率，否则 job failed + 稳定码 `E_OFFLINE_JOB_ALIGNMENT`；WAV 接受 PCM16/24/32 或 float32、1–8 通道（多通道按均值折单声道）、任意非零采样率。
+- 预测电平范围：只覆盖 **identity content/matrix/routing + protection PEQ**；plan 带 folds/非恒等段时 job failed + `E_OFFLINE_JOB_LEVELS`（detail 内是 `E_PLAN_LEVELS_*` 稳定码），不静默少算——所以校准 job 的 plan 必须用 identity 方案，不能直接拿 22 通道 audio-profile 生成的折叠方案。
+- succeeded job artifacts 至少含 `plan.bin / predicted.json / observed.json / report.json / artifacts.manifest.json`；下载响应头 `x-khaen-artifact-sha256` == 列表 sha == body sha（report schema `khaen-closed-loop-report/v1`，manifest schema `khaen-calibration-artifacts/v1`）。
 - apply/rollback 必须按 `host_link.target` 路由（process=进程内、rt-host=控制通道），不得固定打到 daemon 进程内引擎。
 - 错误体：成功 2xx + 上述字段；失败 M1 错误体（见 §1）。
 
@@ -154,6 +157,7 @@
 - **G5**：以本文件 §7 的“实际形状 + 加法目标”为准（前端先适配实际形状）。
 - **G6**：routing 当前值来源与降级口径见 §5 末条与 §9.7。
 - **H2（v1.2，认证 §2 形状，2026-11-27 实测）**：以上表 §2 实际形状为准——`/api/auth/status` 是 `{configured,authenticated}`（无 ok/initialized）、setup 201、login/session/password 的 token 响应是 `{csrf, expires_in}`、session 是 `{authenticated,csrf,expires_at}`、logout 200 `{ok:true}`。前端（webui/src/api/auth.ts）已按此实现；本次由**真 daemon 本地冒烟**核实（见 HANDOFF/20261126-khaen-engineering-integration/evidence/local-daemon-smoke.json）。
+- **H3（v1.2 补充，2026-11-27 真 daemon 实测）**：校准 §7 离线 job 全链路核实（profile→plan→plan 上传→WAV 上传→建 job→succeeded→5 artifacts 下载→两阶段 apply prepare→commit 生效）；两阶段 apply 实际回执形状见 §7 表，plan 必须作为 calibration upload 上传（plan_sha=upload_id）；`/api/audio-profile/plan` 生成的 22ch 方案在当前 2ch 引擎下 inspect.compile 如实报 `content channel mismatch`（不假成功）。证据：HANDOFF/20261126-khaen-engineering-integration/evidence/daemon-calibration-e2e.json。不升 api_version。
 - **H（v1.2，校准 §7 字段）**：以**后端实际形状**为准修正 §7——job 对象 canonical=`id`/`status`（backend tests 已锁定，不改后端加别名）；创建响应=`{ok, job_id, state, location}`、cancel=`{ok, job_id, status, state}`（status/state 同源别名）；job 详情顶层 result/artifacts/error；uploads 返回 `{upload_id,sha256,bytes,created}`（无 schema）；wizard/apply 返回 apply 回执（无 location）。前端解析保持宽容（job_id|id、state|status）但契约测试断言实际 canonical 形状；本修正不改任何实际行为，不升 api_version。
 
 ## 12. 音频通道 profile（输入/输出映射与布局）——v1.2 新增
