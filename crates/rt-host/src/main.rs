@@ -6,10 +6,19 @@
 //!   `SupervisorOptions::enabled = false`（状态如实为 absent，不假装断言过速率）；
 //! - 方案切换：启动时读一次方案文件（`KHAEN_PLAN`）；运行期不换图。
 //!   运行期换图需要跨进程控制通道（T70f 未实现），本进程不宣称支持。
-//! - 采样率回读：启动时先打印设备当前速率，打开 PCM 后再回读 `/proc/asound/.../hw_params` 的
-//!   `rate:`；若与方案速率不一致（例如 MOTU 被外部改到 192 kHz），直接退出 1 并报
-//!   `device_rate_mismatch`，不带着错速播放。回读依赖 `hw:` 直连设备名；`default`/`plughw:`
-//!   读不到时只打印 unknown，不假装断言成功。
+//! - 采样率回读：打开 PCM 前后回读 `/proc/asound/.../hw_params` 的 `rate:`；若与方案速率
+//!   不一致（例如 MOTU 被外部改到 192 kHz），fail-closed 不播放、关掉设备并按退避重试，
+//!   状态文件记录 `last_device_error`（不带着错速播放，也不退出进程）。回读依赖 `hw:`
+//!   直连设备名；`default`/`plughw:` 读不到时只打印 unknown，不假装断言成功。
+//!
+//! # 声卡掉线不退出（T42o）
+//!
+//! 声卡被拔掉/重新枚举（ALSA 写 `alsa pcm disconnected`）或启动时不在位时，进程**不退出**：
+//! 关闭 PCM 句柄、进入 fail-closed 的 `absent` 状态（不输出、状态文件 `safe=true`），按固定
+//! 退避（2 s 起、翻倍、封顶 5 s，日志每 10 次尝试限频一条）用 `Runtime::open_device` 重开；
+//! 恢复后重建输入抖动缓冲（重新预填）、显式清除设备丢失故障、当前方案 version/graph_id 保持
+//! 不变，块计数继续增长回到 running。设备缺失永不导致退出；只有配置/方案准入类错误与无法
+//! 恢复的内部错误才退出（稳定退出码）。
 //!
 //! # 环境变量
 //!
@@ -27,13 +36,20 @@
 //! | `KHAEN_JITTER_FRAMES` | `192` | 首块预填抖动水位（媒体帧；0 = 不预填） |
 //! | `KHAEN_PLAN` | 未设置 | 方案文件路径（ABI v3）；未设置时按 `KHAEN_UNLOADED` 策略运行 |
 //! | `KHAEN_UNLOADED` | `silence` | 未加载方案时的策略：`silence`（fail-closed）或 `passthrough` |
-//! | `KHAEN_RUN_SECONDS` | `0` | 运行秒数；0 = 一直跑（Ctrl-C 结束） |
+//! | `KHAEN_RUN_SECONDS` | `0` | 按块数换算的运行秒数；0 = 一直跑（Ctrl-C 结束）。设备缺失期间块不增长，进程保持运行 |
 //! | `KHAEN_STATS_EVERY_BLOCKS` | `4000` | 每 N 块打印一次统计并轮询设备监督器（0 = 不打印） |
-//! | `KHAEN_STATUS_FILE` | 未设置 | 状态 JSON 落盘路径（每统计周期原子替换一次；soak 无人值守时用来取证） |
+//! | `KHAEN_STATUS_FILE` | 未设置 | 状态 JSON 落盘路径（每统计周期与设备状态变化时原子替换；soak 无人值守时用来取证） |
+//!
+//! # 状态文件字段（schema 仍是 `khaen-rt-status/v1`，T42o 为向后兼容的纯增量）
+//!
+//! 原有字段不变；新增：`device_state`（`present`/`absent`）、`absent_since`（本次缺失起点，
+//! 进程内单调毫秒，present 为 `null`）、`reopen_attempts`（本次缺失期间的重开次数）、
+//! `last_device_error`（最近一次设备错误文本或 `null`）。设备缺失期间 `safe` 恒为 `true`。
 //!
 //! # 退出码
 //!
-//! 0 = 正常跑完（`KHAEN_RUN_SECONDS` 到点）；1 = 运行期错误（带稳定错误码）；2 = 配置/环境错误。
+//! 0 = 正常跑完（`KHAEN_RUN_SECONDS` 到点）；1 = 运行期不可恢复错误（带稳定错误码）；
+//! 2 = 配置/环境错误（含方案文件读取/ABI 错误）。**设备缺失/掉线永不退出**。
 //!
 //! # 实时约束说明（重要）
 //!
@@ -44,10 +60,9 @@
 //!
 //! # 平台说明
 //!
-//! 除 `AlsaPcm` 外，本文件的配置解析/状态文件/块循环都在 `app` 模块里、与平台无关地编译，
-//! 这样 Windows 上 `cargo clippy`/测试期就能检查这些逻辑的**类型正确性**（运行期仍需要
-//! Linux + ALSA 才能出声；Windows 只打一条说明并退出 2）。
-
+//! 除 `AlsaPcm` 外，本文件的配置解析/状态文件/设备监督循环都在 `app` / `recovery` 模块里、
+//! 与平台无关地编译，这样 Windows 上 `cargo clippy`/测试期就能检查这些逻辑的**类型正确性**
+//! （运行期仍需要 Linux + ALSA 才能出声；Windows 只打一条说明并退出 2）。
 #[cfg(target_os = "linux")]
 fn main() -> std::process::ExitCode {
     app::run::<khaen_host::alsa_backend::AlsaPcm>()
@@ -62,6 +77,11 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(2)
 }
 
+// 设备缺失/重开监督循环（T42o）：平台无关（时钟/设备都可注入），Windows 上同样参与
+// 编译与单元测试；只有 Linux 的 main 会真正跑它。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod recovery;
+
 // Windows 上 main 不实例化 app（没有 ALSA），但模块仍参与编译以检查逻辑类型；
 // 因此非 Linux 目标允许这些“只被 Linux 调用者使用”的项为 dead_code。
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -70,6 +90,7 @@ mod app {
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
 
+    use crate::recovery::DeviceLifecycle;
     use khaen_core::plan::Plan;
     use khaen_host::admission::admit;
     use khaen_host::aes67_input::Aes67InputConfig;
@@ -440,9 +461,18 @@ mod app {
     /// 把运行状态写成单行 JSON 文件（先写 .tmp 再 rename，读方不会看到半截）。
     ///
     /// 字段级契约见 docs/DEPLOY.md 4.3；只在控制/统计周期调用，不在 run_block 路径上。
-    pub fn write_status_file(path: &Path, status: &RuntimeStatus) -> std::io::Result<()> {
+    ///
+    /// T42o 新增设备缺失字段（schema 仍是 khaen-rt-status/v1，向后兼容的纯增量）：
+    /// `device_state`=present|absent、`absent_since`（进程内单调毫秒或 null）、
+    /// `reopen_attempts`（本次缺失期间的重开次数）、`last_device_error`（null 或转义后的错误文本）。
+    /// 设备缺失期间 `safe` 恒为 true（fail-closed：没有输出）。
+    pub fn write_status_file(
+        path: &Path,
+        status: &RuntimeStatus,
+        lifecycle: &DeviceLifecycle,
+    ) -> std::io::Result<()> {
         let graph_id = match status.graph.graph_id.as_deref() {
-            Some(id) => format!("\"{id}\""),
+            Some(id) => json_string(id),
             None => "null".to_string(),
         };
         let device_rate = match status.device_rate {
@@ -450,13 +480,27 @@ mod app {
             None => "null".to_string(),
         };
         let last_error = match status.last_error {
-            Some(code) => format!("\"{code}\""),
+            Some(code) => json_string(code),
             None => "null".to_string(),
         };
         let ssrc = match status.input.ssrc {
             Some(ssrc) => ssrc.to_string(),
             None => "null".to_string(),
         };
+        let absent_since = match lifecycle.absent_since_ms() {
+            Some(ms) => ms.to_string(),
+            None => "null".to_string(),
+        };
+        let last_device_error = match lifecycle.last_device_error() {
+            Some(text) => json_string(text),
+            None => "null".to_string(),
+        };
+        let device_state = if lifecycle.is_absent() {
+            "absent"
+        } else {
+            "present"
+        };
+        let safe = status.state.requires_mute() || lifecycle.is_absent();
         let json = format!(
             concat!(
                 "{{\"schema\":\"khaen-rt-status/v1\",\"blocks\":{},",
@@ -465,12 +509,13 @@ mod app {
                 "\"input\":{{\"packets\":{},\"underruns\":{},\"jitter_fill\":{},\"ssrc\":{}}},",
                 "\"output\":{{\"xruns\":{},\"blocks_written\":{},\"bytes_written\":{}}},",
                 "\"receiver\":{{\"packets_received\":{},\"queue_full_drops\":{},\"recv_errors\":{}}},",
-                "\"graph_id\":{},\"last_error\":{}}}\n"
+                "\"graph_id\":{},\"last_error\":{},",
+                "\"device_state\":\"{}\",\"absent_since\":{},\"reopen_attempts\":{},\"last_device_error\":{}}}\n"
             ),
             status.blocks,
             status.state.as_str(),
             status.muted,
-            status.state.requires_mute(),
+            safe,
             status.plan_rate,
             device_rate,
             status.rate_asserted,
@@ -485,19 +530,44 @@ mod app {
             status.receiver.queue_full_drops,
             status.receiver.recv_errors,
             graph_id,
-            last_error
+            last_error,
+            device_state,
+            absent_since,
+            lifecycle.reopen_attempts(),
+            last_device_error
         );
         let temporary = path.with_extension("tmp");
         std::fs::write(&temporary, json.as_bytes())?;
         std::fs::rename(&temporary, path)
     }
 
-    pub fn print_status(status: &RuntimeStatus) {
+    /// 把文本编码成 JSON 字符串字面量（含两侧引号）；引号/反斜杠/控制字符都转义。
+    fn json_string(text: &str) -> String {
+        let mut out = String::with_capacity(text.len() + 2);
+        out.push('"');
+        for character in text.chars() {
+            match character {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                control if control < ' ' => {
+                    out.push_str(&format!("\\u{:04x}", u32::from(control)));
+                }
+                other => out.push(other),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    pub fn print_status(status: &RuntimeStatus, lifecycle: &DeviceLifecycle) {
         let device = &status.device;
         println!(
             "blocks={} recv_pkts={} fill={} underruns={} xruns={} out_errors={} \
-             state={} device_state={} plan_rate={} device_rate={:?} rate_asserted={} \
-             graph={:?} last_error={:?}",
+             state={} device_state={} pcm={} absent_since={:?} reopen_attempts={} \
+             plan_rate={} device_rate={:?} rate_asserted={} graph={:?} last_error={:?}",
             status.blocks,
             status.receiver.packets_received,
             status.input.jitter_fill,
@@ -506,15 +576,29 @@ mod app {
             status.output_errors,
             status.state.as_str(),
             device.state.as_str(),
+            if lifecycle.is_absent() {
+                "absent"
+            } else {
+                "present"
+            },
+            lifecycle.absent_since_ms(),
+            lifecycle.reopen_attempts(),
             status.plan_rate,
             status.device_rate,
             status.rate_asserted,
             status.graph.graph_id,
             status.last_error
         );
+        if let Some(error) = lifecycle.last_device_error() {
+            println!("last_device_error={error:?}");
+        }
     }
 
     /// 数据面主循环（平台无关；`P` 为 PCM 设备类型，真机是 AlsaPcm，Windows 不实例化）。
+    ///
+    /// 设备生命周期交给 [`crate::recovery::drive_loop`]：声卡不在位/掉线都**不退出**，
+    /// 而是 fail-closed + 按退避重开。这里只负责配置解析、运行时构造、方案预检/加载，
+    /// 以及把不可恢复的配置/方案错误映射成稳定退出码。
     pub fn run<P: PcmOutput + 'static>() -> ExitCode {
         let settings = match build_settings() {
             Ok(value) => value,
@@ -534,17 +618,8 @@ mod app {
             settings.plan_path
         );
 
-        let proc_asound = Path::new("/proc/asound");
-        let plan_rate = settings.config.engine.sample_rate;
-        let card_index = resolve_card_index(&settings.alsa_device, &read_cards_text(proc_asound));
-        let pcm_index = device_pcm_index(&settings.alsa_device);
-        let rate_before = card_index.and_then(|card| read_hw_rate(proc_asound, card, pcm_index));
-        println!(
-            "khaen-rt-host: device rate before open: {} (plan {plan_rate} Hz)",
-            rate_before.map_or_else(|| "unknown".to_string(), |rate| format!("{rate} Hz"))
-        );
-
-        let mut runtime: Runtime<P> = match Runtime::new(settings.config.clone()) {
+        // 设备延迟打开：声卡不在位时构造不失败（旧实现会直接退出）；后续由监督循环重开。
+        let mut runtime: Runtime<P> = match Runtime::new_deferred(settings.config.clone()) {
             Ok(runtime) => runtime,
             Err(err) => {
                 eprintln!(
@@ -555,25 +630,8 @@ mod app {
             }
         };
 
-        // 打开 PCM 时 ALSA 会按方案速率协商；打开后回读一次，设备若卡在 192 kHz 这类
-        // 非方案速率上就 fail-closed（不带着错速播放），提示先让设备回到方案速率。
-        let rate_after = card_index.and_then(|card| read_hw_rate(proc_asound, card, pcm_index));
-        if let Err(code) = check_device_rate(plan_rate, rate_after) {
-            eprintln!(
-                "khaen-rt-host: device rate after open {} Hz != plan {plan_rate} Hz [{code}]; ",
-                rate_after.unwrap_or(0)
-            );
-            eprintln!("khaen-rt-host: MOTU may be stuck at a non-plan rate (e.g. 192 kHz); ",);
-            eprintln!(
-                "khaen-rt-host: bring it back to {plan_rate} Hz (48k keeper or replug), then retry",
-            );
-            return ExitCode::from(1);
-        }
-        println!(
-            "khaen-rt-host: device rate after open: {}",
-            rate_after.map_or_else(|| "unknown".to_string(), |rate| format!("{rate} Hz"))
-        );
-
+        // 方案先于设备校验/加载：文件/ABI/准入错误属于不可恢复的配置类错误，必须退出
+        // （即使声卡此刻不在位）；设备缺失不影响方案加载与 version/graph_id 语义。
         if let Some(path) = settings.plan_path.as_deref() {
             let startup = match load_startup_plan(path) {
                 Ok(startup) => startup,
@@ -602,90 +660,22 @@ mod app {
             }
         }
 
-        let block_frames = settings.config.engine.block_frames as u64;
-        let sample_rate = u64::from(settings.config.engine.sample_rate);
-        let target_blocks = if settings.run_seconds == 0 {
-            0
-        } else {
-            (settings.run_seconds * sample_rate).div_ceil(block_frames)
+        let options = crate::recovery::LoopOptions {
+            alsa_device: settings.alsa_device,
+            proc_asound: Path::new("/proc/asound").to_path_buf(),
+            status_file: settings.status_file,
+            run_seconds: settings.run_seconds,
+            stats_every: settings.stats_every,
         };
-        let mut blocks: u64 = 0;
-        loop {
-            if target_blocks != 0 && blocks >= target_blocks {
-                break;
-            }
-            if let Err(err) = runtime.run_block() {
-                eprintln!(
-                    "khaen-rt-host: run_block failed at block {blocks}: [{:?}] {err}",
-                    err.code()
-                );
-                return ExitCode::from(1);
-            }
-            blocks += 1;
-            // 故障待上报时立刻走控制路径落地；若只是启动瞬间的输入欠载、且输入已恢复，
-            // 就清掉这一类安全故障（其他故障仍锁存等人工确认）。
-            if runtime.has_pending_fault() {
-                runtime.poll_device();
-                if runtime.clear_recovered_underrun_fault() {
-                    println!(
-                        "khaen-rt-host: cleared recovered input-underrun fault at block {blocks}; resuming"
-                    );
-                }
-            }
-            if settings.stats_every != 0 && blocks.is_multiple_of(settings.stats_every) {
-                // 验证工具的让步点：状态打印与 supervise 轮询都在块线程上（见模块文档）。
-                runtime.poll_device();
-                // 启动瞬间 RTP 包还没到时会有短暂欠载；恢复后清掉这一类安全故障（只清欠载）。
-                if runtime.clear_recovered_underrun_fault() {
-                    println!(
-                        "khaen-rt-host: cleared recovered input-underrun fault at block {blocks}; resuming"
-                    );
-                }
-                let status = runtime.status();
-                print_status(&status);
-                if status.state.requires_mute() {
-                    eprintln!("khaen-rt-host: safety requires mute; continuing (fail-closed blocks are silent)");
-                }
-                if let Some(path) = settings.status_file.as_deref() {
-                    if let Err(err) = write_status_file(path, &status) {
-                        eprintln!(
-                            "khaen-rt-host: cannot write status file {}: {err}",
-                            path.display()
-                        );
-                    }
-                }
-            }
-        }
-
-        let status = runtime.status();
-        print_status(&status);
-        if let Some(path) = settings.status_file.as_deref() {
-            if let Err(err) = write_status_file(path, &status) {
-                eprintln!(
-                    "khaen-rt-host: cannot write final status file {}: {err}",
-                    path.display()
-                );
-            }
-        }
-        println!(
-            "khaen-rt-host: finished {blocks} blocks ({} s), exiting",
-            (blocks * block_frames) as f64 / sample_rate as f64
-        );
-        // 明确停收包线程并 join；drop 也会做，但这里要让失败可见。
-        if let Err(err) = runtime.stop_receiver() {
-            eprintln!(
-                "khaen-rt-host: receiver stop failed: [{:?}] {err}",
-                err.code()
-            );
-            return ExitCode::from(1);
-        }
-        ExitCode::SUCCESS
+        let mut pacer = crate::recovery::RealPacer::new();
+        crate::recovery::drive_loop(&mut runtime, &options, &mut pacer).0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::app;
+    use crate::recovery::DeviceLifecycle;
     use khaen_host::alsa_backend::AlsaStats;
     use khaen_host::runtime::{ReceiverStats, RuntimeStatus};
     use khaen_host::safety::RuntimeState;
@@ -728,7 +718,8 @@ mod tests {
     fn status_file_is_valid_single_line_json() {
         let mut path = std::env::temp_dir();
         path.push(format!("khaen-rt-host-status-{}.json", std::process::id()));
-        app::write_status_file(&path, &status()).expect("write status file");
+        app::write_status_file(&path, &status(), &DeviceLifecycle::new())
+            .expect("write status file");
         let text = std::fs::read_to_string(&path).expect("read status file");
         let _ = std::fs::remove_file(&path);
         assert_eq!(text.matches('\n').count(), 1, "must be a single line");
@@ -738,14 +729,63 @@ mod tests {
         assert_eq!(doc["blocks"], serde_json::json!(12));
         assert_eq!(doc["state"], serde_json::json!("running"));
         assert_eq!(doc["muted"], serde_json::json!(false));
+        assert_eq!(doc["safe"], serde_json::json!(false));
         assert_eq!(doc["plan_rate"], serde_json::json!(48_000));
         assert_eq!(doc["device_rate"], serde_json::Value::Null);
         assert_eq!(doc["input"]["packets"], serde_json::json!(34));
         assert_eq!(doc["input"]["ssrc"], serde_json::Value::Null);
         assert_eq!(doc["graph_id"], serde_json::Value::Null);
         assert_eq!(doc["last_error"], serde_json::Value::Null);
+        // T42o 设备缺失字段：present 时 absent_since/last_device_error 为 null、attempts=0。
+        assert_eq!(doc["device_state"], serde_json::json!("present"));
+        assert_eq!(doc["absent_since"], serde_json::Value::Null);
+        assert_eq!(doc["reopen_attempts"], serde_json::json!(0));
+        assert_eq!(doc["last_device_error"], serde_json::Value::Null);
         // 原子替换：临时文件不残留。
         assert!(!path.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn status_file_marks_absent_device_safe_and_escapes_error() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "khaen-rt-host-status-absent-{}.json",
+            std::process::id()
+        ));
+        let mut lifecycle = DeviceLifecycle::new();
+        // 设备缺失：safe 必须为 true（fail-closed），并带上缺失起点/重开次数/错误文本。
+        lifecycle.note_absent(1_234, "alsa pcm disconnected: \"hot\" \\ path");
+        let _ = lifecycle.note_attempt(1_234);
+        let _ = lifecycle.note_attempt(3_234);
+        app::write_status_file(&path, &status(), &lifecycle).expect("write status file");
+        let text = std::fs::read_to_string(&path).expect("read status file");
+        let _ = std::fs::remove_file(&path);
+        let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert_eq!(doc["schema"], serde_json::json!("khaen-rt-status/v1"));
+        assert_eq!(doc["device_state"], serde_json::json!("absent"));
+        assert_eq!(doc["safe"], serde_json::json!(true));
+        assert_eq!(doc["absent_since"], serde_json::json!(1_234));
+        assert_eq!(doc["reopen_attempts"], serde_json::json!(2));
+        // 错误文本里的引号/反斜杠必须被 JSON 正确转义（否则状态文件不是合法 JSON）。
+        assert_eq!(
+            doc["last_device_error"],
+            serde_json::json!("alsa pcm disconnected: \"hot\" \\ path")
+        );
+
+        // 恢复后：present，absent_since 回到 null、attempts 清零；last_device_error 保留"最近一次"语义。
+        lifecycle.note_recovered(9_000);
+        app::write_status_file(&path, &status(), &lifecycle).expect("write recovered status file");
+        let text = std::fs::read_to_string(&path).expect("read status file");
+        let _ = std::fs::remove_file(&path);
+        let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert_eq!(doc["device_state"], serde_json::json!("present"));
+        assert_eq!(doc["safe"], serde_json::json!(false));
+        assert_eq!(doc["absent_since"], serde_json::Value::Null);
+        assert_eq!(doc["reopen_attempts"], serde_json::json!(0));
+        assert_eq!(
+            doc["last_device_error"],
+            serde_json::json!("alsa pcm disconnected: \"hot\" \\ path")
+        );
     }
 
     use std::sync::atomic::{AtomicU32, Ordering};

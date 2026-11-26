@@ -39,6 +39,25 @@
 //! DeviceSupervisor::poll 会做系统调用/外部命令，安全监督器构造故障文本会分配。调用方必须
 //! 把它们放在控制上下文（独立线程或块循环之外），不要放进 RT 回调。
 //!
+//! # 设备掉线/缺失：fail-closed，不退出
+//!
+//! 声卡被拔掉/重新枚举（ALSA 写返回 `alsa pcm disconnected` 等）或启动时设备不在位时，
+//! 生产宿主不应退出：Runtime 提供一条控制路径的生命周期：
+//!
+//! - 用 [`Runtime::new_deferred`] / [`Runtime::with_source_deferred`] 构造（**不**打开设备，
+//!   收包线程/引擎/缓冲照常就位）；
+//! - 设备未打开期间 [`Runtime::run_block`] 直接返回 [`BackendError::NotStarted`]：
+//!   不推进输入/图状态、不写设备（fail-closed，进程保持运行）；
+//! - 控制路径按退避调用 [`Runtime::open_device`] 重开；成功后**重建输入抖动缓冲**（抽干收包环
+//!   里断线期间积压的旧包、重新分配 Aes67Input，预填从零开始），当前方案图/版本保持不动
+//!   （不需要重新 apply_plan，version/graph_id 语义不变）；
+//! - [`Runtime::clear_device_loss_fault`] 显式清除"设备丢失"造成的安全故障；处理器/欠载/
+//!   换图等其它故障仍锁存（fail-closed 语义不变）；
+//! - [`Runtime::close_device`] 释放旧句柄（设备已掉线时调用不会 panic）。
+//!
+//! 设备缺失永不导致退出；退避、日志限频与状态文件由宿主（rt-host）的监督循环负责。
+//! 只有配置/方案准入类错误与无法恢复的内部错误才由宿主决定退出。
+//!
 //! # 未实现 / 边界（如实声明）
 //!
 //! - PTP / 媒体时钟：Aes67Input 的边界就是不碰 PTP；本模块同样不做首块延迟与时钟锚定。
@@ -46,8 +65,10 @@
 //!   设置（ReceiverStats::rcvbuf_applied 如实上报是否成功），其它平台恒为 false；
 //!   不为此引入新依赖。
 //! - 设备监督器的流控制：生产装配里 DeviceSupervisor 的 StreamControl 是 NullStream
-//!   （只验证状态机与速率，不真正开关音频流）；ALSA PCM 由 Runtime::new 在构造期打开。
-//!   把 Streaming 状态与后端 start/stop 联动留给 daemon 层（需要共享后端所有权，超出本任务）。
+//!   （只验证状态机与速率，不真正开关音频流）；ALSA PCM 由 Runtime::new 在构造期打开，
+//!   设备缺失/掉线场景用 Runtime::new_deferred + Runtime::open_device 由宿主重试
+//!   （见"设备掉线/缺失"一节）。把 Streaming 状态与后端 start/stop 联动留给 daemon 层
+//!   （需要共享后端所有权，超出本任务）。
 //! - 冗余流 / 丢包补偿 / RTCP：单流、无重传（与 aes67_input 的边界一致）。
 
 use std::fmt;
@@ -943,6 +964,9 @@ pub struct Runtime<P: PcmOutput> {
     pending_fault: Option<FaultReason>,
     /// 最近一次故障原因（留到控制路径清除，供"已恢复的欠载"判定；只写 Copy 枚举）。
     last_fault_reason: Option<FaultReason>,
+    /// 设备丢失标记：块路径的 backend 写失败把它置位，控制路径恢复设备后显式清除
+    /// （避免把欠载/处理器等其它锁存故障一起清掉）。
+    device_fault: bool,
     last_error: Option<&'static str>,
 }
 
@@ -953,6 +977,8 @@ impl<P: PcmOutput> fmt::Debug for Runtime<P> {
             .field("blocks", &self.blocks)
             .field("output_errors", &self.output_errors)
             .field("pending_fault", &self.pending_fault)
+            .field("device_started", &self.backend.is_started())
+            .field("device_fault", &self.device_fault)
             .field("last_error", &self.last_error)
             .field("receiver", &self.receiver.stats())
             .field("graph", &self.engine.graph_info())
@@ -969,7 +995,19 @@ impl<P: PcmOutput> Runtime<P> {
         config.validate()?;
         let source = UdpPacketSource::bind(&config.input, &config.receiver)?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver)
+        Self::build_validated(config, source, driver, true)
+    }
+
+    /// 构造运行时但**不打开输出设备**：设备缺失/掉线由控制路径 [`Runtime::open_device`] 重试。
+    ///
+    /// 与 [`Runtime::new`] 的唯一区别是构造期不做 `backend.start`：收包线程、引擎与缓冲照常
+    /// 就位，[`Runtime::run_block`] 在设备打开前 fail-closed 返回 NotStarted（不推进输入/图状态、
+    /// 不写设备）。用于"声卡不在位也要保持进程运行"的宿主（rt-host）。
+    pub fn new_deferred(config: RuntimeConfig) -> Result<Self, RuntimeError> {
+        config.validate()?;
+        let source = UdpPacketSource::bind(&config.input, &config.receiver)?;
+        let driver = build_device_driver(&config)?;
+        Self::build_validated(config, source, driver, false)
     }
 
     /// 用注入的 PacketSource（假包源/其它 socket 实现）构造运行时。
@@ -979,7 +1017,17 @@ impl<P: PcmOutput> Runtime<P> {
     ) -> Result<Self, RuntimeError> {
         config.validate()?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver)
+        Self::build_validated(config, source, driver, true)
+    }
+
+    /// [`Runtime::with_source`] 的"设备延迟打开"版本：构造期不碰设备（设备缺失模拟/重开测试用）。
+    pub fn with_source_deferred<S: PacketSource + 'static>(
+        config: RuntimeConfig,
+        source: S,
+    ) -> Result<Self, RuntimeError> {
+        config.validate()?;
+        let driver = build_device_driver(&config)?;
+        Self::build_validated(config, source, driver, false)
     }
 
     /// 用注入的包源 + 设备驱动构造运行时（测试/daemon 注入用）。
@@ -989,13 +1037,14 @@ impl<P: PcmOutput> Runtime<P> {
         driver: Box<dyn DeviceDriver>,
     ) -> Result<Self, RuntimeError> {
         config.validate()?;
-        Self::build_validated(config, source, driver)
+        Self::build_validated(config, source, driver, true)
     }
 
     fn build_validated<S: PacketSource + 'static>(
         config: RuntimeConfig,
         source: S,
         driver: Box<dyn DeviceDriver>,
+        open_device: bool,
     ) -> Result<Self, RuntimeError> {
         let input = Aes67Input::new(config.input.clone()).map_err(RuntimeError::Input)?;
         let initial: Box<dyn Processor + Send> = match config.unloaded_policy {
@@ -1005,9 +1054,11 @@ impl<P: PcmOutput> Runtime<P> {
         let engine =
             SlotEngine::new(config.engine.clone(), initial).map_err(RuntimeError::Engine)?;
         let mut backend: AlsaOutputBackend<P> = AlsaOutputBackend::new();
-        backend
-            .start(&config.device)
-            .map_err(RuntimeError::Backend)?;
+        if open_device {
+            backend
+                .start(&config.device)
+                .map_err(RuntimeError::Backend)?;
+        }
         let safety = SafetySupervisor::new(config.safety.clone());
         let receiver = Aes67Receiver::spawn(source, &config.receiver)?;
         let block = vec![0.0f32; input.samples_per_block()];
@@ -1030,6 +1081,7 @@ impl<P: PcmOutput> Runtime<P> {
             consecutive_overruns: 0,
             pending_fault: None,
             last_fault_reason: None,
+            device_fault: false,
             last_error: None,
         })
     }
@@ -1084,7 +1136,89 @@ impl<P: PcmOutput> Runtime<P> {
         self.receiver.is_running()
     }
 
+    /// 输出设备是否已打开（PCM 句柄在手；设备掉线/尚未打开时为 false）。
+    pub fn device_started(&self) -> bool {
+        self.backend.is_started()
+    }
+
+    /// 控制路径：打开输出设备（设备缺失/打不开时返回后端错误，运行时保持可用、不退出）。
+    ///
+    /// 打开成功后**重建输入抖动缓冲**：先抽干收包环里断线期间积压的旧包，再换一个全新的
+    /// [`Aes67Input`]（预填从零重新开始，Warmup 静音块之后才恢复出声）；当前方案图与版本
+    /// 保持不动（不需要重新 apply_plan，version/graph_id 语义不变）。块缓冲/收包线程不重建：
+    /// 它们与设备生命周期无关。
+    ///
+    /// 不是 RT 安全（设备 IO/堆分配），只允许控制线程调用。
+    pub fn open_device(&mut self) -> Result<(), RuntimeError> {
+        if self.backend.is_started() {
+            return Ok(());
+        }
+        // 先分配新的抖动缓冲再碰设备：配置已校验，分配失败只会是内部错误；失败时不改变旧状态。
+        let fresh_input =
+            Aes67Input::new(self.config.input.clone()).map_err(RuntimeError::Input)?;
+        self.backend
+            .start(&self.config.device)
+            .map_err(RuntimeError::Backend)?;
+        // 设备打开后才丢弃断线期间的旧包：它们不属于恢复后的新抖动缓冲。
+        while self.receiver.next_packet(&mut self.packet_buf).is_some() {
+            // 收包统计仍在 receiver 侧累计；这里只把旧载荷从 SPSC 里抽走。
+        }
+        self.input = fresh_input;
+        self.consecutive_underruns = 0;
+        self.consecutive_overruns = 0;
+        Ok(())
+    }
+
+    /// 控制路径：关闭输出设备并释放句柄（幂等；设备已掉线时调用也不会 panic）。
+    pub fn close_device(&mut self) -> Result<(), RuntimeError> {
+        self.backend.stop().map_err(RuntimeError::Backend)
+    }
+
+    /// 控制路径：显式上报"输出设备不在位"故障（启动时设备缺失/重开失败用）。
+    ///
+    /// 与块路径写失败等价：`last_error=BACKEND`、`device_fault=true`、安全监督器立即 faulted
+    /// （fail-closed：输出静音、状态 `safe=true`）。恢复后由 [`Runtime::clear_device_loss_fault`]
+    /// 显式清除；其它锁存故障不受影响。
+    pub fn report_device_loss(&mut self, message: impl Into<String>) {
+        self.last_error = Some(codes::BACKEND);
+        self.device_fault = true;
+        self.last_fault_reason = Some(FaultReason::Internal);
+        if self.pending_fault == Some(FaultReason::Internal) {
+            self.pending_fault = None;
+        }
+        self.safety.note_processor_fault(message);
+    }
+
+    /// 控制路径：设备恢复后清除"设备丢失"造成的安全故障。
+    ///
+    /// 只清块路径因 backend 写失败记录的 Internal 故障（`device_fault`）；处理器/欠载/换图等
+    /// 其它故障仍保持锁存（fail-closed 语义不变）。恢复必须显式调用（与 `clear_fault` 一致）。
+    /// 返回是否真的清掉了安全故障。
+    pub fn clear_device_loss_fault(&mut self) -> bool {
+        if !self.device_fault {
+            return false;
+        }
+        self.device_fault = false;
+        if self.pending_fault == Some(FaultReason::Internal) {
+            self.pending_fault = None;
+        }
+        self.consecutive_underruns = 0;
+        self.consecutive_overruns = 0;
+        // 只清"设备丢失"这一类锁存：安全故障若是别的来源（欠载/处理器等），保持 fail-closed。
+        if self.last_fault_reason != Some(FaultReason::Internal) {
+            return false;
+        }
+        self.last_fault_reason = None;
+        if self.safety.state() == RuntimeState::Faulted {
+            return self.safety.clear_fault().is_ok();
+        }
+        true
+    }
+
     /// 块循环一步：取包 → 取一块输入 → 图处理 → 安全静音 → 写输出设备，返回最终输出块。
+    ///
+    /// 设备未打开（缺失/掉线）时直接返回 [`BackendError::NotStarted`]：不抽包、不推进输入/图
+    /// 状态、不写设备，进程保持运行等控制路径重开（fail-closed）。
     ///
     /// 顺序与实时约束：
     /// 1. 从 SPSC 抽干待处理 RTP 包并 feed_packet（零分配/无锁；每个块最多处理 SPSC 容量个包，
@@ -1097,6 +1231,11 @@ impl<P: PcmOutput> Runtime<P> {
     ///
     /// 正常路径零分配、零锁、无日志、不 panic；错误经返回值上报并计数。
     pub fn run_block(&mut self) -> Result<&[f32], RuntimeError> {
+        if !self.backend.is_started() {
+            // 设备不在位：fail-closed 直接返回，不抽包、不推进输入/图状态、不写设备。
+            // 控制路径用 open_device 重开成功后再恢复块循环（进程本身不退出）。
+            return Err(RuntimeError::Backend(BackendError::NotStarted));
+        }
         // 1) 网络包 → 输入抖动缓冲。feed_packet 与 fill_block 都是 Aes67Input 声明的实时安全操作。
         while let Some(len) = self.receiver.next_packet(&mut self.packet_buf) {
             if let Ok(FeedOutcome::Overflow { .. }) =
@@ -1144,6 +1283,8 @@ impl<P: PcmOutput> Runtime<P> {
         if let Err(err) = self.backend.playout(&self.out_block) {
             self.output_errors = self.output_errors.saturating_add(1);
             self.last_error = Some(codes::BACKEND);
+            // 设备丢失标记：控制路径恢复设备后只清这一类故障（clear_device_loss_fault）。
+            self.device_fault = true;
             self.note_fault(FaultReason::Internal);
             return Err(RuntimeError::Backend(err));
         }

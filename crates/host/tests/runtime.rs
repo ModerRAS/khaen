@@ -212,7 +212,7 @@ fn runtime_for(
 }
 
 /// 等待收包线程把注入的包推进 SPSC（计数在 push 之后更新，因此看到计数即槽位可见）。
-fn wait_for_packets(runtime: &Runtime<FakePcm>, expected: u64) {
+fn wait_for_packets<P: PcmOutput>(runtime: &Runtime<P>, expected: u64) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while runtime.receiver().stats().packets_received < expected {
         assert!(
@@ -1242,4 +1242,293 @@ fn wave(count: usize) -> Vec<i32> {
         out.push(value - 4_194_303);
     }
     out
+}
+// ===========================================================================
+// h) 设备缺失/掉线：延迟打开 + fail-closed + 重开恢复（T42o）
+// ===========================================================================
+
+#[derive(Clone, Default)]
+struct TogglePcmState {
+    present: Arc<AtomicBool>,
+    connected: Arc<AtomicBool>,
+    opens: Arc<AtomicU32>,
+    writes: Arc<AtomicU32>,
+    closed: Arc<AtomicU32>,
+}
+
+static TOGGLE_REGISTRY: std::sync::OnceLock<Mutex<Vec<(String, TogglePcmState)>>> =
+    std::sync::OnceLock::new();
+
+fn toggle_registry() -> &'static Mutex<Vec<(String, TogglePcmState)>> {
+    TOGGLE_REGISTRY.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn register_toggle_pcm(device: &str, state: &TogglePcmState) {
+    toggle_registry()
+        .lock()
+        .expect("toggle registry")
+        .push((device.to_string(), state.clone()));
+}
+
+fn toggle_state(device: &str) -> TogglePcmState {
+    toggle_registry()
+        .lock()
+        .expect("toggle registry")
+        .iter()
+        .find(|(name, _)| name == device)
+        .map(|(_, state)| state.clone())
+        .expect("toggle pcm registered")
+}
+
+/// 可拔插假 PCM：present=false 时 open 失败；connected=false 时 write 报设备掉线。
+struct TogglePcm {
+    state: TogglePcmState,
+    config: Option<DeviceConfig>,
+}
+
+impl PcmOutput for TogglePcm {
+    fn open(config: &DeviceConfig) -> Result<Self, BackendError> {
+        let state = toggle_state(config.device.as_str());
+        state.opens.fetch_add(1, Ordering::SeqCst);
+        if !state.present.load(Ordering::SeqCst) {
+            return Err(BackendError::Fault(
+                "alsa pcm open failed: device absent".to_string(),
+            ));
+        }
+        state.connected.store(true, Ordering::SeqCst);
+        Ok(Self {
+            state,
+            config: Some(config.clone()),
+        })
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, PcmError> {
+        let config = self
+            .config
+            .as_ref()
+            .ok_or(PcmError::Fatal("toggle pcm not open"))?;
+        assert_eq!(bytes.len(), config.samples_per_block() * BYTES_PER_SAMPLE);
+        self.state.writes.fetch_add(1, Ordering::SeqCst);
+        if !self.state.connected.load(Ordering::SeqCst) {
+            return Err(PcmError::Fatal("alsa pcm disconnected"));
+        }
+        Ok(config.block_frames)
+    }
+
+    fn prepare(&mut self, _fault: PcmFault) -> Result<(), BackendError> {
+        Ok(())
+    }
+
+    fn available(&self) -> Result<usize, PcmError> {
+        Ok(self
+            .config
+            .as_ref()
+            .map_or(0, |config| config.block_frames * 4))
+    }
+
+    fn close(&mut self) {
+        self.state.closed.fetch_add(1, Ordering::SeqCst);
+        self.state.connected.store(false, Ordering::SeqCst);
+        self.config = None;
+    }
+}
+
+fn toggle_runtime_config(device: &str) -> RuntimeConfig {
+    let mut config = runtime_config(1, 4);
+    config.device.device = DeviceId::new(device);
+    config
+}
+
+#[test]
+fn deferred_device_fails_closed_and_recovers_after_reopen() {
+    let device = format!("host-test-toggle-pcm-{}", std::process::id());
+    let state = TogglePcmState::default();
+    register_toggle_pcm(&device, &state);
+    let (source, handle) = fake_source();
+    let mut runtime =
+        Runtime::<TogglePcm>::with_source_deferred(toggle_runtime_config(&device), source)
+            .expect("deferred runtime");
+    assert!(
+        !runtime.device_started(),
+        "deferred constructor must not open the device"
+    );
+    assert!(!runtime.status().output_started);
+
+    // 设备缺失时块路径 fail-closed：不推进块数、不写设备；方案仍可加载（版本语义保持）。
+    let plan = identity_plan(1, 4, SAMPLE_RATE);
+    let version = runtime
+        .apply_plan(&plan.encode(), &AdmissionLimits::default())
+        .expect("plan applied while device absent");
+    assert_eq!(version, 1);
+    // 启动时设备缺失：控制路径显式上报设备故障，状态必须是 faulted（fail-closed）。
+    runtime.report_device_loss("output device unavailable at startup");
+    assert_eq!(runtime.status().state, RuntimeState::Faulted);
+    assert!(runtime.safety().requires_mute());
+    handle.send(packet(0, 0, &[1000, 2000, 3000, 4000]));
+    wait_for_packets(&runtime, 1);
+    let error = runtime
+        .run_block()
+        .expect_err("device absent must fail closed");
+    assert!(
+        matches!(error, RuntimeError::Backend(BackendError::NotStarted)),
+        "{error:?}"
+    );
+    assert_eq!(runtime.blocks(), 0, "absent device must not advance blocks");
+    assert_eq!(state.writes.load(Ordering::SeqCst), 0);
+    assert!(
+        runtime.open_device().is_err(),
+        "device absent -> open must fail"
+    );
+    assert!(!runtime.device_started());
+
+    // 设备回来：打开成功、积压旧包被丢弃、抖动缓冲重建；方案在第一块边界生效。
+    state.present.store(true, Ordering::SeqCst);
+    runtime.open_device().expect("reopen device");
+    assert!(runtime.device_started());
+    assert!(
+        runtime.clear_device_loss_fault(),
+        "startup device-loss fault is cleared explicitly after reopen"
+    );
+    assert_eq!(runtime.status().state, RuntimeState::Running);
+    assert_eq!(
+        runtime.input().jitter_fill(),
+        0,
+        "jitter buffer rebuilt empty"
+    );
+    handle.send(packet(1, 4, &[5000, 6000, 7000, 8000]));
+    wait_for_packets(&runtime, 2);
+    let block = runtime.run_block().expect("block after reopen").to_vec();
+    assert_bits(&block, &decoded_all(&[5000, 6000, 7000, 8000]));
+    assert_eq!(runtime.blocks(), 1);
+    let graph = runtime.graph_info();
+    assert_eq!(graph.version, Some(version));
+    let graph_id = graph.graph_id.expect("graph id after first block");
+    assert_eq!(runtime.status().state, RuntimeState::Running);
+    assert_eq!(state.writes.load(Ordering::SeqCst), 1);
+
+    // 运行中掉线：write 失败 → 关设备、进 faulted；进程不 panic，块路径继续 fail-closed。
+    state.connected.store(false, Ordering::SeqCst);
+    handle.send(packet(2, 8, &[1, 2, 3, 4]));
+    wait_for_packets(&runtime, 3);
+    let error = runtime
+        .run_block()
+        .expect_err("disconnect must fail closed");
+    assert!(
+        matches!(error, RuntimeError::Backend(BackendError::Fault(_))),
+        "{error:?}"
+    );
+    assert_eq!(runtime.status().output_errors, 1);
+    runtime.close_device().expect("close lost device");
+    assert!(!runtime.device_started());
+    runtime.poll_device();
+    assert_eq!(runtime.status().state, RuntimeState::Faulted);
+
+    // 设备仍不在：重开失败，块路径不写设备（fail-closed）。
+    state.present.store(false, Ordering::SeqCst);
+    assert!(runtime.open_device().is_err());
+    let writes_after_loss = state.writes.load(Ordering::SeqCst);
+    assert!(matches!(
+        runtime.run_block(),
+        Err(RuntimeError::Backend(BackendError::NotStarted))
+    ));
+    assert_eq!(state.writes.load(Ordering::SeqCst), writes_after_loss);
+
+    // 设备回来：重开 + 显式清设备丢失故障 → running；图版本/graph_id 不变，块计数继续增长。
+    state.present.store(true, Ordering::SeqCst);
+    state.connected.store(true, Ordering::SeqCst);
+    runtime.open_device().expect("reopen after replug");
+    assert!(
+        runtime.clear_device_loss_fault(),
+        "device-loss fault is cleared explicitly"
+    );
+    assert_eq!(runtime.status().state, RuntimeState::Running);
+    let graph_after = runtime.graph_info();
+    assert_eq!(graph_after.version, Some(version));
+    assert_eq!(graph_after.graph_id.as_deref(), Some(graph_id.as_str()));
+    handle.send(packet(3, 12, &[9, 10, 11, 12]));
+    wait_for_packets(&runtime, 4);
+    let block = runtime
+        .run_block()
+        .expect("block after second reopen")
+        .to_vec();
+    assert_bits(&block, &decoded_all(&[9, 10, 11, 12]));
+    assert_eq!(runtime.blocks(), 3, "blocks keep growing across recovery");
+    assert_eq!(state.writes.load(Ordering::SeqCst), 3);
+    assert!(state.opens.load(Ordering::SeqCst) >= 4);
+    assert!(state.closed.load(Ordering::SeqCst) >= 1);
+}
+
+#[test]
+fn open_device_restarts_jitter_prefill_after_device_loss() {
+    const JITTER_TARGET: usize = 8;
+    let device = format!("host-test-prefill-pcm-{}", std::process::id());
+    let state = TogglePcmState::default();
+    register_toggle_pcm(&device, &state);
+    let mut config = toggle_runtime_config(&device);
+    // 抖动目标 8 帧 > 一块 4 帧：重新打开后必须重新预填（Warmup）才能出声。
+    config.input.jitter_target_frames = JITTER_TARGET;
+    let (source, handle) = fake_source();
+    let mut runtime =
+        Runtime::<TogglePcm>::with_source_deferred(config, source).expect("deferred runtime");
+    state.present.store(true, Ordering::SeqCst);
+    runtime.open_device().expect("open device");
+
+    // 第一块：只到 4/8 帧水位 → Warmup 整块静音，播放游标不前进。
+    handle.send(packet(0, 0, &[1000, 2000, 3000, 4000]));
+    wait_for_packets(&runtime, 1);
+    let warmup = runtime.run_block().expect("warmup block").to_vec();
+    assert!(
+        warmup.iter().all(|sample| sample.to_bits() == 0),
+        "prefill gate must output silence"
+    );
+    assert_eq!(runtime.status().input.underruns, 1);
+    assert_eq!(runtime.input().jitter_fill(), 4);
+
+    // 凑够水位：第二块播放第一包的 4 帧。
+    handle.send(packet(1, 4, &[5000, 6000, 7000, 8000]));
+    wait_for_packets(&runtime, 2);
+    let block = runtime.run_block().expect("filled block").to_vec();
+    assert_bits(&block, &decoded_all(&[1000, 2000, 3000, 4000]));
+    assert_eq!(runtime.input().jitter_fill(), 4);
+
+    // 运行中掉线 → 关设备、faulted；重开后抖动缓冲是全新的（预填重新开始）。
+    state.connected.store(false, Ordering::SeqCst);
+    handle.send(packet(2, 8, &[1, 2, 3, 4]));
+    wait_for_packets(&runtime, 3);
+    let error = runtime
+        .run_block()
+        .expect_err("disconnect must fail closed");
+    assert!(
+        matches!(error, RuntimeError::Backend(BackendError::Fault(_))),
+        "{error:?}"
+    );
+    runtime.close_device().expect("close lost device");
+    runtime.poll_device();
+    assert_eq!(runtime.status().state, RuntimeState::Faulted);
+
+    state.present.store(true, Ordering::SeqCst);
+    state.connected.store(true, Ordering::SeqCst);
+    runtime.open_device().expect("reopen after replug");
+    assert!(runtime.clear_device_loss_fault());
+    assert_eq!(
+        runtime.input().jitter_fill(),
+        0,
+        "jitter buffer is empty after reopen"
+    );
+    // 新流锚定后只到 4/8 帧：再次 Warmup（证明预填重新开始，而不是沿用旧水位）。
+    handle.send(packet(3, 500, &[1100, 2200, 3300, 4400]));
+    wait_for_packets(&runtime, 4);
+    let warmup = runtime.run_block().expect("warmup after reopen").to_vec();
+    assert!(
+        warmup.iter().all(|sample| sample.to_bits() == 0),
+        "prefill must restart after device reopen"
+    );
+    assert_eq!(runtime.status().input.underruns, 1);
+    assert_eq!(runtime.input().jitter_fill(), 4);
+
+    handle.send(packet(4, 504, &[5500, 6600, 7700, 8800]));
+    wait_for_packets(&runtime, 5);
+    let block = runtime.run_block().expect("filled after reopen").to_vec();
+    assert_bits(&block, &decoded_all(&[1100, 2200, 3300, 4400]));
+    assert_eq!(runtime.status().state, RuntimeState::Running);
 }
