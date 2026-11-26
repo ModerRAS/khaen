@@ -34,12 +34,12 @@
 | 方法 | 路径 | 请求 | 成功响应 |
 |---|---|---|---|
 | GET | `/healthz` | — | `{ok, uptime_s, version}`（version=release 版本） |
-| GET | `/api/auth/status` | — | `{ok, initialized, authenticated}` |
-| POST | `/api/auth/setup` | `{password}` | `{ok}`（仅首次） |
-| POST | `/api/auth/login` | `{password}` | `{ok, csrf, expires_in}` + Set-Cookie |
-| GET | `/api/auth/session` | — | `{ok, authenticated, csrf?, expires_in?}` |
-| POST | `/api/auth/logout` | — | `{ok}` |
-| POST | `/api/auth/password` | `{current, new}` | `{ok}` |
+| GET | `/api/auth/status` | — | `{configured, authenticated}`（匿名；**无 `ok`/`initialized` 字段**） |
+| POST | `/api/auth/setup` | `{password, confirm}`（≥8 字符、两次一致） | **201** `{csrf, expires_in}` + `Set-Cookie: khaen_session`；已配置 409 `already_configured`，弱密码 400 `weak_password`，不一致 400 `password_mismatch` |
+| POST | `/api/auth/login` | `{password}` | **200** `{csrf, expires_in}` + `Set-Cookie`；未配置 409 `not_configured`，密码错 401 `invalid_credentials`，同源 60s 内失败 5 次后 429 `rate_limited` |
+| GET | `/api/auth/session` | 需会话 | `{authenticated:true, csrf, expires_at}`（RFC3339）；无会话 401 |
+| POST | `/api/auth/logout` | — | **200** `{ok:true}` + 清 Cookie（幂等） |
+| POST | `/api/auth/password` | `{old, new}` | **200** `{csrf, expires_in}` + 新 Set-Cookie（旧会话全部失效） |
 | GET | `/api/meta` | — | `{api_version, web_version, ops:[], surfaces:[], calibration:{wired,reason?}, host_link:{...}, not_wired:[{op,reason}|{surface,reason}]}`（`ok` 可缺省；not_wired 项为 op/surface 二选一形状） |
 
 ## 3. 状态与只读视图
@@ -153,6 +153,7 @@
 - **G3 当前值**：暂不新增 GET /api/surface 读接口；除 routing 可用 `/api/channels.mapping`（标注来源/降级）外，其余显示“当前值不可读”。**例外（v1.2 加法）**：音频模式当前值现可从 `GET /api/status.mode` 读到（来源=rt-host 控制 status 顶层 mode，仅 socket；file/process/不可用时 null+reason）；UI 有真值显示真值，null 时如实显示“不可读+原因”。可读 surface 状态其余项仍为后续独立任务。
 - **G5**：以本文件 §7 的“实际形状 + 加法目标”为准（前端先适配实际形状）。
 - **G6**：routing 当前值来源与降级口径见 §5 末条与 §9.7。
+- **H2（v1.2，认证 §2 形状，2026-11-27 实测）**：以上表 §2 实际形状为准——`/api/auth/status` 是 `{configured,authenticated}`（无 ok/initialized）、setup 201、login/session/password 的 token 响应是 `{csrf, expires_in}`、session 是 `{authenticated,csrf,expires_at}`、logout 200 `{ok:true}`。前端（webui/src/api/auth.ts）已按此实现；本次由**真 daemon 本地冒烟**核实（见 HANDOFF/20261126-khaen-engineering-integration/evidence/local-daemon-smoke.json）。
 - **H（v1.2，校准 §7 字段）**：以**后端实际形状**为准修正 §7——job 对象 canonical=`id`/`status`（backend tests 已锁定，不改后端加别名）；创建响应=`{ok, job_id, state, location}`、cancel=`{ok, job_id, status, state}`（status/state 同源别名）；job 详情顶层 result/artifacts/error；uploads 返回 `{upload_id,sha256,bytes,created}`（无 schema）；wizard/apply 返回 apply 回执（无 location）。前端解析保持宽容（job_id|id、state|status）但契约测试断言实际 canonical 形状；本修正不改任何实际行为，不升 api_version。
 
 ## 12. 音频通道 profile（输入/输出映射与布局）——v1.2 新增
