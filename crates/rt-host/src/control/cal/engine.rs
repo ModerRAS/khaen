@@ -585,12 +585,11 @@ impl StageAudioEngine for InProcessCalEngine {
             }
         }
         // seed：capture sample 0 对应的 render frame（capture 先起 → 负值）。
-        let seed = capture_first
+        let elapsed_seconds = capture_first
             .elapsed()
             .saturating_sub(playback_started.elapsed())
-            .as_secs_f64()
-            * request.sample_rate as f64
-            * -1.0;
+            .as_secs_f64();
+        let seed = -(elapsed_seconds * request.sample_rate as f64);
         // 需要覆盖：|seed| + timeline + post 尾巴（+ 0.2 s 裕量）。
         let rate = request.sample_rate.max(1) as f64;
         let target_frames = (-seed).max(0.0).ceil() as u64

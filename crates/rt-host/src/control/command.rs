@@ -78,8 +78,6 @@ pub enum ControlCommand {
 
 /// 一笔热重配请求（控制线程校验/探测后交给块线程执行）。
 pub struct ReconfigureRequest {
-    /// 幂等 token（回执/追踪器对账用）。
-    pub token: String,
     /// 目标完整运行时配置。
     pub config: RuntimeConfig,
     /// 控制线程按目标格式预编译的方案草稿（只有引擎格式变化时才有）。
@@ -340,7 +338,6 @@ pub fn execute_command<T: ControlTarget>(
             let started = Instant::now();
             let _ = target.request_mute(true);
             let result = target.reconfigure(ReconfigureRequest {
-                token: token.clone(),
                 config: *config,
                 plan,
                 probe,

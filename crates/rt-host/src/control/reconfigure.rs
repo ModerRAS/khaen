@@ -57,8 +57,6 @@ pub mod error {
     pub const CHANNELS_BUSY: &str = "channels_busy";
     /// 重配进行中（校准 enter 拒绝用）。
     pub const RECONFIGURING: &str = "reconfiguring";
-    /// 校准模式进行中（提交拒绝用；与 cal::error::BUSY 同值）。
-    pub const CAL_BUSY: &str = "cal_busy";
     /// 只读设备探测失败：设备不在位/读不到 hw params。
     pub const DEVICE_UNAVAILABLE: &str = "device_unavailable";
     /// 没有待提交的 channels 草稿。
@@ -645,8 +643,6 @@ pub(crate) struct ChannelsDraft {
     pub config: RuntimeConfig,
     /// 是否有变化（false = 幂等 no-op 草稿）。
     pub changed: bool,
-    /// 引擎格式是否变化（变化丢旧图）。
-    pub engine_changed: bool,
     /// prepare 响应（同 token 重复 prepare 原样返回）。
     pub response: Value,
 }
@@ -658,10 +654,6 @@ pub struct ChannelsCommitEffect {
     pub format: EngineConfig,
     /// 引擎格式是否变化（控制面要同步编译格式/丢旧图基线）。
     pub engine_changed: bool,
-    /// 生效后的目标视图。
-    pub target: ChannelsView,
-    /// 生效的 token。
-    pub token: String,
 }
 
 /// 对账结果（ack 丢失后从块线程追踪器恢复出的一笔结果）。
@@ -727,24 +719,9 @@ impl ChannelsState {
         lock_tracker(&self.tracker).generation
     }
 
-    /// 当前视图（控制面镜像）。
-    pub fn current(&self) -> &ChannelsView {
-        &self.current
-    }
-
     /// 探测句柄（提交命令要带给块线程做回读校验）。
     pub fn probe(&self) -> Arc<dyn DeviceProbe> {
         Arc::clone(&self.probe)
-    }
-
-    /// 追踪器句柄。
-    pub fn tracker(&self) -> SharedReconfigure {
-        Arc::clone(&self.tracker)
-    }
-
-    /// 是否有待提交草稿。
-    pub fn has_pending(&self) -> bool {
-        self.pending.is_some()
     }
 
     /// 是否有一笔提交在飞/结果未知。
@@ -909,7 +886,6 @@ impl ChannelsState {
             target,
             config,
             changed,
-            engine_changed,
             response: response.clone(),
         });
         Ok(response)
@@ -1135,8 +1111,6 @@ impl ChannelsState {
         let effect = ChannelsCommitEffect {
             format: outcome.format.clone(),
             engine_changed: outcome.engine_rebuilt,
-            target: self.current.clone(),
-            token: draft.token.clone(),
         };
         (response, effect)
     }
@@ -1237,8 +1211,6 @@ impl ChannelsState {
         let effect = ChannelsCommitEffect {
             format: applied.format.clone(),
             engine_changed: applied.engine_changed,
-            target: applied.target.clone(),
-            token: applied.token.clone(),
         };
         (response, effect)
     }
