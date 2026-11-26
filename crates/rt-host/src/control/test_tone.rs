@@ -206,6 +206,8 @@ pub struct RenderedToneBuffer {
     /// 总块数。
     pub total_blocks: u64,
     /// 有效采样帧数（其后的整块填充是静音）。
+    /// 仅测试读取：bin 目标不读它，`--all-targets` 的 clippy 会对 bin 目标报 dead_code。
+    #[allow(dead_code)]
     pub total_samples: u64,
 }
 
@@ -213,10 +215,8 @@ pub struct RenderedToneBuffer {
 pub struct RenderedTone {
     /// 播放数据（交错 f32 + 进度句柄）。
     pub playback: CalibrationPlayback,
-    /// 进度共享句柄。
+    /// 进度共享句柄（总块数/剩余进度从 progress 读）。
     pub progress: Arc<CalibrationProgress>,
-    /// 总块数。
-    pub total_blocks: u64,
 }
 
 /// 双二阶滤波器系数（RBJ 低通/高通，Q=1/sqrt(2) 即 Butterworth 响应）。
@@ -404,11 +404,7 @@ pub fn render(
             format!("speaker test tone buffer was rejected by the host playback seam: {err}"),
         )
     })?;
-    Ok(RenderedTone {
-        playback,
-        progress,
-        total_blocks: buffer.total_blocks,
-    })
+    Ok(RenderedTone { playback, progress })
 }
 
 /// 正在播放的测试音（控制面会话状态；块线程只拥有 playback/progress）。
