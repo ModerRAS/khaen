@@ -1,21 +1,27 @@
 /**
- * 路由矩阵页（M3b / 任务 T58）——「输入 → 矩阵域 → DAC 输出」只读诊断的数据组合。
+ * 路由矩阵页（task-68）——「输入 → 矩阵域 → DAC 输出」只读诊断 + lane → DAC 可编辑两阶段的数据组合。
  *
- * 页面不新增后端端点，只把三个现有只读接口组合成一个路由视图（缺数据一律 null + 原因）：
+ * 只读诊断来源（缺数据一律 null + 原因）：
  * - GET /api/channels      khaen-channels/v1：output.channels/dac_map、input.*、mapping[{lane,dac}]、
  *                          plan.{source,version,graph_id,routing_known}、reasons、not_wired；
  * - GET /api/status        khaen-status/v1：format.channels / format.aes67.{channels,map} /
  *                          plan.{version,latency_samples,applied_at,source,graph_id} / host_link / reasons；
  * - GET /api/plan/history  已生效历史：current_version + entries（当前版本、latency 的回退来源、applied_at）。
  *
- * 与 /channels 页的口径保持一致（同一条 mapping 语义：lane / 0-based DAC / 1-based MOTU 物理输出），
- * 但**不重复编辑入口**：本页只读诊断，写入口仍在 /channels（M4/T54）。
+ * 当前可编辑值（唯一来源）：GET /api/channels 的 `mapping`（lane → 0-based DAC）。它是 daemon 在
+ * prepare/upload 时记录的**方案 routing 镜像**，不是数据面实时回读；mapping = null 表示 routing 段
+ * 未知，页面必须显示「当前值未知」+ 原因，**不得用 dac_map / 旧值 / 默认值冒充当前值**（API.md §5 末条、
+ * §9.7、§11 裁决 G3/G6）。
  *
- * 路由编辑/重排在本里程碑是 NOT_AVAILABLE：需要 PlanGraph 编辑器/designer（任务 T59）。
- * 控制面虽然有一个低层 `POST /api/surface {surface:"routing"}` 的 Plan 片段补丁，但它不是图形
- * 编辑器，且提交生效依赖块边界换图/热重配（M3b/T52），本页不暴露写入口（不假成功）。
+ * 写入口（两阶段，API.md §1 / §4）：`POST /api/surface {surface:"routing", data:{routes:[lane,dac],
+ * dac_channels?}}` → 草稿 + engine_token；`POST /api/commit {engine_token}` 生效；
+ * `POST /api/abort {engine_token}` 丢弃。routes 是 lane → DAC 的**全量替换表**；dac_channels 缺省沿用
+ * 方案值（CONTRACTS B.1.2）。changed/diff/current/target 等是可选回执字段，缺失时页面显示「服务端未上报」。
  *
- * 解析纪律（与 T54 的严格解析不同，这里对真实 daemon 形态更宽容，仍拒绝结构漂移）：
+ * 本模块只放纯函数（解析 / 当前值来源 / 草稿校验与构造），不依赖 Vue/DOM，Node 单测直接覆盖；
+ * 两阶段请求与草稿状态机在 api/control.ts + stores/control.ts（本页复用，不另造一套）。
+ *
+ * 解析纪律（对真实 daemon 形态更宽容，仍拒绝结构漂移）：
  * - 真实 daemon 的 `dac_map` 允许 null（该 DAC 没有 lane 喂入/静音），旧契约是纯 number[]；
  * - `/api/plan/history` 同时接受 daemon 的 `{current:{version},entries:[]}` 与 T54 mock 契约的
  *   `{current_version,versions:[]}`（也接受 history/items 别名），条目 applied_at 兼容 recorded_at；
@@ -25,17 +31,19 @@
 import { ApiClient, ApiError } from './client.ts'
 import { CHANNELS_SCHEMA, motuOutputLabelKey } from './channels.ts'
 import {
+  buildRoutingPatch,
+  validateRoutingPatch,
+  type RoutingPatch
+} from './control.ts'
+import {
   reasonForPath,
   type StatusResponse
 } from './status.ts'
 
-/** 路由编辑/重排缺失的任务号（PlanGraph 编辑器/designer）。 */
-export const ROUTING_EDIT_TASK = 'T59'
-
 /** 设计上的矩阵域 lane 数（PLAN：22 lane）；只用于显示「期望值」，不用于补数据。 */
 export const ROUTING_MATRIX_LANES = 22
 
-/** 路由页组合用的只读端点。 */
+/** 路由页组合用的只读端点（写入口复用 api/control.ts 的 CONTROL_PATHS）。 */
 export const ROUTING_PATHS = {
   channels: '/api/channels',
   planHistory: '/api/plan/history'
@@ -53,6 +61,18 @@ export interface RoutingChannelsPlan {
   routing_known: boolean | null
 }
 
+/**
+ * GET /api/channels 的【加法】字段 speaker_roles 条目（docs/API.md §12.2；后端尚未实现，
+ * 缺失/null 是合法形态）：某个 0-based DAC 的 canonical 角色（L/R/C/LFE/Tfl…）。
+ *
+ * 纪律：role 原样展示（代码不维护中文映射表、不猜测），enabled 未知时为 null。
+ */
+export interface RoutingSpeakerRole {
+  dac: number
+  role: string
+  enabled: boolean | null
+}
+
 /** GET /api/channels 中路由页要用的归一化子集（dac_map 允许 null 项）。 */
 export interface RoutingChannelsInfo {
   schema: typeof CHANNELS_SCHEMA
@@ -68,6 +88,8 @@ export interface RoutingChannelsInfo {
   }
   /** lane -> 0-based dac（按 lane 升序）；null = routing 段未知（不是「0 条路由」）。 */
   mapping: Array<{ lane: number; dac: number }> | null
+  /** 【加法】dac -> canonical 角色（docs/API.md §12.2）；未上报/null = 不显示角色（不编造）。 */
+  speaker_roles: RoutingSpeakerRole[] | null
   plan: RoutingChannelsPlan
   reasons: Record<string, string>
   not_wired: Array<{ path: string; reason: string }>
@@ -242,6 +264,36 @@ function parseMapping(value: unknown): Array<{ lane: number; dac: number }> | nu
   return rows
 }
 
+/**
+ * 解析【加法】字段 speaker_roles（docs/API.md §12.2；后端未实现时缺省/null）。
+ * - 缺失/null → null（不是错误，也不编造角色）；
+ * - 结构漂移（数组项非对象 / dac 非非负整数 / role 非字符串）→ invalid_response。
+ */
+function parseSpeakerRoles(value: unknown): RoutingSpeakerRole[] | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!Array.isArray(value)) {
+    throw invalidResponse('speaker_roles must be an array or null')
+  }
+  return value.map((item, index) => {
+    const path = 'speaker_roles[' + String(index) + ']'
+    const record = asRecord(item)
+    if (record === null) {
+      throw invalidResponse(path + ' must be an object')
+    }
+    const dac = readInteger(record, 'dac', path)
+    const role = readString(record, 'role', path)
+    if (dac === null || dac < 0) {
+      throw invalidResponse(path + '.dac must be a non-negative integer')
+    }
+    if (role === null || role.length === 0) {
+      throw invalidResponse(path + '.role must be a non-empty string')
+    }
+    return { dac, role, enabled: readBoolean(record, 'enabled', path) }
+  })
+}
+
 function parseChannelsPlan(value: unknown): RoutingChannelsPlan {
   const record = group(value, 'plan')
   return {
@@ -277,6 +329,7 @@ export function parseRoutingChannels(body: unknown): RoutingChannelsInfo {
       sdp_sha256: readString(input, 'sdp_sha256', 'input')
     },
     mapping: parseMapping(root.mapping),
+    speaker_roles: parseSpeakerRoles(root.speaker_roles),
     plan: parseChannelsPlan(root.plan),
     reasons: readReasons(root.reasons),
     not_wired: parseNotWired(root.not_wired)
@@ -669,4 +722,180 @@ export function buildPlanSummary(
     routes: mapping === null ? null : mapping.length,
     historyCurrentVersion: currentVersion
   }
+}
+
+/* ------------------------------------------ 可编辑草稿（POST /api/surface routing） */
+
+/** 可编辑草稿行：lane → 0-based DAC。提交时 routes 是**全量替换表**（不是增量）。 */
+export interface RoutingDraftRow {
+  lane: number
+  dac: number
+}
+
+/** 草稿行 → routes（[lane, dac] 整数对，按 lane/DAC 升序，保证请求体确定）。 */
+export function rowsToRoutes(rows: readonly RoutingDraftRow[]): Array<[number, number]> {
+  return rows
+    .map((row) => [row.lane, row.dac] as [number, number])
+    .sort((left, right) => left[0] - right[0] || left[1] - right[1])
+}
+
+/** 新增行用的默认 lane：最小未占用的非负整数（越界由后端准入拒绝，前端不猜 lane 总数）。 */
+export function nextRoutingLane(rows: readonly RoutingDraftRow[]): number {
+  const used = new Set<number>()
+  for (const row of rows) {
+    if (Number.isInteger(row.lane) && row.lane >= 0) {
+      used.add(row.lane)
+    }
+  }
+  let lane = 0
+  while (used.has(lane)) {
+    lane += 1
+  }
+  return lane
+}
+
+/**
+ * 「当前值」来源快照——唯一来源是 GET /api/channels 的 `mapping`（lane → 0-based DAC），
+ * 它是 daemon 在 prepare/upload 时记录的**方案 routing 镜像**，不是数据面实时回读。
+ *
+ * 降级口径（API.md §5 末条 / §9.7 / §11 裁决 G3、G6）：
+ * - mapping = null（方案图被 channels_commit 丢弃 / mirror 未记录）→ rows = null、source = null，
+ *   页面必须显示「当前值未知」+ 原因，**禁止**用 dac_map / 旧值 / 默认值冒充；
+ * - mapping = [] → known = true（明确的「已知 0 条路由」，与未知区分）；
+ * - /api/channels 整体不可用 → rows = null、reason = null（页面用 i18n 兜底原因）。
+ */
+export interface RoutingCurrentSource {
+  /** 可预填的草稿行（mapping，按 lane 升序）；null = 当前值未知。 */
+  rows: RoutingDraftRow[] | null
+  /** 'mapping' = /api/channels 记录的方案 routing 镜像（lane → 0-based DAC）；null = 没有来源。 */
+  source: 'mapping' | null
+  /** true = mapping 已上报（含空数组）；false = 未知（mapping:null / /api/channels 不可用）。 */
+  known: boolean
+  /** 当前方案 DAC 声道数（/api/channels.output.channels，回退 dac_map 长度；不是实时回读）。 */
+  dacChannels: number | null
+  /** 来源方案版本 / graph_id（快照语义；null = 未上报）。 */
+  planVersion: number | null
+  planGraphId: string | null
+  /** daemon 是否关联到当前方案 routing 段（/api/channels.plan.routing_known；null = 未上报）。 */
+  routingKnown: boolean | null
+  /** 当前值未知原因（优先后端 reasons.mapping，其次 reasons.plan；null = 后端未给原因）。 */
+  reason: string | null
+}
+
+/** 组合「当前值」来源快照（纯函数；null 输入 = /api/channels 不可用，不猜任何值）。 */
+export function currentRoutingSource(info: RoutingChannelsInfo | null): RoutingCurrentSource {
+  if (info === null) {
+    return {
+      rows: null,
+      source: null,
+      known: false,
+      dacChannels: null,
+      planVersion: null,
+      planGraphId: null,
+      routingKnown: null,
+      reason: null
+    }
+  }
+  const mapping = info.mapping
+  const rows =
+    mapping === null
+      ? null
+      : mapping
+          .map((entry) => ({ lane: entry.lane, dac: entry.dac }))
+          .sort((left, right) => left.lane - right.lane || left.dac - right.dac)
+  const dacMap = info.output.dac_map
+  const dacChannels = info.output.channels ?? (dacMap === null ? null : dacMap.length)
+  const reason =
+    rows === null
+      ? (reasonForRoutingChannelsPath(info, 'mapping') ?? reasonForRoutingChannelsPath(info, 'plan'))
+      : null
+  return {
+    rows,
+    source: rows === null ? null : 'mapping',
+    known: rows !== null,
+    dacChannels,
+    planVersion: info.plan.version,
+    planGraphId: info.plan.graph_id,
+    routingKnown: info.plan.routing_known,
+    reason
+  }
+}
+
+/**
+ * 查询某个 0-based DAC 的 canonical 角色（GET /api/channels 的【加法】字段 speaker_roles）。
+ *
+ * - 字段缺失/null（后端尚未实现，docs/API.md §12）→ null：页面不显示角色，也不编造；
+ * - role 原样返回 canonical 字符串（显示层不做中文映射，避免两套角色表漂移）；
+ * - enabled 未知时同样返回（页面按需显示），不推断。
+ */
+export function speakerRoleForDac(
+  info: RoutingChannelsInfo | null,
+  dac: number | null
+): { role: string; enabled: boolean | null } | null {
+  if (info === null || info.speaker_roles === null || dac === null || !Number.isInteger(dac)) {
+    return null
+  }
+  const entry = info.speaker_roles.find((item) => item.dac === dac)
+  return entry === undefined ? null : { role: entry.role, enabled: entry.enabled }
+}
+
+/** 本地草稿校验的可选项。 */
+export interface RoutingDraftValidationOptions {
+  /** 显式指定的 dac_channels；undefined = 未勾选（沿用方案值）；null = 勾选了但没填值。 */
+  explicitDacChannels?: number | null
+  /** 当前方案 DAC 声道数（dac 上界校验；null/undefined = 未知，跳过上界）。 */
+  knownDacChannels?: number | null
+}
+
+/**
+ * 本地校验 lane → DAC 草稿（错误码；null = 合法）。
+ *
+ * 在 api/control.ts 的 validateRoutingPatch 之上补充两条编辑期约束：
+ * - 勾选「显式指定 dac_channels」但没填值 → 'dac_channels'；
+ * - 已知 DAC 声道数时，DAC 序号必须 < 声道数 → 'dac_range'（最终仍以后端准入为准）。
+ * 结构错误码沿用 validateRoutingPatch：'empty' / 'entry' / 'duplicate' / 'dac_channels'。
+ */
+export function validateRoutingDraft(
+  rows: readonly RoutingDraftRow[],
+  options: RoutingDraftValidationOptions = {}
+): string | null {
+  if (options.explicitDacChannels === null) {
+    return 'dac_channels'
+  }
+  const routes = rowsToRoutes(rows)
+  const patch: RoutingPatch = { routes }
+  if (typeof options.explicitDacChannels === 'number') {
+    patch.dac_channels = options.explicitDacChannels
+  }
+  const structural = validateRoutingPatch(patch)
+  if (structural !== null) {
+    return structural
+  }
+  const bound =
+    typeof options.explicitDacChannels === 'number'
+      ? options.explicitDacChannels
+      : (options.knownDacChannels ?? null)
+  if (bound !== null && Number.isInteger(bound) && bound > 0) {
+    for (const [, dac] of routes) {
+      if (dac >= bound) {
+        return 'dac_range'
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * 构造 POST /api/surface {surface:"routing"} 的 `data`（即 RoutingPatch）：
+ * - routes 永远是全量替换表；
+ * - explicitDacChannels 为整数时带 `dac_channels`；null/undefined = 沿用方案值，**不发送该字段**。
+ */
+export function buildRoutingDraftPatch(
+  rows: readonly RoutingDraftRow[],
+  explicitDacChannels: number | null | undefined
+): RoutingPatch {
+  const routes = rowsToRoutes(rows)
+  return typeof explicitDacChannels === 'number'
+    ? buildRoutingPatch(routes, explicitDacChannels)
+    : buildRoutingPatch(routes)
 }

@@ -29,8 +29,11 @@ const messages = {
   nav: {
     overview: '概览',
     volume: '音量与静音',
+    mode: '工作模式',
     channels: '方案与声道',
     routing: '路由矩阵',
+    layout: '内容布局',
+    speakers: "音频映射",
     format: '音频格式',
     calibration: '校准',
     system: '系统信息',
@@ -40,33 +43,20 @@ const messages = {
     main: '主功能',
     system: '系统'
   },
-  navFlag: {
-    planned: '待接入'
-  },
   shell: {
-    brandSub: 'DSP 控制台',
     collapse: '收起侧栏',
     expand: '展开侧栏',
     menu: '打开导航',
-    navDisabled: '该页面尚未接入（计划 {milestone}）',
-    stubBanner:
-      'T53/T54/T58（M3/M4/M3b）：音量与静音、音频格式/工作模式接 /api/mute、/api/surface、/api/format（prepare → commit 两阶段）；方案与声道页接 /api/channels、/api/plan/upload / history / inspect 与 /api/prepare / commit / abort / rollback；路由矩阵页只读组合 /api/status、/api/channels 与 /api/plan/history；校准页接 /api/calibration/*，系统信息页接 /api/system/*，概览页接 /api/status。未接入的能力（路由编辑/重排、声道热重配 commit 等）一律显示「未接入」+ 原因 + 任务号，不展示假数据、不假成功。',
-    hostLink: '控制通道',
     hostLinkNotWired: '控制通道未接入',
     hostLinkConnected: '控制通道已连接',
     hostLinkStale: '控制通道状态过期',
-    hostLinkDisconnected: '控制通道已断开'
   },
   topbar: {
     runState: '运行状态',
     plan: '方案版本',
     deviceRate: '设备速率',
-    hostLink: '控制通道',
     changePassword: '修改密码',
     logout: '退出登录',
-    comingSoon: '{milestone} 接入',
-    appearance: '外观',
-    language: '语言',
     userMenu: '用户菜单',
     themeToggle: '切换深浅色',
     version: '版本',
@@ -193,7 +183,7 @@ const messages = {
       timeout: '控制请求超时，请重试。',
       unauthorized: '会话已过期，请重新登录。',
       hostLinkUnavailable:
-        'daemon 与 rt-host 的控制通道不可用（T70f-b 未接通或 socket 不可达）：写操作未发送，页面不会显示假成功。',
+        'daemon 与 rt-host 的控制通道不可用（控制 socket 不可达）：写操作未发送，页面不会显示假成功。',
       unsupported: '后端明确不支持该操作（unsupported）：不会假装成功。',
       notWired: '该能力尚未接入 daemon（not_wired）：不展示假数据。',
       noBasePlan: '还没有已生效的方案可作为音量补丁的基线（no_base_plan）：请先在方案页应用一份方案。',
@@ -208,29 +198,10 @@ const messages = {
       unknown: '控制面操作失败，请重试。'
     },
     channels: {
-      network: '无法连接 daemon（后端未启动或网络中断），请检查后重试。',
-      timeout: '方案/声道请求超时，请重试。',
-      unauthorized: '会话已过期，请重新登录。',
-      hostLinkUnavailable:
-        'daemon 与 rt-host 的控制通道不可用（T70f-b 未接通或 socket 不可达）：写操作未发送，页面不会显示假成功。',
-      hostLinkUnsupported:
-        'rt-host 尚不支持声道热重配（M3b / T52 未完成）：daemon 如实返回 host_link_unsupported，页面不会把提交显示成成功。',
-      notWired: 'daemon 尚未实现该 M4 能力（T55 未完成）：页面显示「未接入」，不编造映射/历史。',
-      notFound: '目标资源不存在（可能是后端尚未实现该端点，T55）。',
-      invalidRequest: '请求参数不合法（bad_request）：请检查输入后重试。',
-      invalidPlan: '方案文件不合法（ABI v3 解码/结构校验失败）：原方案保持不变。',
-      uploadTooLarge: '方案文件超过 4 MiB 上传上限。',
-      uploadNotFound: '上传的 plan 不存在（可能已过期或上传失败）：请重新上传。',
       shaMismatch: '客户端与服务端计算的 sha256 不一致：已拒绝继续（不信任任何一侧）。',
-      admissionRejected: '方案未通过准入（admission_rejected）：系数/延迟/通道超限，原方案保持不变。',
-      noHistory: '没有可回滚的历史版本（no_history）。',
-      conflict: '当前状态不允许该操作（冲突，例如已有热重配进行中），请刷新后重试。',
-      server: 'daemon 返回服务器错误，请稍后重试。',
-      invalidResponse: 'daemon 返回的方案/声道结构不合法，已拒绝显示（不把畸形响应当成功）。',
       shaUnavailable: '浏览器不支持 WebCrypto SHA-256：无法完成上传校验（不支持降级为不校验）。',
       planPathUnavailable:
         '上传回执没有 plan_path（stored_path）：daemon 未返回方案的落盘路径，无法调用 POST /api/plan/inspect 或 /api/prepare；页面不猜路径、不伪造预览/草稿。',
-      unknown: '方案/声道操作失败，请重试。'
     }
   },
   overview: {
@@ -256,8 +227,8 @@ const messages = {
     },
     notice: {
       stale: '控制通道状态过期（连接={connected}，新鲜度={age}）；当前显示的是最后一次成功获取的数据。',
-      hostLinkNotWired: '控制通道（T70f）尚未接入：host_link 字段全部为 null，变更控制需重启后端。',
-      hostLinkNotWiredReason: '控制通道（T70f）尚未接入：{reason}',
+      hostLinkNotWired: '控制通道不可用：host_link 字段全部为 null；变更控制需要 daemon 与 rt-host 的控制通道恢复。',
+      hostLinkNotWiredReason: '控制通道不可用：{reason}',
       refreshFailed: '刷新失败：{message}（最后成功更新 {time}）。仍在显示最后一次成功获取的数据。'
     },
     uptime: {
@@ -368,22 +339,224 @@ const messages = {
           verdict: '结论',
           activeJob: '进行中 job'
         },
-        stub: '校准页在 M5 接入，本卡只读展示 daemon 上报的最近一次 job。'
+        stub: '本卡只读展示 daemon /api/calibration/jobs 上报的最近一次 job；拿不到数据时显示未接入原因，不展示假数据。'
       },
       control: {
         title: '控制通道',
-        desc: 'daemon ↔ rt-host 控制链路（T70f）',
+        desc: 'daemon ↔ rt-host 控制链路',
         field: {
           connected: '已连接',
           statusAgeMs: '状态新鲜度',
           since: '连接起始时间',
           socket: 'socket 路径'
         },
-        notWiredHint: '控制通道（T70f）未接入：变更控制需重启后端。'
+        notWiredHint: '控制通道不可用：host_link 字段为 null，变更控制需要控制通道恢复。'
       }
     }
   },
   calibration: {
+    review: {
+      applyState: '应用状态',
+      appliedVersion: '已应用版本',
+      before: '应用前（当前运行方案）',
+      after: '应用后（job 产物）',
+      beforeHint: '应用前快照：失败时回滚到该版本。',
+      snapshot: '应用前快照',
+      version: '版本',
+      graphId: 'graph_id',
+      sha256: 'sha256',
+      apply: '应用校准方案',
+      rollback: '回滚到应用前版本',
+      noJob: '没有可应用的 job。',
+      exportConfig: '导出配置 JSON',
+      applyReceipt: '最近应用回执',
+      rollbackReceipt: '最近回滚回执',
+      appliedAt: '应用时间',
+      restoredVersion: '恢复版本',
+      ack: '回执类型',
+      ackActual: 'actual（真实生效）',
+      ackSynthetic: 'synthetic（模拟提交）',
+      confirmApply: {
+        title: '应用校准方案？',
+        message: '将把 job 产出的方案 prepare → commit 到运行方案；应用前会记录快照（当前版本 {version}），失败可回滚。',
+        ok: '确认应用'
+      },
+      confirmRollback: {
+        title: '回滚到应用前版本？',
+        message: '将把运行方案恢复到应用前版本 {version}（graph_id {graphId}）。',
+        ok: '确认回滚'
+      },
+      appliedToast: '已应用校准方案',
+      rolledBackToast: '已回滚到应用前版本'
+    },
+    wizard: {
+      pageTitle: '校准向导',
+      subtitle:
+        'Dirac 式 8 步离线校准闭环（P1）。每步门禁由 daemon 的 /api/calibration/wizard/state 判定；缺失能力（多点/ART、实时测量等）灰态明示，不伪造进度与结果。',
+      stepNav: '向导步骤',
+      stepShort: '第 {step} 步',
+      stepOf: '第 {current} / {total} 步',
+      backToList: '返回校准列表',
+      previous: '上一步',
+      next: '下一步',
+      nextSkip: '下一步（此步未接入）',
+      finish: '完成',
+      cancelWizard: '取消向导',
+      confirmCancel: {
+        title: '退出向导？',
+        message: '向导配置、测量上传与已完成的步骤会保留在后端；可以随时回来继续。',
+        ok: '退出向导'
+      },
+      unavailable: {
+        title: '校准后端未接入',
+      },
+      error: {
+        title: '无法读取向导状态'
+      },
+      actionError: '操作失败：{message}',
+      toast: {
+        saved: '校准设置已保存',
+        uploaded: '上传完成',
+        jobCreated: '分析 job 已创建',
+        jobCancelled: 'job 已取消'
+      },
+      device: {
+        desc: '数据来自 /api/status（设备 / 格式 / 控制通道），本步门禁由 daemon 判定。',
+        device: '设备',
+        deviceState: '设备状态',
+        deviceCard: 'ALSA 卡',
+        deviceRate: '设备速率',
+        rateAsserted: '速率已确认',
+        hostLink: '控制通道',
+        hostLinkAge: '状态新鲜度',
+        runState: '运行状态',
+        channels: '输出声道数',
+        encoding: '编码',
+        noStatus: '尚未获取 /api/status 数据（后端未接入或请求失败），本步不显示任何数值。',
+        statusError: '无法获取 /api/status：{message}'
+      },
+      channels: {
+        desc: '只读展示 /api/status 与 /api/channels 的格式/声道事实；当前值拿不到时显示未接入原因，不展示假数据。',
+        notAvailable: '/api/channels 不可用：本步只读展示，写入请使用「方案与声道」页的热重配两阶段。',
+        noMapping: '不展示也不伪造声道映射：只显示 daemon 上报的 mapping；未知时显示原因。',
+        readOnly: '本步只读，不产生任何配置。',
+        planRate: '方案速率',
+        deviceRate: '设备速率',
+        channels: '输出声道数',
+        encoding: '编码',
+        aes67Channels: 'AES67 接收声道',
+        aes67Map: 'AES67 声道映射',
+        aes67Group: 'AES67 组播地址',
+        aes67Port: 'AES67 端口',
+        task: '缺失能力'
+      },
+      mic: {
+        desc: '上传麦克风校准文件、选择朝向与目标曲线、设置单点参数；保存后由 daemon 判定本步门禁。',
+        file: '麦克风校准文件',
+        fileHint: 'UMIK-1 校准 txt（≤ 1 MiB）；上传后显示服务端计算的 SHA-256。',
+        fileSelect: '选择校准文件',
+        fileTooLarge: '校准文件超过 1 MiB 上限',
+        savedSha: '已保存 SHA-256',
+        filename: '文件名',
+        orientation: '麦克风朝向',
+        orientation0: '0°（指向声源）',
+        orientation90: '90°（指向天花板）',
+        targetMode: '目标曲线',
+        targetFlat: 'flat（平坦）',
+        targetTilt10: 'tilt10（−10 dB 于 20 kHz）',
+        centers: '中心频率（Hz，逗号分隔）',
+        centersHint: '1/3-oct 中心频率，最多 64 个；默认 25 Hz–20 kHz（30 个）。',
+        tolerance: '容差（dB）',
+        minBands: '最少频段数',
+        save: '保存设置',
+        saving: '正在保存…',
+        savedAt: '已保存（{time}）',
+        notSaved: '尚未保存',
+        validation: {
+          micRequired: '请先上传麦克风校准文件',
+          orientationRequired: '请选择麦克风朝向',
+          targetRequired: '请选择目标曲线',
+          centersRange: '中心频率必须是 1–24000 Hz 的数字（逗号/空格分隔）',
+          centersTooMany: '最多 64 个中心频率',
+          toleranceRange: '容差必须在 0.1–24 dB 之间',
+          minBandsRange: '最少频段数必须是 1–64 的整数'
+        }
+      },
+      positions: {
+        desc: 'khaen P1 只支持单点（皇帝位）；多点与 ART 不在本版本目标内。',
+        single: '单点（皇帝位）',
+        singleDesc: '固定主听音位；本版本唯一支持的测点方案。',
+        selected: '已确认',
+        notSelected: '待确认（需先保存第 3 步设置）',
+        multi: '多点测量',
+        multiReason: 'khaen 目标不含多点：需要多点测量后端。',
+        art: 'ART（主动房间处理）',
+        artReason: 'ART 需要多点测量与支持组，khaen 当前没有对应后端。'
+      },
+      measure: {
+        desc: 'P1 仅离线：上传 baseline 与 applied 两段 WAV；实时测量需要采集服务（后续版本）。',
+        baseline: 'baseline（校准前）',
+        applied: 'applied（校准后）',
+        hint: '48 kHz / 16–24 bit / 单声道或双声道；≤ 64 MiB。',
+        select: '选择 WAV',
+        format: '格式',
+        duration: '时长',
+        formatValue: '{rate} / {bits} bit / {channels} ch',
+        savedBaseline: '已保存 baseline',
+        savedApplied: '已保存 applied',
+        realtime: '实时测量（麦克风采集 / 自动扫频）',
+        realtimeReason: 'daemon 没有采集服务，实时测量在本版本不可用（需要 T42 延伸的实时测量后端，P2）。',
+        realtimeTask: 'T42 / P2',
+        parseError: '文件不是可用的 WAV：{message}',
+        formatError: '格式不符合校准要求：{message}',
+        pairError: '两段录音结构不一致：{message}',
+        wavErrors: {
+          file_too_large: '文件超过 64 MiB 上限',
+          file_too_small: '文件太小，不是有效 WAV',
+          not_riff: '不是 RIFF 容器（缺 RIFF 头）',
+          not_wave: '不是 WAVE 格式',
+          missing_fmt: '缺少 fmt chunk',
+          missing_data: '缺少 data chunk',
+          unsupported_codec: '不支持的编码（只接受 PCM）',
+          bad_sample_rate: '采样率必须是 48 kHz',
+          bad_bits: '位深必须是 16 或 24 bit',
+          bad_channels: '声道数必须是 1 或 2',
+          bad_block_align: 'blockAlign 与声道/位深不一致',
+          bad_data_length: 'data chunk 长度非法或被截断',
+          format_mismatch: '两段录音的采样率/声道/位深不一致',
+          length_mismatch: '两段录音长度不一致（±1 帧以内才接受）'
+        }
+      },
+      analysis: {
+        desc: '创建单点离线 job；进度与结果全部来自 daemon 的真实 job 状态（无假进度条）。',
+        planSha: '当前方案 sha256（来自 /api/status）',
+        planMissing: '当前没有已应用的方案（status.plan.sha256 为 null）',
+        uploadsMissing: '需要先在第 5 步上传 baseline / applied 两段 WAV',
+        settingsMissing: '需要先在第 3 步保存校准设置',
+        start: '开始分析',
+        starting: '正在创建 job…',
+        retry: '用相同输入重试',
+        cancel: '取消 job',
+        jobId: 'job id',
+        noJob: '尚未创建分析 job。',
+        failedTitle: '分析失败',
+        cancelledTitle: '分析已取消',
+        cancelledDesc: '可重试或返回上一步。',
+        errorCode: '稳定错误码',
+        cancelConfirm: {
+          title: '取消分析 job？',
+          message: '将取消进行中的 job {id}；已完成的步骤保留。',
+        }
+      },
+      design: {
+        desc: '展示 job 产出的方案摘要、设计残留（FULL / PARTIAL / NONE）与准入结果。',
+        noResult: 'job 尚未成功，没有设计产物。',
+        nextBlocked: '没有可应用的产物：下一步被门禁阻止。'
+      },
+      review: {
+        desc: '应用前展示 before / after 与快照；应用与回滚都需要二次确认，回执来自 daemon 的真实 commit 结果。'
+      }
+    },
     pageTitle: '校准',
     subtitle:
       '校准 job 列表与 8 步向导（P1 离线闭环）。数据来自 daemon 的校准 REST（/api/calibration/*）；后端未接入时如实显示「未接入」，不展示假数据。',
@@ -418,8 +591,6 @@ const messages = {
       newWizard: '新建校准向导',
       engine: '引擎真实性',
       engineUnknown: '未上报',
-      unavailableTitle: '校准后端未接入',
-      unavailableDesc: 'daemon 的校准 job 后端尚未接入（{task}）：{reason}。页面不展示假 job/假结果。',
       summary: {
         lastJob: '最近 job',
         wizard: '向导状态',
@@ -468,17 +639,11 @@ const messages = {
       finished: '结束时间',
       duration: '耗时',
       status: '状态',
-      verdict: '结论',
       engine: '引擎',
       applyState: '应用状态',
-      appliedVersion: '已应用版本',
       steps: '状态时间线',
       artifacts: '产物',
       noArtifacts: '该 job 没有产物（失败/取消或后端未产出）。',
-      artifactName: '名称',
-      artifactSha: 'sha256',
-      artifactBytes: '大小',
-      download: '下载',
       inputs: '输入参数',
       inputsPlanSha: 'plan sha256',
       inputsBaseline: 'baseline 上传',
@@ -487,7 +652,6 @@ const messages = {
       inputsTolerance: '容差（dB）',
       inputsMinBands: '最少频段数',
       error: '失败原因',
-      errorCode: '稳定错误码',
       resultTitle: '分析结果',
       applyTitle: '应用 / 回滚',
       loadError: '无法获取 job 详情',
@@ -524,217 +688,6 @@ const messages = {
       canSkip: '该步能力未接入：不产生数据，可继续（灰态步骤）。',
       reason: '原因：{reason}',
       failClosed: 'daemon 未上报本步门禁，按不可继续处理（fail closed）。'
-    },
-    wizard: {
-      pageTitle: '校准向导',
-      subtitle:
-        'Dirac 式 8 步离线校准闭环（P1）。每步门禁由 daemon 的 /api/calibration/wizard/state 判定；缺失能力（M4 声道、P3 多点/ART、T42 实时测量）灰态明示，不伪造进度与结果。',
-      stepNav: '向导步骤',
-      stepShort: '第 {step} 步',
-      stepOf: '第 {current} / {total} 步',
-      backToList: '返回校准列表',
-      previous: '上一步',
-      next: '下一步',
-      nextSkip: '下一步（此步未接入）',
-      finish: '完成',
-      cancelWizard: '取消向导',
-      confirmCancel: {
-        title: '退出向导？',
-        message: '向导配置、测量上传与已完成的步骤会保留在后端；可以随时回来继续。',
-        ok: '退出向导'
-      },
-      unavailable: {
-        title: '校准后端未接入',
-        desc: 'daemon 的校准向导后端尚未接入（{task}）：无法读取配置/门禁。页面不展示假数据。'
-      },
-      error: {
-        title: '无法读取向导状态'
-      },
-      actionError: '操作失败：{message}',
-      toast: {
-        saved: '校准设置已保存',
-        uploaded: '上传完成',
-        jobCreated: '分析 job 已创建',
-        jobCancelled: 'job 已取消'
-      },
-      device: {
-        title: '设备检查',
-        desc: '数据来自 /api/status（设备 / 格式 / 控制通道），本步门禁由 daemon 判定。',
-        device: '设备',
-        deviceState: '设备状态',
-        deviceCard: 'ALSA 卡',
-        deviceRate: '设备速率',
-        rateAsserted: '速率已确认',
-        hostLink: '控制通道',
-        hostLinkAge: '状态新鲜度',
-        runState: '运行状态',
-        channels: '输出声道数',
-        encoding: '编码',
-        noStatus: '尚未获取 /api/status 数据（后端未接入或请求失败），本步不显示任何数值。',
-        statusError: '无法获取 /api/status：{message}'
-      },
-      channels: {
-        title: '布局与声道',
-        desc: '只读展示 /api/status 的格式与声道事实；/api/channels 属 M4，尚未实现。',
-        notAvailable: '/api/channels 未实现（M4）：无法读取/校验声道映射，也不提供编辑。',
-        noMapping: '不展示也不伪造声道映射：当前能力缺口为 M4。',
-        readOnly: '本步只读，不产生任何配置。',
-        planRate: '方案速率',
-        deviceRate: '设备速率',
-        channels: '输出声道数',
-        encoding: '编码',
-        aes67Channels: 'AES67 接收声道',
-        aes67Map: 'AES67 声道映射',
-        aes67Group: 'AES67 组播地址',
-        aes67Port: 'AES67 端口',
-        task: '缺失能力'
-      },
-      mic: {
-        title: '麦克风与校准设置',
-        desc: '上传麦克风校准文件、选择朝向与目标曲线、设置单点参数；保存后由 daemon 判定本步门禁。',
-        file: '麦克风校准文件',
-        fileHint: 'UMIK-1 校准 txt（≤ 1 MiB）；上传后显示服务端计算的 SHA-256。',
-        fileSelect: '选择校准文件',
-        fileTooLarge: '校准文件超过 1 MiB 上限',
-        savedSha: '已保存 SHA-256',
-        filename: '文件名',
-        orientation: '麦克风朝向',
-        orientation0: '0°（指向声源）',
-        orientation90: '90°（指向天花板）',
-        targetMode: '目标曲线',
-        targetFlat: 'flat（平坦）',
-        targetTilt10: 'tilt10（−10 dB 于 20 kHz）',
-        centers: '中心频率（Hz，逗号分隔）',
-        centersHint: '1/3-oct 中心频率，最多 64 个；默认 25 Hz–20 kHz（30 个）。',
-        tolerance: '容差（dB）',
-        minBands: '最少频段数',
-        save: '保存设置',
-        saving: '正在保存…',
-        savedAt: '已保存（{time}）',
-        notSaved: '尚未保存',
-        validation: {
-          micRequired: '请先上传麦克风校准文件',
-          orientationRequired: '请选择麦克风朝向',
-          targetRequired: '请选择目标曲线',
-          centersRange: '中心频率必须是 1–24000 Hz 的数字（逗号/空格分隔）',
-          centersTooMany: '最多 64 个中心频率',
-          toleranceRange: '容差必须在 0.1–24 dB 之间',
-          minBandsRange: '最少频段数必须是 1–64 的整数'
-        }
-      },
-      positions: {
-        title: '测点',
-        desc: 'khaen P1 只支持单点（皇帝位）；多点与 ART 不在本版本目标内。',
-        single: '单点（皇帝位）',
-        singleDesc: '固定主听音位；本版本唯一支持的测点方案。',
-        selected: '已确认',
-        notSelected: '待确认（需先保存第 3 步设置）',
-        multi: '多点测量',
-        multiReason: 'khaen 目标不含多点：需要多点测量后端。',
-        art: 'ART（主动房间处理）',
-        artReason: 'ART 需要多点测量与支持组，khaen 当前没有对应后端。'
-      },
-      measure: {
-        title: '测量',
-        desc: 'P1 仅离线：上传 baseline 与 applied 两段 WAV；实时测量需要采集服务（后续版本）。',
-        baseline: 'baseline（校准前）',
-        applied: 'applied（校准后）',
-        hint: '48 kHz / 16–24 bit / 单声道或双声道；≤ 64 MiB。',
-        select: '选择 WAV',
-        format: '格式',
-        duration: '时长',
-        formatValue: '{rate} / {bits} bit / {channels} ch',
-        savedBaseline: '已保存 baseline',
-        savedApplied: '已保存 applied',
-        realtime: '实时测量（麦克风采集 / 自动扫频）',
-        realtimeReason: 'daemon 没有采集服务，实时测量在本版本不可用（需要 T42 延伸的实时测量后端，P2）。',
-        realtimeTask: 'T42 / P2',
-        parseError: '文件不是可用的 WAV：{message}',
-        formatError: '格式不符合校准要求：{message}',
-        pairError: '两段录音结构不一致：{message}',
-        wavErrors: {
-          file_too_large: '文件超过 64 MiB 上限',
-          file_too_small: '文件太小，不是有效 WAV',
-          not_riff: '不是 RIFF 容器（缺 RIFF 头）',
-          not_wave: '不是 WAVE 格式',
-          missing_fmt: '缺少 fmt chunk',
-          missing_data: '缺少 data chunk',
-          unsupported_codec: '不支持的编码（只接受 PCM）',
-          bad_sample_rate: '采样率必须是 48 kHz',
-          bad_bits: '位深必须是 16 或 24 bit',
-          bad_channels: '声道数必须是 1 或 2',
-          bad_block_align: 'blockAlign 与声道/位深不一致',
-          bad_data_length: 'data chunk 长度非法或被截断',
-          format_mismatch: '两段录音的采样率/声道/位深不一致',
-          length_mismatch: '两段录音长度不一致（±1 帧以内才接受）'
-        }
-      },
-      analysis: {
-        title: '分析',
-        desc: '创建单点离线 job；进度与结果全部来自 daemon 的真实 job 状态（无假进度条）。',
-        planSha: '当前方案 sha256（来自 /api/status）',
-        planMissing: '当前没有已应用的方案（status.plan.sha256 为 null）',
-        uploadsMissing: '需要先在第 5 步上传 baseline / applied 两段 WAV',
-        settingsMissing: '需要先在第 3 步保存校准设置',
-        start: '开始分析',
-        starting: '正在创建 job…',
-        retry: '用相同输入重试',
-        cancel: '取消 job',
-        jobId: 'job id',
-        noJob: '尚未创建分析 job。',
-        failedTitle: '分析失败',
-        cancelledTitle: '分析已取消',
-        cancelledDesc: '可重试或返回上一步。',
-        errorCode: '稳定错误码',
-        cancelConfirm: {
-          title: '取消分析 job？',
-          message: '将取消进行中的 job {id}；已完成的步骤保留。',
-          ok: '取消 job'
-        }
-      },
-      design: {
-        title: '设计',
-        desc: '展示 job 产出的方案摘要、设计残留（FULL / PARTIAL / NONE）与准入结果。',
-        noResult: 'job 尚未成功，没有设计产物。',
-        nextBlocked: '没有可应用的产物：下一步被门禁阻止。'
-      },
-      review: {
-        desc: '应用前展示 before / after 与快照；应用与回滚都需要二次确认，回执来自 daemon 的真实 commit 结果。'
-      }
-    },
-    review: {
-      applyState: '应用状态',
-      appliedVersion: '已应用版本',
-      before: '应用前（当前运行方案）',
-      after: '应用后（job 产物）',
-      beforeHint: '应用前快照：失败时回滚到该版本。',
-      snapshot: '应用前快照',
-      version: '版本',
-      graphId: 'graph_id',
-      sha256: 'sha256',
-      apply: '应用校准方案',
-      rollback: '回滚到应用前版本',
-      noJob: '没有可应用的 job。',
-      exportConfig: '导出配置 JSON',
-      applyReceipt: '最近应用回执',
-      rollbackReceipt: '最近回滚回执',
-      appliedAt: '应用时间',
-      restoredVersion: '恢复版本',
-      ack: '回执类型',
-      ackActual: 'actual（真实生效）',
-      ackSynthetic: 'synthetic（模拟提交）',
-      confirmApply: {
-        title: '应用校准方案？',
-        message: '将把 job 产出的方案 prepare → commit 到运行方案；应用前会记录快照（当前版本 {version}），失败可回滚。',
-        ok: '确认应用'
-      },
-      confirmRollback: {
-        title: '回滚到应用前版本？',
-        message: '将把运行方案恢复到应用前版本 {version}（graph_id {graphId}）。',
-        ok: '确认回滚'
-      },
-      appliedToast: '已应用校准方案',
-      rolledBackToast: '已回滚到应用前版本'
     },
     result: {
       syntheticHint: '当前 job 的引擎为 {engine}：以下数值标为「示意」，不是 khaen 实测。',
@@ -1052,27 +1005,6 @@ const messages = {
       taskValue: 'T70f-a / T70f-b / T53',
       replacedBy: '替代方案：用右侧「逐 lane 增益」逐个设置并提交；当前实际增益不可读（无读接口）。'
     },
-    mode: {
-      title: '工作模式',
-      desc: 'POST /api/surface （surface: "mode"） → POST /api/commit，两阶段；off = 整链静音，aes67 = 使能输出（当前唯一已实现输入源）。',
-      option: {
-        off: 'off（整链静音）',
-        aes67: 'aes67（AES67 输入）',
-        analog: 'analog（模拟/本地输入）'
-      },
-      analogReason: '控制面只接受 off/on/aes67；analog（模拟/本地输入源）没有实现，提交会被拒绝。',
-      analogTask: 'NOT_AVAILABLE · 任务 T70f/T70g',
-      currentUnknown: '未接入：/api/status 不包含 mode；只能显示最近一次提交回执。',
-      field: {
-        appliedReceipt: '最近提交回执模式',
-        statusSource: '模式状态来源'
-      },
-      sourceReceiptOnly: '控制面回执（不是 /api/status 回读）',
-      prepared: '模式草稿已准备',
-      selectHint: '请选择目标模式',
-      draftReady: '草稿已准备：可在下方「两阶段回执」提交或丢弃',
-      note: '模式属于控制面（输出使能）；真实输入源切换（toslink/dante/analog）属于 rt-host/设备监督层，尚未实现。'
-    },
     gains: {
       title: '逐 lane 增益草稿',
       desc: 'POST /api/surface （surface: "volume", data: gains_db） → POST /api/commit，两阶段。当前实际增益没有读接口：草稿从 0 dB 中性值开始，勾选要提交的 lane。',
@@ -1172,8 +1104,6 @@ const messages = {
   },
   channels: {
     pageTitle: '方案与声道',
-    subtitle:
-      '当前方案（/api/status + /api/plan/history）、输出通道与 MOTU 物理映射、AES67 输入（/api/channels），以及方案上传/历史/回滚（上传 → sha256 校验 → inspect 预览 → prepare → commit）。后端 M4（T55）与热重配（T52）未完成时如实显示「未接入」+ 原因，不伪造映射/历史/成功。',
     actions: {
       refresh: '刷新'
     },
@@ -1193,11 +1123,6 @@ const messages = {
       historyUnavailable: '方案历史不可用：{message}',
       inspectUnavailable: '方案预览（/api/plan/inspect）不可用：只显示上传摘要，不伪造段列表/延迟'
     },
-    unavailable: {
-      title: '/api/channels 未接入（M4 / T55）',
-      desc: 'daemon 尚未实现声道布局 API（任务 {task}）：{message}。页面不展示假映射/假通道数。',
-      reason: 'daemon 未上报（/api/channels 未接入，T55）'
-    },
     plan: {
       title: '当前方案',
       desc: '来自 /api/status 的 plan 元数据与 /api/plan/history 的当前版本；缺失字段显示「未接入」+ 原因。',
@@ -1211,7 +1136,6 @@ const messages = {
       },
       noPlan: '尚无已应用的方案',
       shaUnavailable: '/api/status 不包含 sha256（无数据源）',
-      historyUnavailableHint: '方案历史不可用：当前版本/回滚点无法读取（T55）。',
       prepared: '方案草稿已准备',
       committed: '方案已提交（回执见下方两阶段卡）'
     },
@@ -1246,7 +1170,6 @@ const messages = {
         sdp: 'SDP 描述符（sdp）',
         manual: '手工配置（manual）'
       },
-      note: '输入布局由 rt-host 的 AES67 接收端决定（T70f-d2 起支持 SDP 驱动）；本页只读展示，不在这里改输入源。'
     },
     inspect: {
       title: '方案预览（/api/plan/inspect）',
@@ -1293,7 +1216,6 @@ const messages = {
       rollback: '回滚到此版本',
       empty: '尚无已生效的历史版本。',
       noSource: '历史接口没有可用数据源（daemon 未上报当前版本/可用版本）：不编造历史。',
-      unavailable: '方案历史未接入（{task}）：{message}。页面不编造历史。',
       rollbackNote: '回滚 = 版本号递增的新提交：历史保留，回滚后仍需在「两阶段」卡提交（commit）才生效。',
       rollbackPrepared: '已准备回滚到 v{version} 的草稿：提交后生效',
       table: {
@@ -1307,39 +1229,6 @@ const messages = {
         title: '回滚到旧版本？',
         message: '将准备回滚到 v{version} 的草稿（版本号递增，历史不改写）；仍需提交（commit）才生效。',
         ok: '准备回滚'
-      }
-    },
-    hotswap: {
-      title: '声道热重配（M3b / T52 未完成）',
-      desc: '改输出通道数/输入通道数走 prepare → commit 热重配：rt-host 进程不退出，静音 → 关设备 → 应用 → 重开 → 校验 → 恢复，失败自动回滚。',
-      warningTitle: '会中断出声',
-      warningDesc: '提交后会静音并关闭/重开设备（预计音频中断约 1–2 秒，以实测为准）；失败时 rt-host 自动回滚到旧配置。',
-      field: {
-        outputChannels: '输出通道数',
-        inputChannels: '输入通道数',
-        audioGap: '预计音频中断（估算）'
-      },
-      previewChange: '{from} → {to}',
-      audioGapValue: '约 {ms} ms',
-      prepare: '准备（prepare）',
-      commit: '提交（热重配）',
-      prepared: '声道草稿已准备（未提交）',
-      committed: '热重配已提交',
-      committedAt: '最近提交回执时间：{time}',
-      previewTitle: '准备预览（old → new）',
-      notAvailable: '热重配提交由后端任务 {task} 实现；未完成前 commit 返回 501，页面如实显示「未接入」，不假装生效。',
-      notAvailableReason: 'M3b 热重配状态机（T52）与 daemon M4 接口（T55）未完成：commit 会返回 501 host_link_unsupported。',
-      confirmTitle: '提交声道热重配？',
-      confirmMessage: '将静音并关闭/重开设备，音频会中断约 1–2 秒；失败时自动回滚到旧配置。确认提交？',
-      confirmOk: '确认提交',
-      validation: {
-        output_range: '输出通道数必须是 1–32 的整数',
-        dac_map_length: 'DAC 映射长度必须等于输出通道数',
-        dac_map_value: 'DAC 映射必须是 0–31 且不重复',
-        input_range: '输入通道数必须是 1–8 的整数',
-        input_map_length: '输入映射长度必须等于输入通道数',
-        input_map_value: '输入映射必须是 0–63 且不重复',
-        empty: '请至少修改输出/输入通道数'
       }
     },
     draft: {
@@ -1364,8 +1253,9 @@ const messages = {
   },
   routing: {
     pageTitle: '路由矩阵',
-    subtitle:
-      '输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断：组合 /api/channels（lane → DAC 映射、输出声道、plan 段）、/api/status（AES67/格式/方案/控制通道）与 /api/plan/history。缺失字段显示「未接入」+ 原因；路由编辑/重排需 PlanGraph 编辑器（T59），本页不提供写入口、不假成功。',
+    lanes: {
+      unknownLabel: 'OUT {channel}'
+    },
     actions: {
       refresh: '刷新'
     },
@@ -1393,11 +1283,6 @@ const messages = {
       noPlan: '尚未读到已应用的方案：矩阵域/输出路由没有事实来源（本页不猜直通映射）。'
     },
     statusUnavailable: '/api/status 未接入：路由页拿不到输入/格式/控制通道事实；请检查会话与 daemon。',
-    unavailable: {
-      title: '/api/channels 未接入（M4 / T55）',
-      desc: 'daemon 尚未提供声道/路由映射 API（任务 {task}）：{message}。本页不展示假映射。',
-      reason: 'daemon 未上报（/api/channels 未接入，T55）'
-    },
     chain: {
       title: '当前路由链（输入 → 矩阵域 → DAC 输出）',
       desc: '只读诊断：AES67 输入（/api/status.format.aes67）→ 22 lane 矩阵域（format.channels）→ DAC 物理输出（/api/channels.output + mapping）。没有数据源的字段显示「未接入」+ 原因，不假设 lane i → DAC i 的直通映射。',
@@ -1425,23 +1310,6 @@ const messages = {
       },
       note: '矩阵域 lane 数来自数据面格式（/api/status.format.channels）；输出声道/DAC 映射来自 /api/channels（rt-host 实际配置 + 当前方案 routing 段）。两者都缺失时本页不画「直通」。'
     },
-    lanes: {
-      title: 'lane → DAC 映射',
-      desc: '与 /channels 页同一口径（lane / 0-based DAC / 1-based MOTU 物理输出）；只读展示，编辑入口在 /channels（M4）。',
-      openChannels: '去 /channels 查看/编辑映射',
-      routedLanes: '已路由 lane',
-      routes: '路由条目',
-      empty: '/api/channels 未上报 lane → DAC 映射（rt-host 状态不可用或方案 routing 段未知）：本页不编造映射。',
-      unknownLabel: 'OUT {channel}',
-      editHint:
-        '映射编辑（输出通道数 / DAC 映射）在「方案与声道」页（M4/T54 两阶段 prepare → commit）；daemon 的 /api/channels commit 目前仍返回 501 host_link_unsupported（热重配入口未接通），页面如实显示「未接入」，不在此页重复写入口。',
-      table: {
-        lane: 'lane',
-        dac: 'DAC（0-based）',
-        physical: 'MOTU 输出',
-        label: '物理标签'
-      }
-    },
     plan: {
       title: '计划内 routing 段摘要',
       desc: '组合 /api/status.plan 与 /api/plan/history；routing 段明细来自 /api/channels（mapping / dac_channels）。',
@@ -1452,9 +1320,6 @@ const messages = {
         graphId: 'graph_id',
         appliedAt: '应用时间',
         source: '方案来源',
-        routingKnown: 'routing 段已知',
-        dacChannels: 'DAC 声道数',
-        routes: '路由条目数',
         historyCurrent: '历史当前版本'
       },
       versionReason: '运行中方案版本不可读（/api/status 与 /api/plan/history 都没有值）',
@@ -1462,30 +1327,6 @@ const messages = {
       historyReason: '方案历史尚未读取或不可用',
       segmentsReason:
         '当前生效方案的区段清单/区段数没有任何只读接口上报：daemon 只在 POST /api/plan/upload 的回执里报告 segments/segment_count（T55），/api/status 与 /api/plan/history 都不含它。本页不把路由条目数冒充区段数；上传/查看入口在 /channels。',
-      segmentsNote:
-        '区段数（content/crossover/matrix/protection/routing 的条数）目前只能在 /channels 的方案上传回执里看到；本页如实显示「未接入」，不猜。'
-    },
-    edit: {
-      title: '路由编辑与重排（NOT_AVAILABLE）',
-      desc: '矩阵交叉点编辑 / lane 重排 / 路由应用：本里程碑不提供写入口，也不做看起来成功的操作。',
-      notAvailableTitle: '路由写操作未接入（{task}）',
-      notAvailableDesc:
-        '需要 PlanGraph 编辑器/designer（任务 {task}）：在图上安全编辑矩阵交叉点、lane 重排并把补丁编译成 Plan 区段；本页只有只读诊断，不暴露低级补丁接口，避免假成功。',
-      reason: 'PlanGraph 编辑器/designer（T59）未实现；本页不提供路由写入口。',
-      action: {
-        reorder: '重排 lane',
-        crosspoint: '编辑矩阵交叉点',
-        apply: '应用路由',
-        channels: '打开 /channels（只读映射）'
-      },
-      disabledHint: '未接入（T59）：按钮禁用，不做假成功',
-      requirement: {
-        editor: '编辑器/designer（{task}）：矩阵交叉点与 lane 重排的可视化编辑 + Plan 区段编译。',
-        patch:
-          '控制面已有一个低层 POST /api/surface（surface=routing）的 Plan 片段补丁（route lane→dac 列表）；它不是图形编辑器，也不校验重排后的完整路由语义，本页因此不暴露它。',
-        commit:
-          '提交生效依赖块边界换图/热重配（M3b/T52）：路由变更真正切换前，控制面回执不等于设备已按新路由出声。'
-      }
     },
     notWired: {
       title: '后端上报的未接入能力',

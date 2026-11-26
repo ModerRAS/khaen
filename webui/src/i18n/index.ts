@@ -9,6 +9,28 @@
 import { createI18n } from 'vue-i18n'
 import zhCN from './zh-CN'
 import enUS from './en-US'
+import zhSpeakerRole from './messages/speakerRole.zh-CN'
+import enSpeakerRole from './messages/speakerRole.en-US'
+import zhSpeakerLayout from './messages/speakerLayout.zh-CN'
+import enSpeakerLayout from './messages/speakerLayout.en-US'
+import zhSpeakerTest from './messages/speakerTest.zh-CN'
+import enSpeakerTest from './messages/speakerTest.en-US'
+import zhDraftReview from './messages/draftReview.zh-CN'
+import enDraftReview from './messages/draftReview.en-US'
+import zhMeta from './messages/meta.zh-CN'
+import enMeta from './messages/meta.en-US'
+import zhMotu from './messages/motu.zh-CN'
+import enMotu from './messages/motu.en-US'
+import zhMode from './messages/mode.zh-CN'
+import enMode from './messages/mode.en-US'
+import zhLayout from './messages/layout.zh-CN'
+import enLayout from './messages/layout.en-US'
+import zhRoutingEdit from './messages/routingEdit.zh-CN'
+import enRoutingEdit from './messages/routingEdit.en-US'
+import zhCalibrationEdit from './messages/calibrationEdit.zh-CN'
+import enCalibrationEdit from './messages/calibrationEdit.en-US'
+import zhChannelsEdit from './messages/channelsEdit.zh-CN'
+import enChannelsEdit from './messages/channelsEdit.en-US'
 
 export const LOCALES = ['zh-CN', 'en-US'] as const
 export type Locale = (typeof LOCALES)[number]
@@ -59,8 +81,8 @@ export const i18n = createI18n({
   locale: detectLocale(),
   fallbackLocale: FALLBACK_LOCALE,
   messages: {
-    'zh-CN': zhCN,
-    'en-US': enUS
+    'zh-CN': { ...zhCN, ...zhDraftReview, ...zhMeta, ...zhMotu, ...zhMode, ...zhLayout, ...zhRoutingEdit, ...zhCalibrationEdit, ...zhChannelsEdit, ...zhSpeakerRole, ...zhSpeakerLayout, ...zhSpeakerTest },
+    'en-US': { ...enUS, ...enDraftReview, ...enMeta, ...enMotu, ...enMode, ...enLayout, ...enRoutingEdit, ...enCalibrationEdit, ...enChannelsEdit, ...enSpeakerRole, ...enSpeakerLayout, ...enSpeakerTest }
   },
   missingWarn: true,
   fallbackWarn: true,

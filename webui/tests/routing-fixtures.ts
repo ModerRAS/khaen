@@ -133,3 +133,63 @@ export function buildMockHistoryDocument() {
     reasons: {}
   }
 }
+
+/** routing 两阶段草稿的稳定 token（契约测试断言用）。 */
+export const ROUTING_PREPARED_TOKEN = 'tok-routing-9f3a'
+/** routing surface 的 prepare 计划版本（与 ROUTING_GRAPH_ID 对应的假想下一版）。 */
+export const ROUTING_PLANNED_VERSION = 9
+
+/**
+ * wiring: 给 /api/channels 文档加 §12.2 的【加法】字段 speaker_roles
+ * （后端尚未实现；缺失/null 是合法形态，页面不显示角色、不编造）。
+ */
+export function withSpeakerRoles(document) {
+  const clone = JSON.parse(JSON.stringify(document))
+  clone.speaker_roles = [
+    { dac: 0, role: 'L', enabled: true },
+    { dac: 1, role: 'R', enabled: true },
+    { dac: 2, role: 'C', enabled: false },
+    { dac: 3, role: 'LFE', enabled: true }
+  ]
+  return clone
+}
+
+/**
+ * POST /api/surface {surface:"routing"} 的 prepare 回执（真实控制面形态：ok/surface/engine_token/
+ * planned_version/graph_id/admission；changed/diff/current/target 是**可选**字段，缺省 = 服务端未上报）。
+ */
+export function buildRoutingPrepareAck(overrides = {}) {
+  return {
+    ok: true,
+    surface: 'routing',
+    engine_token: ROUTING_PREPARED_TOKEN,
+    planned_version: ROUTING_PLANNED_VERSION,
+    graph_id: ROUTING_GRAPH_ID,
+    admission: { accepted: true, budget: { matrix_ops: 22 } },
+    blockers: null,
+    ...overrides
+  }
+}
+
+/** POST /api/commit {engine_token} 的成功回执。 */
+export function buildRoutingCommitAck(overrides = {}) {
+  return {
+    ok: true,
+    version: ROUTING_PLANNED_VERSION,
+    graph_id: ROUTING_GRAPH_ID,
+    applied_block: 1024,
+    changed: true,
+    all_ack: true,
+    ...overrides
+  }
+}
+
+/** POST /api/abort {engine_token} 的成功回执。 */
+export function buildRoutingAbortAck(overrides = {}) {
+  return {
+    ok: true,
+    aborted: true,
+    aborted_surface: 'routing',
+    ...overrides
+  }
+}

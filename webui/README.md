@@ -4,14 +4,50 @@ khaen DSP 引擎的 Web 控制台：Vue 3 + TypeScript + Element Plus + Vite + v
 由 khaen-daemon 同源托管（编译期 `include_bytes!` 内嵌 `webui/dist`），运行期不需要 Node / Python / 反代。
 
 > 规划：`HANDOFF/20261126-khaen-webui-plan/PLAN.md`（仓库外）§4 API、§5 路由、§6.1 登录、§6.2 概览、§11 UI 布局、§12 主题与 i18n。
-> 当前里程碑：**T60（前端与 daemon 真实契约对齐）**；M1–M6 已落地（M3b 路由矩阵只读页 T58 已合并）。
-> 概览页（M2）接 `GET /api/status`；校准页/向导（M5）接 `/api/calibration/*`；系统信息页/日志页接 `/api/system/*`；
-> 音量/格式/工作模式页接 `/api/mute`、`/api/surface`、`/api/format`（prepare → commit 两阶段，T70f-b 代理到 rt-host）；
-> 方案与声道页接 `/api/channels`、`/api/plan/*`、`/api/prepare|commit|abort|rollback`（M4 后端 T55 已落地；T60 按 daemon 真实契约对齐读路径与上传/预览/准备流程）；
-> 路由矩阵页只读组合 `/api/status` + `/api/channels` + `/api/plan/history`（编辑/重排需 PlanGraph 编辑器 T59，页面 NOT_AVAILABLE）。
-> 真实 Rust 后端联调与真机热切换由 lead 在合并后执行（本任务 NOT_RUN，前端用契约 mock + 单测 + 浏览器断言验证）。
+> 当前里程碑：**T62（前端工程补齐，2026-11-26）**——五个语义界面真实两阶段可编辑、MOTU 控制面、校准 UI 按 §7 实际形状接线、
+> 声道热重配两阶段、新增「工作模式 / 内容布局 / 音频映射（Speaker Layout）」页、i18n 分片机制与过期文案清理、契约测试。
+> API 合同唯一来源：`docs/API.md`（v1.2，lead 维护，含 §11 裁决记录与 §12 音频 channel profile）；设计：`docs/SPEAKER-MAPPING.md`。
+> 真实 Rust 后端联调、真机出声/热切换、MOTU 实机写入由 lead 在合并后执行（本任务 NOT_RUN 清单见文末；前端用契约 mock + 单测 + vite build 验证）。
 
-## 当前状态
+## T62：前端工程补齐（当前实现基线，2026-11-26）
+
+> M1–M6 各节保留为历史记录（记录当时的实现细节）；T62 之后的页面/契约以本节与 `docs/API.md` 为准。
+
+### 页面（13 个路由）
+
+| 路由 | 页面 | 数据面 |
+|---|---|---|
+| `/login` | 登录/初始化 | `/api/auth/*` |
+| `/` | 概览 | `GET /api/status`（5s 轮询） |
+| `/volume` | 音量/静音 + MOTU | `POST /api/mute`；`GET /api/motu`+`PUT /api/motu/volume`（prepare→commit，无 abort：本地取消+TTL）；`/api/surface volume` 两阶段 |
+| `/mode` | 工作模式（新） | `/api/surface mode` 两阶段（off/aes67；on=aes67 别名；analog 不提供） |
+| `/channels` | 方案与声道 | `GET/PUT /api/channels`（khaen-channels/v1 全形状 + 两阶段热重配；mapping 是方案镜像，mapping=null 显示“当前值未知”）、`/api/plan/*`、`/api/prepare|commit|abort|rollback` |
+| `/routing` | 路由矩阵（升级为可编辑） | `GET /api/channels.mapping` 当前值（标注来源/降级）；`/api/surface routing` 两阶段 + `/api/commit|abort` |
+| `/layout` | 内容布局（新） | `/api/surface layout` 两阶段（in_channels/out_lanes/folds）；内容布局是方案补丁，当前值不可读时如实标注 |
+| `/speakers` | 音频映射 / Speaker Layout（新） | `GET/PUT /api/audio-profile` 两阶段、`POST /api/audio-profile/plan`（→inspect→prepare→commit）、`GET /api/device/inputs`、`POST /api/speaker-test(+stop)`（audible+confirm，默认 -30 dBFS/1 s，可立即停止） |
+| `/format` | 音频格式 | `/api/format` 两阶段（changed/format/device_restart_required）、`/api/device/retry` |
+| `/calibration` | 校准列表 | §7 实际形状：jobs `{schema,available,reason,engine,...}`；`/api/calibration/jobs/{id}/apply|rollback`（单发 `{}` + 兼容 staged）；artifacts 带认证无损下载（`getRawBytes` → Blob） |
+| `/calibration/wizard` | 8 步向导 | `/api/calibration/wizard`、`.../wizard/state`、`.../wizard/apply` |
+| `/calibration/jobs/:id` | job 详情 | `GET /api/calibration/jobs/{id}`（canonical `id/status`）、cancel/apply/rollback |
+| `/system`、`/system/logs` | 系统信息/日志 | `/api/system/*` |
+
+### 共享基础设施
+
+- **i18n 分片**：基础 `src/i18n/zh-CN.ts`/`en-US.ts` + `src/i18n/messages/<area>.<locale>.ts`（draftReview/meta/motu/mode/layout/routingEdit/calibrationEdit/channelsEdit/speakerRole/speakerLayout/speakerTest），
+  `i18n/index.ts` 合并；`scripts/i18n-check.mjs` 校验跨文件键集对等、无重复键、源码引用存在、注释行/E2E 文案不误判；
+- **能力快照**：`GET /api/meta`（`src/api/meta.ts` + `src/stores/meta.ts`，AppShell 启动预热）；`surfaces/not_wired` 三态（wired/not_wired/unknown）驱动入口，unknown 降级但标注；
+- **两阶段标准件**：`src/components/control/DraftReview.vue`（prepare 回执：changed/diff/current/target/graph/admission/blockers；缺省显示“服务端未上报”）；
+- **错误语义**：`ApiClient` 同时兼容 M1 `{error:{code,message,details}}` 与 host_link 转发 `{ok:false,error:"<code>",message}`；401 统一跳登录；501/503 显示“未实现/未接入 + reason”不假成功；
+- **二进制下载**：`ApiClient.getRawBytes`（无损 ArrayBuffer，用于校准产物 plan.bin 等）；
+- **诚实边界**：当前值不可读（volume 逐 lane 增益、layout 内容、mode 当前值）一律显示“不可读（无数据源）”；routing 用 `/api/channels.mapping` 并标注来源，mapping=null 显示未知；未使用 DAC 不做 CueMix 写入。
+
+### 契约测试
+
+- `tests/api-contract.test.ts`：解析 `docs/API.md` 的端点表/列表，断言 webui 实际调用的每个 path/method 都在文档中；
+- `tests/navigation.test.ts`：侧栏项 ↔ 路由注册 ↔ 双语言标题 ↔ requiresAuth 一致性；
+- 各区域 mock 契约测试：断言 POST/PUT 的 path/method/body 精确形状、prepare/commit/abort、401/501/503、失败回执（token 单次消费、commit_supported=false 不提交、MOTU 无 abort 等）。
+
+## 当前状态（历史：M1–M6）
 
 ### M1：认证 / 会话 / 路由守卫（已合并）
 
@@ -540,183 +576,12 @@ tests/errors.test.ts             后端错误码 -> 归一化类别 + 本地化�
 tests/mock-integration.test.ts   契约 mock 端到端：认证全流程 + /api/status 三种 fixture（present/stale/missing）+ 401
 tests/status-api.test.ts         /api/status 运行时校验、派生逻辑（stale/state/欠载率/uptime/reasons）、错误归类、401 传递
 tests/status-polling.test.ts     5s 轮询控制器：立即拉取、定时刷新、并发去重、隐藏暂停/恢复、错误保留旧数据、401、停止/重启
-tests/format.test.ts             Intl 数字/时间、id 省略、字节/采样率单位换算
-tests/wav.test.ts                WAV 头解析/格式校验（48k/16-24bit/1-2ch）/baseline-applied 对齐/截断拒绝
-tests/calibration-api.test.ts    校准 REST 响应运行时校验（schema/枚举/8 步 steps 完整性/apply 回执）+ 端点请求
-                                 + gate 纯函数（fail closed/not_available 可跳过）+ 错误码归类 + 原始字节上传/CSRF
-tests/calibration-store.test.ts  wizard 加载/保存/上传草稿持久化 + job 轮询状态机（终态停止/网络重试/404 停止/
-                                 隐藏暂停）+ apply/rollback 回执 + 503 not_wired -> unavailable
-tests/calibration-mock.test.ts   契约 mock 端到端：鉴权/CSRF、上传（幂等/类型/超限 413）、wizard GET/PUT/刷新恢复、
-                                 job 创建->轮询->成功->产物 sha->apply->rollback、失败/未接入 fixture、稳定错误码
-tests/system-api.test.ts         /api/system/* 运行时校验（schema/字段类型/reasons/设备/restart 能力）、版本一致性、
-                                 MOTU 识别、Content-Disposition 文件名、错误归类、改密校验、端点请求（CSRF/401）
-tests/system-store.test.ts       info 控制器（加载/并发去重/失败保留旧数据/重试）+ 日志控制器（unit/行数切换、
-                                 自动刷新 5s、隐藏暂停、失败保留旧日志、停止/重启）+ release 版本 store
-tests/system-mock.test.ts        契约 mock 端到端：匿名 /healthz release 版本、401、三种 system fixture、
-                                 日志参数校验与 503、诊断下载文件名/内容/无敏感字段、改密后旧会话失效、重启开关
-tests/control-api.test.ts        M3 控制面：mute/surface/format/commit/abort 端点与运行时校验、逐 lane 增益模型
-                                 （clamp/0.5dB/勾选补丁）、草稿面判定、错误码归类（含 409/501/503/网络）
-tests/control-store.test.ts      M3 两阶段状态机：prepare/commit/abort/静音/设备重试、busy 互斥、token 失效清理、
-                                 草稿保留/清空、历史 8 条、错误分类
-tests/control-mock.test.ts       契约 mock 端到端：静音回读 (/api/status)、音量两阶段 + 单草稿槽 409 + abort、
-                                 模式 changed/off+静音联动、格式 96k/64 + device_restart、unavailable fixture 503
-tests/channels-api.test.ts       M4：khaen-channels/v1 校验、plan 上传/历史/预览解析（嵌套+扁平形态）、MOTU 标签、
-                                 声道补丁校验、sha256、错误归类（含 host_link_unsupported/not_wired/invalid_plan）
-tests/channels-store.test.ts     M4 控制器：方案上传（本地/服务端 sha 比对）、prepare/commit/abort、回滚草稿、
-                                 声道 prepare/commit（501 保留草稿）、busy 互斥、加载去重
-tests/channels-mock.test.ts      契约 mock 端到端：channels GET/PUT+commit 501、plan upload 幂等/sha 校验、
-                                 POST inspect（plan_path/405/400）、prepare plan_path、partial fixture 的 dac_map null 项、
-                                 history/inspect、rollback 草稿、degraded/unavailable fixture
-tests/routing-api.test.ts        M3b 路由页：/api/channels 宽松解析（dac_map null 项 / mapping null / plan 段）、
-                                 /api/plan/history 双向形态（daemon current+entries / mock current_version+versions）、
-                                 路由链与计划摘要组合（不猜直通、segments 恒 NOT_AVAILABLE + 原因）、reasons 回退
-tests/routing-store.test.ts      路由页只读控制器：并行拉取/并发去重、失败保留最后成功数据、history 失败清空、
-                                 401/501 归类、loadedAt 只在成功时推进、reset
-tests/routing-mock.test.ts       契约 mock 端到端：401、wired 22 lane 路由链/映射/计划摘要、degraded 逐字段「未接入」、
-                                 unavailable 501 not_wired、stale/missing status fixture 降级
-```
-
-当前共 **346** 个测试（Node 内置 test runner；T58 基线 337 + T60 契约对齐 9），全部通过。
-
-## 视觉验收（浏览器实测，evidence 在 `artifacts/browser/`）
-
-- 视口 390x844 与 1440x900 × 深/浅主题 × zh-CN/en-US 共 8 组：`document.documentElement.scrollWidth <= innerWidth`
-  （无横向溢出），卡片网格 390 单列 / 1440 三列；真实浏览器（Chromium/Playwright）实测 49 项断言全通过；
-- M5 校准页/8 步向导/job 详情同矩阵浏览器实测 **133 项断言全通过**（`artifacts/qa/qa-calibration.mjs`，DEV-ONLY）：
-  无横向溢出、主题/语言生效、无页面报错；success/empty/unavailable 三态诚实；第 2/5 步 NOT_AVAILABLE + 任务号；
-  第 6 步 mock 引擎标「示意」；blocked 步骤「下一步」禁用且 title 带原因；**真实点击**应用 → 二次确认 → 回读 v4 /
-  synthetic 回执 → 回滚 → 恢复 v3；
-- 系统信息页/日志页同矩阵浏览器实测 **73 项断言全通过**（`artifacts/qa/qa-system.mjs`，DEV-ONLY）：
-  无横向溢出、无页面报错；版本不一致警示条（crate v0.1.0 vs release v0.1.2）；顶栏/登录页页脚 release 版本；
-  MOTU 标签；consistent 形态无警示、degraded 形态逐字段「未接入」+ 日志 503 原因 + 重启按钮隐藏；
-  日志 unit/行数切换、复制、自动刷新；诊断 JSON 下载（文件名/内容/无敏感字段）；
-  重启 rt-host 输入确认词二次确认（错误词拒绝）；改密 -> 旧会话失效 -> 新密码重新登录；
-- 截图：`overview_zh_dark_1440x900.png`、`overview_zh_dark_390x844.png`、
-  `overview_en_light_1440x900.png`、`overview_en_light_390x844.png`、
-  `overview_zh_dark_stale_1440x900.png`（stale fixture）、`overview_zh_dark_missing_1440x900.png`
-  （missing fixture，逐字段「未接入」）；
-- 校准截图：`calibration_list_zh_dark_1440x900.png`、`calibration_list_zh_dark_390x844.png`、
-  `calibration_list_en_light_1440x900.png`、`calibration_list_unavailable_zh_dark_1440x900.png`、
-  `calibration_wizard_step{1,2,3,4,5,6,7,8}_zh_dark_1440x900.png`、`calibration_wizard_step3_zh_dark_390x844.png`、
-  `calibration_wizard_step8_zh_dark_390x844.png`、`calibration_wizard_step8_en_light_1440x900.png`、
-  `calibration_wizard_step3_blocked_zh_dark_1440x900.png`、`calibration_wizard_step8_applied_zh_dark_1440x900.png`、
-  `calibration_job_zh_dark_{1440x900,390x844}.png`；
-- M3/M4 同矩阵浏览器实测 **88 项断言全通过**（`artifacts/qa/qa-m3m4.mjs`，DEV-ONLY）：
-  无横向溢出、主题/语言生效、无页面报错；音量页静音回读（/api/status）与取消静音、逐 lane 草稿 22 行 + 0.5 dB 步进 +
-  prepare→commit→desktop readback、主音量/当前增益 NOT_AVAILABLE 卡片、模式 analog 禁用；格式页 96k/64 两阶段 +
-  device_restart_required 提示 + 重试回读；声道页 22ch MOTU 映射/已知标签/未知 OUT n、plan 上传 sha 匹配 + 历史回滚二次确认、
-  热重配 prepare 预览 + commit 501 诚实显示、degraded/unavailable 逐字段「未接入」+ 任务号；
-- M3/M4 截图：`m3m4_volume_zh-CN_dark_1440x900.png`、`m3m4_volume_zh-CN_dark_390x844.png`、
-  `m3m4_volume_en-US_light_1440x900.png`、`m3m4_volume_committed_zh_dark_1440x900.png`、
-  `m3m4_volume_unavailable_zh_dark_1440x900.png`、`m3m4_format_zh-CN_dark_1440x900.png`、
-  `m3m4_format_zh-CN_dark_390x844.png`、`m3m4_format_en-US_light_1440x900.png`、
-  `m3m4_format_committed_zh_dark_1440x900.png`、`m3m4_channels_zh-CN_dark_1440x900.png`、
-  `m3m4_channels_zh-CN_dark_390x844.png`、`m3m4_channels_en-US_light_1440x900.png`、
-  `m3m4_channels_committed_zh_dark_1440x900.png`、`m3m4_channels_degraded_zh_dark_1440x900.png`、
-  `m3m4_channels_unavailable_zh_dark_1440x900.png`；
-- M3b 路由矩阵页同矩阵浏览器实测 **128 项断言全通过**（`artifacts/qa/qa-routing.mjs`，DEV-ONLY）：
-  390x844 / 1440x900 × 深/浅 × zh-CN/en-US 8 组无横向溢出、无页面报错、标题/主题/语言生效；
-  3 节点路由链（输入 2ch → 矩阵 22 lane → DAC 22）、22 行 lane→DAC 表 + 已知标签 + 未知 OUT 7、
-  计划摘要 v3 / latency 1,023 / segments NOT_AVAILABLE + 原因、编辑 NOT_AVAILABLE（T59 + 3 个禁用按钮 + 1 个跳转）、
-  侧栏条目已启用/高亮（移动端抽屉同断言）、「去 /channels」真实跳转；
-  channels degraded 逐字段「未接入」+ 后端原因（tooltip）、unavailable 501 not_wired + T55、
-  status stale 控制通道警示、status missing 矩阵 lane「未接入」+ 无方案提示；
-- M3b 截图：`m3b_routing_zh-CN_dark_1440x900.png`、`m3b_routing_zh-CN_dark_390x844.png`、
-  `m3b_routing_en-US_light_1440x900.png`、`m3b_routing_en-US_light_390x844.png`、
-  `m3b_routing_degraded_zh_dark_1440x900.png`、`m3b_routing_degraded_zh_dark_390x844.png`、
-  `m3b_routing_unavailable_zh_dark_1440x900.png`、`m3b_routing_stale_zh_dark_1440x900.png`、
-  `m3b_routing_missing_zh_dark_1440x900.png`；
-- 系统页截图：`system_{zh-CN,en-US}_{dark,light}_{1440x900,390x844}.png`、`system_consistent_zh_dark_1440x900.png`、
-  `system_degraded_zh_dark_1440x900.png`、`system_logs_restart_zh_dark_1440x900.png`、
-  `system_logs_en_light_390x844.png`（`artifacts/` 不入库）。
-
-## 开发
-
-```bash
-cd webui
-pnpm dev    # http://localhost:5173，/api 反代到 KHAEN_DEV_API（默认 http://127.0.0.1:8730）
-pnpm build && KHAEN_DEV_API=http://127.0.0.1:8790 pnpm preview   # 预览 dist，/api 反代到 mock
-```
-
-开发/预览代理转发 `/api`、`/__mock`（仅契约 mock）与匿名 `/healthz`（release 版本来源，生产由 daemon 同源托管，无代理、无外网资源）。
-
-## 主题
-
-- 选择器：`html[data-theme='dark|light']` + `html.dark`（Element Plus 暗色变量）；
-- token：`src/styles/tokens.css`（深色默认 + 浅色覆盖 + Element Plus 变量映射），组件只引用变量不写死颜色；
-- 首帧：`public/theme-init.js`（外置同步脚本，满足 daemon CSP `script-src 'self'`）在挂载前写 DOM，避免闪白/闪黑；
-- 运行时：`src/composables/useTheme.ts`（`system` 模式下监听 `prefers-color-scheme`）。
-
-## i18n
-
-- 源语言 `src/i18n/zh-CN.ts`；`en-US.ts` 用 `Messages` 类型（`typeof zhCN`）在 **typecheck 阶段**强制键集对等；
-- 键命名 `<scope>.<page|component>.<key>`；后端稳定错误码在前端映射成本地化文案（`src/api/errors.ts`、
-  `src/api/status.ts` 的 classifyStatusError）；
-- 新增文案必须同时改两份语言文件；`node scripts/i18n-check.mjs` 会检查缺失/多余/重复/空值、
-  源码里引用的键是否存在、以及 `.vue`/`.ts` 是否硬编码中文（注释除外）。
-
-## 目录
-
-```
-webui/
-├─ index.html                 入口（含外置 theme-init.js）
-├─ public/{favicon.svg,theme-init.js}
-├─ scripts/
-│  ├─ i18n-check.mjs          i18n 门禁脚本
-│  ├─ mock-auth-server.mjs    /api/auth/*、/api/status、/api/calibration/*、/api/system/* 与 M3/M4 控制面契约 mock
-│  │                          （开发/测试，不进 dist）
-│  ├─ status-fixtures.mjs     /api/status 三种 fixture（present/stale/missing）
-│  ├─ calibration-fixtures.mjs 校准四种 fixture（empty/success/failed/unavailable）+ mock job 状态机
-│  ├─ system-fixtures.mjs     系统信息三种 fixture（mismatch/consistent/degraded）+ 日志/诊断 mock 数据
-│  ├─ control-fixtures.mjs    M3 控制面两种 fixture（wired/unavailable）
-│  ├─ channels-fixtures.mjs   M4 方案/声道四种 fixture（wired/partial/degraded/unavailable；真实 daemon 形态）
-│  └─ mock-test-support.mjs   单测辅助（不进 dist）
-├─ tests/*.test.ts            Node 内置 test runner 单测（不进 dist）
-├─ src/
-│  ├─ main.ts App.vue config.ts env.d.ts
-│  ├─ api/{client.ts,auth.ts,errors.ts,status.ts,calibration.ts,system.ts,control.ts,channels.ts,routing.ts}
-│  │                           REST 客户端 / 认证 / 错误码映射 / 状态聚合 / 校准 REST + gate 纯函数
-│  │                           / 系统信息 REST + 版本一致性/设备识别/错误归类
-│  │                           / M3 控制面（mute/surface/format/commit/abort/device retry + 增益模型）
-│  │                           / M4 方案与声道（khaen-channels/v1 + plan upload/history/inspect + sha256）
-│  │                           / M3b 路由页组合（channels/status/history 宽松解析 + 路由链/计划摘要纯函数）
-│  ├─ auth/validation.ts      表单本地校验
-│  ├─ components/             AppShell / PageHeader / PanelCard / StatusBadge / TruthTag / StatRow
-│  │  ├─ calibration/         WizardStepper / GateCard / JobTimeline / VerdictBadge / UploadCard /
-│  │  │                       JobResultPanel / ApplyPanel
-│  │  ├─ control/             ControlErrorNotice（稳定码 + 本地化文案 + 重试）
-│  │  └─ system/              SystemLogsPanel / PasswordChangeCard / RestartCard
-│  ├─ composables/            useTheme / useViewport / useStatusPolling
-│  ├─ i18n/                   index.ts + zh-CN.ts（源）+ en-US.ts
-│  ├─ router/                 index.ts（路由表 + 守卫）+ guard.ts（纯决策：next 防开放重定向）
-│  ├─ stores/                 session.ts（认证会话）+ status.ts（概览聚合状态/轮询控制器）
-│  │                          + calibration.ts（向导配置/state/上传/job 轮询/apply 回滚）
-│  │                          + system.ts（系统信息/日志控制器）+ version.ts（release 版本）
-│  │                          + control.ts（M3 单草稿槽两阶段 + 静音/设备重试 + 操作历史）
-│  │                          + channels.ts（M4 方案上传/预览/历史/回滚 + 声道两阶段）
-│  │                          + routing.ts（M3b 路由页 channels + history 只读控制器）
-│  ├─ styles/                 tokens.css + main.css
-│  ├─ types/                  ui.ts + auth.ts
-│  ├─ utils/                  format.ts（Intl/单位/省略）+ wav.ts（WAV 头解析/格式校验）
-│  └─ views/                  LoginView / OverviewView / CalibrationView /
-│                             CalibrationWizardView / CalibrationJobView /
-│                             SystemView / SystemLogsView / VolumeView / FormatView /
-│                             ChannelsView / RoutingView
-├─ dist/                      **构建产物，提交入库**
-└─ vite.config.ts tsconfig.json package.json pnpm-lock.yaml
-```
-
-## 验收命令（本轮）
-
-```bash
-pnpm test && pnpm typecheck && node scripts/i18n-check.mjs && pnpm build
-# 连续两次 pnpm build 的 dist 逐文件 SHA256 必须一致（确定性构建）；dist 不得包含 scripts/ 的 mock/fixture 字符串
-# 浏览器视觉/交互验收（先起 mock + preview）：
-#   node scripts/mock-auth-server.mjs --port 8790 --calibration-fixture success
-#   KHAEN_DEV_API=http://127.0.0.1:8790 pnpm preview
-#   node artifacts/qa/qa-calibration.mjs   # DEV-ONLY；截图写 artifacts/browser/（不入库）
-#   node artifacts/qa/qa-system.mjs        # DEV-ONLY；系统信息页/日志页 73 项浏览器断言
-#   node scripts/mock-auth-server.mjs --port 8790 --control-fixture wired --channels-fixture wired
-#   node artifacts/qa/qa-m3m4.mjs          # DEV-ONLY；M3/M4 88 项浏览器断言（音量/格式/声道）
-#   node artifacts/qa/qa-routing.mjs       # DEV-ONLY；M3b 路由页浏览器断言（正常/降级/未接线三态 + 主题/视口）
-```
+tests/api-contract.test.ts        中央合同：解析 docs/API.md 端点表，断言 webui 使用的 path/method 全部在合同中
+tests/navigation.test.ts          导航/路由：侧栏项↔route record↔双语言标题↔requiresAuth 一致性
+tests/meta-api.test.ts           能力快照：/api/meta 解析（数组/对象 surfaces、not_wired op/surface、三态）
+tests/meta-store.test.ts          能力 store：缓存/并发去重/失败保留旧快照/unknown 降级
+tests/control-api.test.ts         （T62 扩展）surface routing/layout 请求体、changed/diff 可选字段、validators
+tests/mode-api.test.ts / mode-store.test.ts       Mode 页：surface mode 两阶段 body/commit/abort、401/503/409、别名与写门禁
+tests/layout-api.test.ts / layout-draft.test.ts   Layout 页：surface layout 两阶段 body、行增删/校验/草稿 patch
+tests/motu-api.test.ts / motu-store.test.ts / motu-mock.test.ts / volume-motu.test.ts  MOTU：GET/PUT 契约、轮询、prepare/commit、错误码、无 abort 本地取消
+tests/routing-api.test.ts / routing-store.test.ts / routing-mock.test.ts  路由可编辑：surface routing 精确 body、mapping 当前值/降级、commit/abort

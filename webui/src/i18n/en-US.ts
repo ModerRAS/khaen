@@ -27,8 +27,11 @@ const messages: Messages = {
   nav: {
     overview: 'Overview',
     volume: 'Volume & mute',
+    mode: 'Operating mode',
     channels: 'Plan & channels',
     routing: 'Routing matrix',
+    layout: 'Content layout',
+    speakers: "Speaker layout",
     format: 'Audio format',
     calibration: 'Calibration',
     system: 'System',
@@ -38,33 +41,20 @@ const messages: Messages = {
     main: 'Main',
     system: 'System'
   },
-  navFlag: {
-    planned: 'Planned'
-  },
   shell: {
-    brandSub: 'DSP console',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
     menu: 'Open navigation',
-    navDisabled: 'This page is not wired yet (planned {milestone})',
-    stubBanner:
-      'T53/T54/T58 (M3/M4/M3b): volume/mute, format and run mode use /api/mute, /api/surface and /api/format (prepare → commit); the plan & channels page uses /api/channels, /api/plan/upload / history / inspect and /api/prepare / commit / abort / rollback; the routing matrix page composes read-only /api/status, /api/channels and /api/plan/history; calibration uses /api/calibration/*, system uses /api/system/* and the overview uses /api/status. Unwired capabilities (routing edits/reorders, channel hot-swap commit, ...) always show "not wired" plus the reason and task id, with no fake data and no fake success.',
-    hostLink: 'Control link',
     hostLinkNotWired: 'Control link not wired',
     hostLinkConnected: 'Control link connected',
     hostLinkStale: 'Control link status is stale',
-    hostLinkDisconnected: 'Control link disconnected'
   },
   topbar: {
     runState: 'Run state',
     plan: 'Plan version',
     deviceRate: 'Device rate',
-    hostLink: 'Control link',
     changePassword: 'Change password',
     logout: 'Sign out',
-    comingSoon: 'Wired in {milestone}',
-    appearance: 'Appearance',
-    language: 'Language',
     userMenu: 'User menu',
     themeToggle: 'Toggle dark / light',
     version: 'Version',
@@ -191,7 +181,7 @@ const messages: Messages = {
       timeout: 'The control request timed out. Please retry.',
       unauthorized: 'Your session has expired. Please sign in again.',
       hostLinkUnavailable:
-        'The daemon to rt-host control channel is unavailable (T70f-b not wired or the socket is unreachable): the write was not sent and the page will not show a fake success.',
+        'The daemon to rt-host control channel is unavailable (the control socket is unreachable): the write was not sent and the page will not show a fake success.',
       unsupported: 'The backend explicitly does not support this action (unsupported); it will not pretend to succeed.',
       notWired: 'The daemon does not have this capability yet (not_wired); no fake data is shown.',
       noBasePlan: 'There is no committed plan to patch volume gains (no_base_plan): apply a plan on the plan page first.',
@@ -206,29 +196,10 @@ const messages: Messages = {
       unknown: 'The control action failed. Please retry.'
     },
     channels: {
-      network: 'Cannot reach the daemon (not running or network down). Check it and retry.',
-      timeout: 'The plan/channel request timed out. Please retry.',
-      unauthorized: 'Your session has expired. Please sign in again.',
-      hostLinkUnavailable:
-        'The daemon to rt-host control channel is unavailable (T70f-b not wired or the socket is unreachable): the write was not sent and the page will not show a fake success.',
-      hostLinkUnsupported:
-        'rt-host does not support hot channel reconfiguration yet (M3b / T52 not done): the daemon honestly returns host_link_unsupported, and the page never shows the commit as successful.',
-      notWired: 'The daemon does not implement this M4 capability yet (T55 not done): the page shows "not wired" and invents neither mappings nor history.',
-      notFound: 'The target resource does not exist (the backend may not implement this endpoint yet, T55).',
-      invalidRequest: 'The request parameters are invalid (bad_request); check the input and retry.',
-      invalidPlan: 'The plan file is invalid (ABI v3 decode/structure validation failed); the running plan is unchanged.',
-      uploadTooLarge: 'The plan file exceeds the 4 MiB upload limit.',
-      uploadNotFound: 'The uploaded plan does not exist (expired or upload failed): upload it again.',
       shaMismatch: 'The client and server sha256 do not match: the operation was rejected (neither side is trusted).',
-      admissionRejected: 'The plan was rejected by admission (admission_rejected): coefficients/latency/channel limits; the running plan is unchanged.',
-      noHistory: 'There is no committed history to roll back to (no_history).',
-      conflict: 'The current state does not allow this action (conflict, e.g. another hot reconfiguration is running); refresh and retry.',
-      server: 'The daemon returned a server error. Please retry later.',
-      invalidResponse: 'The daemon returned an invalid plan/channel document; it was rejected instead of treated as success.',
       shaUnavailable: 'This browser does not support WebCrypto SHA-256, so the upload cannot be verified (there is no "verify nothing" fallback).',
       planPathUnavailable:
         'The upload receipt has no plan_path (stored_path): the daemon did not report where the plan was stored, so POST /api/plan/inspect and /api/prepare cannot be called; the page does not guess a path or invent a preview/draft.',
-      unknown: 'The plan/channel action failed. Please retry.'
     }
   },
   overview: {
@@ -256,8 +227,8 @@ const messages: Messages = {
       stale:
         'The control link is stale (connected={connected}, freshness={age}); the values shown are from the last successful fetch.',
       hostLinkNotWired:
-        'The control link (T70f) is not wired yet: every host_link field is null, so changing control state requires a backend restart.',
-      hostLinkNotWiredReason: 'The control link (T70f) is not wired yet: {reason}',
+        'Control link unavailable: every host_link field is null; changing control state requires the daemon ↔ rt-host control link to recover.',
+      hostLinkNotWiredReason: 'Control link unavailable: {reason}',
       refreshFailed: 'Refresh failed: {message} (last successful update {time}). The last successful values are still shown.'
     },
     uptime: {
@@ -368,22 +339,224 @@ const messages: Messages = {
           verdict: 'Verdict',
           activeJob: 'Active job'
         },
-        stub: 'The calibration page lands in M5; this card only reads the last job reported by the daemon.'
+        stub: 'This card only reads the last calibration job reported by the daemon (/api/calibration/jobs); when it is unavailable the reason is shown instead of fake data.'
       },
       control: {
         title: 'Control link',
-        desc: 'daemon ↔ rt-host control path (T70f)',
+        desc: 'daemon ↔ rt-host control path',
         field: {
           connected: 'Connected',
           statusAgeMs: 'Status age',
           since: 'Connected since',
           socket: 'Socket path'
         },
-        notWiredHint: 'The control link (T70f) is not wired yet: changing control state requires a backend restart.'
+        notWiredHint: 'Control link unavailable: host_link is null; changing control state requires the control link to recover.'
       }
     }
   },
   calibration: {
+    review: {
+      applyState: 'Apply state',
+      appliedVersion: 'Applied version',
+      before: 'Before (current running plan)',
+      after: 'After (job artifact)',
+      beforeHint: 'Pre-apply snapshot: rollback returns to this version.',
+      snapshot: 'Pre-apply snapshot',
+      version: 'Version',
+      graphId: 'graph_id',
+      sha256: 'sha256',
+      apply: 'Apply calibration plan',
+      rollback: 'Roll back to the pre-apply version',
+      noJob: 'No job available to apply.',
+      exportConfig: 'Export config JSON',
+      applyReceipt: 'Latest apply receipt',
+      rollbackReceipt: 'Latest rollback receipt',
+      appliedAt: 'Applied at',
+      restoredVersion: 'Restored version',
+      ack: 'Ack kind',
+      ackActual: 'actual (really applied)',
+      ackSynthetic: 'synthetic (simulated commit)',
+      confirmApply: {
+        title: 'Apply the calibration plan?',
+        message: 'The job artifact will be prepare → commit-ed to the running plan; a snapshot of the current version {version} is recorded and can be rolled back.',
+        ok: 'Apply'
+      },
+      confirmRollback: {
+        title: 'Roll back to the pre-apply version?',
+        message: 'The running plan will be restored to version {version} (graph_id {graphId}).',
+        ok: 'Roll back'
+      },
+      appliedToast: 'Calibration plan applied',
+      rolledBackToast: 'Rolled back to the pre-apply version'
+    },
+    wizard: {
+      pageTitle: 'Calibration wizard',
+      subtitle:
+        'Dirac-style 8-step offline calibration closed loop (P1). Every gate is decided by the daemon (/api/calibration/wizard/state); missing capabilities (multi-point/ART, realtime measurement, ...) are shown grey with NOT_AVAILABLE. No fake progress or results.',
+      stepNav: 'Wizard steps',
+      stepShort: 'Step {step}',
+      stepOf: 'Step {current} / {total}',
+      backToList: 'Back to calibration',
+      previous: 'Previous',
+      next: 'Next',
+      nextSkip: 'Next (step not wired)',
+      finish: 'Finish',
+      cancelWizard: 'Cancel wizard',
+      confirmCancel: {
+        title: 'Leave the wizard?',
+        message: 'Wizard settings, measurement uploads and finished steps stay on the backend; you can come back later.',
+        ok: 'Leave wizard'
+      },
+      unavailable: {
+        title: 'Calibration backend not wired',
+      },
+      error: {
+        title: 'Cannot read the wizard state'
+      },
+      actionError: 'Action failed: {message}',
+      toast: {
+        saved: 'Calibration settings saved',
+        uploaded: 'Upload complete',
+        jobCreated: 'Analysis job created',
+        jobCancelled: 'Job cancelled'
+      },
+      device: {
+        desc: 'Data comes from /api/status (device / format / control link); the gate is decided by the daemon.',
+        device: 'Device',
+        deviceState: 'Device state',
+        deviceCard: 'ALSA card',
+        deviceRate: 'Device rate',
+        rateAsserted: 'Rate asserted',
+        hostLink: 'Control link',
+        hostLinkAge: 'Status age',
+        runState: 'Run state',
+        channels: 'Output channels',
+        encoding: 'Encoding',
+        noStatus: 'No /api/status data yet (backend not wired or request failed); no values are shown for this step.',
+        statusError: 'Cannot fetch /api/status: {message}'
+      },
+      channels: {
+        desc: 'Read-only format/channel facts from /api/status and /api/channels; missing values show the reason instead of fake data.',
+        notAvailable: '/api/channels is unavailable: this step is read-only; use the Plan & channels page for the two-phase hot reconfiguration.',
+        noMapping: 'No channel mapping is shown or invented: only the daemon-reported mapping is displayed, with a reason when unknown.',
+        readOnly: 'This step is read-only and produces no configuration.',
+        planRate: 'Plan rate',
+        deviceRate: 'Device rate',
+        channels: 'Output channels',
+        encoding: 'Encoding',
+        aes67Channels: 'AES67 receive channels',
+        aes67Map: 'AES67 channel map',
+        aes67Group: 'AES67 multicast group',
+        aes67Port: 'AES67 port',
+        task: 'Missing capability'
+      },
+      mic: {
+        desc: 'Upload the microphone calibration file, choose orientation and target curve, set single-point parameters; the daemon decides the gate after saving.',
+        file: 'Microphone calibration file',
+        fileHint: 'UMIK-1 calibration txt (≤ 1 MiB); the SHA-256 is computed by the server.',
+        fileSelect: 'Choose calibration file',
+        fileTooLarge: 'Calibration file exceeds the 1 MiB limit',
+        savedSha: 'Saved SHA-256',
+        filename: 'File name',
+        orientation: 'Microphone orientation',
+        orientation0: '0° (pointing at the source)',
+        orientation90: '90° (pointing at the ceiling)',
+        targetMode: 'Target curve',
+        targetFlat: 'flat (flat response)',
+        targetTilt10: 'tilt10 (−10 dB at 20 kHz)',
+        centers: 'Center frequencies (Hz, comma separated)',
+        centersHint: '1/3-oct center frequencies, up to 64; default 25 Hz–20 kHz (30 values).',
+        tolerance: 'Tolerance (dB)',
+        minBands: 'Min bands',
+        save: 'Save settings',
+        saving: 'Saving…',
+        savedAt: 'Saved ({time})',
+        notSaved: 'Not saved yet',
+        validation: {
+          micRequired: 'Upload the microphone calibration file first',
+          orientationRequired: 'Choose the microphone orientation',
+          targetRequired: 'Choose the target curve',
+          centersRange: 'Center frequencies must be numbers in 1–24000 Hz (comma/space separated)',
+          centersTooMany: 'At most 64 center frequencies',
+          toleranceRange: 'Tolerance must be between 0.1 and 24 dB',
+          minBandsRange: 'Min bands must be an integer between 1 and 64'
+        }
+      },
+      positions: {
+        desc: 'khaen P1 supports a single position (listening seat) only; multi-point and ART are out of scope.',
+        single: 'Single point (listening seat)',
+        singleDesc: 'Fixed primary listening position; the only supported scheme in this version.',
+        selected: 'Confirmed',
+        notSelected: 'Not confirmed yet (save step 3 settings first)',
+        multi: 'Multi-point',
+        multiReason: 'khaen does not target multi-point: a multi-point backend is required.',
+        art: 'ART (active room treatment)',
+        artReason: 'ART needs multi-point measurements and support groups; khaen has no such backend.'
+      },
+      measure: {
+        desc: 'P1 is offline only: upload the baseline and applied WAV recordings; realtime measurement needs a capture service (later version).',
+        baseline: 'baseline (before calibration)',
+        applied: 'applied (after calibration)',
+        hint: '48 kHz / 16–24 bit / mono or stereo; ≤ 64 MiB.',
+        select: 'Choose WAV',
+        format: 'Format',
+        duration: 'Duration',
+        formatValue: '{rate} / {bits} bit / {channels} ch',
+        savedBaseline: 'Saved baseline',
+        savedApplied: 'Saved applied',
+        realtime: 'Realtime measurement (mic capture / sweep)',
+        realtimeReason: 'The daemon has no capture service; realtime measurement is unavailable in this version (needs the T42 follow-up backend, P2).',
+        realtimeTask: 'T42 / P2',
+        parseError: 'The file is not a usable WAV: {message}',
+        formatError: 'Format does not meet the calibration requirements: {message}',
+        pairError: 'The two recordings are structurally inconsistent: {message}',
+        wavErrors: {
+          file_too_large: 'File exceeds the 64 MiB limit',
+          file_too_small: 'File is too small to be a valid WAV',
+          not_riff: 'Not a RIFF container (missing RIFF header)',
+          not_wave: 'Not WAVE format',
+          missing_fmt: 'Missing fmt chunk',
+          missing_data: 'Missing data chunk',
+          unsupported_codec: 'Unsupported codec (PCM only)',
+          bad_sample_rate: 'Sample rate must be 48 kHz',
+          bad_bits: 'Bit depth must be 16 or 24 bit',
+          bad_channels: 'Channel count must be 1 or 2',
+          bad_block_align: 'blockAlign does not match channels/bit depth',
+          bad_data_length: 'data chunk length is invalid or truncated',
+          format_mismatch: 'The two recordings differ in sample rate/channels/bit depth',
+          length_mismatch: 'The two recordings differ in length (within ±1 frame only)'
+        }
+      },
+      analysis: {
+        desc: 'Create a single-point offline job; progress and results come from the real daemon job state (no fake progress bars).',
+        planSha: 'Current plan sha256 (from /api/status)',
+        planMissing: 'No plan is applied (status.plan.sha256 is null)',
+        uploadsMissing: 'Upload the baseline / applied WAVs in step 5 first',
+        settingsMissing: 'Save the calibration settings in step 3 first',
+        start: 'Start analysis',
+        starting: 'Creating job…',
+        retry: 'Retry with the same inputs',
+        cancel: 'Cancel job',
+        jobId: 'job id',
+        noJob: 'No analysis job created yet.',
+        failedTitle: 'Analysis failed',
+        cancelledTitle: 'Analysis cancelled',
+        cancelledDesc: 'You can retry or go back one step.',
+        errorCode: 'Stable error code',
+        cancelConfirm: {
+          title: 'Cancel the analysis job?',
+          message: 'This cancels the running job {id}; finished steps are kept.',
+        }
+      },
+      design: {
+        desc: 'Shows the produced plan summary, design residual (FULL / PARTIAL / NONE) and admission result.',
+        noResult: 'The job has not succeeded yet, so there is no design artifact.',
+        nextBlocked: 'No applicable artifact: the next step is blocked by the gate.'
+      },
+      review: {
+        desc: 'Before applying, the before/after summary and snapshot are shown; apply and rollback both require confirmation and receipts come from the real daemon commit result.'
+      }
+    },
     pageTitle: 'Calibration',
     subtitle:
       'Calibration jobs and the 8-step wizard (P1 offline closed loop). Data comes from the daemon calibration REST (/api/calibration/*); when the backend is not wired the page says so instead of showing fake data.',
@@ -418,8 +591,6 @@ const messages: Messages = {
       newWizard: 'New calibration wizard',
       engine: 'Engine authenticity',
       engineUnknown: 'not reported',
-      unavailableTitle: 'Calibration backend not wired',
-      unavailableDesc: 'The daemon calibration job backend is not wired yet ({task}): {reason}. No fake jobs or results are shown.',
       summary: {
         lastJob: 'Latest job',
         wizard: 'Wizard state',
@@ -468,17 +639,11 @@ const messages: Messages = {
       finished: 'Finished',
       duration: 'Duration',
       status: 'Status',
-      verdict: 'Verdict',
       engine: 'Engine',
       applyState: 'Apply state',
-      appliedVersion: 'Applied version',
       steps: 'State timeline',
       artifacts: 'Artifacts',
       noArtifacts: 'This job has no artifacts (failed/cancelled or not produced yet).',
-      artifactName: 'Name',
-      artifactSha: 'sha256',
-      artifactBytes: 'Size',
-      download: 'Download',
       inputs: 'Inputs',
       inputsPlanSha: 'plan sha256',
       inputsBaseline: 'baseline upload',
@@ -487,7 +652,6 @@ const messages: Messages = {
       inputsTolerance: 'Tolerance (dB)',
       inputsMinBands: 'Min bands',
       error: 'Failure reason',
-      errorCode: 'Stable error code',
       resultTitle: 'Analysis result',
       applyTitle: 'Apply / rollback',
       loadError: 'Cannot load the job detail',
@@ -524,217 +688,6 @@ const messages: Messages = {
       canSkip: 'This capability is not wired: the step produces no data and can be skipped (grey step).',
       reason: 'Reason: {reason}',
       failClosed: 'The daemon did not report a gate for this step; treated as blocked (fail closed).'
-    },
-    wizard: {
-      pageTitle: 'Calibration wizard',
-      subtitle:
-        'Dirac-style 8-step offline calibration closed loop (P1). Every gate is decided by the daemon (/api/calibration/wizard/state); missing capabilities (M4 channels, P3 multi-point/ART, T42 realtime measurement) are shown grey with NOT_AVAILABLE. No fake progress or results.',
-      stepNav: 'Wizard steps',
-      stepShort: 'Step {step}',
-      stepOf: 'Step {current} / {total}',
-      backToList: 'Back to calibration',
-      previous: 'Previous',
-      next: 'Next',
-      nextSkip: 'Next (step not wired)',
-      finish: 'Finish',
-      cancelWizard: 'Cancel wizard',
-      confirmCancel: {
-        title: 'Leave the wizard?',
-        message: 'Wizard settings, measurement uploads and finished steps stay on the backend; you can come back later.',
-        ok: 'Leave wizard'
-      },
-      unavailable: {
-        title: 'Calibration backend not wired',
-        desc: 'The daemon calibration wizard backend is not wired yet ({task}): settings/gates cannot be read. No fake data is shown.'
-      },
-      error: {
-        title: 'Cannot read the wizard state'
-      },
-      actionError: 'Action failed: {message}',
-      toast: {
-        saved: 'Calibration settings saved',
-        uploaded: 'Upload complete',
-        jobCreated: 'Analysis job created',
-        jobCancelled: 'Job cancelled'
-      },
-      device: {
-        title: 'Device check',
-        desc: 'Data comes from /api/status (device / format / control link); the gate is decided by the daemon.',
-        device: 'Device',
-        deviceState: 'Device state',
-        deviceCard: 'ALSA card',
-        deviceRate: 'Device rate',
-        rateAsserted: 'Rate asserted',
-        hostLink: 'Control link',
-        hostLinkAge: 'Status age',
-        runState: 'Run state',
-        channels: 'Output channels',
-        encoding: 'Encoding',
-        noStatus: 'No /api/status data yet (backend not wired or request failed); no values are shown for this step.',
-        statusError: 'Cannot fetch /api/status: {message}'
-      },
-      channels: {
-        title: 'Layout & channels',
-        desc: 'Read-only format/channel facts from /api/status; /api/channels belongs to M4 and is not implemented.',
-        notAvailable: '/api/channels is not implemented (M4): channel mapping cannot be read, validated or edited.',
-        noMapping: 'No channel mapping is shown or invented: the capability gap is M4.',
-        readOnly: 'This step is read-only and produces no configuration.',
-        planRate: 'Plan rate',
-        deviceRate: 'Device rate',
-        channels: 'Output channels',
-        encoding: 'Encoding',
-        aes67Channels: 'AES67 receive channels',
-        aes67Map: 'AES67 channel map',
-        aes67Group: 'AES67 multicast group',
-        aes67Port: 'AES67 port',
-        task: 'Missing capability'
-      },
-      mic: {
-        title: 'Microphone & settings',
-        desc: 'Upload the microphone calibration file, choose orientation and target curve, set single-point parameters; the daemon decides the gate after saving.',
-        file: 'Microphone calibration file',
-        fileHint: 'UMIK-1 calibration txt (≤ 1 MiB); the SHA-256 is computed by the server.',
-        fileSelect: 'Choose calibration file',
-        fileTooLarge: 'Calibration file exceeds the 1 MiB limit',
-        savedSha: 'Saved SHA-256',
-        filename: 'File name',
-        orientation: 'Microphone orientation',
-        orientation0: '0° (pointing at the source)',
-        orientation90: '90° (pointing at the ceiling)',
-        targetMode: 'Target curve',
-        targetFlat: 'flat (flat response)',
-        targetTilt10: 'tilt10 (−10 dB at 20 kHz)',
-        centers: 'Center frequencies (Hz, comma separated)',
-        centersHint: '1/3-oct center frequencies, up to 64; default 25 Hz–20 kHz (30 values).',
-        tolerance: 'Tolerance (dB)',
-        minBands: 'Min bands',
-        save: 'Save settings',
-        saving: 'Saving…',
-        savedAt: 'Saved ({time})',
-        notSaved: 'Not saved yet',
-        validation: {
-          micRequired: 'Upload the microphone calibration file first',
-          orientationRequired: 'Choose the microphone orientation',
-          targetRequired: 'Choose the target curve',
-          centersRange: 'Center frequencies must be numbers in 1–24000 Hz (comma/space separated)',
-          centersTooMany: 'At most 64 center frequencies',
-          toleranceRange: 'Tolerance must be between 0.1 and 24 dB',
-          minBandsRange: 'Min bands must be an integer between 1 and 64'
-        }
-      },
-      positions: {
-        title: 'Measurement positions',
-        desc: 'khaen P1 supports a single position (listening seat) only; multi-point and ART are out of scope.',
-        single: 'Single point (listening seat)',
-        singleDesc: 'Fixed primary listening position; the only supported scheme in this version.',
-        selected: 'Confirmed',
-        notSelected: 'Not confirmed yet (save step 3 settings first)',
-        multi: 'Multi-point',
-        multiReason: 'khaen does not target multi-point: a multi-point backend is required.',
-        art: 'ART (active room treatment)',
-        artReason: 'ART needs multi-point measurements and support groups; khaen has no such backend.'
-      },
-      measure: {
-        title: 'Measurement',
-        desc: 'P1 is offline only: upload the baseline and applied WAV recordings; realtime measurement needs a capture service (later version).',
-        baseline: 'baseline (before calibration)',
-        applied: 'applied (after calibration)',
-        hint: '48 kHz / 16–24 bit / mono or stereo; ≤ 64 MiB.',
-        select: 'Choose WAV',
-        format: 'Format',
-        duration: 'Duration',
-        formatValue: '{rate} / {bits} bit / {channels} ch',
-        savedBaseline: 'Saved baseline',
-        savedApplied: 'Saved applied',
-        realtime: 'Realtime measurement (mic capture / sweep)',
-        realtimeReason: 'The daemon has no capture service; realtime measurement is unavailable in this version (needs the T42 follow-up backend, P2).',
-        realtimeTask: 'T42 / P2',
-        parseError: 'The file is not a usable WAV: {message}',
-        formatError: 'Format does not meet the calibration requirements: {message}',
-        pairError: 'The two recordings are structurally inconsistent: {message}',
-        wavErrors: {
-          file_too_large: 'File exceeds the 64 MiB limit',
-          file_too_small: 'File is too small to be a valid WAV',
-          not_riff: 'Not a RIFF container (missing RIFF header)',
-          not_wave: 'Not WAVE format',
-          missing_fmt: 'Missing fmt chunk',
-          missing_data: 'Missing data chunk',
-          unsupported_codec: 'Unsupported codec (PCM only)',
-          bad_sample_rate: 'Sample rate must be 48 kHz',
-          bad_bits: 'Bit depth must be 16 or 24 bit',
-          bad_channels: 'Channel count must be 1 or 2',
-          bad_block_align: 'blockAlign does not match channels/bit depth',
-          bad_data_length: 'data chunk length is invalid or truncated',
-          format_mismatch: 'The two recordings differ in sample rate/channels/bit depth',
-          length_mismatch: 'The two recordings differ in length (within ±1 frame only)'
-        }
-      },
-      analysis: {
-        title: 'Analysis',
-        desc: 'Create a single-point offline job; progress and results come from the real daemon job state (no fake progress bars).',
-        planSha: 'Current plan sha256 (from /api/status)',
-        planMissing: 'No plan is applied (status.plan.sha256 is null)',
-        uploadsMissing: 'Upload the baseline / applied WAVs in step 5 first',
-        settingsMissing: 'Save the calibration settings in step 3 first',
-        start: 'Start analysis',
-        starting: 'Creating job…',
-        retry: 'Retry with the same inputs',
-        cancel: 'Cancel job',
-        jobId: 'job id',
-        noJob: 'No analysis job created yet.',
-        failedTitle: 'Analysis failed',
-        cancelledTitle: 'Analysis cancelled',
-        cancelledDesc: 'You can retry or go back one step.',
-        errorCode: 'Stable error code',
-        cancelConfirm: {
-          title: 'Cancel the analysis job?',
-          message: 'This cancels the running job {id}; finished steps are kept.',
-          ok: 'Cancel job'
-        }
-      },
-      design: {
-        title: 'Design',
-        desc: 'Shows the produced plan summary, design residual (FULL / PARTIAL / NONE) and admission result.',
-        noResult: 'The job has not succeeded yet, so there is no design artifact.',
-        nextBlocked: 'No applicable artifact: the next step is blocked by the gate.'
-      },
-      review: {
-        desc: 'Before applying, the before/after summary and snapshot are shown; apply and rollback both require confirmation and receipts come from the real daemon commit result.'
-      }
-    },
-    review: {
-      applyState: 'Apply state',
-      appliedVersion: 'Applied version',
-      before: 'Before (current running plan)',
-      after: 'After (job artifact)',
-      beforeHint: 'Pre-apply snapshot: rollback returns to this version.',
-      snapshot: 'Pre-apply snapshot',
-      version: 'Version',
-      graphId: 'graph_id',
-      sha256: 'sha256',
-      apply: 'Apply calibration plan',
-      rollback: 'Roll back to the pre-apply version',
-      noJob: 'No job available to apply.',
-      exportConfig: 'Export config JSON',
-      applyReceipt: 'Latest apply receipt',
-      rollbackReceipt: 'Latest rollback receipt',
-      appliedAt: 'Applied at',
-      restoredVersion: 'Restored version',
-      ack: 'Ack kind',
-      ackActual: 'actual (really applied)',
-      ackSynthetic: 'synthetic (simulated commit)',
-      confirmApply: {
-        title: 'Apply the calibration plan?',
-        message: 'The job artifact will be prepare → commit-ed to the running plan; a snapshot of the current version {version} is recorded and can be rolled back.',
-        ok: 'Apply'
-      },
-      confirmRollback: {
-        title: 'Roll back to the pre-apply version?',
-        message: 'The running plan will be restored to version {version} (graph_id {graphId}).',
-        ok: 'Roll back'
-      },
-      appliedToast: 'Calibration plan applied',
-      rolledBackToast: 'Rolled back to the pre-apply version'
     },
     result: {
       syntheticHint: 'This job engine is {engine}: the values below are marked as demo data, not khaen measurements.',
@@ -1054,27 +1007,6 @@ const messages: Messages = {
       taskValue: 'T70f-a / T70f-b / T53',
       replacedBy: 'Alternative: use the per-lane gain editor on the right; the current gains cannot be read back (no read endpoint).'
     },
-    mode: {
-      title: 'Run mode',
-      desc: 'POST /api/surface （surface: "mode"） → POST /api/commit, two-phase; off = silence the whole chain, aes67 = enable output (the only implemented input source).',
-      option: {
-        off: 'off (silence the chain)',
-        aes67: 'aes67 (AES67 input)',
-        analog: 'analog (analog/local input)'
-      },
-      analogReason: 'The control plane only accepts off/on/aes67; analog (analog/local input source) is not implemented and would be rejected.',
-      analogTask: 'NOT_AVAILABLE · task T70f/T70g',
-      currentUnknown: 'Not wired: /api/status has no mode; only the latest commit receipt can be shown.',
-      field: {
-        appliedReceipt: 'Latest commit receipt mode',
-        statusSource: 'Mode state source'
-      },
-      sourceReceiptOnly: 'Control-plane receipt (not an /api/status readback)',
-      prepared: 'Mode draft prepared',
-      selectHint: 'Choose a target mode',
-      draftReady: 'Draft prepared: commit or discard it in the two-phase receipt below',
-      note: 'Mode belongs to the control plane (output enable); real input-source switching (toslink/dante/analog) belongs to rt-host/device supervision and is not implemented.'
-    },
     gains: {
       title: 'Per-lane gain draft',
       desc: 'POST /api/surface （surface: "volume", data: gains_db） → POST /api/commit, two-phase. There is no readback of current gains, so the draft starts from a neutral 0 dB and you select the lanes to submit.',
@@ -1175,8 +1107,6 @@ const messages: Messages = {
   },
   channels: {
     pageTitle: 'Plan & channels',
-    subtitle:
-      'Current plan (/api/status + /api/plan/history), output channels and MOTU physical mapping, AES67 input (/api/channels), and plan upload/history/rollback (upload → sha256 check → inspect preview → prepare → commit). When the M4 backend (T55) or hot reconfiguration (T52) is missing, the page honestly shows "not wired" plus the reason instead of inventing mappings/history/success.',
     actions: {
       refresh: 'Refresh'
     },
@@ -1196,11 +1126,6 @@ const messages: Messages = {
       historyUnavailable: 'Plan history unavailable: {message}',
       inspectUnavailable: 'Plan preview (/api/plan/inspect) unavailable: only the upload summary is shown; sections/latency are not invented'
     },
-    unavailable: {
-      title: '/api/channels is not wired (M4 / T55)',
-      desc: 'The daemon does not implement the channel layout API yet (task {task}): {message}. The page shows no fake mapping or channel count.',
-      reason: 'not reported by the daemon (/api/channels not wired, T55)'
-    },
     plan: {
       title: 'Current plan',
       desc: 'Plan metadata from /api/status plus the current version from /api/plan/history; missing fields show "not wired" plus the reason.',
@@ -1214,7 +1139,6 @@ const messages: Messages = {
       },
       noPlan: 'No plan has been applied yet',
       shaUnavailable: '/api/status has no sha256 (no data source)',
-      historyUnavailableHint: 'Plan history unavailable: the current version/rollback points cannot be read (T55).',
       prepared: 'Plan draft prepared',
       committed: 'Plan committed (receipt in the two-phase card below)'
     },
@@ -1249,7 +1173,6 @@ const messages: Messages = {
         sdp: 'SDP descriptor (sdp)',
         manual: 'Manual configuration (manual)'
       },
-      note: 'The input layout is decided by the rt-host AES67 receiver (SDP-driven since T70f-d2); this page only displays it and does not switch the input source.'
     },
     inspect: {
       title: 'Plan preview (/api/plan/inspect)',
@@ -1296,7 +1219,6 @@ const messages: Messages = {
       rollback: 'Roll back to this version',
       empty: 'No applied version in history yet.',
       noSource: 'The history endpoint has no data source (the daemon reports neither the current nor the available versions): no history is invented.',
-      unavailable: 'Plan history is not wired ({task}): {message}. The page does not invent history.',
       rollbackNote: 'Rollback is a forward commit: history is kept, and it still needs a commit in the two-phase card to take effect.',
       rollbackPrepared: 'Prepared a rollback draft to v{version}: commit it to apply',
       table: {
@@ -1310,39 +1232,6 @@ const messages: Messages = {
         title: 'Roll back to an older version?',
         message: 'A draft rolling back to v{version} will be prepared (the version number increases, history is not rewritten); it still requires a commit to take effect.',
         ok: 'Prepare rollback'
-      }
-    },
-    hotswap: {
-      title: 'Hot channel reconfiguration (M3b / T52 not done)',
-      desc: 'Changing output/input channel counts runs prepare → commit hot reconfiguration: the rt-host process stays alive and goes mute → close → apply → reopen → verify → resume, with automatic rollback on failure.',
-      warningTitle: 'Audio output will be interrupted',
-      warningDesc: 'Committing mutes and closes/reopens the device (expected audio gap about 1–2 seconds; the real measurement is authoritative); on failure rt-host rolls back to the old configuration automatically.',
-      field: {
-        outputChannels: 'Output channels',
-        inputChannels: 'Input channels',
-        audioGap: 'Estimated audio gap'
-      },
-      previewChange: '{from} → {to}',
-      audioGapValue: 'about {ms} ms',
-      prepare: 'Prepare',
-      commit: 'Commit (hot reconfiguration)',
-      prepared: 'Channel draft prepared (not committed)',
-      committed: 'Hot reconfiguration committed',
-      committedAt: 'Last commit receipt time: {time}',
-      previewTitle: 'Prepare preview (old → new)',
-      notAvailable: 'Hot reconfiguration commit is implemented by backend task {task}; until then the commit returns 501 and the page honestly shows "not wired" instead of pretending it applied.',
-      notAvailableReason: 'The M3b hot reconfiguration state machine (T52) and the daemon M4 API (T55) are not finished: commit returns 501 host_link_unsupported.',
-      confirmTitle: 'Commit the hot channel reconfiguration?',
-      confirmMessage: 'The engine mutes and closes/reopens the device, so audio is interrupted for about 1–2 seconds; on failure it rolls back automatically. Commit?',
-      confirmOk: 'Commit',
-      validation: {
-        output_range: 'Output channels must be an integer between 1 and 32',
-        dac_map_length: 'The DAC map length must equal the output channel count',
-        dac_map_value: 'DAC map values must be unique integers between 0 and 31',
-        input_range: 'Input channels must be an integer between 1 and 8',
-        input_map_length: 'The input map length must equal the input channel count',
-        input_map_value: 'Input map values must be unique integers between 0 and 63',
-        empty: 'Change at least the output or input channel count'
       }
     },
     draft: {
@@ -1367,8 +1256,9 @@ const messages: Messages = {
   },
   routing: {
     pageTitle: 'Routing matrix',
-    subtitle:
-      'Read-only diagnosis of input → 22-lane matrix → DAC physical outputs: composed from /api/channels (lane → DAC mapping, output channels, plan section), /api/status (AES67/format/plan/control link) and /api/plan/history. Missing fields show "not wired" plus the reason; routing edits/reorders need the PlanGraph editor (T59), so this page exposes no write entry and never fakes success.',
+    lanes: {
+      unknownLabel: 'OUT {channel}'
+    },
     actions: {
       refresh: 'Refresh'
     },
@@ -1396,11 +1286,6 @@ const messages: Messages = {
       noPlan: 'No applied plan has been read: there is no source of truth for the matrix/output routing (this page does not guess an identity mapping).'
     },
     statusUnavailable: '/api/status is not wired: the routing page cannot read input/format/control-link facts; check the session and the daemon.',
-    unavailable: {
-      title: '/api/channels is not wired (M4 / T55)',
-      desc: 'The daemon does not provide the channel/routing mapping API yet (task {task}): {message}. This page never shows a fake mapping.',
-      reason: 'not reported by the daemon (/api/channels not wired, T55)'
-    },
     chain: {
       title: 'Current routing chain (input → matrix → DAC output)',
       desc: 'Read-only: AES67 input (/api/status.format.aes67) → 22-lane matrix (format.channels) → DAC physical outputs (/api/channels.output + mapping). Fields without a data source show "not wired" plus the reason; no lane i → DAC i identity mapping is assumed.',
@@ -1428,23 +1313,6 @@ const messages: Messages = {
       },
       note: 'The matrix lane count comes from the data-plane format (/api/status.format.channels); output channels / DAC map come from /api/channels (actual rt-host configuration + the running plan routing section). When both are missing this page does not draw an identity path.'
     },
-    lanes: {
-      title: 'lane → DAC mapping',
-      desc: 'Same convention as the /channels page (lane / 0-based DAC / 1-based MOTU physical output); read-only here, the edit entry is on /channels (M4).',
-      openChannels: 'Open /channels to view/edit the mapping',
-      routedLanes: 'Routed lanes',
-      routes: 'Routes',
-      empty: '/api/channels does not report a lane → DAC mapping (rt-host status unavailable or the plan routing section unknown): this page does not invent a mapping.',
-      unknownLabel: 'OUT {channel}',
-      editHint:
-        'Mapping edits (output channels / DAC map) live on the Plan & channels page (M4/T54 two-phase prepare → commit); the daemon /api/channels commit still returns 501 host_link_unsupported (the hot-reconfig entry is not wired), which the page reports as not wired instead of duplicating a write entry here.',
-      table: {
-        lane: 'lane',
-        dac: 'DAC (0-based)',
-        physical: 'MOTU output',
-        label: 'Physical label'
-      }
-    },
     plan: {
       title: 'Plan routing section summary',
       desc: 'Composed from /api/status.plan and /api/plan/history; routing details come from /api/channels (mapping / dac_channels).',
@@ -1455,9 +1323,6 @@ const messages: Messages = {
         graphId: 'graph_id',
         appliedAt: 'Applied at',
         source: 'Plan source',
-        routingKnown: 'Routing section known',
-        dacChannels: 'DAC channels',
-        routes: 'Routes',
         historyCurrent: 'History current version'
       },
       versionReason: 'The running plan version is unreadable (neither /api/status nor /api/plan/history has a value)',
@@ -1465,30 +1330,6 @@ const messages: Messages = {
       historyReason: 'Plan history has not been read or is unavailable',
       segmentsReason:
         'No read-only endpoint reports the applied plan section list/count: the daemon reports segments/segment_count only in the POST /api/plan/upload ack (T55); /api/status and /api/plan/history do not contain it. This page never passes the route count off as the segment count; the upload/view entry is on /channels.',
-      segmentsNote:
-        'The segment count (number of content/crossover/matrix/protection/routing sections) can currently only be seen in the /channels plan upload ack; this page honestly shows "not wired" instead of guessing.'
-    },
-    edit: {
-      title: 'Routing edit and reorder (NOT_AVAILABLE)',
-      desc: 'Matrix crosspoint editing / lane reordering / applying a routing: this milestone exposes no write entry and never performs an operation that looks successful.',
-      notAvailableTitle: 'Routing write operations are not wired ({task})',
-      notAvailableDesc:
-        'The PlanGraph editor/designer (task {task}) is required to edit matrix crosspoints and lane order on the graph and compile the patch into Plan sections; this page is read-only diagnostics and does not expose the low-level patch endpoint, so no fake success.',
-      reason: 'The PlanGraph editor/designer (T59) is not implemented; this page exposes no routing write entry.',
-      action: {
-        reorder: 'Reorder lanes',
-        crosspoint: 'Edit matrix crosspoints',
-        apply: 'Apply routing',
-        channels: 'Open /channels (read-only mapping)'
-      },
-      disabledHint: 'Not wired (T59): button disabled, no fake success',
-      requirement: {
-        editor: 'Editor/designer ({task}): visual editing of matrix crosspoints and lane order + Plan section compilation.',
-        patch:
-          'The control plane already has a low-level POST /api/surface (surface=routing) Plan-section patch (route lane→dac list); it is not a graph editor and does not validate the complete reordered routing semantics, so this page does not expose it.',
-        commit:
-          'Committing depends on the block-boundary swap / hot reconfiguration (M3b/T52): before the routing is really switched, a control-plane ack does not mean the device is already rendering the new routing.'
-      }
     },
     notWired: {
       title: 'Capabilities reported as not wired by the backend',

@@ -5,18 +5,20 @@
  * 所有数值来自 daemon 的 job result；缺失显示「—」，不编造。
  * mock/fixture 引擎（engine=synthetic/mock/fixture）的数据标「示意」，不冒充实测。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessage } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
 import TruthTag from '@/components/TruthTag.vue'
 import VerdictBadge from './VerdictBadge.vue'
 import {
-  calibrationArtifactUrl,
-  jobResultTruth,
+  resultTruth,
+  type CalibrationArtifact,
   type CalibrationDesign,
   type CalibrationJob,
   type CalibrationJobResult
 } from '@/api/calibration'
+import { downloadCalibrationArtifact } from '@/stores/calibration'
 import { formatDecimal, formatInteger, shortenId, toByteUnit } from '@/utils/format'
 import type { TruthKind } from '@/types/ui'
 
@@ -34,7 +36,48 @@ const { t, locale } = useI18n({ useScope: 'global' })
 
 const localeId = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
 const result = computed<CalibrationJobResult | null>(() => props.job.result)
-const truth = computed<TruthKind>(() => jobResultTruth(props.job.engine))
+/**
+ * 结果真实性：优先用 result.measured / result.simulated（合同 §7【加法】），
+ * 缺失时按 engine 判定；synthetic 永远不写成实测。
+ */
+const truth = computed<TruthKind>(() => resultTruth(result.value, props.job.engine))
+
+const downloadingArtifact = ref<string | null>(null)
+
+/**
+ * 产物下载必须走带认证的 API（getRaw：Cookie 会话 + 统一 401/错误体），
+ * 不能直接把 artifacts 路径放进 <a href>（同源 Cookie 虽在，但无法处理 401/错误体）。
+ * 拿到 text/filename 后用 Blob + object URL 保存（浏览器侧）。
+ */
+async function downloadArtifact(artifact: CalibrationArtifact): Promise<void> {
+  if (downloadingArtifact.value !== null) {
+    return
+  }
+  downloadingArtifact.value = artifact.name
+  try {
+    const download = await downloadCalibrationArtifact(props.job.id, artifact.name)
+    if (download.ok !== true) {
+      const detail = download.error.detail ?? download.error.code
+      ElMessage.error(t('calibrationEdit.artifact.failed') + ': ' + t(download.error.i18nKey) + ' — ' + detail)
+      return
+    }
+    // 无损字节（getRawBytes）：二进制产物（plan.bin）也可以直接 Blob 保存。
+    const blob = new Blob([download.value.data], {
+      type: download.value.content_type ?? artifact.content_type ?? 'application/octet-stream'
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = download.value.filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('calibrationEdit.artifact.done', { filename: download.value.filename }))
+  } finally {
+    downloadingArtifact.value = null
+  }
+}
 
 function num(value: number | null, digits = 2): string {
   return formatDecimal(value, digits, localeId.value) ?? t('common.dash')
@@ -75,7 +118,7 @@ function residualTone(design: CalibrationDesign | null): string {
 
     <template v-if="result">
       <div class="job-result__verdict">
-        <VerdictBadge :verdict="result.verdict" :engine="props.job.engine" large />
+        <VerdictBadge :verdict="result.verdict" :engine="props.job.engine" :truth="truth" large />
         <span v-if="props.job.verdict !== result.verdict" class="aux-text">
           {{ t('calibration.result.jobVerdictMismatch', { job: props.job.verdict ?? t('common.dash'), result: result.verdict ?? t('common.dash') }) }}
         </span>
@@ -177,15 +220,18 @@ function residualTone(design: CalibrationDesign | null): string {
               sha256: {{ shortenId(artifact.sha256, 12, 8) ?? t('common.dash') }}
             </span>
             <span class="aux-text mono">{{ bytes(artifact.bytes) }}</span>
-            <a
+            <el-button
               class="job-result__download"
-              :href="calibrationArtifactUrl(props.job.id, artifact.name)"
-              :download="artifact.name"
-              :aria-label="t('calibration.job.download') + ': ' + artifact.name"
+              size="small"
+              plain
+              :loading="downloadingArtifact === artifact.name"
+              :disabled="downloadingArtifact !== null && downloadingArtifact !== artifact.name"
+              :aria-label="t('calibrationEdit.artifact.download') + ': ' + artifact.name"
+              @click="downloadArtifact(artifact)"
             >
               <el-icon :size="13"><Download /></el-icon>
-              <span>{{ t('calibration.job.download') }}</span>
-            </a>
+              <span>{{ t('calibrationEdit.artifact.download') }}</span>
+            </el-button>
           </li>
         </ul>
       </section>

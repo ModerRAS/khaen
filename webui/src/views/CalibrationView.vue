@@ -25,6 +25,7 @@ import {
 } from '@/stores/calibration'
 import {
   JOBS_PAGE_SIZE,
+  engineTruth as engineTruthOf,
   isJobActive,
   jobDurationMs,
   type CalibrationJobSummary
@@ -51,11 +52,24 @@ const lastJob = computed(() => list.value.find((job) => !isJobActive(job.status)
 const measurement = computed(() => state.wizardState?.measurement ?? null)
 const currentWizardStep = computed(() => state.wizardState?.current_step ?? null)
 const unavailable = computed(() => phase.value === 'unavailable')
+/** 原因优先取 daemon 列表的 reason（available=false 时必给），其次 reasons.jobs / 错误详情；不硬编码里程碑号。 */
 const unavailableReason = computed(
-  () => state.jobs?.reason ?? (error.value?.detail ?? error.value?.code ?? t('common.unknown'))
+  () =>
+    state.jobs?.reason ??
+    state.jobs?.reasons['jobs'] ??
+    state.jobs?.reasons['engine'] ??
+    error.value?.detail ??
+    error.value?.code ??
+    null
+)
+const unavailableReasonText = computed(() =>
+  unavailableReason.value === null
+    ? t('calibrationEdit.list.notAvailableNoReason')
+    : t('calibrationEdit.list.notAvailableReason', { reason: unavailableReason.value })
 )
 const engineText = computed(() => state.jobs?.engine ?? null)
-const engineTruth = computed<TruthKind>(() => (engineText.value === null ? 'notWired' : 'actual'))
+/** synthetic/mock 引擎标「示意」，只有 real_audio 才是实测；缺失=未上报。 */
+const engineTruth = computed<TruthKind>(() => engineTruthOf(engineText.value))
 
 const page = computed(() => Math.floor(offset.value / JOBS_PAGE_SIZE) + 1)
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / JOBS_PAGE_SIZE)))
@@ -96,7 +110,11 @@ function shortId(id: string | null): string {
 }
 
 function truthForJob(job: CalibrationJobSummary): TruthKind {
-  return job.status === 'queued' || job.status === 'running' ? 'notWired' : 'actual'
+  // 引擎未上报/非 real_audio 时不能把行标成实测（job 状态不决定真实性）。
+  if (job.status === 'queued' || job.status === 'running') {
+    return 'notWired'
+  }
+  return engineTruthOf(engineText.value)
 }
 
 async function refresh(): Promise<void> {
@@ -203,8 +221,8 @@ onBeforeUnmount(() => {
     </PageHeader>
 
     <div v-if="unavailable" class="banner banner--warn" role="status">
-      <strong>{{ t('calibration.list.unavailableTitle') }}</strong>
-      <span>{{ t('calibration.list.unavailableDesc', { reason: unavailableReason, task: 'T70h-b' }) }}</span>
+      <strong>NOT_AVAILABLE · {{ t('calibrationEdit.list.notAvailableTitle') }}</strong>
+      <span>{{ unavailableReasonText }}</span>
       <TruthTag kind="notWired" />
     </div>
 
@@ -224,7 +242,8 @@ onBeforeUnmount(() => {
             <button type="button" class="calibration-summary__id mono" @click="openJob(lastJob)">
               {{ shortId(lastJob.id) }}
             </button>
-            <VerdictBadge :verdict="lastJob.verdict" :engine="state.jobs?.engine ?? null" />
+            <VerdictBadge :verdict="lastJob.verdict" :engine="state.jobs?.engine ?? null" :truth="engineTruth" />
+            <span v-if="engineText === null" class="aux-text">{{ t('calibrationEdit.list.engineUnknownReason') }}</span>
           </div>
           <p class="aux-text">
             {{ statusLabel(lastJob.status) }} · {{ timeText(lastJob.created_at) }} · {{ durationText(lastJob) }}
@@ -287,7 +306,7 @@ onBeforeUnmount(() => {
           {{ unavailable ? t('calibration.list.emptyUnavailableTitle') : t('calibration.list.emptyTitle') }}
         </p>
         <p class="aux-text">
-          {{ unavailable ? unavailableReason : t('calibration.list.emptyDesc') }}
+          {{ unavailable ? unavailableReasonText : t('calibration.list.emptyDesc') }}
         </p>
         <el-button type="primary" plain :disabled="unavailable" @click="openWizard">
           {{ t('calibration.list.newWizard') }}
@@ -315,7 +334,10 @@ onBeforeUnmount(() => {
                   <button type="button" class="calibration-table__id mono" @click="openJob(job)">
                     {{ shortId(job.id) }}
                   </button>
-                  <TruthTag :kind="truthForJob(job)" />
+                  <TruthTag
+                    :kind="truthForJob(job)"
+                    :reason="engineText === null ? t('calibrationEdit.list.engineUnknownReason') : null"
+                  />
                 </td>
                 <td class="mono">{{ job.kind }}</td>
                 <td>
@@ -324,7 +346,7 @@ onBeforeUnmount(() => {
                     {{ statusLabel(job.status) }}
                   </span>
                 </td>
-                <td><VerdictBadge :verdict="job.verdict" :engine="state.jobs?.engine ?? null" /></td>
+                <td><VerdictBadge :verdict="job.verdict" :engine="state.jobs?.engine ?? null" :truth="engineTruth" /></td>
                 <td class="mono">{{ timeText(job.created_at) }}</td>
                 <td class="mono">{{ durationText(job) }}</td>
                 <td class="calibration-table__actions">

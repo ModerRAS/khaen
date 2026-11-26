@@ -1,12 +1,16 @@
 <script setup lang="ts">
 /**
- * 方案与声道页（M4 / 任务 T54）——方案上传/历史/回滚 + 输出声道与前级映射。
+ * 方案与声道页——方案上传/历史/回滚 + 声道热重配（PUT /api/channels 两阶段）。
  *
- * 数据来源（页面唯一事实源，缺失即「未接入」）：
+ * 数据来源（页面唯一事实源，缺失即「未接入/未上报」）：
  * - GET /api/status（5s 轮询）：plan.graph_id / version / latency_samples / applied_at / source；
- * - GET /api/channels：khaen-channels/v1（output.channels/dac_map、input.channels/map/source/sdp_sha256、
- *   mapping、reasons、not_wired）；
- * - PUT /api/channels（prepare）→ POST /api/commit（热重配提交；M3b/T52 未完成前返回 501 host_link_unsupported）；
+ * - GET /api/channels（恒 200 khaen-channels/v1）：current/device/format/generation/busy/pending/
+ *   last_gap_ms/last_result/input/output/mapping/plan/hot_reconfigure/not_wired/reasons；
+ *   mapping=null 时显示「当前值未知」+ 原因（不拿旧值/直通冒充当前值）；
+ * - PUT /api/channels 两阶段：prepare（可带 channels/sample_rate/aes67 系列字段/jitter_frames/mapping/dac_map）
+ *   → commit {stage:'commit',engine_token} 或 abort {stage:'abort',engine_token}；
+ *   mapping/dac_map 是方案 routing：commit_supported=false 时禁用 commit、逐条显示 blockers，
+ *   引导走方案上传 → prepare → commit（不签发假 token、不假成功）；
  * - POST /api/plan/upload（客户端 sha256 + 服务端 sha 双侧比对）→ POST /api/plan/inspect {plan_path}
  *   （plan_path = 上传回执的 stored_path；失败降级为上传摘要）→ POST /api/prepare {plan_path, plan_sha256}
  *   → POST /api/commit / POST /api/abort；
@@ -14,10 +18,10 @@
  *   → 回滚草稿 → commit（版本号递增，历史不改写）。
  *
  * 诚实边界：
- * - 后端端点未实现/不可用时整块显示 NOT_AVAILABLE + 稳定码 + 原因 + 任务号（T55 / T52），不编造历史/映射；
+ * - 后端不可用/未接线时显示 NOT_AVAILABLE + 稳定码 + 原因，不编造历史/映射；
  * - MOTU 物理输出只标注已知位置（1-2 L/R、3-4 SL/SR、5-6 TF/TFR、8 LFE），未知位置显示输出序号，不猜；
- * - 声道/样本率变更会中断出声：提交前必须确认；M3b 未完成时提交按钮仍可点，但后端 501 如实显示为
- *   「热重配未接入」，绝不显示成功；
+ * - 声道/样本率变更会中断出声：commit 前必须确认；502 reconfig_failed 的 details.rolled_back 原样展示；
+ * - 回执里的 applied/generation/gap_ms/format 是数据面真实值；「设备已换格式」只按 rt-host 回执标注；
  * - 上传 sha 两侧不一致即失败（不信任任何一侧）；历史/预览缺失时清空对应数据，不用旧数据冒充最新。
  */
 import { computed, ref, watch } from 'vue'
@@ -33,6 +37,7 @@ import ControlErrorNotice from '@/components/control/ControlErrorNotice.vue'
 import { useStatusPolling } from '@/composables/useStatusPolling'
 import { reasonForPath, runStateKind, runStateLabelKey } from '@/api/status'
 import {
+  CHANNELS_SAMPLE_RATES_HZ,
   MOTU_KNOWN_OUTPUT_NUMBERS,
   PLAN_UPLOAD_MAX_BYTES,
   formatChannelMap,
@@ -48,6 +53,7 @@ import {
   channelsState,
   commitChannelLayout,
   commitChannelPlan,
+  discardChannelLayoutDraft,
   loadChannels,
   loadChannelsHistory,
   prepareChannelLayout,
@@ -512,154 +518,532 @@ async function onRollback(target: number): Promise<void> {
   }
 }
 
-/* ------------------------------------------------------- 声道热重配（M3b） */
+/* ------------------------------------------------- 声道热重配（PUT /api/channels 两阶段） */
 
-const outputDraft = ref<number | null>(null)
-const inputDraft = ref<number | null>(null)
+const channelsCurrent = computed(() => channels.value?.current ?? null)
+/** 当前输出通道数：channels_status.current 优先，方案 routing / 契约 B format 是降级来源（都真实上报）。 */
+const currentOutputChannels = computed(
+  () => channelsCurrent.value?.channels ?? channels.value?.output.channels ?? null
+)
+const currentSampleRate = computed(
+  () => channelsCurrent.value?.sample_rate ?? channels.value?.format?.sample_rate ?? null
+)
+const currentAes67Channels = computed(
+  () => channelsCurrent.value?.aes67_channels ?? channels.value?.input.channels ?? null
+)
+const currentAes67Map = computed<number[] | null>(
+  () => channelsCurrent.value?.aes67_map ?? channels.value?.input.map ?? null
+)
+/** 从 mapping（lane->dac）还原 dac_map（dac -> lane；null = 该 DAC 无 lane）；mapping=null 时为 null（未知）。 */
+const currentDacMap = computed<Array<number | null> | null>(() => {
+  const info = channels.value
+  if (info === null || info.mapping === null) {
+    return null
+  }
+  const length =
+    info.output.channels ?? (info.mapping.length > 0 ? Math.max(...info.mapping.map((entry) => entry.dac)) + 1 : 0)
+  const result: Array<number | null> = []
+  for (let dac = 0; dac < length; dac += 1) {
+    result.push(null)
+  }
+  for (const entry of info.mapping) {
+    if (Number.isInteger(entry.dac) && entry.dac >= 0 && entry.dac < length) {
+      result[entry.dac] = entry.lane
+    }
+  }
+  return result
+})
+
+const draftChannels = ref<number | null>(null)
+const draftSampleRate = ref<number | null>(null)
+const draftAes67Group = ref<string>('')
+const draftAes67Port = ref<number | null>(null)
+const draftPayloadType = ref<number | null>(null)
+const draftAes67Channels = ref<number | null>(null)
+const draftAes67MapText = ref<string>('')
+const draftJitter = ref<number | null>(null)
+/** 方案 routing 的 DAC -> lane 文本（'-' = 该 DAC 无 lane）；空 = 未编辑，不猜当前路由。 */
+const draftDacMapText = ref<string>('')
+
+function joinNumberList(values: readonly number[] | null): string {
+  return values === null ? '' : values.join(', ')
+}
+
+function dacMapToText(values: readonly (number | null)[] | null): string {
+  return values === null ? '' : values.map((value) => (value === null ? '-' : String(value))).join(', ')
+}
+
+function parseNumberList(text: string): number[] | null {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+  const values: number[] = []
+  for (const part of trimmed.split(',')) {
+    const token = part.trim()
+    if (!/^\d+$/.test(token)) {
+      return null
+    }
+    values.push(Number(token))
+  }
+  return values
+}
+
+function parseDacMapList(text: string): Array<number | null> | null {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+  const values: Array<number | null> = []
+  for (const part of trimmed.split(',')) {
+    const token = part.trim()
+    if (token === '-') {
+      values.push(null)
+      continue
+    }
+    if (!/^\d+$/.test(token)) {
+      return null
+    }
+    values.push(Number(token))
+  }
+  return values
+}
+
+function sameNumberList(a: readonly number[] | null, b: readonly number[] | null): boolean {
+  if (a === null || b === null) {
+    return a === b
+  }
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
+function sameNullableList(
+  a: readonly (number | null)[] | null,
+  b: readonly (number | null)[] | null
+): boolean {
+  if (a === null || b === null) {
+    return a === b
+  }
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
+function syncDraftsFromChannels(): void {
+  const info = channels.value
+  draftChannels.value = currentOutputChannels.value
+  draftSampleRate.value = currentSampleRate.value
+  draftAes67Group.value = channelsCurrent.value?.aes67_group ?? ''
+  draftAes67Port.value = channelsCurrent.value?.aes67_port ?? null
+  draftPayloadType.value = channelsCurrent.value?.aes67_payload_type ?? null
+  draftAes67Channels.value = currentAes67Channels.value
+  draftAes67MapText.value = joinNumberList(currentAes67Map.value)
+  draftJitter.value = channelsCurrent.value?.jitter_frames ?? null
+  draftDacMapText.value = info !== null && info.mapping !== null ? dacMapToText(currentDacMap.value) : ''
+}
 
 watch(
   () => channels.value,
   (info) => {
-    if (info === null) {
-      outputDraft.value = null
-      inputDraft.value = null
+    // 准备中/有草稿时不覆盖用户编辑；commit 成功会清草稿并重新 load，随后按新 current 同步。
+    if (channelsState.channelsDraft !== null || channelsState.channelsBusy !== null) {
       return
     }
-    if (outputDraft.value === null && info.output.channels !== null) {
-      outputDraft.value = info.output.channels
+    if (info === null) {
+      return
     }
-    if (inputDraft.value === null && info.input.channels !== null) {
-      inputDraft.value = info.input.channels
-    }
+    syncDraftsFromChannels()
   },
   { immediate: true }
 )
 
+/** 与当前值不同的字段才进补丁（未提供的字段后端不修改）。 */
 const channelsPatch = computed<ChannelsPatch>(() => {
   const patch: ChannelsPatch = {}
-  const output = outputDraft.value
-  if (output !== null && output !== (channels.value?.output.channels ?? null)) {
-    const previous = channels.value?.output.dac_map ?? null
-    // daemon 的 dac_map 允许 null 项（该 DAC 静音/没有 lane 喂入）：T54 的补丁契约只接受
-    // number[]（每个输出通道的 DAC 序号），null 项无法原样复用 -> 退回按新通道数的 identity 草稿
-    // （只是草稿，仍需 prepare 校验 + commit；提交在 M3b/T52 前恒 501，不假装生效）。
-    const reusable =
-      previous !== null &&
-      previous.length === output &&
-      previous.every((value): value is number => value !== null)
-    if (reusable && previous !== null) {
-      patch.output = { channels: output, dac_map: previous }
-    } else {
-      const dacMap: number[] = []
-      for (let index = 0; index < output; index += 1) {
-        dacMap.push(index)
-      }
-      patch.output = { channels: output, dac_map: dacMap }
-    }
+  if (channels.value === null) {
+    return patch
   }
-  const input = inputDraft.value
-  if (input !== null && input !== (channels.value?.input.channels ?? null)) {
-    const previous = channels.value?.input.map ?? null
-    if (previous !== null && previous.length === input) {
-      patch.input = { channels: input, map: previous }
-    } else {
-      const map: number[] = []
-      for (let index = 0; index < input; index += 1) {
-        map.push(index)
-      }
-      patch.input = { channels: input, map }
-    }
+  if (draftChannels.value !== null && draftChannels.value !== currentOutputChannels.value) {
+    patch.channels = draftChannels.value
+  }
+  if (draftSampleRate.value !== null && draftSampleRate.value !== currentSampleRate.value) {
+    patch.sample_rate = draftSampleRate.value
+  }
+  const group = draftAes67Group.value.trim()
+  if (group.length > 0 && group !== (channelsCurrent.value?.aes67_group ?? null)) {
+    patch.aes67_group = group
+  }
+  if (draftAes67Port.value !== null && draftAes67Port.value !== (channelsCurrent.value?.aes67_port ?? null)) {
+    patch.aes67_port = draftAes67Port.value
+  }
+  if (
+    draftPayloadType.value !== null &&
+    draftPayloadType.value !== (channelsCurrent.value?.aes67_payload_type ?? null)
+  ) {
+    patch.aes67_payload_type = draftPayloadType.value
+  }
+  if (draftAes67Channels.value !== null && draftAes67Channels.value !== currentAes67Channels.value) {
+    patch.aes67_channels = draftAes67Channels.value
+  }
+  const parsedAes67Map = parseNumberList(draftAes67MapText.value)
+  if (parsedAes67Map !== null && !sameNumberList(parsedAes67Map, currentAes67Map.value)) {
+    patch.aes67_map = parsedAes67Map
+  }
+  if (draftJitter.value !== null && draftJitter.value !== (channelsCurrent.value?.jitter_frames ?? null)) {
+    patch.jitter_frames = draftJitter.value
+  }
+  const parsedDacMap = parseDacMapList(draftDacMapText.value)
+  if (parsedDacMap !== null && !sameNullableList(parsedDacMap, currentDacMap.value)) {
+    patch.dac_map = parsedDacMap
   }
   return patch
 })
 
-const patchValidation = computed(() =>
-  Object.keys(channelsPatch.value).length === 0
-    ? 'empty'
-    : validateChannelsPatch(channelsPatch.value, channels.value?.output.channels ?? null)
-)
+/** 文本解析失败先于契约校验（否则会把非法文本当「未修改」静默丢掉）。 */
+const patchTextError = computed<string | null>(() => {
+  if (draftAes67MapText.value.trim().length > 0 && parseNumberList(draftAes67MapText.value) === null) {
+    return 'aes67_map_value'
+  }
+  if (draftDacMapText.value.trim().length > 0 && parseDacMapList(draftDacMapText.value) === null) {
+    return 'dac_map_value'
+  }
+  return null
+})
+
+/** 只改 aes67_channels 而映射长度不匹配时也要在客户端拦住（后端会 400）。 */
+const patchAes67ConsistencyError = computed<string | null>(() => {
+  const patch = channelsPatch.value
+  const targetChannels = patch.aes67_channels ?? channelsCurrent.value?.aes67_channels ?? null
+  const targetMap = patch.aes67_map ?? currentAes67Map.value
+  if (targetChannels !== null && targetMap !== null && targetMap.length !== targetChannels) {
+    return 'aes67_map_length'
+  }
+  return null
+})
+
+const patchValidation = computed<string | null>(() => {
+  if (Object.keys(channelsPatch.value).length === 0) {
+    return 'empty'
+  }
+  return (
+    patchTextError.value ??
+    patchAes67ConsistencyError.value ??
+    validateChannelsPatch(channelsPatch.value)
+  )
+})
 
 const channelsDraft = computed(() => channelsState.channelsDraft)
 const channelsCommitAck = computed(() => channelsState.channelsCommit)
 const channelsWriteBusy = computed(() => channelsState.channelsBusy)
 const channelsWriteError = computed(() => channelsState.channelsError)
+/** commit_supported=false 是页面内诚实保护（blockers 在草稿卡逐条展示），不重复弹错误条。 */
+const channelsNoticeError = computed(() =>
+  channelsWriteError.value !== null && channelsWriteError.value.category === 'commit_unsupported'
+    ? null
+    : channelsWriteError.value
+)
+const channelsErrorStage = computed(() => channelsState.channelsErrorStage)
+const channelsFailure = computed(() => channelsState.channelsFailure)
 
 const canPrepareChannels = computed(
-  () =>
-    channelsWriteBusy.value === null &&
-    channels.value !== null &&
-    patchValidation.value === null
+  () => channelsWriteBusy.value === null && channels.value !== null && patchValidation.value === null
 )
 
-/** M3b 热重配未完成：commit 后端会返回 501 host_link_unsupported；UI 明示、不假装成功。 */
-const hotSwapNotAvailableReason = computed(() => t('channels.hotswap.notAvailableReason'))
+/** commit_supported=false 或没有 token：禁止发 commit（不假成功）。 */
+const canCommitChannels = computed(
+  () =>
+    channelsDraft.value !== null &&
+    channelsWriteBusy.value === null &&
+    channelsDraft.value.commit_supported &&
+    channelsDraft.value.engine_token !== null
+)
+const canAbortChannels = computed(
+  () => channelsDraft.value !== null && channelsWriteBusy.value === null
+)
+
+/* --------------------------------------------- 只读状态（capability / 当前值来源） */
+
+const hotCapabilityText = computed(() => {
+  const wired = channels.value?.hot_reconfigure.wired ?? null
+  if (wired === true) {
+    return t('channelsEdit.hotswap.capabilityWired')
+  }
+  if (wired === false) {
+    return t('channelsEdit.hotswap.capabilityNotWired')
+  }
+  return t('channelsEdit.hotswap.capabilityUnknown')
+})
+
+const hotCapabilityReason = computed(() => channels.value?.hot_reconfigure.reason ?? null)
+
+const pendingText = computed(() => {
+  const pending = channels.value?.pending ?? null
+  return pending === null ? t('channelsEdit.hotswap.pendingNo') : t('channelsEdit.hotswap.pendingYes')
+})
+
+const lastGapText = computed(() => {
+  const gap = channels.value?.last_gap_ms ?? null
+  return gap === null ? null : t('channelsEdit.hotswap.lastGapValue', { ms: intText(gap) ?? String(gap) })
+})
+
+const lastResultJson = computed(() => {
+  const result = channels.value?.last_result ?? null
+  if (result === null) {
+    return null
+  }
+  try {
+    return JSON.stringify(result, null, 2)
+  } catch {
+    return String(result)
+  }
+})
+
+const deviceText = computed(() => {
+  const device = channels.value?.device ?? null
+  if (device === null || device.name === null) {
+    return null
+  }
+  return t('channelsEdit.hotswap.deviceValue', {
+    name: device.name,
+    state: device.state ?? t('common.dash')
+  })
+})
+
+const probeText = computed(() => {
+  const probe = channels.value?.device?.probe ?? null
+  if (probe === null) {
+    return null
+  }
+  if (probe.available === false) {
+    return t('channelsEdit.hotswap.probeUnavailable')
+  }
+  return t('channelsEdit.hotswap.probeValue', {
+    rate: intText(probe.sample_rate) ?? t('common.dash'),
+    channels: intText(probe.channels) ?? t('common.dash')
+  })
+})
 
 async function onPrepareChannels(): Promise<void> {
   if (!canPrepareChannels.value) {
     return
   }
   const ack = await prepareChannelLayout(channelsPatch.value)
-  if (ack !== null) {
-    ElMessage.success(t('channels.hotswap.prepared'))
+  if (ack === null) {
+    return
+  }
+  if (ack.commit_supported) {
+    ElMessage.success(t('channelsEdit.hotswap.prepared'))
+  } else {
+    // 不签发假 token：commit 被本地禁用，明示只能走方案 prepare+commit。
+    ElMessage.warning(t('channelsEdit.error.commitUnsupported'))
   }
 }
 
 async function onCommitChannels(): Promise<void> {
-  if (channelsDraft.value === null || channelsWriteBusy.value !== null) {
+  if (!canCommitChannels.value) {
     return
   }
   try {
     await ElMessageBox.confirm(
-      t('channels.hotswap.confirmMessage'),
-      t('channels.hotswap.confirmTitle'),
-      { confirmButtonText: t('channels.hotswap.confirmOk'), cancelButtonText: t('common.cancel'), type: 'warning' }
+      t('channelsEdit.hotswap.commitConfirmMessage'),
+      t('channelsEdit.hotswap.commitConfirmTitle'),
+      { confirmButtonText: t('channelsEdit.hotswap.commitConfirmOk'), cancelButtonText: t('common.cancel'), type: 'warning' }
     )
   } catch {
     return
   }
   const ack = await commitChannelLayout()
-  if (ack !== null) {
-    ElMessage.success(t('channels.hotswap.committed'))
-    await refreshStatus()
+  if (ack === null) {
+    return
+  }
+  ElMessage.success(t('channelsEdit.hotswap.committed'))
+  await refreshStatus()
+  if (planRecommitRequired.value === true) {
+    ElMessage.warning(t('channelsEdit.hotswap.planRecommitLabel'))
   }
 }
 
 async function onAbortChannels(): Promise<void> {
+  const hadToken = channelsDraft.value !== null && channelsDraft.value.engine_token !== null
   const ok = await abortChannelLayout()
   if (ok) {
-    ElMessage.success(t('control.toast.aborted'))
+    ElMessage.success(t(hadToken ? 'channelsEdit.hotswap.aborted' : 'channelsEdit.hotswap.discarded'))
   }
 }
 
-const channelsPreviewRows = computed<KvRow[]>(() => {
-  const ack = channelsDraft.value
-  if (ack === null || ack.preview === null) {
+function onDiscardChannelsDraft(): void {
+  discardChannelLayoutDraft()
+  ElMessage.success(t('channelsEdit.hotswap.discarded'))
+}
+
+function onResetChannelsDrafts(): void {
+  syncDraftsFromChannels()
+}
+
+/* -------------------------------------------------- 草稿 / 回执 / 失败明细展示 */
+
+function formatText(format: {
+  channels: number | null
+  sample_rate: number | null
+  block_frames: number | null
+} | null): string | null {
+  if (format === null) {
+    return null
+  }
+  return t('channelsEdit.hotswap.formatValue', {
+    rate: intText(format.sample_rate) ?? t('common.dash'),
+    channels: intText(format.channels) ?? t('common.dash'),
+    frames: intText(format.block_frames) ?? t('common.dash')
+  })
+}
+
+function jsonText(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+const draftChangedText = computed(() => {
+  const changed = channelsDraft.value?.changed ?? null
+  if (changed === true) {
+    return t('channelsEdit.hotswap.changedYes')
+  }
+  if (changed === false) {
+    return t('channelsEdit.hotswap.changedNo')
+  }
+  return t('channelsEdit.hotswap.notReported')
+})
+
+const draftFormatText = computed(() => formatText(channelsDraft.value?.format ?? null))
+
+const draftGraphText = computed(() => {
+  const graph = channelsDraft.value?.graph ?? null
+  if (graph === null || graph.action === null) {
+    return null
+  }
+  const reason = graph.reason ?? t('channelsEdit.hotswap.notReported')
+  return t('channelsEdit.hotswap.graphValue', { action: graph.action, reason })
+})
+
+const draftAdmissionText = computed(() => {
+  const admission = channelsDraft.value?.admission ?? null
+  if (admission === null) {
+    return t('channelsEdit.hotswap.admissionUnknown')
+  }
+  const accepted = admission.accepted
+  if (accepted === true) {
+    return t('channelsEdit.hotswap.admissionAccepted')
+  }
+  if (accepted === false) {
+    return t('channelsEdit.hotswap.admissionRejected')
+  }
+  return t('channelsEdit.hotswap.admissionUnknown')
+})
+
+const draftBlockers = computed(() => channelsDraft.value?.blockers ?? [])
+const draftWarnings = computed(() => channelsDraft.value?.warnings ?? [])
+const draftEngineToken = computed(() => shortenId(channelsDraft.value?.engine_token ?? null, 8, 4))
+const draftDiffJson = computed(() => jsonText(channelsDraft.value?.diff ?? null))
+const draftCurrentJson = computed(() => jsonText(channelsDraft.value?.current ?? null))
+const draftTargetJson = computed(() => jsonText(channelsDraft.value?.target ?? null))
+const draftRawJson = computed(() => jsonText(channelsDraft.value ?? null))
+const draftCommitUnsupported = computed(
+  () => channelsDraft.value !== null && !channelsDraft.value.commit_supported
+)
+
+const channelsCommitAckRows = computed<KvRow[]>(() => {
+  const ack = channelsCommitAck.value
+  if (ack === null) {
     return []
   }
-  const preview = ack.preview
+  const boolText = (value: boolean | null): string | null =>
+    value === null ? null : value ? t('channelsEdit.hotswap.failureYes') : t('channelsEdit.hotswap.failureNo')
   return [
     {
-      label: t('channels.hotswap.field.outputChannels'),
-      value: t('channels.hotswap.previewChange', {
-        from: intText(preview.old_channels) ?? t('common.dash'),
-        to: intText(preview.new_channels) ?? t('common.dash')
-      })
-    },
-    {
-      label: t('channels.hotswap.field.inputChannels'),
-      value: t('channels.hotswap.previewChange', {
-        from: intText(preview.old_input_channels) ?? t('common.dash'),
-        to: intText(preview.new_input_channels) ?? t('common.dash')
-      })
-    },
-    {
-      label: t('channels.hotswap.field.audioGap'),
+      label: t('channelsEdit.hotswap.appliedLabel'),
       value:
-        preview.audio_gap_ms_estimate === null
-          ? null
-          : t('channels.hotswap.audioGapValue', { ms: intText(preview.audio_gap_ms_estimate) ?? t('common.dash') })
-    }
+        ack.applied === null
+          ? t('channelsEdit.hotswap.notReported')
+          : ack.applied
+            ? t('channelsEdit.hotswap.appliedYes')
+            : t('channelsEdit.hotswap.appliedNo'),
+      tone: ack.applied === false ? ('warn' as const) : null
+    },
+    { label: t('channelsEdit.hotswap.changedLabel'), value: boolText(ack.changed) },
+    { label: t('channelsEdit.hotswap.commitGenerationLabel'), value: intText(ack.generation) },
+    {
+      label: t('channelsEdit.hotswap.gapLabel'),
+      value: ack.gap_ms === null ? null : t('channelsEdit.hotswap.gapValue', { ms: intText(ack.gap_ms) ?? String(ack.gap_ms) })
+    },
+    { label: t('channelsEdit.hotswap.formatLabel'), value: formatText(ack.format) },
+    { label: t('channelsEdit.hotswap.graphDroppedLabel'), value: boolText(ack.graph_dropped) },
+    { label: t('channelsEdit.hotswap.rolledBackLabel'), value: boolText(ack.rolled_back) },
+    { label: t('channelsEdit.hotswap.idempotentLabel'), value: boolText(ack.idempotent) },
+    {
+      label: t('channelsEdit.hotswap.routingAppliedLabel'),
+      value:
+        ack.routing === null || ack.routing.applied === null
+          ? t('channelsEdit.hotswap.notReported')
+          : ack.routing.applied
+            ? t('channelsEdit.hotswap.routingAppliedYes')
+            : t('channelsEdit.hotswap.routingAppliedNo')
+    },
+    {
+      label: t('channelsEdit.hotswap.planRecommitLabel'),
+      value: boolText(planRecommitRequired.value)
+    },
+    { label: t('channelsEdit.hotswap.noteLabel'), value: ack.note }
   ]
+})
+
+const planRecommitRequired = computed<boolean | null>(() => {
+  const ack = channelsCommitAck.value
+  if (ack === null) {
+    return null
+  }
+  if (ack.routing !== null && ack.routing.plan_recommit_required !== null) {
+    return ack.routing.plan_recommit_required
+  }
+  if (ack.graph_dropped !== null) {
+    return ack.graph_dropped
+  }
+  return null
+})
+
+const commitDetailsJson = computed(() => jsonText(channelsCommitAck.value ?? null))
+
+const failureRows = computed<KvRow[]>(() => {
+  const failure = channelsFailure.value
+  if (failure === null) {
+    return []
+  }
+  const boolText = (value: boolean | null): string | null =>
+    value === null ? null : value ? t('channelsEdit.hotswap.failureYes') : t('channelsEdit.hotswap.failureNo')
+  return [
+    { label: t('channelsEdit.hotswap.failureCode'), value: failure.code, copy: failure.code },
+    { label: t('channelsEdit.hotswap.failureStage'), value: failure.stage },
+    { label: t('channelsEdit.hotswap.failureRolledBack'), value: boolText(failure.rolled_back), tone: failure.rolled_back === true ? ('ok' as const) : null },
+    { label: t('channelsEdit.hotswap.failureDeviceStarted'), value: boolText(failure.device_started) },
+    { label: t('channelsEdit.hotswap.failureReceiverRunning'), value: boolText(failure.receiver_running) },
+    { label: t('channelsEdit.hotswap.failureApplied'), value: boolText(failure.applied), tone: failure.applied === true ? ('bad' as const) : null },
+    {
+      label: t('channelsEdit.hotswap.failureGap'),
+      value: failure.gap_ms === null ? null : t('channelsEdit.hotswap.gapValue', { ms: intText(failure.gap_ms) ?? String(failure.gap_ms) })
+    },
+    { label: t('channelsEdit.hotswap.failureGeneration'), value: intText(failure.generation) }
+  ]
+})
+
+const failureJson = computed(() => jsonText(channelsFailure.value?.raw ?? null))
+const failureVisible = computed(
+  () => channelsFailure.value !== null || channelsWriteError.value?.category === 'reconfig_failed'
+)
+
+const commitAtText = computed(() => {
+  const at = channelsState.channelsCommitAt
+  return at === null ? null : t('channelsEdit.hotswap.commitAt', { time: clockText(at) ?? t('common.dash') })
 })
 
 /* ------------------------------------------------------------------ 告警 */
@@ -702,7 +1086,7 @@ void loadChannelsHistory()
 
 <template>
   <div class="channels-page">
-    <PageHeader title-key="channels.pageTitle" subtitle-key="channels.subtitle">
+    <PageHeader title-key="channelsEdit.pageTitle" subtitle-key="channelsEdit.pageSubtitle">
       <template #actions>
         <span class="channels-page__updated">{{ lastUpdateText }}</span>
         <el-button
@@ -719,17 +1103,17 @@ void loadChannelsHistory()
       </template>
     </PageHeader>
 
-    <!-- 声道后端未接入：整块 NOT_AVAILABLE + 稳定码 + 原因 + 任务号（T55） -->
+    <!-- 声道后端不可用：整块 NOT_AVAILABLE + 稳定码 + 原因（不编造映射/通道数） -->
     <div v-if="fatalChannels" class="banner banner--warn channels-page__not-wired" role="status">
       <div class="channels-page__not-wired-text">
-        <span class="channels-page__not-wired-title">{{ t('channels.unavailable.title') }}</span>
-        <span>{{ t('channels.unavailable.desc', { task: 'T55', message: t(channelsError!.i18nKey) }) }}</span>
+        <span class="channels-page__not-wired-title">{{ t('channelsEdit.unavailable.title') }}</span>
+        <span>{{ t('channelsEdit.unavailable.desc', { message: t(channelsError!.i18nKey) }) }}</span>
         <span v-if="channelsError!.detail" class="aux-text mono">{{ channelsError!.code }} — {{ channelsError!.detail }}</span>
       </div>
       <el-button size="small" @click="onRefresh">{{ t('common.retry') }}</el-button>
     </div>
 
-    <ControlErrorNotice :error="channelsWriteError" @retry="onRefresh" />
+    <ControlErrorNotice :error="channelsNoticeError" @retry="onRefresh" />
     <ControlErrorNotice :error="planError" @retry="onRefresh" />
 
     <p v-for="banner in notices" :key="banner.text" class="banner" :class="'banner--' + banner.tone" role="status">
@@ -769,7 +1153,7 @@ void loadChannelsHistory()
             <TruthTag v-if="row.value === null" kind="notWired" :reason="row.reason ?? null" />
           </li>
         </ul>
-        <p v-if="historyError" class="aux-text">{{ t('channels.plan.historyUnavailableHint') }}</p>
+        <p v-if="historyError" class="aux-text">{{ t('channelsEdit.plan.historyUnavailableHint') }}</p>
       </PanelCard>
 
       <!-- 输出通道与 MOTU 物理映射 -->
@@ -783,13 +1167,13 @@ void loadChannelsHistory()
           <StatRow
             :label="t('channels.output.field.channels')"
             :value="intText(outputCount)"
-            :reason="channels === null ? t('channels.unavailable.reason') : reasonForChannelsPath(channels, 'output.channels')"
+            :reason="channels === null ? t('channelsEdit.unavailable.reason') : reasonForChannelsPath(channels, 'output.channels')"
           />
           <StatRow
             :label="t('channels.output.field.dacMap')"
             :value="dacMapText"
             :copy="dacMapText"
-            :reason="channels === null ? t('channels.unavailable.reason') : reasonForChannelsPath(channels, 'output.dac_map')"
+            :reason="channels === null ? t('channelsEdit.unavailable.reason') : reasonForChannelsPath(channels, 'output.dac_map')"
           />
           <StatRow :label="t('channels.output.field.knownLabels')" :value="knownLabelsText" :reason="null" />
         </ul>
@@ -832,10 +1216,10 @@ void loadChannelsHistory()
             :label="row.label"
             :value="row.value"
             :copy="row.copy ?? null"
-            :reason="row.reason ?? (channels === null ? t('channels.unavailable.reason') : null)"
+            :reason="row.reason ?? (channels === null ? t('channelsEdit.unavailable.reason') : null)"
           />
         </ul>
-        <p class="aux-text">{{ t('channels.input.note') }}</p>
+        <p class="aux-text">{{ t('channelsEdit.input.note') }}</p>
         <ul v-if="notWiredEntries.length > 0" class="channels-not-wired">
           <li v-for="entry in notWiredEntries" :key="entry.path" class="channels-not-wired__item">
             <span class="mono">{{ entry.path }}</span>
@@ -934,7 +1318,7 @@ void loadChannelsHistory()
       >
         <p v-if="historyError !== null" class="aux-text channels-history__unavailable">
           <TruthTag kind="notWired" :reason="historyError.detail ?? null" />
-          {{ t('channels.history.unavailable', { message: t(historyError.i18nKey), task: 'T55' }) }}
+          {{ t('channelsEdit.history.unavailable', { message: t(historyError.i18nKey) }) }}
         </p>
         <div v-else-if="historyRows.length === 0" class="aux-text channels-history__unavailable">
           <template v-if="historyNoSourceReason !== null">
@@ -979,43 +1363,148 @@ void loadChannelsHistory()
         <p class="aux-text">{{ t('channels.history.rollbackNote') }}</p>
       </PanelCard>
 
-      <!-- 声道热重配（M3b/T52 未完成：commit 501 如实显示） -->
+      <!-- 声道热重配（PUT /api/channels 两阶段：prepare → commit/abort；回执如实展示） -->
       <PanelCard
         class="channels-grid__span-7"
-        title-key="channels.hotswap.title"
-        desc-key="channels.hotswap.desc"
+        title-key="channelsEdit.hotswap.title"
+        desc-key="channelsEdit.hotswap.desc"
         :truth="channels === null ? 'notWired' : 'actual'"
       >
+        <!-- 只读：能力/目标/当前值来源/数据面状态（GET /api/channels） -->
+        <ul class="kv-list">
+          <StatRow
+            :label="t('channelsEdit.hotswap.capabilityLabel')"
+            :value="hotCapabilityText"
+            :reason="hotCapabilityReason"
+            :tone="channels?.hot_reconfigure.wired === false ? 'bad' : null"
+          />
+          <StatRow :label="t('channelsEdit.hotswap.targetLabel')" :value="channels?.target ?? null" :reason="null" />
+          <StatRow
+            :label="t('channelsEdit.hotswap.sourceLabel')"
+            :value="t('channelsEdit.hotswap.sourceValue')"
+            :reason="null"
+          />
+          <StatRow
+            :label="t('channelsEdit.hotswap.generationLabel')"
+            :value="intText(channels?.generation ?? null)"
+            :reason="null"
+          />
+          <StatRow :label="t('channelsEdit.hotswap.busyLabel')" :value="boolText(channels?.busy ?? null)" :reason="null" />
+          <StatRow :label="t('channelsEdit.hotswap.pendingLabel')" :value="pendingText" :reason="null" />
+          <StatRow :label="t('channelsEdit.hotswap.lastGapLabel')" :value="lastGapText" :reason="null" />
+          <StatRow :label="t('channelsEdit.hotswap.deviceLabel')" :value="deviceText" :reason="null" />
+          <StatRow :label="t('channelsEdit.hotswap.probeLabel')" :value="probeText" :reason="null" />
+        </ul>
+        <details v-if="lastResultJson !== null" class="channels-hotswap__details">
+          <summary>{{ t('channelsEdit.hotswap.lastResultLabel') }}</summary>
+          <pre class="channels-hotswap__pre mono">{{ lastResultJson }}</pre>
+        </details>
+        <p v-else class="aux-text">
+          {{ t('channelsEdit.hotswap.lastResultLabel') }} · {{ t('channelsEdit.hotswap.lastResultNone') }}
+        </p>
+
         <div class="banner banner--warn channels-hotswap__warning" role="status">
           <div class="channels-hotswap__warning-text">
-            <strong>{{ t('channels.hotswap.warningTitle') }}</strong>
-            <span>{{ t('channels.hotswap.warningDesc') }}</span>
+            <strong>{{ t('channelsEdit.hotswap.warningTitle') }}</strong>
+            <span>{{ t('channelsEdit.hotswap.warningDesc') }}</span>
           </div>
         </div>
+
+        <h3 class="channels-subheading">{{ t('channelsEdit.hotswap.formTitle') }}</h3>
         <div class="channels-hotswap__form">
           <label class="channels-hotswap__field">
-            <span>{{ t('channels.hotswap.field.outputChannels') }}</span>
+            <span>{{ t('channelsEdit.hotswap.field.channels') }}</span>
             <el-input-number
-              v-model="outputDraft"
+              v-model="draftChannels"
               :min="1"
-              :max="32"
+              :max="22"
               :disabled="channels === null || channelsWriteBusy !== null"
               size="small"
             />
           </label>
           <label class="channels-hotswap__field">
-            <span>{{ t('channels.hotswap.field.inputChannels') }}</span>
+            <span>{{ t('channelsEdit.hotswap.field.sampleRate') }}</span>
+            <el-select
+              v-model="draftSampleRate"
+              :disabled="channels === null || channelsWriteBusy !== null"
+              size="small"
+            >
+              <el-option v-for="rate in CHANNELS_SAMPLE_RATES_HZ" :key="rate" :label="String(rate)" :value="rate" />
+            </el-select>
+          </label>
+          <label class="channels-hotswap__field">
+            <span>{{ t('channelsEdit.hotswap.field.aes67Group') }}</span>
+            <el-input v-model="draftAes67Group" :disabled="channels === null || channelsWriteBusy !== null" size="small" />
+          </label>
+          <label class="channels-hotswap__field">
+            <span>{{ t('channelsEdit.hotswap.field.aes67Port') }}</span>
             <el-input-number
-              v-model="inputDraft"
+              v-model="draftAes67Port"
+              :min="1"
+              :max="65535"
+              :disabled="channels === null || channelsWriteBusy !== null"
+              size="small"
+            />
+          </label>
+          <label class="channels-hotswap__field">
+            <span>{{ t('channelsEdit.hotswap.field.payloadType') }}</span>
+            <el-input-number
+              v-model="draftPayloadType"
+              :min="96"
+              :max="127"
+              :disabled="channels === null || channelsWriteBusy !== null"
+              size="small"
+            />
+          </label>
+          <label class="channels-hotswap__field">
+            <span>{{ t('channelsEdit.hotswap.field.aes67Channels') }}</span>
+            <el-input-number
+              v-model="draftAes67Channels"
               :min="1"
               :max="8"
               :disabled="channels === null || channelsWriteBusy !== null"
               size="small"
             />
           </label>
+          <label class="channels-hotswap__field">
+            <span>{{ t('channelsEdit.hotswap.field.aes67Map') }}</span>
+            <el-input v-model="draftAes67MapText" :disabled="channels === null || channelsWriteBusy !== null" size="small" />
+          </label>
+          <label class="channels-hotswap__field">
+            <span>{{ t('channelsEdit.hotswap.field.jitterFrames') }}</span>
+            <el-input-number
+              v-model="draftJitter"
+              :min="0"
+              :disabled="channels === null || channelsWriteBusy !== null"
+              size="small"
+            />
+          </label>
         </div>
+
+        <!-- 方案 routing（mapping/dac_map）：单独改动时 commit_supported=false，只能走方案两阶段 -->
+        <h3 class="channels-subheading">{{ t('channelsEdit.hotswap.routingTitle') }}</h3>
+        <p class="aux-text">{{ t('channelsEdit.hotswap.routingDesc') }}</p>
+        <p v-if="channels !== null && channels.mapping === null" class="aux-text">
+          <TruthTag kind="notWired" :reason="mappingReason" />
+          {{ t('channelsEdit.hotswap.mappingUnknown') }}
+        </p>
+        <div class="channels-hotswap__routing">
+          <label class="channels-hotswap__field channels-hotswap__field--wide">
+            <span>{{ t('channelsEdit.hotswap.field.dacMap') }}</span>
+            <el-input
+              v-model="draftDacMapText"
+              :placeholder="t('channelsEdit.hotswap.routingPlaceholder')"
+              :disabled="channels === null || channelsWriteBusy !== null"
+              size="small"
+            />
+          </label>
+          <el-button size="small" :disabled="channels === null || channelsWriteBusy !== null" @click="onResetChannelsDrafts">
+            {{ t('channelsEdit.hotswap.resetDrafts') }}
+          </el-button>
+        </div>
+
         <p v-if="patchValidation !== null && patchValidation !== 'empty'" class="channels-upload__invalid" role="alert">
-          {{ t('channels.hotswap.validation.' + patchValidation) }}
+          {{ t('channelsEdit.hotswap.validation.' + patchValidation) }}
         </p>
         <div class="channels-hotswap__actions">
           <el-button
@@ -1025,49 +1514,142 @@ void loadChannelsHistory()
             :disabled="!canPrepareChannels"
             @click="onPrepareChannels"
           >
-            {{ t('channels.hotswap.prepare') }}
+            {{ t('channelsEdit.hotswap.prepare') }}
           </el-button>
           <el-button
             type="primary"
             :loading="channelsWriteBusy === 'commit'"
-            :disabled="channelsDraft === null || channelsWriteBusy !== null"
+            :disabled="!canCommitChannels"
             @click="onCommitChannels"
           >
-            {{ t('channels.hotswap.commit') }}
+            {{ t('channelsEdit.hotswap.commit') }}
           </el-button>
           <el-button
+            v-if="channelsDraft !== null && channelsDraft.engine_token !== null"
             :loading="channelsWriteBusy === 'abort'"
-            :disabled="channelsDraft === null || channelsWriteBusy !== null"
+            :disabled="!canAbortChannels"
             @click="onAbortChannels"
           >
-            {{ t('control.actions.abort') }}
+            {{ t('channelsEdit.hotswap.abort') }}
+          </el-button>
+          <el-button
+            v-else-if="channelsDraft !== null"
+            :disabled="channelsWriteBusy !== null"
+            @click="onDiscardChannelsDraft"
+          >
+            {{ t('channelsEdit.hotswap.discard') }}
+          </el-button>
+          <el-button
+            v-if="channelsDraft !== null && channelsErrorStage === 'abort'"
+            :disabled="channelsWriteBusy !== null"
+            @click="onDiscardChannelsDraft"
+          >
+            {{ t('channelsEdit.hotswap.discard') }}
           </el-button>
         </div>
-        <p class="channels-hotswap__not-available">
-          <TruthTag kind="notWired" :reason="hotSwapNotAvailableReason" />
-          <span>{{ t('channels.hotswap.notAvailable', { task: 'T52 / T55' }) }}</span>
-        </p>
+
+        <!-- prepare 草稿（不签发假 token；commit_supported=false 时逐条 blockers） -->
         <template v-if="channelsDraft !== null">
-          <h3 class="channels-subheading">{{ t('channels.hotswap.previewTitle') }}</h3>
+          <h3 class="channels-subheading">{{ t('channelsEdit.hotswap.draftTitle') }}</h3>
+          <ul class="kv-list">
+            <StatRow :label="t('channelsEdit.hotswap.changedLabel')" :value="draftChangedText" :reason="null" />
+            <StatRow
+              :label="t('channelsEdit.hotswap.commitSupportedLabel')"
+              :value="channelsDraft.commit_supported ? t('channelsEdit.hotswap.commitSupportedYes') : t('channelsEdit.hotswap.commitSupportedNo')"
+              :tone="channelsDraft.commit_supported ? 'ok' : 'bad'"
+              :reason="null"
+            />
+            <StatRow
+              :label="t('channelsEdit.hotswap.engineTokenLabel')"
+              :value="draftEngineToken ?? t('common.dash')"
+              :copy="channelsDraft.engine_token"
+              :reason="channelsDraft.commit_supported ? null : t('channelsEdit.error.commitUnsupported')"
+            />
+            <StatRow
+              :label="t('channelsEdit.hotswap.plannedGenerationLabel')"
+              :value="intText(channelsDraft.planned_generation)"
+              :reason="null"
+            />
+            <StatRow :label="t('channelsEdit.hotswap.formatLabel')" :value="draftFormatText" :reason="null" />
+            <StatRow :label="t('channelsEdit.hotswap.graphActionLabel')" :value="draftGraphText" :reason="null" />
+            <StatRow :label="t('channelsEdit.hotswap.admissionLabel')" :value="draftAdmissionText" :reason="null" />
+          </ul>
+          <ul v-if="draftWarnings.length > 0" class="channels-hotswap__list">
+            <li v-for="warning in draftWarnings" :key="warning" class="aux-text">{{ warning }}</li>
+          </ul>
+          <template v-if="draftCommitUnsupported">
+            <p class="banner banner--info" role="status">{{ t('channelsEdit.hotswap.guidance') }}</p>
+            <h4 class="channels-hotswap__blockers-title">{{ t('channelsEdit.hotswap.blockersTitle') }}</h4>
+            <ul class="channels-hotswap__list channels-hotswap__list--blockers">
+              <li v-for="blocker in draftBlockers" :key="blocker">{{ blocker }}</li>
+            </ul>
+          </template>
+          <ul v-else-if="draftBlockers.length > 0" class="channels-hotswap__list channels-hotswap__list--blockers">
+            <li v-for="blocker in draftBlockers" :key="blocker">{{ blocker }}</li>
+          </ul>
+          <details v-if="draftDiffJson !== null" class="channels-hotswap__details">
+            <summary>{{ t('channelsEdit.hotswap.diffTitle') }}</summary>
+            <pre class="channels-hotswap__pre mono">{{ draftDiffJson }}</pre>
+          </details>
+          <details v-if="draftCurrentJson !== null" class="channels-hotswap__details">
+            <summary>{{ t('channelsEdit.hotswap.currentTitle') }}</summary>
+            <pre class="channels-hotswap__pre mono">{{ draftCurrentJson }}</pre>
+          </details>
+          <details v-if="draftTargetJson !== null" class="channels-hotswap__details">
+            <summary>{{ t('channelsEdit.hotswap.targetTitle') }}</summary>
+            <pre class="channels-hotswap__pre mono">{{ draftTargetJson }}</pre>
+          </details>
+          <details v-if="draftRawJson !== null" class="channels-hotswap__details">
+            <summary>{{ t('channelsEdit.hotswap.detailsTitle') }}</summary>
+            <pre class="channels-hotswap__pre mono">{{ draftRawJson }}</pre>
+          </details>
+        </template>
+
+        <!-- commit 真实回执（applied/generation/gap_ms/format/graph_dropped/routing） -->
+        <template v-if="channelsCommitAck !== null">
+          <h3 class="channels-subheading">{{ t('channelsEdit.hotswap.receiptTitle') }}</h3>
           <ul class="kv-list">
             <StatRow
-              v-for="row in channelsPreviewRows"
+              v-for="row in channelsCommitAckRows"
               :key="row.label"
               :label="row.label"
               :value="row.value"
+              :copy="row.copy ?? null"
+              :tone="row.tone ?? null"
               :reason="null"
             />
           </ul>
-          <ul v-if="channelsDraft.warnings.length > 0" class="channels-hotswap__list">
-            <li v-for="warning in channelsDraft.warnings" :key="warning" class="aux-text">{{ warning }}</li>
-          </ul>
-          <ul v-if="channelsDraft.blockers.length > 0" class="channels-hotswap__list channels-hotswap__list--blockers">
-            <li v-for="blocker in channelsDraft.blockers" :key="blocker">{{ blocker }}</li>
-          </ul>
+          <p v-if="commitAtText !== null" class="aux-text">{{ commitAtText }}</p>
+          <p class="aux-text">{{ t('channelsEdit.hotswap.commitFormatHint') }}</p>
+          <p v-if="planRecommitRequired === true" class="banner banner--warn" role="status">
+            {{ t('channelsEdit.hotswap.graphDropped') }}
+          </p>
+          <details v-if="commitDetailsJson !== null" class="channels-hotswap__details">
+            <summary>{{ t('channelsEdit.hotswap.detailsTitle') }}</summary>
+            <pre class="channels-hotswap__pre mono">{{ commitDetailsJson }}</pre>
+          </details>
         </template>
-        <p v-if="channelsCommitAck !== null" class="aux-text">
-          {{ t('channels.hotswap.committedAt', { time: clockText(plan.lastCommitAt) ?? t('common.dash') }) }}
-        </p>
+
+        <!-- 502 reconfig_failed：details.rolled_back 等原样展示，不写成功 -->
+        <template v-if="failureVisible">
+          <h3 class="channels-subheading channels-hotswap__failure-title">{{ t('channelsEdit.hotswap.failureTitle') }}</h3>
+          <ul class="kv-list">
+            <StatRow
+              v-for="row in failureRows"
+              :key="row.label"
+              :label="row.label"
+              :value="row.value"
+              :copy="row.copy ?? null"
+              :tone="row.tone ?? null"
+              :reason="null"
+            />
+          </ul>
+          <p v-if="channelsWriteError?.detail" class="aux-text mono">{{ channelsWriteError.detail }}</p>
+          <details v-if="failureJson !== null" class="channels-hotswap__details">
+            <summary>{{ t('channelsEdit.hotswap.detailsTitle') }}</summary>
+            <pre class="channels-hotswap__pre mono">{{ failureJson }}</pre>
+          </details>
+        </template>
       </PanelCard>
 
       <!-- 方案两阶段草稿 / 回执（上传方案与历史回滚共用） -->
@@ -1371,6 +1953,45 @@ void loadChannelsHistory()
 }
 
 .channels-hotswap__list--blockers {
+  color: var(--khaen-danger);
+}
+
+.channels-hotswap__field--wide {
+  flex: 1 1 320px;
+  min-width: min(320px, 100%);
+}
+
+.channels-hotswap__routing {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+}
+
+.channels-hotswap__details {
+  font-size: var(--khaen-font-aux);
+}
+
+.channels-hotswap__pre {
+  margin: var(--khaen-space-1) 0 0;
+  padding: var(--khaen-space-2);
+  max-height: 240px;
+  overflow: auto;
+  border: 1px dashed var(--khaen-border);
+  border-radius: var(--khaen-radius-tag);
+  background: var(--khaen-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.channels-hotswap__blockers-title {
+  margin-top: var(--khaen-space-2);
+  color: var(--khaen-danger);
+  font-size: var(--khaen-font-aux);
+  font-weight: 600;
+}
+
+.channels-hotswap__failure-title {
   color: var(--khaen-danger);
 }
 

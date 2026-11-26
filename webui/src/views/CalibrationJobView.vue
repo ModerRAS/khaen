@@ -22,7 +22,7 @@ import {
   isJobActive,
   isJobTerminal,
   jobDurationMs,
-  jobResultTruth,
+  resultTruth,
   type CalibrationJob
 } from '@/api/calibration'
 import {
@@ -47,7 +47,10 @@ const jobId = computed(() => (typeof route.params.id === 'string' ? route.params
 const job = computed<CalibrationJob | null>(() => state.job)
 const phase = computed(() => state.jobPhase)
 const error = computed(() => state.jobError)
-const truth = computed(() => jobResultTruth(job.value?.engine ?? null))
+const truth = computed(() => resultTruth(job.value?.result ?? null, job.value?.engine ?? null))
+/** 503/501 类错误显示「未接入（NOT_AVAILABLE）+ 原因」，不弹假数据/假错误。 */
+const unavailable = computed(() => error.value?.category === 'not_wired')
+const unavailableReason = computed(() => error.value?.detail ?? t('calibrationEdit.list.notAvailableNoReason'))
 const beforePlan = computed<BeforePlan | null>(() => {
   const plan = statusState.data?.plan ?? null
   if (plan === null) {
@@ -133,13 +136,15 @@ onBeforeUnmount(() => {
       </template>
     </PageHeader>
 
-    <div v-if="phase === 'error' && error" class="banner banner--danger" role="alert">
+    <div v-if="phase === 'error' && error" :class="unavailable ? 'banner banner--warn' : 'banner banner--danger'" :role="unavailable ? 'status' : 'alert'">
       <div class="job-page__notice">
-        <strong>{{ t('calibration.job.loadError') }}</strong>
-        <span>{{ t(error.i18nKey) }}</span>
-        <span v-if="error && error.detail" class="aux-text">{{ error.detail }}</span>
+        <strong v-if="unavailable">NOT_AVAILABLE · {{ t('calibrationEdit.list.notAvailableTitle') }}</strong>
+        <strong v-else>{{ t('calibration.job.loadError') }}</strong>
+        <span v-if="unavailable">{{ unavailableReason }}</span>
+        <span v-else>{{ t(error.i18nKey) }}</span>
+        <span v-if="error && error.detail && !unavailable" class="aux-text">{{ error.detail }}</span>
       </div>
-      <el-button size="small" @click="load">{{ t('common.retry') }}</el-button>
+      <el-button v-if="!unavailable" size="small" @click="load">{{ t('common.retry') }}</el-button>
     </div>
 
     <div v-else-if="phase === 'loading' && job === null" class="job-page__loading" aria-busy="true">
@@ -155,7 +160,7 @@ onBeforeUnmount(() => {
               <span class="calibration-status__dot" aria-hidden="true" />
               {{ t('calibration.jobStatus.' + job.status) }}
             </span>
-            <VerdictBadge :verdict="job.verdict" :engine="job.engine" />
+            <VerdictBadge :verdict="job.verdict" :engine="job.engine" :truth="truth" />
             <TruthTag :kind="truth" :reason="job.engine ? t('calibration.engine.label', { engine: job.engine }) : null" />
           </div>
         </header>

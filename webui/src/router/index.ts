@@ -1,8 +1,10 @@
 /**
  * 路由表与全局守卫（PLAN §5.1 / §5.2）。
  *
- * 已落地：/login（登录/初始化，公开）、/（概览）、/volume（音量与静音，M3）、/format（音频格式，M3）、
- * /channels（方案与声道，M4）、/routing（路由矩阵只读诊断，M3b/T58）、/calibration（校准列表）、
+ * 已落地：/login（登录/初始化，公开）、/（概览）、/volume（音量与静音 + MOTU）、/mode（工作模式）、
+ * /routing（路由矩阵，可编辑两阶段）、/layout（内容布局，可编辑两阶段）、/speakers（音频映射/Speaker Layout）、
+ * /format（音频格式）、
+ * /channels（方案与声道）、/calibration（校准列表）、
  * /calibration/wizard（8 步向导）、/calibration/jobs/:id（job 详情）、/system（系统信息）、/system/logs（日志）。
  * 菜单里已没有灰显页面；未注册的深链由 catch-all 重定向回 /（后续里程碑接入时再补 route record）。
  *
@@ -17,6 +19,9 @@ import AppShell from '@/components/AppShell.vue'
 import LoginView from '@/views/LoginView.vue'
 import OverviewView from '@/views/OverviewView.vue'
 import VolumeView from '@/views/VolumeView.vue'
+import ModeView from '@/views/ModeView.vue'
+import LayoutView from '@/views/LayoutView.vue'
+import SpeakerLayoutView from '@/views/SpeakerLayoutView.vue'
 import FormatView from '@/views/FormatView.vue'
 import ChannelsView from '@/views/ChannelsView.vue'
 import RoutingView from '@/views/RoutingView.vue'
@@ -41,9 +46,9 @@ declare module 'vue-router' {
   }
 }
 
-/** 侧栏导航项（未落地的项 implemented=false，灰显 + 里程碑提示）。 */
+/** 侧栏导航项（全部已落地；页面内能力差异由页面按 /api/meta 如实标注）。 */
 export interface NavItem {
-  /** 路由名（落地后与 route name 一致）。 */
+  /** 路由名（与 route name 一致）。 */
   name: string
   path: string
   /** 菜单文案 i18n 键。 */
@@ -51,20 +56,20 @@ export interface NavItem {
   /** @element-plus/icons-vue 的组件名（AppShell 内映射）。 */
   icon: string
   group: 'main' | 'system'
-  implemented: boolean
-  /** 计划里程碑（未落地时展示，如 'M3'）。 */
-  milestone?: string
 }
 
 export const navItems: NavItem[] = [
-  { name: 'overview', path: '/', titleKey: 'nav.overview', icon: 'Odometer', group: 'main', implemented: true },
-  { name: 'volume', path: '/volume', titleKey: 'nav.volume', icon: 'Headset', group: 'main', implemented: true },
-  { name: 'channels', path: '/channels', titleKey: 'nav.channels', icon: 'Files', group: 'main', implemented: true },
-  { name: 'routing', path: '/routing', titleKey: 'nav.routing', icon: 'Share', group: 'main', implemented: true },
-  { name: 'format', path: '/format', titleKey: 'nav.format', icon: 'DataLine', group: 'main', implemented: true },
-  { name: 'calibration', path: '/calibration', titleKey: 'nav.calibration', icon: 'Timer', group: 'main', implemented: true },
-  { name: 'system', path: '/system', titleKey: 'nav.system', icon: 'Monitor', group: 'system', implemented: true },
-  { name: 'logs', path: '/system/logs', titleKey: 'nav.logs', icon: 'Document', group: 'system', implemented: true }
+  { name: 'overview', path: '/', titleKey: 'nav.overview', icon: 'Odometer', group: 'main' },
+  { name: 'volume', path: '/volume', titleKey: 'nav.volume', icon: 'Headset', group: 'main' },
+  { name: 'mode', path: '/mode', titleKey: 'nav.mode', icon: 'SwitchButton', group: 'main' },
+  { name: 'channels', path: '/channels', titleKey: 'nav.channels', icon: 'Files', group: 'main' },
+  { name: 'routing', path: '/routing', titleKey: 'nav.routing', icon: 'Share', group: 'main' },
+  { name: 'layout', path: '/layout', titleKey: 'nav.layout', icon: 'Grid', group: 'main' },
+  { name: 'speakers', path: '/speakers', titleKey: 'nav.speakers', icon: 'Connection', group: 'main' },
+  { name: 'format', path: '/format', titleKey: 'nav.format', icon: 'DataLine', group: 'main' },
+  { name: 'calibration', path: '/calibration', titleKey: 'nav.calibration', icon: 'Timer', group: 'main' },
+  { name: 'system', path: '/system', titleKey: 'nav.system', icon: 'Monitor', group: 'system' },
+  { name: 'logs', path: '/system/logs', titleKey: 'nav.logs', icon: 'Document', group: 'system' }
 ]
 
 /** 侧栏分组（与 PLAN §11.2 一致：主功能 / 系统）。 */
@@ -97,6 +102,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, titleKey: 'nav.volume' }
       },
       {
+        path: 'mode',
+        name: 'mode',
+        component: ModeView,
+        meta: { requiresAuth: true, titleKey: 'nav.mode' }
+      },
+      {
         path: 'format',
         name: 'format',
         component: FormatView,
@@ -113,6 +124,18 @@ const routes: RouteRecordRaw[] = [
         name: 'routing',
         component: RoutingView,
         meta: { requiresAuth: true, titleKey: 'nav.routing' }
+      },
+      {
+        path: 'layout',
+        name: 'layout',
+        component: LayoutView,
+        meta: { requiresAuth: true, titleKey: 'nav.layout' }
+      },
+      {
+        path: 'speakers',
+        name: 'speakers',
+        component: SpeakerLayoutView,
+        meta: { requiresAuth: true, titleKey: 'nav.speakers' }
       },
       {
         path: 'calibration',

@@ -1,6 +1,7 @@
 /**
- * 控制面两阶段 REST 客户端（M3 / 任务 T53）：静音、音量（per-lane protection gains）、
- * 工作模式（off / aes67）、音频格式（sample_rate / chunksize）。
+ * 控制面两阶段 REST 客户端：静音、五个语义界面（/api/surface）—— volume（per-lane protection
+ * gains）、routing（lane→DAC）、layout（内容布局折叠加权）、mode（off/on/aes67）、format
+ * （sample_rate/chunksize，也走 /api/format）；commit/abort 统一 /api/commit|/api/abort。
  *
  * 契约来源（以后端代码为准，不靠猜测）：
  * - `crates/daemon/src/lib.rs` 的 REST 路由：POST /api/mute、POST /api/surface、POST /api/commit、
@@ -48,8 +49,13 @@ export const CONTROL_PATHS = {
   deviceRetry: '/api/device/retry'
 } as const
 
-/** 控制面语义界面（surface op）。 */
-export type ControlSurface = 'volume' | 'mode' | 'format'
+/**
+ * 控制面语义界面（surface op）。
+ *
+ * 五个界面全部由后端 WIRED_SURFACES 上报（/api/meta.surfaces）；
+ * volume/routing/layout 是方案补丁（需要已生效方案作为基线），format/mode 走执行器配置两阶段。
+ */
+export type ControlSurface = 'volume' | 'routing' | 'layout' | 'mode' | 'format'
 
 /** 运行模式：控制面真正接通的只有 off / aes67（"on" 是 aes67 的别名）。 */
 export type RunMode = 'off' | 'aes67'
@@ -76,6 +82,28 @@ export interface FormatPatch {
   chunksize?: number
 }
 
+/**
+ * 路由界面的补丁（/api/surface {surface:"routing", data}）。
+ * routes 是 lane -> DAC 的完整替换表；dac_channels 缺省沿用方案值（CONTRACTS B.1.2）。
+ */
+export interface RoutingPatch {
+  routes: Array<[number, number]>
+  dac_channels?: number
+}
+
+/**
+ * 内容布局界面的补丁（/api/surface {surface:"layout", data}）。
+ * folds 是 [src, dst, gain] 的完整替换表；越界/空表由后端准入拒绝（前端只做形状校验）。
+ */
+export interface LayoutPatch {
+  in_channels: number
+  out_lanes: number
+  folds: Array<[number, number, number]>
+}
+
+/** 语义界面补丁的并集（commit/abort 与草稿形状共用）。 */
+export type SurfacePatch = FormatPatch | RoutingPatch | LayoutPatch
+
 /** 草稿种类（volume/mode/format 由 M3 使用；plan/rollback 由 M4 方案页复用同一 commit/abort）。 */
 export type ControlDraftSurface = ControlSurface | 'plan' | 'rollback'
 
@@ -100,6 +128,20 @@ export interface ControlDraft {
   device_restart_required: boolean | null
   applies_to: string | null
   note: string | null
+  /** 后端上报的补丁差异（API.md §1 通用两阶段语义）；未上报为 null（不臆造）。 */
+  diff: unknown
+  /** 后端上报的当前值；未上报为 null。 */
+  current: unknown
+  /** 后端上报的目标值；未上报为 null。 */
+  target: unknown
+  /** 后端上报的图编译结果（graph）；未上报为 null。 */
+  graph: unknown
+  /** 准入结果（accepted/budget/rejections）；未上报为 null。 */
+  admission: Record<string, unknown> | null
+  /** 阻塞项（例如 mapping 改动只能经方案 commit 生效）；未上报为 null。 */
+  blockers: string[] | null
+  /** 该草稿是否支持 commit（/api/channels 的 commit_supported）；未上报为 null。 */
+  commit_supported: boolean | null
 }
 
 /** commit 归一化回执（三类草稿的响应取并集；字段缺失为 null）。 */
@@ -194,6 +236,45 @@ function readBoolean(record: Record<string, unknown>, field: string): boolean | 
   return value
 }
 
+/** 任意 JSON 值（diff/current/target/graph 的形状由后端定义，前端只做展示）。 */
+function readJson(record: Record<string, unknown>, field: string): unknown {
+  const value = record[field]
+  if (value === null || value === undefined) {
+    return null
+  }
+  return value
+}
+
+/** JSON 对象字段（admission）；缺失 = null，非对象 = 契约漂移。 */
+function readJsonObject(record: Record<string, unknown>, field: string): Record<string, unknown> | null {
+  const value = record[field]
+  if (value === null || value === undefined) {
+    return null
+  }
+  const object = asRecord(value)
+  if (object === null) {
+    throw invalidResponse(field + ' must be an object or null')
+  }
+  return object
+}
+
+/** 字符串数组字段（blockers）；缺失 = null。 */
+function readStringArray(record: Record<string, unknown>, field: string): string[] | null {
+  const value = record[field]
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!Array.isArray(value)) {
+    throw invalidResponse(field + ' must be an array of strings or null')
+  }
+  return value.map((item) => {
+    if (typeof item !== 'string') {
+      throw invalidResponse(field + ' entries must be strings')
+    }
+    return item
+  })
+}
+
 function readOk(record: Record<string, unknown>): true {
   if (record.ok !== true) {
     throw invalidResponse('ok must be true')
@@ -237,7 +318,13 @@ export function parseControlDraft(body: unknown): ControlDraft {
   const format = readFormatField(record.format)
   const graphId = readString(record, 'graph_id')
   let surface: ControlDraftSurface | null = null
-  if (surfaceRaw === 'volume' || surfaceRaw === 'mode' || surfaceRaw === 'format') {
+  if (
+    surfaceRaw === 'volume' ||
+    surfaceRaw === 'routing' ||
+    surfaceRaw === 'layout' ||
+    surfaceRaw === 'mode' ||
+    surfaceRaw === 'format'
+  ) {
     surface = surfaceRaw
   } else if (rolledBackTo !== null) {
     surface = 'rollback'
@@ -260,7 +347,14 @@ export function parseControlDraft(body: unknown): ControlDraft {
     format,
     device_restart_required: readBoolean(record, 'device_restart_required'),
     applies_to: readString(record, 'applies_to'),
-    note: readString(record, 'note')
+    note: readString(record, 'note'),
+    diff: readJson(record, 'diff'),
+    current: readJson(record, 'current'),
+    target: readJson(record, 'target'),
+    graph: readJson(record, 'graph'),
+    admission: readJsonObject(record, 'admission'),
+    blockers: readStringArray(record, 'blockers'),
+    commit_supported: readBoolean(record, 'commit_supported')
   }
 }
 
@@ -408,6 +502,91 @@ export function validateGainPatch(gains: readonly GainEntry[], laneCount: number
   return null
 }
 
+/* ------------------------------------------------------------ 语义界面补丁校验 */
+
+/**
+ * 校验 routing 补丁（前端 error 码；null = 合法）：
+ * - empty：routes 为空；- entry：表项不是 [lane, dac] 整数对；- duplicate：同一 lane 出现两次；
+ * - dac_channels：dac_channels 不是正整数；- lane/dac 越界（只拒绝负数；上界由后端准入决定）。
+ */
+export function validateRoutingPatch(patch: RoutingPatch): string | null {
+  const routes = patch.routes
+  if (!Array.isArray(routes) || routes.length === 0) {
+    return 'empty'
+  }
+  const seen = new Set<number>()
+  for (const entry of routes) {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      return 'entry'
+    }
+    const [lane, dac] = entry
+    if (!Number.isInteger(lane) || !Number.isInteger(dac) || lane < 0 || dac < 0) {
+      return 'entry'
+    }
+    if (seen.has(lane)) {
+      return 'duplicate'
+    }
+    seen.add(lane)
+  }
+  if (patch.dac_channels !== undefined) {
+    if (!Number.isInteger(patch.dac_channels) || patch.dac_channels <= 0) {
+      return 'dac_channels'
+    }
+  }
+  return null
+}
+
+/**
+ * 校验 layout 补丁（前端 error 码；null = 合法）：
+ * - empty：folds 为空；- entry：折叠项不是 [src, dst, gain] 且 gain 非有限；- channels：in_channels/out_lanes 非正整数。
+ */
+export function validateLayoutPatch(patch: LayoutPatch): string | null {
+  if (!Number.isInteger(patch.in_channels) || patch.in_channels <= 0) {
+    return 'channels'
+  }
+  if (!Number.isInteger(patch.out_lanes) || patch.out_lanes <= 0) {
+    return 'channels'
+  }
+  if (!Array.isArray(patch.folds) || patch.folds.length === 0) {
+    return 'empty'
+  }
+  for (const entry of patch.folds) {
+    if (!Array.isArray(entry) || entry.length !== 3) {
+      return 'entry'
+    }
+    const [src, dst, gain] = entry
+    if (!Number.isInteger(src) || !Number.isInteger(dst) || src < 0 || dst < 0) {
+      return 'entry'
+    }
+    if (typeof gain !== 'number' || !Number.isFinite(gain)) {
+      return 'entry'
+    }
+  }
+  return null
+}
+
+/** 构造 routing 补丁（过滤出 [lane, dac] 整数对，保持输入顺序）。 */
+export function buildRoutingPatch(routes: readonly (readonly [number, number])[], dacChannels?: number): RoutingPatch {
+  const patch: RoutingPatch = { routes: routes.map(([lane, dac]) => [lane, dac] as [number, number]) }
+  if (typeof dacChannels === 'number') {
+    patch.dac_channels = dacChannels
+  }
+  return patch
+}
+
+/** 构造 layout 补丁（保持输入顺序）。 */
+export function buildLayoutPatch(
+  inChannels: number,
+  outLanes: number,
+  folds: readonly (readonly [number, number, number])[]
+): LayoutPatch {
+  return {
+    in_channels: inChannels,
+    out_lanes: outLanes,
+    folds: folds.map(([src, dst, gain]) => [src, dst, gain] as [number, number, number])
+  }
+}
+
 /* ---------------------------------------------------------------------- 端点 */
 
 export interface ControlApi {
@@ -415,6 +594,10 @@ export interface ControlApi {
   setMute(mute: boolean): Promise<ControlMuteAck>
   /** POST /api/surface {surface:'volume', data:{gains_db}}：只准备草稿，commit 才生效。 */
   prepareVolume(gains: readonly GainEntry[]): Promise<ControlDraft>
+  /** POST /api/surface {surface:'routing', data:{routes,dac_channels?}}：只准备草稿。 */
+  prepareRouting(patch: RoutingPatch): Promise<ControlDraft>
+  /** POST /api/surface {surface:'layout', data:{in_channels,out_lanes,folds}}：只准备草稿。 */
+  prepareLayout(patch: LayoutPatch): Promise<ControlDraft>
   /** POST /api/surface {surface:'mode', data:{mode}}：只准备草稿。 */
   prepareMode(mode: RunMode): Promise<ControlDraft>
   /** POST /api/format {sample_rate?, chunksize?}：只准备草稿。 */
@@ -438,6 +621,27 @@ export function createControlApi(client: ApiClient): ControlApi {
       const body = await client.post<unknown>(CONTROL_PATHS.surface, {
         surface: 'volume',
         data: { gains_db: gains.map((entry) => ({ lane: entry.lane, gain_db: entry.gain_db })) }
+      })
+      return parseControlDraft(body)
+    },
+    async prepareRouting(patch: RoutingPatch): Promise<ControlDraft> {
+      const data: Record<string, unknown> = {
+        routes: patch.routes.map(([lane, dac]) => [lane, dac])
+      }
+      if (patch.dac_channels !== undefined) {
+        data.dac_channels = patch.dac_channels
+      }
+      const body = await client.post<unknown>(CONTROL_PATHS.surface, { surface: 'routing', data })
+      return parseControlDraft(body)
+    },
+    async prepareLayout(patch: LayoutPatch): Promise<ControlDraft> {
+      const body = await client.post<unknown>(CONTROL_PATHS.surface, {
+        surface: 'layout',
+        data: {
+          in_channels: patch.in_channels,
+          out_lanes: patch.out_lanes,
+          folds: patch.folds.map(([src, dst, gain]) => [src, dst, gain])
+        }
       })
       return parseControlDraft(body)
     },

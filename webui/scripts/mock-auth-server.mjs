@@ -1,45 +1,88 @@
 #!/usr/bin/env node
 /**
- * Contract mock for /api/auth/* — DEV / TEST ONLY (scripts/ is never bundled into dist).
+ * Contract mock for the khaen web console — DEV / TEST ONLY (scripts/ is never bundled into dist).
  *
- * It implements exactly the PLAN §4.1/§4.2 frontend contract:
+ * 对齐 docs/API.md v1.2（唯一 API 合同）+ crates/daemon 实际形态；所有写端点遵守 M1 错误体
+ * {error:{code,message,details}}，前端兼容的 host_link 转发形态只保留在旧转发路径。
+ *
+ * 认证（scripts 级 mock，不是真实安全实现）：
  *   GET  /api/auth/status   -> {configured, authenticated}            (anonymous)
  *   POST /api/auth/setup    -> 201 {csrf, expires_in} + Set-Cookie   (409 when configured)
  *   POST /api/auth/login    -> 200 {csrf, expires_in} + Set-Cookie   (401 wrong, 429 rate limited)
  *   GET  /api/auth/session  -> {authenticated, csrf, expires_at}     (401 when anonymous)
  *   POST /api/auth/logout   -> clears session (idempotent)
  *   POST /api/auth/password -> {old, new}, requires session + CSRF
- *   GET  /api/status        -> 401 without session; khaen-status/v1 fixture with session
- *                              (fixtures: present | stale | missing, see scripts/status-fixtures.mjs)
- *   /api/calibration/*      -> 校准 REST（jobs/uploads/artifacts/wizard；fixtures: empty | success | failed |
- *                              unavailable，见 scripts/calibration-fixtures.mjs）；写操作要求 CSRF
- *   /api/system/*           -> 系统信息 REST（info/logs/diagnostics/password/restart；fixtures: mismatch |
- *                              consistent | degraded，见 scripts/system-fixtures.mjs）；写操作要求 CSRF
- *   M3 控制面                -> /api/mute、/api/surface（volume|mode）、/api/format、/api/commit、/api/abort、
- *                              /api/device/retry（prepare → commit/abort 单草稿槽；fixtures: wired | unavailable，
- *                              见 scripts/control-fixtures.mjs）；写操作要求 CSRF
- *   M4 方案与声道            -> /api/channels（GET/PUT）、POST /api/plan/upload|inspect、GET /api/plan/history、
- *                              POST /api/prepare|rollback；channels commit 在 M3b/T52 完成前返回 501
- *                              host_link_unsupported。**T60 起按 daemon 真实形态**：上传回执带
- *                              segments:[区段名]/segment_count/stored_path；inspect 是
+ *
+ * 只读视图：
+ *   GET  /api/status        -> 401 without session; khaen-status/v1 fixture（present | stale | missing，
+ *                              scripts/status-fixtures.mjs）+ 运行时叠加（mute/format/plan）+ §12.2 加法 speaker_test
+ *   GET  /api/meta          -> {ok, api_version, web_version, ops, surfaces, calibration:{wired,reason},
+ *                              host_link, not_wired}（能力清单来自当前 fixture，页面先读能力再决定入口）
+ *   GET  /api/motu          -> khaen-motu/v1 设备快照（fixtures: wired | degraded，scripts/motu-fixtures 逻辑内联）
+ *   GET  /api/channels      -> khaen-channels/v1（恒 200；fixtures: wired | partial | degraded | unavailable，
+ *                              scripts/channels-fixtures.mjs）+ §12.2 加法 speaker_roles/input_roles
+ *   GET  /api/device/inputs -> 声卡输入能力（模拟 + 光口；scripts/audio-profile-fixtures.mjs）
+ *   GET  /api/audio-profile -> 音频通道 profile 快照（fixtures: wired | not-wired，scripts/audio-profile-fixtures.mjs）
+ *   GET  /api/plan/history、POST /api/plan/upload|inspect   （T60 起按 daemon 真实形态：
+ *                              upload 回执带 segments:[区段名]/segment_count/stored_path；inspect 是
  *                              POST {plan_path, plan_sha256?}（plan_path = 上传回执的 stored_path）；
- *                              prepare 是 {plan_path, plan_sha256}；history 是
- *                              {current:{version,graph_id}, entries:[{recorded_at,...}]}。
- *                              （fixtures: wired | partial | degraded | unavailable，见 scripts/channels-fixtures.mjs）
+ *                              history 是 {current:{version,graph_id}, entries:[{recorded_at,...}]}）
  *   GET  /healthz           -> {ok, version, uptime_s}（匿名；version = release 版本，缺失回退 crate 版本）
- *   GET  /__mock/status     -> {fixture, fixtures}                     (dev-only switch helper)
- *   POST /__mock/status-fixture {fixture} -> switch /api/status fixture (dev-only)
- *   GET  /__mock/system     -> {fixture, fixtures, restart}            (dev-only switch helper)
- *   POST /__mock/system-fixture {fixture} -> switch /api/system fixture (dev-only)
- *   GET  /__mock/control    -> {fixture, fixtures, state, drafts}      (dev-only switch helper)
- *   POST /__mock/control-fixture {fixture} -> switch M3 control fixture (dev-only; clears drafts)
- *   GET  /__mock/channels   -> {fixture, fixtures, state, history}     (dev-only switch helper)
- *   POST /__mock/channels-fixture {fixture} -> switch M4 channels fixture (dev-only)
+ *
+ * 两阶段写操作（全部要求会话 + X-KHAEN-CSRF；CSRF 失败 403 csrf_invalid）：
+ *   POST /api/surface       -> 五个语义界面 volume|routing|layout|mode|format 的 prepare
+ *                              （volume/routing/layout: engine_token/planned_version/graph_id/admission；
+ *                               mode/format 另带 changed/applies_to/device_restart_required）
+ *   POST /api/format        -> format prepare 的独立入口（与 surface format 同一套草稿）
+ *   POST /api/prepare|commit|abort            -> 方案/回滚草稿两阶段（单一 pending 草稿槽）
+ *   POST /api/rollback      -> 历史旧版本准备成草稿（token 递增，commit 后生效）
+ *   POST /api/mute          -> 静音立即生效（回执带真实回读 mute/muted）
+ *   GET/POST/PUT /api/motu/volume -> MOTU 音量两阶段（prepare 只签 token、commit 才写设备 + 真值回读；
+ *                              没有 abort，草稿由 TTL 过期；>2 通道 400 motu_batch_rejected）
+ *   PUT  /api/channels      -> 数据面热重配两阶段 {stage:"prepare"|"commit"|"abort"}：
+ *                              prepare 回 changed/diff/current/target/engine_token/commit_supported/blockers/
+ *                              admission/graph；commit 回 applied/changed/generation/gap_ms/format/
+ *                              graph_dropped/routing（失败 502 ERR_RECONFIGURE_* + details.rolled_back）；
+ *                              mapping/dac_map 属方案 routing：只改 mapping 时 commit_supported=false 且不签 token
+ *   PUT  /api/audio-profile -> 音频 profile 两步保存 {stage:"prepare"|"commit"|"abort"}：
+ *                              prepare 回 profile/validation/diff/token/expires_in_s；commit 回
+ *                              applied/saved/revision/profile；abort 回 aborted
+ *   POST /api/audio-profile/plan -> profile -> 方案文件（plan_path/sha256/lane_count/inspect/
+ *                              folds_preview/downmix_applied），之后走现有 /api/plan/inspect + prepare + commit
+ *   POST /api/speaker-test、POST /api/speaker-test/stop -> 通道识别测试音（必须 audible=true 且
+ *                              confirm=true；dac 0..21、ms 500..10000、db -60..-12 默认 -30；
+ *                              fixtures: enabled | sound-window-closed(403) | not-wired(503)）；
+ *                              stop 幂等
+ *   POST /api/device/retry  -> 设备监督器重试回执
+ *
+ * 校准 REST（实际 canonical 形状，docs/API.md §7 裁决 H；写操作要求 CSRF）：
+ *   POST /api/calibration/uploads|null -> 原始字节 WAV 上传（201 首次 / 200 同 sha 去重；
+ *                              {upload_id,sha256,bytes,created}，无 schema）
+ *   GET/POST /api/calibration/jobs -> 列表 {schema,available,reason?,engine?,active_job_id?,total,limit,
+ *                              offset,jobs,reasons}；创建 202 {ok,job_id,state,location}
+ *   GET  /api/calibration/jobs/{id} -> {ok,schema,job(id/status canonical),result,artifacts,error,reasons}
+ *   POST /api/calibration/jobs/{id}/cancel -> {ok,job_id,status,state}
+ *   POST /api/calibration/jobs/{id}/apply|rollback -> 旧单发 {} 或 staged
+ *                              {stage:"prepare"|"commit"|"abort",engine_token?}
+ *   GET  /api/calibration/jobs/{id}/artifacts/{name} -> 二进制/JSON 产物（Content-Disposition +
+ *                              X-KHAEN-Artifact-SHA256；含二进制 plan.bin）
+ *   GET/PUT /api/calibration/wizard、GET /api/calibration/wizard/state、POST /api/calibration/wizard/apply
+ *                              （apply 返回 apply 回执；无可用 job 409 no_applicable_job）
+ *   fixtures: empty | success | failed | unavailable（scripts/calibration-fixtures.mjs）
+ *
+ * 系统 REST（fixtures: mismatch | consistent | degraded，scripts/system-fixtures.mjs）：
+ *   GET /api/system/info|logs|diagnostics、POST /api/system/password|restart
+ *
+ * Dev-only fixture 切换（帮助浏览器验收，真实 daemon 没有这些端点）：
+ *   GET  /__mock/status|calibration|system|control|channels|motu|audio-profile|speaker-test
+ *   POST /__mock/{status,calibration,system,control,channels,motu,audio-profile,speaker-test}-fixture {fixture}
+ *   （channels 除内置 4 个 fixture 外还接受 reconfigure-failure | host-link-unavailable | mapping-only）
  *
  * Cookie: khaen_session=<opaque>; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800
  * CSRF: X-KHAEN-CSRF must equal the session csrf for session-bound writes.
  * State is in-memory only (restart = fresh setup flow). It never replaces the real backend:
- * the real one is Rust/axum (task T34) and must be validated separately before M1 ships.
+ * the real one is Rust/axum and must be validated separately; this mock 不假成功：
+ * 未接线的能力一律 null + reason / 503 not_wired，写失败不返回成功回执。
  *
  * Usage:
  *   node scripts/mock-auth-server.mjs                          # 127.0.0.1:8790
@@ -48,7 +91,9 @@
  *   node scripts/mock-auth-server.mjs --calibration-fixture success # empty | success | failed | unavailable
  *   node scripts/mock-auth-server.mjs --system-fixture degraded    # mismatch | consistent | degraded
  *   node scripts/mock-auth-server.mjs --control-fixture wired --channels-fixture wired
- *                              # control: wired | unavailable; channels: wired | degraded | unavailable
+ *                              # control: wired | unavailable; channels: 见上（含三个扩展 fixture）
+ *   node scripts/mock-auth-server.mjs --motu-fixture degraded --audio-profile-fixture not-wired \
+ *        --speaker-test-fixture sound-window-closed
  *   KHAEN_DEV_API=http://127.0.0.1:8790 pnpm dev               # vite proxies /api to the mock
  */
 import { createHash, randomBytes } from 'node:crypto'
@@ -91,11 +136,62 @@ import {
 import {
   CHANNELS_FIXTURES,
   DEFAULT_CHANNELS_FIXTURE,
+  MAPPING_PLAN_OWNED_REASON,
+  buildChannelsAbortAck,
+  buildChannelsCommitAck,
+  buildChannelsCommitFailureDetails,
+  buildChannelsCurrent,
+  buildChannelsMappingOnlyAck,
+  buildChannelsPrepareAck,
   buildChannelsSeed,
   isChannelsFixture
 } from './channels-fixtures.mjs'
+import {
+  AES67_CAPABILITY,
+  AUDIO_PROFILE_DEVICE_CHANNELS,
+  AUDIO_PROFILE_FIXED_AT,
+  AUDIO_PROFILE_FIXTURES,
+  AUDIO_PROFILE_GRAPH_ID,
+  AUDIO_PROFILE_NOT_WIRED_REASON,
+  AUDIO_PROFILE_PREPARE_TTL_S,
+  AUDIO_PROFILE_SCHEMA,
+  DEFAULT_AUDIO_PROFILE_FIXTURE,
+  buildAudioProfileSeed,
+  buildDefaultAudioProfile,
+  buildDeviceInputsBody,
+  buildGeneratedPlan,
+  buildPlanSummary,
+  enabledLaneOrder,
+  isAudioProfileFixture,
+  profileDiff,
+  validateAudioProfile
+} from './audio-profile-fixtures.mjs'
+import {
+  DEFAULT_SPEAKER_TEST_FIXTURE,
+  SPEAKER_TEST_DAC_MAX,
+  SPEAKER_TEST_FIXED_AT,
+  SPEAKER_TEST_FIXTURES,
+  SPEAKER_TEST_NOT_WIRED_REASON,
+  SPEAKER_TEST_WINDOW_CLOSED_REASON,
+  buildSpeakerTestAck,
+  buildSpeakerTestSeed,
+  buildSpeakerTestStatus,
+  buildSpeakerTestStopAck,
+  isSpeakerTestFixture,
+  validateSpeakerTestRequest
+} from './speaker-test-fixtures.mjs'
 
 export const DEFAULT_MOCK_PORT = 8790
+
+/** MOTU mock fixture（wired | degraded；degraded = detected:false + reason motu_not_detected，写 503）。 */
+export const MOTU_FIXTURES = ['wired', 'degraded']
+const MOTU_FIXED_CREATED_AT = '2026-11-26T07:20:00.000Z'
+const MOTU_DB_FLOOR = -144.49
+const MOTU_WRITE_APPLIES_TO = 'MOTU Main 1/Main 2 koBusFader (single-key write + readback, device write at commit only)'
+
+export function isMotuFixture(value) {
+  return typeof value === 'string' && MOTU_FIXTURES.includes(value)
+}
 
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000
 const SESSION_TTL_S = SESSION_TTL_MS / 1000
@@ -146,6 +242,11 @@ export function createMockAuthServer(options = {}) {
   let wizardMeasurement = { baseline_upload_id: null, applied_upload_id: null, plan_sha: null }
   let appliedJobId = null
   let appliedSnapshot = null
+  /**
+   * apply/rollback 的两阶段 staging（docs/API.md §7：stage=prepare 只签一次性 token，commit 才生效）。
+   * token -> {job_id, kind:'apply'|'rollback', plan_sha256, previous_version, target_version}
+   */
+  let calibrationStagedOps = new Map()
 
   function seedCalibration(fixture) {
     const seed = buildCalibrationSeed(fixture)
@@ -165,6 +266,7 @@ export function createMockAuthServer(options = {}) {
     }
     appliedJobId = seed.appliedJobId ?? null
     appliedSnapshot = null
+    calibrationStagedOps = new Map()
   }
   seedCalibration(calibrationFixture)
 
@@ -187,21 +289,174 @@ export function createMockAuthServer(options = {}) {
   }
   seedControl(controlFixture)
 
-  /* --------------------------------------------------- M4 方案/声道 mock 状态 */
-  // DEV/TEST ONLY：/api/channels（读 + prepare）、/api/plan/upload|prepare|history|inspect、/api/rollback。
-  // fixture unavailable = daemon 尚未实现 M4（T55）：所有 M4 端点 501 not_wired（不编造映射/历史）。
-  let channelsFixture = isChannelsFixture(options.channelsFixture) ? options.channelsFixture : DEFAULT_CHANNELS_FIXTURE
-  let channelsSeed = buildChannelsSeed(channelsFixture)
+  /* ------------------------------------------- M4 方案/声道 mock 状态 */
+  // DEV/TEST ONLY：/api/channels（读 + 两阶段写）、/api/plan/upload|prepare|history|inspect、/api/rollback。
+  // fixture：
+  // - 内置 4 个（wired | partial | degraded | unavailable，scripts/channels-fixtures.mjs）；
+  // - 扩展 3 个（仅 mock 接受，用于浏览器演练 daemon 的真实失败/降级形态，见 docs/API.md §5/§1）：
+  //   mapping-only：prepare 一律返回 commit_supported=false 的 mapping 草稿（mapping 属方案 routing，
+  //                 channels_commit 不能改，正确行为是禁用 commit + 逐条 blockers）；
+  //   reconfigure-failure：commit 返回 502 ERR_RECONFIGURE_DEVICE + details.rolled_back=true（不假成功）；
+  //   host-link-unavailable：GET 200 但现场字段 null + reasons，PUT 任何 stage 503 host_link_unavailable。
+  let channelsFixture = DEFAULT_CHANNELS_FIXTURE
+  let channelsSeed = buildChannelsSeed(DEFAULT_CHANNELS_FIXTURE)
+  /** 扩展 fixture 的运行模式：normal | mapping-only | reconfigure-failure | host-link-unavailable。 */
+  let channelsMode = 'normal'
+  /** PUT /api/channels 的 pending 草稿槽（rt-host channels 两阶段自己的 token，与控制面草稿槽分开）。 */
+  let channelsPending = null
+  /** 数据面重配 generation（commit 成功后 +1；null = 拿不到）。 */
+  let channelsGeneration = null
   /** sha256(plan bytes) -> 上传记录（幂等）。 */
   let planUploads = new Map()
 
-  function seedM4(fixture) {
-    channelsFixture = fixture
-    channelsSeed = buildChannelsSeed(fixture)
+  const CHANNELS_EXTRA_FIXTURES = ['mapping-only', 'reconfigure-failure', 'host-link-unavailable']
+
+  function resolveChannelsFixture(name) {
+    if (isChannelsFixture(name)) {
+      return { fixture: name, base: name, mode: 'normal' }
+    }
+    if (typeof name === 'string' && CHANNELS_EXTRA_FIXTURES.includes(name)) {
+      return { fixture: name, base: 'wired', mode: name }
+    }
+    return null
+  }
+
+  function seedM4(name) {
+    const resolved = resolveChannelsFixture(name) ?? resolveChannelsFixture(DEFAULT_CHANNELS_FIXTURE)
+    channelsFixture = resolved.fixture
+    channelsMode = resolved.mode
+    channelsSeed = buildChannelsSeed(resolved.base)
+    channelsGeneration = channelsSeed.channels === null ? null : channelsSeed.channels.generation
+    channelsPending = null
     planUploads = new Map()
     controlPending = null
   }
-  seedM4(channelsFixture)
+  seedM4(options.channelsFixture)
+
+  /* ------------------------------------------------------- MOTU 设备 mock 状态 */
+  // DEV/TEST ONLY：GET /api/motu（恒 200）+ PUT/POST /api/motu/volume 两阶段（prepare -> commit；**没有 abort**）。
+  // fixture：
+  // - wired：检测到 UltraLite-mk5、USB-CDC 控制网可达、Main 1/2 真值回读、逐通道单键写 + 回读可用；
+  // - degraded：未检测到（reason=motu_not_detected）：GET 200 + mute/vol/state=null + reasons，
+  //   写端点 503 motu_not_detected（不尝试写、不假成功）。
+  // 所有时间戳/初始音量固定（不依赖当前时间/随机）。
+  /** fader linear -> dB（0/-inf -> null；与 crates/motu-cuemix/src/fader.rs 一致）。 */
+  function motuFaderToDb(linear) {
+    if (typeof linear !== 'number' || !Number.isFinite(linear) || linear <= 0) {
+      return null
+    }
+    return 20 * Math.log10(linear)
+  }
+
+  /** 8.24 量化（与设备一致：写入值 == 回读值）。 */
+  function motuQuantizeLinear(linear) {
+    return Math.round(linear * 16777216) / 16777216
+  }
+
+  function motuMainChannels() {
+    return [
+      { channel: 1, name: 'Main 1', datastore: { key: 'koBusFader', index: 0 } },
+      { channel: 2, name: 'Main 2', datastore: { key: 'koBusFader', index: 1 } }
+    ]
+  }
+
+  function buildMotuSeed(fixture) {
+    const name = isMotuFixture(fixture) ? fixture : 'wired'
+    const channels = motuMainChannels()
+    if (name === 'degraded') {
+      return {
+        fixture: name,
+        detected: false,
+        model: null,
+        card_id: null,
+        card_index: null,
+        control_reachable: false,
+        reason: 'motu_not_detected',
+        reason_detail:
+          'no MOTU card was found in /proc/asound/cards: MOTU control is unavailable on this host (this is not an error)',
+        mute: null,
+        vol: null,
+        state: null,
+        draft: null,
+        write_seq: 0
+      }
+    }
+    return {
+      fixture: name,
+      detected: true,
+      model: 'UltraLite-mk5',
+      card_id: 'hw:CARD=UltraLitemk5,DEV=0',
+      card_index: 1,
+      control_reachable: true,
+      reason: 'detected',
+      reason_detail:
+        'MOTU control is available: a MOTU card is present and the USB-CDC control network answered the TCP probe',
+      mute: false,
+      vol: [
+        { ...channels[0], linear: 1, db: 0 },
+        { ...channels[1], linear: 0.5, db: motuFaderToDb(0.5) }
+      ],
+      state: {
+        sample_rate_hz: 48000,
+        main_trim: 0,
+        main_bus_mute: false,
+        device: {
+          model_id: 'UltraLite-mk5',
+          name: 'MOTU UltraLite mk5',
+          version: '1.6.6',
+          api_version: 2
+        },
+        missing: []
+      },
+      draft: null,
+      write_seq: 0
+    }
+  }
+
+  let motuFixture = isMotuFixture(options.motuFixture) ? options.motuFixture : 'wired'
+  let motu = buildMotuSeed(motuFixture)
+
+  function seedMotu(fixture) {
+    motuFixture = isMotuFixture(fixture) ? fixture : 'wired'
+    motu = buildMotuSeed(motuFixture)
+  }
+
+  /* --------------------------------------------- 音频 profile / 测试音 mock 状态 */
+  // DEV/TEST ONLY：/api/audio-profile（GET/PUT 两阶段）、/api/audio-profile/plan、/api/device/inputs、
+  // /api/speaker-test(+stop)。fixture 语义见 scripts/audio-profile-fixtures.mjs / speaker-test-fixtures.mjs。
+  let audioProfileFixture = isAudioProfileFixture(options.audioProfileFixture)
+    ? options.audioProfileFixture
+    : DEFAULT_AUDIO_PROFILE_FIXTURE
+  let audioProfileSeed = buildAudioProfileSeed(audioProfileFixture)
+  /** 已保存的 profile（null = 未接线/未保存）与其 revision。 */
+  let audioProfileSaved = audioProfileSeed.profile
+  let audioProfileRevision = audioProfileSeed.revision
+  /** 当前**已生效**方案的摘要（GET 快照 plan 段；只有 profile 方案经 /api/commit 生效后才更新）。 */
+  let audioProfileAppliedPlan = { ...audioProfileSeed.plan }
+  /** 最近一次 POST /api/audio-profile/plan 生成的方案（等 /api/commit 后并入 appliedPlan）。 */
+  let audioProfileGeneratedPlan = null
+  /** PUT /api/audio-profile 的 pending 草稿槽（单槽；commit/abort 消费）。 */
+  let audioProfilePending = null
+
+  function seedAudioProfile(fixture) {
+    audioProfileFixture = isAudioProfileFixture(fixture) ? fixture : DEFAULT_AUDIO_PROFILE_FIXTURE
+    audioProfileSeed = buildAudioProfileSeed(audioProfileFixture)
+    audioProfileSaved = audioProfileSeed.profile
+    audioProfileRevision = audioProfileSeed.revision
+    audioProfileAppliedPlan = { ...audioProfileSeed.plan }
+    audioProfileGeneratedPlan = null
+    audioProfilePending = null
+  }
+
+  let speakerTestFixture = isSpeakerTestFixture(options.speakerTestFixture)
+    ? options.speakerTestFixture
+    : DEFAULT_SPEAKER_TEST_FIXTURE
+  let speakerTest = buildSpeakerTestSeed(speakerTestFixture)
+
+  function seedSpeakerTest(fixture) {
+    speakerTestFixture = isSpeakerTestFixture(fixture) ? fixture : DEFAULT_SPEAKER_TEST_FIXTURE
+    speakerTest = buildSpeakerTestSeed(speakerTestFixture)
+  }
 
   function controlUnavailable(res) {
     sendError(
@@ -290,6 +545,151 @@ export function createMockAuthServer(options = {}) {
     return { response }
   }
 
+  /** 语义界面 routing：routes=[[lane,dac],...] 完整替换表 + 可选 dac_channels（CONTRACTS B.1.2）。 */
+  function prepareRoutingSurface(body) {
+    const data = body.data === undefined ? {} : body.data
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      return { status: 400, code: 'bad_request', message: 'field data must be a json object' }
+    }
+    if (control.basePlan === null) {
+      return {
+        status: 409,
+        code: 'no_base_plan',
+        message: 'no committed plan to patch: prepare + commit a plan first'
+      }
+    }
+    const routes = data.routes
+    if (!Array.isArray(routes) || routes.length === 0) {
+      return { status: 400, code: 'bad_request', message: 'field data.routes must be a non-empty array of [lane, dac]' }
+    }
+    const parsed = []
+    const seenLanes = new Set()
+    for (const item of routes) {
+      if (!Array.isArray(item) || item.length !== 2) {
+        return { status: 400, code: 'bad_request', message: 'data.routes entries must be [lane, dac] arrays' }
+      }
+      const lane = item[0]
+      const dac = item[1]
+      if (!Number.isInteger(lane) || lane < 0) {
+        return { status: 400, code: 'bad_request', message: 'route lane must be a non-negative integer' }
+      }
+      if (!Number.isInteger(dac) || dac < 0) {
+        return { status: 400, code: 'bad_request', message: 'route dac must be a non-negative integer' }
+      }
+      if (seenLanes.has(lane)) {
+        return { status: 400, code: 'bad_request', message: 'data.routes must not route the same lane twice' }
+      }
+      seenLanes.add(lane)
+      parsed.push([lane, dac])
+    }
+    let dacChannels = control.format.channels ?? 22
+    if (data.dac_channels !== undefined) {
+      if (!Number.isInteger(data.dac_channels) || data.dac_channels <= 0 || data.dac_channels > 32) {
+        return { status: 400, code: 'bad_request', message: 'field data.dac_channels must be an integer in 1..32' }
+      }
+      dacChannels = data.dac_channels
+    }
+    for (const [lane, dac] of parsed) {
+      if (dac >= dacChannels) {
+        return {
+          status: 400,
+          code: 'bad_request',
+          message: 'route lane ' + String(lane) + ' -> dac ' + String(dac) + ' is outside dac_channels ' + String(dacChannels)
+        }
+      }
+    }
+    const version = control.version + 1
+    const graphId = graphIdForVersion(version)
+    const token = stableControlToken('routing', version, { parsed, dacChannels })
+    const response = {
+      ok: true,
+      surface: 'routing',
+      engine_token: token,
+      planned_version: version,
+      graph_id: graphId,
+      admission: { accepted: true, budget: {} }
+    }
+    if (controlPending !== null && controlPending.token === token) {
+      return { response: controlPending.response }
+    }
+    controlPending = { kind: 'routing', token, version, response, routes: parsed, dacChannels, graph_id: graphId }
+    return { response }
+  }
+
+  /** 语义界面 layout：{in_channels, out_lanes, folds:[[src,dst,gain],...]} 完整替换表。 */
+  function prepareLayoutSurface(body) {
+    const data = body.data === undefined ? {} : body.data
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      return { status: 400, code: 'bad_request', message: 'field data must be a json object' }
+    }
+    if (control.basePlan === null) {
+      return {
+        status: 409,
+        code: 'no_base_plan',
+        message: 'no committed plan to patch: prepare + commit a plan first'
+      }
+    }
+    const inChannels = data.in_channels
+    const outLanes = data.out_lanes
+    if (!Number.isInteger(inChannels) || inChannels < 1 || inChannels > 64) {
+      return { status: 400, code: 'bad_request', message: 'field data.in_channels must be an integer in 1..64' }
+    }
+    if (!Number.isInteger(outLanes) || outLanes < 1 || outLanes > 32) {
+      return { status: 400, code: 'bad_request', message: 'field data.out_lanes must be an integer in 1..32' }
+    }
+    const folds = data.folds
+    if (!Array.isArray(folds) || folds.length === 0) {
+      return { status: 400, code: 'bad_request', message: 'field data.folds must be a non-empty array of [src, dst, gain]' }
+    }
+    const parsed = []
+    for (const item of folds) {
+      if (!Array.isArray(item) || item.length !== 3) {
+        return { status: 400, code: 'bad_request', message: 'data.folds entries must be [src, dst, gain] arrays' }
+      }
+      const src = item[0]
+      const dst = item[1]
+      const gain = item[2]
+      if (!Number.isInteger(src) || src < 0 || !Number.isInteger(dst) || dst < 0) {
+        return { status: 400, code: 'bad_request', message: 'fold src/dst must be non-negative integers' }
+      }
+      if (typeof gain !== 'number' || !Number.isFinite(gain)) {
+        return { status: 400, code: 'bad_request', message: 'fold gain must be a finite number' }
+      }
+      if (src >= inChannels) {
+        return { status: 400, code: 'bad_request', message: 'fold src ' + String(src) + ' is outside in_channels ' + String(inChannels) }
+      }
+      if (dst >= outLanes) {
+        return { status: 400, code: 'bad_request', message: 'fold dst ' + String(dst) + ' is outside out_lanes ' + String(outLanes) }
+      }
+      parsed.push([src, dst, gain])
+    }
+    const version = control.version + 1
+    const graphId = graphIdForVersion(version)
+    const token = stableControlToken('layout', version, { inChannels, outLanes, parsed })
+    const response = {
+      ok: true,
+      surface: 'layout',
+      engine_token: token,
+      planned_version: version,
+      graph_id: graphId,
+      admission: { accepted: true, budget: {} }
+    }
+    if (controlPending !== null && controlPending.token === token) {
+      return { response: controlPending.response }
+    }
+    controlPending = {
+      kind: 'layout',
+      token,
+      version,
+      response,
+      in_channels: inChannels,
+      out_lanes: outLanes,
+      folds: parsed,
+      graph_id: graphId
+    }
+    return { response }
+  }
+
   function prepareModeSurface(body) {
     const data = body.data === undefined ? {} : body.data
     if (typeof data !== 'object' || data === null || Array.isArray(data)) {
@@ -371,21 +771,11 @@ export function createMockAuthServer(options = {}) {
     return { response }
   }
 
-  /** 消费 pending 草稿并返回 commit 回执（volume / mode / format / plan / rollback / channels）。 */
+  /** 消费 pending 草稿并返回 commit 回执（volume / routing / layout / mode / format / plan / rollback）。 */
   function commitControlDraft() {
     const pending = controlPending
     if (pending === null) {
       return { status: 409, code: 'engine_token_invalid', message: 'no prepared draft: call prepare before commit' }
-    }
-    if (pending.kind === 'channels') {
-      // M3b / T52 未完成：commit 明确 501（保留草稿，可 abort），绝不假装成功。
-      return {
-        status: 501,
-        code: 'host_link_unsupported',
-        message:
-          'rt-host does not support channel hot reconfiguration yet (M3b/T52): commit refused',
-        details: { reason: 'channel hot reconfiguration (M3b/T52) is not implemented in rt-host' }
-      }
     }
     controlPending = null
     controlOperationSeq += 1
@@ -432,8 +822,15 @@ export function createMockAuthServer(options = {}) {
       }
     }
     if (pending.kind === 'format') {
+      const wasMuted = control.muted
+      let droppedHistory = false
       if (pending.changed) {
         control.format = { ...pending.target }
+        // daemon 语义（crates/host/src/control/mod.rs commit_format）：格式变化重建执行器并丢弃旧格式下的
+        // 方案与历史；副本格式的旧方案对新格式不再合法，如实暴露给页面（后续 surface 补丁会 409 no_base_plan）。
+        control.basePlan = null
+        droppedHistory = control.history.length > 0
+        control.history = []
       }
       return {
         response: {
@@ -444,9 +841,109 @@ export function createMockAuthServer(options = {}) {
           format: control.format,
           all_ack: true,
           graph_dropped: pending.changed,
-          history_cleared: false,
-          mute_preserved: control.muted,
+          history_cleared: droppedHistory,
+          mute_preserved: wasMuted,
           device_restart_required: true
+        }
+      }
+    }
+    if (pending.kind === 'routing') {
+      const appliedAt = '2026-11-26T07:15:00.000Z'
+      const graphId = pending.graph_id
+      control.basePlan = {
+        graph_id: graphId,
+        sha256: null,
+        latency_samples: 1023,
+        applied_at: appliedAt,
+        source: 'surface:routing'
+      }
+      control.history.push({
+        version: pending.version,
+        graph_id: graphId,
+        sha256: null,
+        latency_samples: 1023,
+        applied_at: appliedAt,
+        source: 'surface:routing'
+      })
+      if (control.history.length > 16) {
+        control.history.shift()
+      }
+      // 方案 routing 已生效：/api/channels 的 mapping / output.dac_map 跟随（daemon 的方案 routing 镜像）。
+      if (channelsSeed.channels !== null) {
+        const channels = channelsSeed.channels
+        const mapping = pending.routes
+          .map(([lane, dac]) => ({ lane, dac }))
+          .sort((left, right) => left.lane - right.lane || left.dac - right.dac)
+        const dacMap = new Array(pending.dacChannels).fill(null)
+        for (const [lane, dac] of pending.routes) {
+          if (dac < dacMap.length) {
+            dacMap[dac] = lane
+          }
+        }
+        channels.mapping = mapping
+        channels.output = {
+          channels: pending.dacChannels,
+          dac_map: dacMap,
+          channels_source: 'plan-routing'
+        }
+        channels.plan = {
+          ...channels.plan,
+          version: pending.version,
+          graph_id: graphId,
+          routing_known: true,
+          routing_invalidated: null
+        }
+        if (channels.format !== null) {
+          channels.format = { ...channels.format, channels: pending.dacChannels }
+        }
+        if (channels.current !== null) {
+          channels.current = { ...channels.current, channels: pending.dacChannels }
+        }
+        channels.reasons = { ...channels.reasons }
+        delete channels.reasons.mapping
+        delete channels.reasons['output.dac_map']
+        channels.not_wired = (Array.isArray(channels.not_wired) ? channels.not_wired : []).filter(
+          (entry) => entry.path !== 'channels.hot_reconfigure.routing'
+        )
+      }
+      return {
+        response: {
+          ok: true,
+          applied_block: pending.version * 128 + 1,
+          version: pending.version,
+          all_ack: true,
+          graph_id: graphId
+        }
+      }
+    }
+    if (pending.kind === 'layout') {
+      const appliedAt = '2026-11-26T07:16:00.000Z'
+      const graphId = pending.graph_id
+      control.basePlan = {
+        graph_id: graphId,
+        sha256: null,
+        latency_samples: 1023,
+        applied_at: appliedAt,
+        source: 'surface:layout'
+      }
+      control.history.push({
+        version: pending.version,
+        graph_id: graphId,
+        sha256: null,
+        latency_samples: 1023,
+        applied_at: appliedAt,
+        source: 'surface:layout'
+      })
+      if (control.history.length > 16) {
+        control.history.shift()
+      }
+      return {
+        response: {
+          ok: true,
+          applied_block: pending.version * 128 + 1,
+          version: pending.version,
+          all_ack: true,
+          graph_id: graphId
         }
       }
     }
@@ -457,6 +954,16 @@ export function createMockAuthServer(options = {}) {
       latency_samples: 1023,
       applied_at: '2026-11-26T07:20:00.000Z',
       source: pending.kind === 'rollback' ? 'rollback' : 'upload'
+    }
+    // audio-profile 生成的方案真正 commit 后，GET /api/audio-profile 的 plan 摘要才更新（生效以回执为准）。
+    if (audioProfileGeneratedPlan !== null && pending.sha256 === audioProfileGeneratedPlan.sha256) {
+      audioProfileAppliedPlan = {
+        lanes: audioProfileGeneratedPlan.lanes,
+        enabled_outputs: audioProfileGeneratedPlan.lanes,
+        dac_channels: audioProfileGeneratedPlan.dac_channels,
+        graph_id: audioProfileGeneratedPlan.graph_id
+      }
+      audioProfileGeneratedPlan = null
     }
     control.history.push({
       version: pending.version,
@@ -564,7 +1071,392 @@ export function createMockAuthServer(options = {}) {
     }
   }
 
-  function prepareChannelsBody(body) {
+  /* ------------------------------------------------ /api/channels 两阶段（rt-host） */
+
+  /** rt-host 图被格式变化丢弃时的稳定原因（与 crates/daemon/src/channels.rs 同义，不编造）。 */
+  const CHANNELS_GRAPH_DROPPED_REASON =
+    'the engine format (channels/sample rate/block) changes, so the running graph is compiled for the old format; it is dropped at commit and a matching plan must be prepared+committed again'
+  const CHANNELS_HOST_LINK_REASON =
+    'the daemon -> rt-host control channel is unavailable (mock fixture: host-link-unavailable): the channels status cannot be read and no reconfiguration can be prepared or committed'
+
+  /** §12.2 加法字段：dac -> canonical 角色（来源 = GET /api/audio-profile 的已保存 profile）。 */
+  function channelsSpeakerRoles() {
+    if (audioProfileSaved === null) {
+      return null
+    }
+    return audioProfileSaved.outputs.map((output) => ({
+      dac: output.dac,
+      role: output.role,
+      enabled: output.enabled === true
+    }))
+  }
+
+  /** §12.2 加法字段：输入源每通道的角色（来源同上；未接线为 null，不编造）。 */
+  function channelsInputRoles() {
+    if (audioProfileSaved === null) {
+      return null
+    }
+    const roles = []
+    const sources = Array.isArray(audioProfileSaved.inputs?.sources) ? audioProfileSaved.inputs.sources : []
+    for (const source of sources) {
+      if (source === null || typeof source !== 'object') {
+        continue
+      }
+      for (const channel of Array.isArray(source.channels) ? source.channels : []) {
+        if (channel === null || typeof channel !== 'object') {
+          continue
+        }
+        roles.push({ source: source.kind, channel: channel.channel, role: channel.role })
+      }
+    }
+    return roles
+  }
+
+  /** GET /api/channels 的正文（恒 200；host-link-unavailable 时现场字段 null + reasons）。 */
+  function buildChannelsView() {
+    if (channelsMode === 'host-link-unavailable') {
+      const document = buildChannelsSeed('degraded').channels
+      document.reasons = {
+        ...document.reasons,
+        'channels.hot_reconfigure': CHANNELS_HOST_LINK_REASON,
+        'output.channels': CHANNELS_HOST_LINK_REASON
+      }
+      document.not_wired = [{ path: 'channels.hot_reconfigure', reason: CHANNELS_HOST_LINK_REASON }]
+      document.speaker_roles = channelsSpeakerRoles()
+      document.input_roles = channelsInputRoles()
+      return document
+    }
+    const document = JSON.parse(JSON.stringify(channelsSeed.channels))
+    document.speaker_roles = channelsSpeakerRoles()
+    document.input_roles = channelsInputRoles()
+    return document
+  }
+
+  const CHANNELS_PATCH_FIELDS = [
+    'channels',
+    'sample_rate',
+    'aes67_group',
+    'aes67_port',
+    'aes67_payload_type',
+    'aes67_channels',
+    'aes67_map',
+    'input_channels',
+    'input_map',
+    'jitter_frames',
+    'mapping',
+    'dac_map',
+    'output',
+    'input'
+  ]
+  const CHANNELS_SAMPLE_RATES = [44100, 48000, 96000]
+  const CHANNELS_MAX_OUTPUT = 22
+  const CHANNELS_MAX_AES67 = 8
+  const CHANNELS_MAX_MAPPING_ENTRIES = 128
+
+  function channelsFail(field, message, code = 'bad_request') {
+    return { ok: false, status: 400, code, message, details: { field } }
+  }
+
+  function isMulticastIpv4(value) {
+    if (typeof value !== 'string') {
+      return false
+    }
+    const parts = value.trim().split('.')
+    if (parts.length !== 4) {
+      return false
+    }
+    const octets = []
+    for (const part of parts) {
+      if (!/^[0-9]{1,3}$/.test(part)) {
+        return false
+      }
+      const octet = Number(part)
+      if (!Number.isInteger(octet) || octet < 0 || octet > 255) {
+        return false
+      }
+      octets.push(octet)
+    }
+    return octets[0] >= 224 && octets[0] <= 239
+  }
+
+  /** 解析 PUT /api/channels 的 prepare 补丁（daemon 字段 + 旧 output/input 嵌套别名）。 */
+  function parseChannelsPatch(body) {
+    for (const key of Object.keys(body)) {
+      if (key === 'stage' || key === 'action' || key === 'engine_token') {
+        continue
+      }
+      if (!CHANNELS_PATCH_FIELDS.includes(key)) {
+        return channelsFail(key, 'unknown field: ' + key)
+      }
+    }
+    const patch = {}
+    if (body.output !== undefined) {
+      if (typeof body.output !== 'object' || body.output === null || Array.isArray(body.output)) {
+        return channelsFail('output', 'field output must be an object')
+      }
+      if (body.output.channels !== undefined) {
+        patch.channels = body.output.channels
+      }
+      if (body.output.dac_map !== undefined) {
+        patch.dac_map = body.output.dac_map
+      }
+    }
+    if (body.input !== undefined) {
+      if (typeof body.input !== 'object' || body.input === null || Array.isArray(body.input)) {
+        return channelsFail('input', 'field input must be an object')
+      }
+      if (body.input.channels !== undefined) {
+        patch.input_channels = body.input.channels
+      }
+      if (body.input.map !== undefined) {
+        patch.input_map = body.input.map
+      }
+    }
+    for (const field of [
+      'channels',
+      'sample_rate',
+      'aes67_group',
+      'aes67_port',
+      'aes67_payload_type',
+      'aes67_channels',
+      'aes67_map',
+      'input_channels',
+      'input_map',
+      'jitter_frames',
+      'mapping',
+      'dac_map'
+    ]) {
+      if (body[field] !== undefined) {
+        patch[field] = body[field]
+      }
+    }
+    const targetChannels = patch.channels === undefined ? null : patch.channels
+    if (targetChannels !== null) {
+      if (!Number.isInteger(targetChannels) || targetChannels < 1 || targetChannels > CHANNELS_MAX_OUTPUT) {
+        return channelsFail('channels', 'output channels must be an integer in 1..' + String(CHANNELS_MAX_OUTPUT))
+      }
+    }
+    if (patch.sample_rate !== undefined && !CHANNELS_SAMPLE_RATES.includes(patch.sample_rate)) {
+      return channelsFail('sample_rate', 'sample_rate must be one of ' + JSON.stringify(CHANNELS_SAMPLE_RATES))
+    }
+    if (patch.aes67_group !== undefined && !isMulticastIpv4(patch.aes67_group)) {
+      return channelsFail('aes67_group', 'aes67_group must be an IPv4 multicast address (224.0.0.0/4)')
+    }
+    if (patch.aes67_port !== undefined) {
+      if (!Number.isInteger(patch.aes67_port) || patch.aes67_port < 1 || patch.aes67_port > 65535) {
+        return channelsFail('aes67_port', 'aes67_port must be an integer in 1..65535')
+      }
+    }
+    if (patch.aes67_payload_type !== undefined) {
+      if (!Number.isInteger(patch.aes67_payload_type) || patch.aes67_payload_type < 96 || patch.aes67_payload_type > 127) {
+        return channelsFail('aes67_payload_type', 'aes67_payload_type must be an integer in 96..127')
+      }
+    }
+    if (patch.aes67_channels !== undefined) {
+      if (!Number.isInteger(patch.aes67_channels) || patch.aes67_channels < 1 || patch.aes67_channels > CHANNELS_MAX_AES67) {
+        return channelsFail('aes67_channels', 'aes67_channels must be an integer in 1..' + String(CHANNELS_MAX_AES67))
+      }
+    }
+    if (patch.aes67_map !== undefined) {
+      if (!Array.isArray(patch.aes67_map)) {
+        return channelsFail('aes67_map', 'aes67_map must be an array of output channels')
+      }
+      const expected =
+        patch.aes67_channels ?? (channelsSeed.channels === null ? null : channelsSeed.channels.current?.aes67_channels ?? null)
+      if (expected !== null && patch.aes67_map.length !== expected) {
+        return channelsFail('aes67_map', 'aes67_map length must equal aes67_channels')
+      }
+      const seen = new Set()
+      for (const slot of patch.aes67_map) {
+        const upper = targetChannels === null ? Number.POSITIVE_INFINITY : targetChannels - 1
+        if (!Number.isInteger(slot) || slot < 0 || slot > upper || seen.has(slot)) {
+          return channelsFail('aes67_map', 'aes67_map values must be unique integers 0..channels-1')
+        }
+        seen.add(slot)
+      }
+    }
+    if (patch.jitter_frames !== undefined) {
+      if (!Number.isInteger(patch.jitter_frames) || patch.jitter_frames < 0) {
+        return channelsFail('jitter_frames', 'jitter_frames must be a non-negative integer')
+      }
+    }
+    if (patch.input_channels !== undefined) {
+      if (!Number.isInteger(patch.input_channels) || patch.input_channels < 1 || patch.input_channels > CHANNELS_MAX_AES67) {
+        return channelsFail('input_channels', 'input channels must be an integer in 1..' + String(CHANNELS_MAX_AES67))
+      }
+    }
+    if (patch.input_map !== undefined) {
+      if (!Array.isArray(patch.input_map)) {
+        return channelsFail('input_map', 'input_map must be an array of capture channels')
+      }
+      const expected =
+        patch.input_channels ??
+        (channelsSeed.channels === null ? null : channelsSeed.channels.input.channels ?? null)
+      if (expected !== null && patch.input_map.length !== expected) {
+        return channelsFail('input_map', 'input_map length must equal the input channel count')
+      }
+      const seen = new Set()
+      for (const channel of patch.input_map) {
+        if (!Number.isInteger(channel) || channel < 0 || channel > 63 || seen.has(channel)) {
+          return channelsFail('input_map', 'input_map values must be unique integers 0..63')
+        }
+        seen.add(channel)
+      }
+    }
+    if (patch.dac_map !== undefined) {
+      if (!Array.isArray(patch.dac_map)) {
+        return channelsFail('dac_map', 'dac_map must be an array of lane numbers (null = no lane)')
+      }
+      const expected =
+        targetChannels ?? (channelsSeed.channels === null ? null : channelsSeed.channels.output.channels ?? null)
+      if (expected !== null && patch.dac_map.length !== expected) {
+        return channelsFail('dac_map', 'dac_map length must equal the output channel count')
+      }
+      const seen = new Set()
+      for (const lane of patch.dac_map) {
+        if (lane === null) {
+          continue
+        }
+        if (!Number.isInteger(lane) || lane < 0 || seen.has(lane)) {
+          return channelsFail('dac_map', 'dac_map values must be unique non-negative lane numbers or null')
+        }
+        seen.add(lane)
+      }
+    }
+    if (patch.mapping !== undefined) {
+      if (!Array.isArray(patch.mapping)) {
+        return channelsFail('mapping', 'mapping must be an array of {lane, dac}')
+      }
+      if (patch.mapping.length > CHANNELS_MAX_MAPPING_ENTRIES) {
+        return channelsFail('mapping', 'mapping has too many entries (max ' + String(CHANNELS_MAX_MAPPING_ENTRIES) + ')')
+      }
+      const lanes = new Set()
+      const dacs = new Set()
+      for (const entry of patch.mapping) {
+        if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+          return channelsFail('mapping', 'mapping entries must be {lane, dac} objects')
+        }
+        if (!Number.isInteger(entry.lane) || entry.lane < 0 || !Number.isInteger(entry.dac) || entry.dac < 0) {
+          return channelsFail('mapping', 'mapping lane/dac must be non-negative integers')
+        }
+        if (lanes.has(entry.lane) || dacs.has(entry.dac)) {
+          return channelsFail('mapping', 'mapping must not repeat lanes or DACs')
+        }
+        lanes.add(entry.lane)
+        dacs.add(entry.dac)
+      }
+    }
+    const rtFields = [
+      'channels',
+      'sample_rate',
+      'aes67_group',
+      'aes67_port',
+      'aes67_payload_type',
+      'aes67_channels',
+      'aes67_map',
+      'input_channels',
+      'input_map',
+      'jitter_frames'
+    ]
+    const hasRtFields = rtFields.some((field) => patch[field] !== undefined)
+    const hasMappingPatch = patch.mapping !== undefined || patch.dac_map !== undefined
+    if (!hasRtFields && !hasMappingPatch) {
+      return channelsFail(
+        'stage',
+        'empty channels patch: provide at least one of channels/sample_rate/aes67_*/jitter_frames/mapping/dac_map'
+      )
+    }
+    return { ok: true, patch, hasRtFields, hasMappingPatch }
+  }
+
+  /** mapping/dac_map 补丁 -> lane -> dac（供 mapping-only 回执的 target 展示）。 */
+  function mappingFromPatch(patch) {
+    if (Array.isArray(patch.mapping)) {
+      return patch.mapping.map((entry) => ({ lane: entry.lane, dac: entry.dac }))
+    }
+    if (Array.isArray(patch.dac_map)) {
+      const rows = []
+      patch.dac_map.forEach((lane, dac) => {
+        if (lane !== null) {
+          rows.push({ lane, dac })
+        }
+      })
+      return rows.sort((left, right) => left.lane - right.lane || left.dac - right.dac)
+    }
+    return null
+  }
+
+  /** 只有 mapping 改动的 prepare 回执（commit_supported=false；不签发假 token）。 */
+  function channelsMappingOnlyAck(patch) {
+    const current = channelsSeed.channels
+    const ack = buildChannelsMappingOnlyAck({
+      current: current === null ? null : JSON.parse(JSON.stringify(current.current)),
+      target: mappingFromPatch(patch),
+      reasons: {
+        'mapping.current': 'the rt-host control status reports no applied graph_id, so the current routing (and the planned diff) is unknown'
+      }
+    })
+    return ack
+  }
+
+  /** 解析 prepare 的目标值（rt-host 字段）并计算 diff。 */
+  function channelsPrepareTarget(patch) {
+    const document = channelsSeed.channels
+    const live = document.current === null ? {} : document.current
+    const currentChannels = document.output.channels
+    const target = {
+      channels: patch.channels ?? currentChannels,
+      sample_rate: patch.sample_rate ?? live.sample_rate ?? document.format?.sample_rate ?? null,
+      aes67_group: patch.aes67_group ?? live.aes67_group ?? null,
+      aes67_port: patch.aes67_port ?? live.aes67_port ?? null,
+      aes67_payload_type: patch.aes67_payload_type ?? live.aes67_payload_type ?? null,
+      aes67_channels: patch.aes67_channels ?? live.aes67_channels ?? document.input.channels ?? null,
+      aes67_map: patch.aes67_map ?? live.aes67_map ?? document.input.map ?? null,
+      jitter_frames: patch.jitter_frames ?? live.jitter_frames ?? null,
+      input_channels: patch.input_channels ?? document.input.channels ?? null,
+      input_map: patch.input_map ?? document.input.map ?? null
+    }
+    const diff = {}
+    if (target.channels !== currentChannels) {
+      diff.channels = { from: currentChannels, to: target.channels }
+    }
+    const compare = [
+      'sample_rate',
+      'aes67_group',
+      'aes67_port',
+      'aes67_payload_type',
+      'aes67_channels',
+      'aes67_map',
+      'jitter_frames'
+    ]
+    for (const field of compare) {
+      if (patch[field] !== undefined && JSON.stringify(live[field] ?? null) !== JSON.stringify(target[field])) {
+        diff[field] = { from: live[field] ?? null, to: target[field] }
+      }
+    }
+    if (target.input_channels !== document.input.channels || JSON.stringify(target.input_map) !== JSON.stringify(document.input.map)) {
+      diff.input = { channels: target.input_channels, map: target.input_map }
+    }
+    const changed = Object.keys(diff).length > 0
+    const changedFormat =
+      target.channels !== currentChannels ||
+      (patch.sample_rate !== undefined && target.sample_rate !== (live.sample_rate ?? document.format?.sample_rate ?? null))
+    return { target, diff, changed, changedFormat, live, currentChannels }
+  }
+
+  /** PUT /api/channels stage=prepare：只生成草稿，不改变运行态。 */
+  function prepareChannelsJson(body) {
+    if (channelsMode === 'host-link-unavailable') {
+      return {
+        status: 503,
+        code: 'host_link_unavailable',
+        message: CHANNELS_HOST_LINK_REASON,
+        details: { target: 'rt-host', phase: 'channels_prepare', reason: CHANNELS_HOST_LINK_REASON }
+      }
+    }
+    if (channelsSeed.unavailable) {
+      return { status: 501, code: 'not_wired', message: channelsSeed.reason, details: { reason: channelsSeed.reason } }
+    }
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return { status: 400, code: 'bad_request', message: 'body must be a json object' }
     }
@@ -576,84 +1468,302 @@ export function createMockAuthServer(options = {}) {
         message: 'current channel layout is not readable (rt-host status unavailable): refusing to prepare a reconfiguration'
       }
     }
-    const output = body.output
-    const input = body.input
-    if (output !== undefined) {
-      if (typeof output !== 'object' || output === null || Array.isArray(output)) {
-        return { status: 400, code: 'bad_request', message: 'field output must be an object' }
-      }
-      if (output.channels !== undefined) {
-        if (!Number.isInteger(output.channels) || output.channels < 1 || output.channels > 32) {
-          return { status: 400, code: 'bad_request', message: 'output.channels must be an integer between 1 and 32' }
-        }
-      }
-      if (output.dac_map !== undefined) {
-        if (!Array.isArray(output.dac_map)) {
-          return { status: 400, code: 'bad_request', message: 'output.dac_map must be an array' }
-        }
-        const expected = output.channels ?? current.output.channels
-        if (output.dac_map.length !== expected) {
-          return { status: 400, code: 'bad_request', message: 'output.dac_map length must equal the channel count' }
-        }
-        const seen = new Set()
-        for (const dac of output.dac_map) {
-          if (!Number.isInteger(dac) || dac < 0 || dac > 31 || seen.has(dac)) {
-            return { status: 400, code: 'bad_request', message: 'output.dac_map values must be unique integers 0..31' }
-          }
-          seen.add(dac)
-        }
-      }
+    const parsed = parseChannelsPatch(body)
+    if (parsed.ok !== true) {
+      return parsed
     }
-    if (input !== undefined) {
-      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-        return { status: 400, code: 'bad_request', message: 'field input must be an object' }
-      }
-      if (input.channels !== undefined) {
-        if (!Number.isInteger(input.channels) || input.channels < 1 || input.channels > 8) {
-          return { status: 400, code: 'bad_request', message: 'input.channels must be an integer between 1 and 8' }
-        }
-      }
-      if (input.map !== undefined && input.map !== null) {
-        if (!Array.isArray(input.map)) {
-          return { status: 400, code: 'bad_request', message: 'input.map must be an array or null' }
-        }
-        const expected = input.channels ?? current.input.channels
-        if (input.map.length !== expected) {
-          return { status: 400, code: 'bad_request', message: 'input.map length must equal the input channel count' }
-        }
-        const seen = new Set()
-        for (const channel of input.map) {
-          if (!Number.isInteger(channel) || channel < 0 || channel > 63 || seen.has(channel)) {
-            return { status: 400, code: 'bad_request', message: 'input.map values must be unique integers 0..63' }
-          }
-          seen.add(channel)
-        }
-      }
+    if (channelsMode === 'mapping-only' || (parsed.hasMappingPatch && !parsed.hasRtFields)) {
+      const ack = channelsMappingOnlyAck(parsed.patch)
+      return { response: ack }
     }
-    const newChannels = output?.channels ?? current.output.channels
-    const newInput = input?.channels ?? current.input.channels
-    const changed =
-      newChannels !== current.output.channels || newInput !== current.input.channels
-    const version = control.version + 1
-    const token = stableControlToken('channels', version, { newChannels, newInput })
-    const response = {
-      ok: true,
+    const prepared = channelsPrepareTarget(parsed.patch)
+    const planGeneration = (channelsGeneration ?? 0) + 1
+    const token = stableControlToken('channels', planGeneration, {
+      target: prepared.target,
+      mapping: mappingFromPatch(parsed.patch)
+    })
+    const mappingSection = parsed.hasMappingPatch
+      ? {
+          requested: true,
+          source: 'mapping',
+          current: current.mapping,
+          target: mappingFromPatch(parsed.patch),
+          changed: true,
+          diff: null,
+          applied_by: 'plan routing section (plan prepare + commit)',
+          applies_with_this_commit: false,
+          reason: MAPPING_PLAN_OWNED_REASON
+        }
+      : {
+          requested: false,
+          reason: 'no lane -> DAC mapping change was requested; the running plan routing is untouched'
+        }
+    const response = buildChannelsPrepareAck({
+      token,
       engine_token: token,
-      planned_version: version,
-      changed,
-      preview: {
-        old: { channels: current.output.channels, input_channels: current.input.channels },
-        new: { channels: newChannels, input_channels: newInput },
-        audio_gap_ms_estimate: 1200
+      planned_generation: planGeneration,
+      changed: prepared.changed,
+      diff: prepared.diff,
+      current: JSON.parse(JSON.stringify(prepared.live)),
+      format: {
+        channels: prepared.target.channels,
+        sample_rate: prepared.target.sample_rate,
+        block_frames: prepared.live.block_frames ?? current.format?.block_frames ?? null,
+        plan_rate: prepared.live.plan_rate ?? null,
+        device: prepared.live.device ?? null,
+        source: 'rt-host-channels-status'
       },
-      warnings: ['audio output will be interrupted while the device is closed and reopened (M3b hot reconfiguration)'],
-      blockers: []
+      device: current.device === null ? null : JSON.parse(JSON.stringify(current.device)),
+      graph: prepared.changedFormat
+        ? { action: 'dropped', reason: CHANNELS_GRAPH_DROPPED_REASON }
+        : {
+            action: 'kept',
+            reason: 'the data-plane format (channels/sample rate/block) is unchanged: the running graph stays valid'
+          },
+      admission: {
+        accepted: true,
+        limits: {
+          max_channels: CHANNELS_MAX_OUTPUT,
+          max_aes67_channels: CHANNELS_MAX_AES67,
+          supported_sample_rates: CHANNELS_SAMPLE_RATES,
+          payload_type_range: [96, 127]
+        }
+      },
+      mapping: mappingSection,
+      preview: {
+        old: { channels: prepared.currentChannels, input_channels: current.input.channels },
+        new: { channels: prepared.target.channels, input_channels: prepared.target.input_channels },
+        audio_gap_ms_estimate: null,
+        audio_gap_ms_estimate_reason: 'the real mute-to-resume gap is measured at commit (gap_ms); prepare does not estimate it'
+      },
+      warnings:
+        parsed.hasMappingPatch
+          ? [
+              'the lane -> DAC mapping is the plan routing section: it is NOT applied by channels_commit (prepare the matching plan and commit it separately)'
+            ]
+          : [],
+      blockers: [],
+      not_wired: [],
+      reasons: {}
+    })
+    if (channelsPending !== null && channelsPending.token === token) {
+      return { response: channelsPending.response }
     }
-    if (controlPending !== null && controlPending.token === token) {
-      return { response: controlPending.response }
+    channelsPending = {
+      kind: 'channels',
+      token,
+      planGeneration,
+      target: prepared.target,
+      changed: prepared.changed,
+      changedFormat: prepared.changedFormat,
+      response
     }
-    controlPending = { kind: 'channels', token, version, response }
     return { response }
+  }
+
+  /** PUT /api/channels stage=commit：块边界生效（失败 502 + details.rolled_back，不假成功）。 */
+  function commitChannelsJson(body) {
+    if (channelsMode === 'host-link-unavailable') {
+      return {
+        status: 503,
+        code: 'host_link_unavailable',
+        message: CHANNELS_HOST_LINK_REASON,
+        details: { target: 'rt-host', phase: 'channels_commit', reason: CHANNELS_HOST_LINK_REASON }
+      }
+    }
+    if (channelsSeed.unavailable) {
+      return { status: 501, code: 'not_wired', message: channelsSeed.reason, details: { reason: channelsSeed.reason } }
+    }
+    const token = body.engine_token === undefined ? body.token : body.engine_token
+    if (typeof token !== 'string' || token.length === 0) {
+      return { status: 400, code: 'bad_request', message: 'field engine_token must be a non-empty string', details: { field: 'engine_token' } }
+    }
+    if (channelsPending === null || channelsPending.token !== token) {
+      return {
+        status: 409,
+        code: 'engine_token_invalid',
+        message: 'engine_token mismatch or no prepared channels draft: call PUT /api/channels {stage:"prepare"} again'
+      }
+    }
+    const draft = channelsPending
+    channelsPending = null
+    if (channelsMode === 'reconfigure-failure') {
+      const failure = buildChannelsCommitFailureDetails({
+        stage: 'device_open',
+        generation: channelsGeneration ?? 0
+      })
+      return {
+        status: 502,
+        code: failure.error,
+        message: failure.message,
+        details: failure
+      }
+    }
+    // 数据面生效：更新 mock 的 channels 视图（rt-host 真值回读形态）。
+    const nextGeneration = (channelsGeneration ?? 0) + 1
+    const document = JSON.parse(JSON.stringify(channelsSeed.channels))
+    const fixedAt = '2026-11-26T07:30:00.000Z'
+    document.generation = nextGeneration
+    document.busy = false
+    document.pending = null
+    document.last_gap_ms = 37
+    document.last_result = { ok: true, applied: true, changed: draft.changed, generation: nextGeneration, gap_ms: 37 }
+    document.current = {
+      ...(document.current ?? {}),
+      channels: draft.target.channels,
+      sample_rate: draft.target.sample_rate,
+      aes67_group: draft.target.aes67_group,
+      aes67_port: draft.target.aes67_port,
+      aes67_payload_type: draft.target.aes67_payload_type,
+      aes67_channels: draft.target.aes67_channels,
+      aes67_map: draft.target.aes67_map,
+      jitter_frames: draft.target.jitter_frames,
+      block_frames: document.current?.block_frames ?? null,
+      plan_rate: document.current?.plan_rate ?? null,
+      device: document.current?.device ?? null
+    }
+    document.format = {
+      ...(document.format ?? {}),
+      channels: draft.target.channels,
+      sample_rate: draft.target.sample_rate,
+      block_frames: document.format?.block_frames ?? null,
+      plan_rate: document.format?.plan_rate ?? null,
+      device: document.format?.device ?? null,
+      source: 'rt-host-channels-status'
+    }
+    document.input = {
+      ...document.input,
+      channels: draft.target.input_channels,
+      map: draft.target.input_map
+    }
+    document.output = { ...document.output, channels: draft.target.channels }
+    if (draft.changedFormat) {
+      // 引擎格式变化：运行中的方案图被丢弃，方案 routing（mapping/dac_map）不再可信（如实置 null + reasons）。
+      document.plan = {
+        ...document.plan,
+        routing_known: false,
+        routing_invalidated: {
+          generation: nextGeneration,
+          recorded_at: fixedAt,
+          reason: 'the running graph was dropped by the channels hot reconfiguration: the plan routing no longer describes the data plane'
+        }
+      }
+      document.mapping = null
+      document.output = { ...document.output, dac_map: null, channels_source: 'rt-host-channels-status' }
+      document.reasons = {
+        ...document.reasons,
+        mapping: 'the running plan graph was dropped by the channels hot reconfiguration (graph_dropped=true): the plan routing mirror is no longer trusted',
+        'output.dac_map': 'the running plan graph was dropped by the channels hot reconfiguration (graph_dropped=true): the plan routing mirror is no longer trusted',
+        'plan.routing_known': 'the running graph was dropped by the channels hot reconfiguration'
+      }
+      document.not_wired = [
+        ...(Array.isArray(document.not_wired) ? document.not_wired : []),
+        {
+          path: 'channels.hot_reconfigure.routing',
+          reason: 'a plan whose routing matches the new format must be prepared and committed again'
+        }
+      ]
+    }
+    document.applied = {
+      generation: nextGeneration,
+      recorded_at: fixedAt,
+      format: {
+        channels: draft.target.channels,
+        sample_rate: draft.target.sample_rate,
+        block_frames: document.format.block_frames
+      }
+    }
+    channelsSeed.channels = document
+    channelsGeneration = nextGeneration
+    const ack = buildChannelsCommitAck({
+      changed: draft.changed,
+      idempotent: false,
+      generation: nextGeneration,
+      gap_ms: 37,
+      format: {
+        channels: draft.target.channels,
+        sample_rate: draft.target.sample_rate,
+        block_frames: document.format.block_frames,
+        plan_rate: document.format.plan_rate,
+        device: document.format.device,
+        source: document.format.source
+      },
+      channels: JSON.parse(JSON.stringify(document.current)),
+      graph_dropped: draft.changedFormat,
+      rolled_back: false,
+      routing: {
+        requested: false,
+        applied: false,
+        graph_dropped: draft.changedFormat,
+        plan_recommit_required: draft.changedFormat,
+        reason: draft.changedFormat
+          ? 'the running graph was dropped by the format change: a plan whose routing matches the new format must be prepared and committed separately'
+          : 'no lane -> DAC routing draft is known to this daemon; channels_commit never changes the plan routing section'
+      },
+      local: { mirror_updated: true, pending_routing_known: false, recorded_at: fixedAt }
+    })
+    return { response: ack }
+  }
+
+  /** PUT /api/channels stage=abort：丢弃草稿（运行态不变）。 */
+  function abortChannelsJson(body) {
+    if (channelsMode === 'host-link-unavailable') {
+      return {
+        status: 503,
+        code: 'host_link_unavailable',
+        message: CHANNELS_HOST_LINK_REASON,
+        details: { target: 'rt-host', phase: 'channels_abort', reason: CHANNELS_HOST_LINK_REASON }
+      }
+    }
+    if (channelsSeed.unavailable) {
+      return { status: 501, code: 'not_wired', message: channelsSeed.reason, details: { reason: channelsSeed.reason } }
+    }
+    const token = body.engine_token === undefined ? body.token : body.engine_token
+    if (typeof token !== 'string' || token.length === 0) {
+      return { status: 400, code: 'bad_request', message: 'field engine_token must be a non-empty string', details: { field: 'engine_token' } }
+    }
+    if (channelsPending === null || channelsPending.token !== token) {
+      return {
+        status: 409,
+        code: 'engine_token_invalid',
+        message: 'engine_token mismatch or no prepared channels draft to abort'
+      }
+    }
+    channelsPending = null
+    return {
+      response: buildChannelsAbortAck({
+        aborted_token: token,
+        local: { pending_routing_discarded: true, recorded_at: '2026-11-26T07:31:00.000Z' }
+      })
+    }
+  }
+
+  /** PUT /api/channels 入口：stage=prepare|commit|abort（兼容 action 字段）。 */
+  function handleChannelsWrite(body) {
+    const stage = body.stage === undefined ? body.action : body.stage
+    if (stage === 'prepare') {
+      return prepareChannelsJson(body)
+    }
+    if (stage === 'commit') {
+      return commitChannelsJson(body)
+    }
+    if (stage === 'abort') {
+      return abortChannelsJson(body)
+    }
+    if (stage === undefined) {
+      return {
+        status: 400,
+        code: 'bad_request',
+        message: 'missing field: stage (prepare|commit|abort)',
+        details: { field: 'stage' }
+      }
+    }
+    return {
+      status: 400,
+      code: 'bad_request',
+      message: 'stage must be prepare, commit or abort (got ' + JSON.stringify(stage) + ')',
+      details: { field: 'stage' }
+    }
   }
 
   async function handleM4(req, res, path, method) {
@@ -662,17 +1772,17 @@ export function createMockAuthServer(options = {}) {
       return
     }
     if (method === 'GET' && path === '/api/channels') {
-      sendJson(res, 200, channelsSeed.channels)
+      sendJson(res, 200, buildChannelsView())
       return
     }
     if (method === 'PUT' && path === '/api/channels') {
       const body = await readJsonBody(req)
-      const prepared = prepareChannelsBody(body)
-      if (prepared.status !== undefined) {
-        sendError(res, prepared.status, prepared.code, prepared.message)
+      const outcome = handleChannelsWrite(body)
+      if (outcome.status !== undefined) {
+        sendError(res, outcome.status, outcome.code, outcome.message, outcome.details)
         return
       }
-      sendJson(res, 200, prepared.response)
+      sendJson(res, 200, outcome.response)
       return
     }
     if (method === 'GET' && path === '/api/plan/history') {
@@ -934,14 +2044,21 @@ export function createMockAuthServer(options = {}) {
         sendError(res, 400, 'bad_request', 'missing field: surface')
         return
       }
+      // 五个界面都走同一套 prepare -> commit/abort（docs/API.md §4 与 crates/host/src/control/mod.rs）：
+      // volume/routing/layout 是方案补丁（需要已生效方案基线，否则 409 no_base_plan）；
+      // mode/format 是执行器配置（不依赖方案，另带 changed/applies_to/device_restart_required）。
       const prepared =
         body.surface === 'volume'
           ? prepareVolumeSurface(body)
-          : body.surface === 'mode'
-            ? prepareModeSurface(body)
-            : body.surface === 'format'
-              ? prepareFormatBody(body.data === undefined ? {} : body.data)
-              : { status: 400, code: 'bad_request', message: 'unknown surface: ' + body.surface }
+          : body.surface === 'routing'
+            ? prepareRoutingSurface(body)
+            : body.surface === 'layout'
+              ? prepareLayoutSurface(body)
+              : body.surface === 'mode'
+                ? prepareModeSurface(body)
+                : body.surface === 'format'
+                  ? prepareFormatBody(body.data === undefined ? {} : body.data)
+                  : { status: 400, code: 'bad_request', message: 'unknown surface: ' + body.surface }
       if (prepared.status !== undefined) {
         sendError(res, prepared.status, prepared.code, prepared.message)
         return
@@ -1024,6 +2141,660 @@ export function createMockAuthServer(options = {}) {
       return
     }
     sendError(res, 405, 'method_not_allowed', 'unsupported method/path: ' + method + ' ' + path)
+  }
+
+  /* ------------------------------------------------------- MOTU handler（T57） */
+
+  function motuFlattenedChannels() {
+    return motuMainChannels()
+  }
+
+  function motuDetectionJson() {
+    return {
+      detected: motu.detected,
+      model: motu.model,
+      card_id: motu.card_id,
+      card_index: motu.card_index,
+      control_reachable: motu.control_reachable,
+      reason: motu.reason,
+      reason_detail: motu.reason_detail
+    }
+  }
+
+  function motuWriteCapabilityJson() {
+    if (motu.detected === true && motu.control_reachable === true) {
+      return {
+        status: 'wired',
+        single_key: true,
+        readback: true,
+        two_phase: true,
+        batch: false,
+        max_channels_per_request: 2,
+        reason: null
+      }
+    }
+    return {
+      status: motu.detected === true ? 'unreachable' : 'not_detected',
+      single_key: true,
+      readback: true,
+      two_phase: true,
+      batch: false,
+      max_channels_per_request: 2,
+      reason: motu.reason_detail
+    }
+  }
+
+  /** GET /api/motu（恒 200；拿不到的字段 null + reasons，不编数值）。 */
+  function motuStatusJson() {
+    const reasons = {}
+    if (!(motu.detected === true && motu.control_reachable === true)) {
+      for (const path of ['mute', 'vol', 'state']) {
+        reasons[path] = motu.reason_detail
+      }
+    }
+    return {
+      schema: 'khaen-motu/v1',
+      ...motuDetectionJson(),
+      channel_count: 2,
+      channels: motuFlattenedChannels(),
+      mute: motu.mute,
+      vol: motu.vol === null ? null : JSON.parse(JSON.stringify(motu.vol)),
+      state: motu.state === null ? null : JSON.parse(JSON.stringify(motu.state)),
+      read_error: null,
+      write: motuWriteCapabilityJson(),
+      not_wired:
+        motu.detected === true && motu.control_reachable === true
+          ? []
+          : [{ path: 'motu.write', reason: motu.reason_detail }],
+      reasons
+    }
+  }
+
+  /** 写前门禁：设备必须 detected 且控制网可达（否则 503 + 稳定码，不尝试写）。 */
+  function motuGateError() {
+    return {
+      status: 503,
+      code: 'motu_not_detected',
+      message: motu.reason_detail,
+      details: { reason: motu.reason, detection: motuDetectionJson() }
+    }
+  }
+
+  function motuWritePlanJson(channels) {
+    return {
+      kind: 'single-key+readback',
+      batch: false,
+      writes_per_channel: 1,
+      writes: channels.length,
+      steps: channels.map((channel) => ({
+        channel,
+        key: 'koBusFader',
+        index: channel - 1,
+        frames: 1
+      })),
+      verified_by: 'device datastore readback: a write only counts as done when the device streams the same value back'
+    }
+  }
+
+  /** 解析音量目标（channel/channels 二选一；db/linear 二选一；>2 通道 400 motu_batch_rejected）。 */
+  function motuParseVolumeTarget(body) {
+    const invalid = (field, message) => ({
+      status: 400,
+      code: 'invalid_request',
+      message,
+      details: { field }
+    })
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return invalid('<body>', 'request body must be a JSON object')
+    }
+    const hasChannel = body.channel !== undefined
+    const hasChannels = body.channels !== undefined
+    if (hasChannel === hasChannels) {
+      return invalid(
+        'channel',
+        'give exactly one of channel (1|2|"both") or channels ([1], [2] or [1,2])'
+      )
+    }
+    let channels = []
+    if (hasChannel) {
+      if (typeof body.channel === 'string') {
+        if (body.channel.trim().toLowerCase() !== 'both') {
+          return invalid('channel', 'field channel must be 1, 2 or "both" (got ' + JSON.stringify(body.channel) + ')')
+        }
+        channels = [1, 2]
+      } else {
+        const channel = body.channel
+        if (!Number.isInteger(channel) || channel < 1 || channel > 2) {
+          return invalid('channel', 'field channel must be a main channel number (1..=2)')
+        }
+        channels = [channel]
+      }
+    } else {
+      if (!Array.isArray(body.channels) || body.channels.length === 0) {
+        return invalid('channels', 'field channels must be a non-empty array of main channel numbers')
+      }
+      if (body.channels.length > 2) {
+        return {
+          status: 400,
+          code: 'motu_batch_rejected',
+          message:
+            'refusing a batch MOTU volume write of ' +
+            String(body.channels.length) +
+            ' channels: at most the two main channels (Main 1/Main 2) are addressable, each with its own single-key write and readback',
+          details: { limit: 2, requested: body.channels.length }
+        }
+      }
+      const seen = new Set()
+      for (const entry of body.channels) {
+        if (!Number.isInteger(entry) || entry < 1 || entry > 2) {
+          return invalid('channels', 'field channels entries must be main channel numbers (1..=2)')
+        }
+        if (seen.has(entry)) {
+          return invalid('channels', 'channels lists channel ' + String(entry) + ' more than once')
+        }
+        seen.add(entry)
+      }
+      channels = [...body.channels].sort((left, right) => left - right)
+    }
+    const hasDb = body.db !== undefined
+    const hasLinear = body.linear !== undefined
+    if (hasDb === hasLinear) {
+      return invalid('db', 'give exactly one of db or linear, not both')
+    }
+    let linear
+    if (hasDb) {
+      const db = body.db
+      if (typeof db !== 'number' || !Number.isFinite(db) || db > 0) {
+        return invalid('db', 'field db must be a finite number <= 0 dB')
+      }
+      if (db < MOTU_DB_FLOOR) {
+        linear = 0
+      } else {
+        linear = Math.min(Math.max(10 ** (db / 20), 0), 1)
+      }
+    } else {
+      const value = body.linear
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+        return invalid('linear', 'field linear must be a finite number in 0.0..=1.0')
+      }
+      linear = value
+    }
+    linear = motuQuantizeLinear(linear)
+    return { ok: true, channels, linear, db: motuFaderToDb(linear) }
+  }
+
+  /** PUT/POST /api/motu/volume stage=prepare：只签一次性 token + 目标/写计划，**不写设备**。 */
+  function motuVolumePrepareJson(body) {
+    const parsed = motuParseVolumeTarget(body)
+    if (parsed.ok !== true) {
+      return parsed
+    }
+    if (!(motu.detected === true && motu.control_reachable === true)) {
+      return motuGateError()
+    }
+    const key = JSON.stringify({ channels: parsed.channels, linear: parsed.linear })
+    let draft = motu.draft
+    if (draft === null || draft.key !== key) {
+      motu.write_seq += 1
+      const token = createHash('sha256')
+        .update('khaen-motu-volume/v1|' + MOTU_FIXED_CREATED_AT + '|' + String(motu.write_seq) + '|' + key)
+        .digest('hex')
+        .slice(0, 16)
+      draft = {
+        token,
+        key,
+        channels: parsed.channels,
+        linear: parsed.linear,
+        db: parsed.db,
+        created_at: MOTU_FIXED_CREATED_AT
+      }
+      motu.draft = draft
+    }
+    return {
+      response: {
+        ok: true,
+        schema: 'khaen-motu-volume/v1',
+        stage: 'prepare',
+        engine_token: draft.token,
+        token: draft.token,
+        created_at: draft.created_at,
+        expires_in_s: 120,
+        target: {
+          channels: draft.channels.map((channel) => ({
+            channel,
+            name: 'Main ' + String(channel),
+            datastore: { key: 'koBusFader', index: channel - 1 }
+          })),
+          linear: draft.linear,
+          db: draft.db
+        },
+        write_plan: motuWritePlanJson(draft.channels),
+        commit_supported: true,
+        two_phase: true,
+        writes_device: false,
+        applies_to: MOTU_WRITE_APPLIES_TO,
+        target_device: motuDetectionJson()
+      }
+    }
+  }
+
+  /** PUT/POST /api/motu/volume stage=commit：逐通道单键写 + 真值回读（一次 commit 消费草稿）。 */
+  function motuVolumeCommitJson(body) {
+    const token = body.engine_token === undefined ? body.token : body.engine_token
+    if (typeof token !== 'string' || token.trim().length === 0) {
+      return {
+        status: 400,
+        code: 'invalid_request',
+        message: 'missing field: engine_token (commit the token returned by stage=prepare)',
+        details: { field: 'engine_token' }
+      }
+    }
+    // 设备不可用时保留草稿（设备恢复后同一 token 还能 commit），如实 503。
+    if (!(motu.detected === true && motu.control_reachable === true)) {
+      return motuGateError()
+    }
+    const draft = motu.draft
+    if (draft === null || draft.token !== token) {
+      return {
+        status: 409,
+        code: 'engine_token_invalid',
+        message: 'engine_token mismatch or no prepared MOTU volume draft: call stage=prepare again'
+      }
+    }
+    motu.draft = null
+    const receipts = []
+    let idempotent = true
+    for (const channel of draft.channels) {
+      const index = Array.isArray(motu.vol) ? motu.vol.findIndex((entry) => entry.channel === channel) : -1
+      const before = index >= 0 ? motu.vol[index].linear : null
+      const changed = before !== draft.linear
+      if (changed) {
+        idempotent = false
+      }
+      const receipt = {
+        channel,
+        name: 'Main ' + String(channel),
+        key: 'koBusFader',
+        index: channel - 1,
+        before,
+        wrote: draft.linear,
+        readback: draft.linear,
+        changed,
+        frame_sent: changed,
+        verified: true
+      }
+      if (index >= 0) {
+        motu.vol[index] = { ...motu.vol[index], linear: draft.linear, db: draft.db }
+      }
+      receipts.push(receipt)
+    }
+    motu.write_seq += 1
+    return {
+      response: {
+        ok: true,
+        schema: 'khaen-motu-volume/v1',
+        stage: 'commit',
+        engine_token: token,
+        applied: true,
+        idempotent,
+        created_at: draft.created_at,
+        linear: draft.linear,
+        db: draft.db,
+        channels: receipts,
+        write_plan: motuWritePlanJson(draft.channels),
+        writes_device: true,
+        applies_to: MOTU_WRITE_APPLIES_TO,
+        target_device: motuDetectionJson()
+      }
+    }
+  }
+
+  /** /api/motu 与 /api/motu/volume 路由（没有 abort；未提交草稿由 TTL 过期）。 */
+  async function handleMotu(req, res, path, method) {
+    if (method === 'GET' && path === '/api/motu') {
+      sendJson(res, 200, motuStatusJson())
+      return
+    }
+    if ((method === 'PUT' || method === 'POST') && path === '/api/motu/volume') {
+      const body = await readJsonBody(req)
+      const stage = body.stage === undefined ? (body.action === undefined ? 'prepare' : body.action) : body.stage
+      let outcome
+      if (stage === 'prepare') {
+        outcome = motuVolumePrepareJson(body)
+      } else if (stage === 'commit') {
+        outcome = motuVolumeCommitJson(body)
+      } else {
+        outcome = {
+          status: 400,
+          code: 'invalid_request',
+          message: 'stage must be prepare or commit (got ' + JSON.stringify(stage) + ')',
+          details: { field: 'stage' }
+        }
+      }
+      if (outcome.status !== undefined) {
+        sendError(res, outcome.status, outcome.code, outcome.message, outcome.details)
+        return
+      }
+      sendJson(res, 200, outcome.response)
+      return
+    }
+    sendError(res, 405, 'method_not_allowed', 'unsupported method/path: ' + method + ' ' + path)
+  }
+
+  /* ------------------------------------------- 音频 profile / 设备输入 / 测试音 handler */
+
+  /** GET /api/audio-profile：read-only 恒 200；不可用 = profile:null + capability 全 null + reasons。 */
+  function audioProfileSnapshotJson() {
+    const profile = audioProfileSaved
+    return {
+      ok: true,
+      schema: AUDIO_PROFILE_SCHEMA,
+      profile: profile === null ? null : JSON.parse(JSON.stringify(profile)),
+      validation: profile === null ? { ok: true, errors: [], warnings: [] } : validateAudioProfile(profile),
+      capability: JSON.parse(JSON.stringify(audioProfileSeed.capability)),
+      plan: JSON.parse(JSON.stringify(audioProfileAppliedPlan)),
+      reasons: { ...audioProfileSeed.reasons }
+    }
+  }
+
+  function audioProfileNotWiredError() {
+    return {
+      status: 503,
+      code: 'not_wired',
+      message: AUDIO_PROFILE_NOT_WIRED_REASON,
+      details: { reason: AUDIO_PROFILE_NOT_WIRED_REASON, target: 'rt-host' }
+    }
+  }
+
+  /** PUT /api/audio-profile stage=prepare：校验 + diff + 一次性 token（不碰引擎）。 */
+  function audioProfilePrepareJson(body) {
+    if (audioProfileSeed.available !== true) {
+      return audioProfileNotWiredError()
+    }
+    if (typeof body.profile !== 'object' || body.profile === null || Array.isArray(body.profile)) {
+      return {
+        status: 400,
+        code: 'bad_request',
+        message: 'missing field: profile (a khaen-audio-profile/v1 JSON object)',
+        details: { field: 'profile' }
+      }
+    }
+    const profile = JSON.parse(JSON.stringify(body.profile))
+    const validation = validateAudioProfile(profile)
+    const diff = profileDiff(audioProfileSaved, profile)
+    const token = createHash('sha256')
+      .update('khaen-audio-profile/v1|prepare|' + JSON.stringify(profile))
+      .digest('hex')
+      .slice(0, 32)
+    const response = {
+      ok: true,
+      stage: 'prepare',
+      profile: JSON.parse(JSON.stringify(profile)),
+      validation,
+      diff,
+      token,
+      expires_in_s: AUDIO_PROFILE_PREPARE_TTL_S
+    }
+    if (audioProfilePending !== null && audioProfilePending.token === token) {
+      return { response: audioProfilePending.response }
+    }
+    audioProfilePending = { token, profile, response }
+    return { response }
+  }
+
+  /** PUT /api/audio-profile stage=commit：保存 profile（revision 递增）。 */
+  function audioProfileCommitJson(body) {
+    if (audioProfileSeed.available !== true) {
+      return audioProfileNotWiredError()
+    }
+    const token = body.token === undefined ? body.engine_token : body.token
+    if (typeof token !== 'string' || token.length === 0) {
+      return { status: 400, code: 'bad_request', message: 'field token must be a non-empty string', details: { field: 'token' } }
+    }
+    if (audioProfilePending === null || audioProfilePending.token !== token) {
+      return {
+        status: 409,
+        code: 'engine_token_invalid',
+        message: 'token mismatch or no prepared profile draft: PUT /api/audio-profile {stage:"prepare"} again'
+      }
+    }
+    const draft = audioProfilePending
+    audioProfilePending = null
+    audioProfileSaved = JSON.parse(JSON.stringify(draft.profile))
+    audioProfileRevision = (typeof audioProfileRevision === 'number' ? audioProfileRevision : 0) + 1
+    return {
+      response: {
+        ok: true,
+        applied: true,
+        saved: true,
+        profile: JSON.parse(JSON.stringify(audioProfileSaved)),
+        revision: audioProfileRevision
+      }
+    }
+  }
+
+  /** PUT /api/audio-profile stage=abort：丢弃草稿（不改变已保存 profile）。 */
+  function audioProfileAbortJson(body) {
+    if (audioProfileSeed.available !== true) {
+      return audioProfileNotWiredError()
+    }
+    const token = body.token === undefined ? body.engine_token : body.token
+    if (typeof token !== 'string' || token.length === 0) {
+      return { status: 400, code: 'bad_request', message: 'field token must be a non-empty string', details: { field: 'token' } }
+    }
+    if (audioProfilePending === null || audioProfilePending.token !== token) {
+      return { status: 409, code: 'engine_token_invalid', message: 'token mismatch or no prepared profile draft to abort' }
+    }
+    audioProfilePending = null
+    return { response: { ok: true, aborted: true } }
+  }
+
+  function handleAudioProfileWrite(body) {
+    const stage = body.stage
+    if (stage === 'prepare') {
+      return audioProfilePrepareJson(body)
+    }
+    if (stage === 'commit') {
+      return audioProfileCommitJson(body)
+    }
+    if (stage === 'abort') {
+      return audioProfileAbortJson(body)
+    }
+    return {
+      status: 400,
+      code: 'bad_request',
+      message: 'stage must be prepare, commit or abort (got ' + JSON.stringify(stage) + ')',
+      details: { field: 'stage' }
+    }
+  }
+
+  /** POST /api/audio-profile/plan：profile -> 方案文件（不自动提交；之后走 inspect + prepare + commit）。 */
+  function audioProfilePlanJson() {
+    if (audioProfileSeed.available !== true) {
+      return audioProfileNotWiredError()
+    }
+    if (audioProfileSaved === null) {
+      return {
+        status: 409,
+        code: 'no_applicable_profile',
+        message: 'no saved audio profile: PUT /api/audio-profile {stage:"prepare"} then commit first'
+      }
+    }
+    const generated = buildGeneratedPlan(audioProfileSaved)
+    // 与 /api/plan/upload 同一份内容寻址表：后续 POST /api/plan/inspect 与 /api/prepare 用同一个 stored_path。
+    planUploads.set(generated.sha256, generated.plan_facts)
+    audioProfileGeneratedPlan = {
+      sha256: generated.sha256,
+      graph_id: generated.sha256,
+      lanes: generated.lane_count,
+      dac_channels: generated.plan_facts.routing?.dac_channels ?? AUDIO_PROFILE_DEVICE_CHANNELS
+    }
+    return {
+      response: {
+        ok: true,
+        plan_path: generated.plan_path,
+        sha256: generated.sha256,
+        lane_count: generated.lane_count,
+        inspect: generated.inspect,
+        folds_preview: generated.folds_preview,
+        downmix_applied: generated.downmix_applied
+      }
+    }
+  }
+
+  /** /api/audio-profile、/api/audio-profile/plan、/api/device/inputs 路由。 */
+  async function handleAudioProfile(req, res, path, method) {
+    if (method === 'GET' && path === '/api/audio-profile') {
+      sendJson(res, 200, audioProfileSnapshotJson())
+      return
+    }
+    if (method === 'PUT' && path === '/api/audio-profile') {
+      const body = await readJsonBody(req)
+      const outcome = handleAudioProfileWrite(body)
+      if (outcome.status !== undefined) {
+        sendError(res, outcome.status, outcome.code, outcome.message, outcome.details)
+        return
+      }
+      sendJson(res, 200, outcome.response)
+      return
+    }
+    if (method === 'POST' && path === '/api/audio-profile/plan') {
+      const outcome = audioProfilePlanJson()
+      if (outcome.status !== undefined) {
+        sendError(res, outcome.status, outcome.code, outcome.message, outcome.details)
+        return
+      }
+      sendJson(res, 200, outcome.response)
+      return
+    }
+    if (method === 'GET' && path === '/api/device/inputs') {
+      sendJson(res, 200, buildDeviceInputsBody(audioProfileFixture))
+      return
+    }
+    sendError(res, 405, 'method_not_allowed', 'unsupported method/path: ' + method + ' ' + path)
+  }
+
+  /** POST /api/speaker-test /api/speaker-test/stop（必须 audible+confirm；403 窗口 / 503 未接线 / 409 busy）。 */
+  async function handleSpeakerTest(req, res, path, method) {
+    if (method === 'POST' && path === '/api/speaker-test') {
+      const body = await readJsonBody(req)
+      if (speakerTest.wired !== true) {
+        sendError(res, 503, 'not_wired', SPEAKER_TEST_NOT_WIRED_REASON, { reason: SPEAKER_TEST_NOT_WIRED_REASON })
+        return
+      }
+      if (speakerTest.windowOpen !== true) {
+        sendError(res, 403, 'sound_window_closed', SPEAKER_TEST_WINDOW_CLOSED_REASON, {
+          reason: SPEAKER_TEST_WINDOW_CLOSED_REASON,
+          fixture: speakerTestFixture
+        })
+        return
+      }
+      const parsed = validateSpeakerTestRequest(body, { dacMax: SPEAKER_TEST_DAC_MAX })
+      if (parsed.ok !== true) {
+        sendError(res, parsed.status, parsed.code, parsed.message, parsed.details)
+        return
+      }
+      const active = speakerTest.state.active === true
+      if (active) {
+        sendError(res, 409, 'busy', 'a speaker test tone is already playing: stop it before starting another one', {
+          active: true,
+          dac: speakerTest.state.dac,
+          remaining_ms: speakerTest.state.remaining_ms
+        })
+        return
+      }
+      // 校准/热重配进行中时不出声（docs/API.md §12.2 busy 409）。
+      const running = calibrationUnavailable ? null : activeJob()
+      if (running !== null) {
+        sendError(res, 409, 'busy', 'a calibration job is active: wait for it to finish or cancel it before playing a test tone', {
+          active_job_id: running.id
+        })
+        return
+      }
+      speakerTest.state = {
+        active: true,
+        dac: parsed.request.dac,
+        ms: parsed.request.ms,
+        kind: parsed.request.kind,
+        level_db: parsed.request.db,
+        remaining_ms: parsed.request.ms,
+        started_at: SPEAKER_TEST_FIXED_AT
+      }
+      sendJson(res, 200, buildSpeakerTestAck(parsed.request))
+      return
+    }
+    if (method === 'POST' && path === '/api/speaker-test/stop') {
+      const stopped = speakerTest.state.active === true
+      speakerTest.state = {
+        active: false,
+        dac: null,
+        ms: null,
+        kind: null,
+        level_db: null,
+        remaining_ms: 0,
+        started_at: null
+      }
+      sendJson(res, 200, buildSpeakerTestStopAck(stopped))
+      return
+    }
+    sendError(res, 405, 'method_not_allowed', 'unsupported method/path: ' + method + ' ' + path)
+  }
+
+  /* ------------------------------------------------------- /api/meta 能力文档 */
+
+  /** GET /api/meta：{api_version, web_version, ops, surfaces, calibration, host_link, not_wired}。 */
+  function buildMetaJson() {
+    const notWired = []
+    if (!control.wired) {
+      for (const op of ['mute', 'prepare', 'commit', 'abort', 'surface', 'format', 'inspect', 'rollback']) {
+        notWired.push({ op, reason: control.reason })
+      }
+    }
+    if (calibrationUnavailable) {
+      notWired.push({
+        op: 'calibration.jobs',
+        reason: 'calibration job backend not wired (mock fixture: unavailable)'
+      })
+    }
+    if (channelsSeed.unavailable) {
+      notWired.push({ op: 'channels', reason: channelsSeed.reason })
+    }
+    if (channelsMode === 'host-link-unavailable') {
+      notWired.push({ op: 'channels', reason: CHANNELS_HOST_LINK_REASON })
+    }
+    if (audioProfileSeed.available !== true) {
+      notWired.push({ op: 'audio_profile', reason: AUDIO_PROFILE_NOT_WIRED_REASON })
+      notWired.push({ op: 'device.inputs', reason: AUDIO_PROFILE_NOT_WIRED_REASON })
+    }
+    if (speakerTest.wired !== true) {
+      notWired.push({ op: 'speaker_test', reason: SPEAKER_TEST_NOT_WIRED_REASON })
+    }
+    if (motu.detected !== true || motu.control_reachable !== true) {
+      notWired.push({ op: 'motu.write', reason: motu.reason_detail })
+    }
+    return {
+      ok: true,
+      api_version: '1',
+      web_version: 'mock',
+      ops: control.wired
+        ? ['status', 'mute', 'prepare', 'commit', 'abort', 'coeff', 'surface', 'inspect', 'rollback', 'format']
+        : ['status'],
+      surfaces: control.wired ? ['volume', 'routing', 'layout', 'format', 'mode'] : [],
+      calibration: {
+        wired: calibrationUnavailable !== true,
+        reason: calibrationUnavailable
+          ? 'calibration job backend not wired (mock fixture: unavailable)'
+          : null
+      },
+      host_link: {
+        target: control.wired ? 'rt-host' : 'none',
+        mode: control.wired ? 'socket' : 'none',
+        connected: control.wired,
+        socket: control.wired ? '/run/khaen/rt-host.sock' : null,
+        error: control.wired ? null : control.reason
+      },
+      not_wired: notWired
+    }
   }
 
   function serializeJob(job) {
@@ -1559,6 +3330,7 @@ export function createMockAuthServer(options = {}) {
     job.apply_state = 'applied'
     job.applied_version = appliedVersion
     return {
+      ok: true,
       applied: true,
       job_id: job.id,
       applied_version: appliedVersion,
@@ -1568,6 +3340,169 @@ export function createMockAuthServer(options = {}) {
       ack: { synthetic: true, actual: false },
       readback: { mock: true, applied_version: appliedVersion, graph_id: job.result.plan.graph_id },
       applied_at: new Date(mockNow()).toISOString()
+    }
+  }
+
+  /* ------------------------------------- apply/rollback 两阶段（docs/API.md §7 目标形状） */
+
+  function calibrationStagedToken(kind, jobId) {
+    return createHash('sha256').update('khaen-calibration-staged:v1:' + kind + ':' + jobId).digest('hex').slice(0, 32)
+  }
+
+  /** 解析 staged 请求：无 stage = 旧单发；prepare/commit/abort = 两阶段。 */
+  function calibrationParseStaged(body) {
+    if (typeof body !== 'object' || body === null || Array.isArray(body) || body.stage === undefined) {
+      return { kind: 'legacy' }
+    }
+    const stage = body.stage
+    if (stage === 'prepare') {
+      return { kind: 'prepare' }
+    }
+    if (stage !== 'commit' && stage !== 'abort') {
+      return {
+        error: {
+          status: 400,
+          code: 'invalid_request',
+          message: 'stage must be prepare, commit or abort (got ' + JSON.stringify(stage) + ')',
+          details: { field: 'stage' }
+        }
+      }
+    }
+    const token = body.engine_token
+    if (typeof token !== 'string' || token.length === 0) {
+      return {
+        error: {
+          status: 400,
+          code: 'invalid_request',
+          message: 'field engine_token must be a non-empty string for stage=' + stage,
+          details: { field: 'engine_token' }
+        }
+      }
+    }
+    return { kind: stage, token }
+  }
+
+  function calibrationStagedTokenError() {
+    return {
+      status: 409,
+      code: 'engine_token_invalid',
+      message: 'engine_token mismatch, already consumed, or does not belong to this job'
+    }
+  }
+
+  /** staged prepare：只签一次性 token（不改变运行态）。 */
+  function calibrationStagedPrepare(job, kind) {
+    const status = calibrationStatus()
+    const planVersion = status.plan === undefined || status.plan === null ? null : status.plan.version
+    const previousVersion = typeof planVersion === 'number' ? planVersion : null
+    const targetVersion =
+      kind === 'apply' ? (previousVersion === null ? 1 : previousVersion + 1) : appliedSnapshot === null ? null : appliedSnapshot.version
+    const planSha =
+      job.result === null || job.result === undefined || job.result.plan === undefined || job.result.plan === null
+        ? null
+        : job.result.plan.sha256 ?? null
+    const token = calibrationStagedToken(kind, job.id)
+    calibrationStagedOps.set(token, {
+      job_id: job.id,
+      kind,
+      plan_sha256: planSha,
+      previous_version: previousVersion,
+      target_version: targetVersion
+    })
+    return {
+      ok: true,
+      stage: 'prepare',
+      job_id: job.id,
+      engine_token: token,
+      plan_sha256: planSha,
+      previous_version: previousVersion,
+      target_version: targetVersion,
+      job: { schema: 'khaen-calibration-job/v1', job: serializeJob(job) },
+      reasons: {}
+    }
+  }
+
+  /** staged abort：丢弃草稿（运行态不变；token 一次性消费）。 */
+  function calibrationStagedAbort(job, op) {
+    return {
+      ok: true,
+      stage: 'abort',
+      aborted: true,
+      job_id: job.id,
+      plan_sha256: op.plan_sha256,
+      target_version: op.target_version,
+      control: { ok: true, aborted: true, note: 'the mock has no real engine draft to discard; the token is consumed' },
+      reasons: {}
+    }
+  }
+
+  /** staged apply commit：真生效并回写 job（与旧单发同一套 applyJobRecord）。 */
+  function calibrationStagedApplyCommit(job, op) {
+    const receipt = applyJobRecord(job)
+    return {
+      ok: true,
+      stage: 'commit',
+      applied: true,
+      job_id: job.id,
+      applied_version: receipt.applied_version,
+      previous_version: op.previous_version,
+      applied_block: receipt.applied_version * 128 + 1,
+      graph_id: receipt.graph_id,
+      sha256: op.plan_sha256,
+      snapshot: receipt.snapshot,
+      ack: receipt.ack,
+      readback: receipt.readback,
+      applied_at: receipt.applied_at,
+      job: { schema: 'khaen-calibration-job/v1', job: serializeJob(job) },
+      reasons: {}
+    }
+  }
+
+  /** staged rollback commit：回滚到 apply 前的快照并回读。 */
+  function calibrationStagedRollbackCommit(job, op) {
+    const snapshot = appliedSnapshot
+    job.apply_state = 'rolled_back'
+    job.applied_version = null
+    appliedJobId = null
+    appliedSnapshot = null
+    return {
+      ok: true,
+      stage: 'commit',
+      rolled_back: true,
+      job_id: job.id,
+      restored_version: snapshot === null ? null : snapshot.version,
+      applied_version: op.target_version,
+      graph_id: snapshot === null ? null : snapshot.graph_id,
+      sha256: snapshot === null ? null : snapshot.sha256 ?? null,
+      readback: snapshot === null ? null : { mock: true, restored_version: snapshot.version, graph_id: snapshot.graph_id },
+      rolled_back_at: new Date(mockNow()).toISOString(),
+      job: { schema: 'khaen-calibration-job/v1', job: serializeJob(job) },
+      reasons: {}
+    }
+  }
+
+  /** 处理 staged 分支；返回 null = 旧单发（交给调用方）。 */
+  function calibrationStagedOutcome(job, kind, staged) {
+    if (staged.kind === 'legacy') {
+      return null
+    }
+    if (staged.kind === 'prepare') {
+      return { response: calibrationStagedPrepare(job, kind) }
+    }
+    const op = calibrationStagedOps.get(staged.token)
+    if (op === undefined || op.job_id !== job.id || op.kind !== kind) {
+      return { error: calibrationStagedTokenError() }
+    }
+    if (staged.kind === 'abort') {
+      calibrationStagedOps.delete(staged.token)
+      return { response: calibrationStagedAbort(job, op) }
+    }
+    if (kind === 'rollback' && appliedSnapshot === null) {
+      return { error: { status: 409, code: 'rollback_unavailable', message: 'no previous plan snapshot is available' } }
+    }
+    calibrationStagedOps.delete(staged.token)
+    return {
+      response: kind === 'apply' ? calibrationStagedApplyCommit(job, op) : calibrationStagedRollbackCommit(job, op)
     }
   }
 
@@ -1656,6 +3591,7 @@ export function createMockAuthServer(options = {}) {
         const all = sortedJobs()
         const page = all.slice(offset, offset + limit)
         sendJson(res, 200, {
+          ok: true,
           schema: 'khaen-calibration-jobs/v1',
           available: !calibrationUnavailable,
           reason: calibrationUnavailable ? 'calibration job backend not wired (T70h-b)' : null,
@@ -1735,7 +3671,12 @@ export function createMockAuthServer(options = {}) {
           }
         })
         calibrationJobs.set(id, job)
-        sendJson(res, 202, { job_id: id, status: 'queued' })
+        sendJson(res, 202, {
+          ok: true,
+          job_id: id,
+          state: 'queued',
+          location: '/api/calibration/jobs/' + id
+        })
         return true
       }
 
@@ -1747,10 +3688,27 @@ export function createMockAuthServer(options = {}) {
         }
         // mock 的进度推进：每次 GET 详情推进一步（真实 daemon 由 worker 推进；进度仍来自真实状态）。
         tickJobRecord(job, mockNow())
+        const detailReasons = {}
+        if (job.result === null) {
+          detailReasons.result = 'job is ' + job.status + ': analysis results exist after the closed_loop and bundle stages'
+        }
+        if (job.engine === null) {
+          detailReasons.engine =
+            'offline single-point jobs do not open an audio engine in the daemon process; engine is reported by the job backend when it has one'
+        }
+        if (job.apply_state === 'not_applied') {
+          detailReasons['apply.applied_version'] = 'job has not been applied to the control plane (apply_state=not_applied)'
+        }
+        const serialized = serializeJob(job)
         sendJson(res, 200, {
+          ok: true,
           schema: 'khaen-calibration-job/v1',
-          job: serializeJob(job),
-          reasons: job.result === null ? { result: 'job has no result yet' } : {}
+          job: serialized,
+          // docs/API.md §7【加法】：详情顶层也暴露 result/artifacts/error（与 job 内同源）。
+          result: serialized.result ?? null,
+          artifacts: serialized.artifacts ?? [],
+          error: serialized.error ?? null,
+          reasons: detailReasons
         })
         return true
       }
@@ -1770,7 +3728,7 @@ export function createMockAuthServer(options = {}) {
         job.steps = job.steps.map((step) =>
           step.status === 'pending' || step.status === 'running' ? { ...step, status: 'cancelled' } : step
         )
-        sendJson(res, 200, { job_id: job.id, status: job.status })
+        sendJson(res, 200, { ok: true, job_id: job.id, status: job.status, state: job.status })
         return true
       }
 
@@ -1788,7 +3746,21 @@ export function createMockAuthServer(options = {}) {
           sendError(res, 409, 'plan_unavailable', 'job has no plan artifact to apply')
           return true
         }
-        sendJson(res, 200, applyJobRecord(job))
+        const staged = calibrationParseStaged(await readJsonBody(req))
+        if (staged.error !== undefined) {
+          sendError(res, staged.error.status, staged.error.code, staged.error.message, staged.error.details)
+          return true
+        }
+        const outcome = calibrationStagedOutcome(job, 'apply', staged)
+        if (outcome === null) {
+          sendJson(res, 200, applyJobRecord(job))
+          return true
+        }
+        if (outcome.error !== undefined) {
+          sendError(res, outcome.error.status, outcome.error.code, outcome.error.message, outcome.error.details)
+          return true
+        }
+        sendJson(res, 200, outcome.response)
         return true
       }
 
@@ -1806,12 +3778,27 @@ export function createMockAuthServer(options = {}) {
           sendError(res, 409, 'rollback_unavailable', 'no previous plan snapshot is available')
           return true
         }
+        const staged = calibrationParseStaged(await readJsonBody(req))
+        if (staged.error !== undefined) {
+          sendError(res, staged.error.status, staged.error.code, staged.error.message, staged.error.details)
+          return true
+        }
+        const outcome = calibrationStagedOutcome(job, 'rollback', staged)
+        if (outcome !== null) {
+          if (outcome.error !== undefined) {
+            sendError(res, outcome.error.status, outcome.error.code, outcome.error.message, outcome.error.details)
+            return true
+          }
+          sendJson(res, 200, outcome.response)
+          return true
+        }
         const snapshot = appliedSnapshot
         job.apply_state = 'rolled_back'
         job.applied_version = null
         appliedJobId = null
         appliedSnapshot = null
         sendJson(res, 200, {
+          ok: true,
           rolled_back: true,
           restored_version: snapshot.version,
           graph_id: snapshot.graph_id,
@@ -1835,8 +3822,11 @@ export function createMockAuthServer(options = {}) {
           sendError(res, 404, 'artifact_not_found', 'unknown artifact: ' + name)
           return true
         }
+        // daemon 真实形态（crates/daemon/src/calibration/api.rs）：JSON/二进制产物都带
+        // Content-Disposition: attachment; filename="<name>"，浏览器/客户端按文件名保存。
         sendBinary(res, 200, content.content, content.content_type, {
-          'X-KHAEN-Artifact-SHA256': artifact.sha256 ?? ''
+          'X-KHAEN-Artifact-SHA256': artifact.sha256 ?? '',
+          'Content-Disposition': 'attachment; filename="' + name + '"'
         })
         return true
       }
@@ -1893,7 +3883,8 @@ export function createMockAuthServer(options = {}) {
         }
         const job = latestJob()
         if (job === null) {
-          sendError(res, 409, 'job_not_succeeded', 'no calibration job to apply')
+          // docs/API.md §7（裁决 H）：无可用 job 409 no_applicable_job。
+          sendError(res, 409, 'no_applicable_job', 'no calibration job to apply: no calibration job has run yet')
           return true
         }
         if (job.status !== 'succeeded') {
@@ -2141,13 +4132,15 @@ export function createMockAuthServer(options = {}) {
       return
     }
 
-    // Dev-only helper: M4 方案/声道 fixture（browser QA 演练 degraded/unavailable）。
+    // Dev-only helper: M4 方案/声道 fixture（browser QA 演练 degraded/unavailable 与三个失败形态）。
     if (method === 'GET' && path === '/__mock/channels') {
       sendJson(res, 200, {
         fixture: channelsFixture,
-        fixtures: CHANNELS_FIXTURES,
+        fixtures: [...CHANNELS_FIXTURES, ...CHANNELS_EXTRA_FIXTURES],
+        mode: channelsMode,
         unavailable: channelsSeed.unavailable,
         channels: channelsSeed.channels,
+        pending: channelsPending === null ? null : channelsPending.kind,
         uploads: planUploads.size,
         current_version: control.version
       })
@@ -2155,12 +4148,83 @@ export function createMockAuthServer(options = {}) {
     }
     if (method === 'POST' && path === '/__mock/channels-fixture') {
       const body = await readJsonBody(req)
-      if (!isChannelsFixture(body.fixture)) {
+      if (resolveChannelsFixture(body.fixture) === null) {
         sendError(res, 400, 'invalid_fixture', 'unknown channels fixture: ' + String(body.fixture))
         return
       }
       seedM4(body.fixture)
-      sendJson(res, 200, { fixture: channelsFixture })
+      sendJson(res, 200, { fixture: channelsFixture, mode: channelsMode })
+      return
+    }
+
+    // Dev-only helper: MOTU fixture（wired | degraded）。
+    if (method === 'GET' && path === '/__mock/motu') {
+      sendJson(res, 200, {
+        fixture: motuFixture,
+        fixtures: MOTU_FIXTURES,
+        detected: motu.detected,
+        control_reachable: motu.control_reachable,
+        reason: motu.reason,
+        draft: motu.draft === null ? null : motu.draft.channels,
+        vol: motu.vol
+      })
+      return
+    }
+    if (method === 'POST' && path === '/__mock/motu-fixture') {
+      const body = await readJsonBody(req)
+      if (!isMotuFixture(body.fixture)) {
+        sendError(res, 400, 'invalid_fixture', 'unknown motu fixture: ' + String(body.fixture))
+        return
+      }
+      seedMotu(body.fixture)
+      sendJson(res, 200, { fixture: motuFixture })
+      return
+    }
+
+    // Dev-only helper: 音频 profile fixture（wired | not-wired）。
+    if (method === 'GET' && path === '/__mock/audio-profile') {
+      sendJson(res, 200, {
+        fixture: audioProfileFixture,
+        fixtures: AUDIO_PROFILE_FIXTURES,
+        available: audioProfileSeed.available,
+        revision: audioProfileRevision,
+        saved_outputs: audioProfileSaved === null ? null : audioProfileSaved.outputs.filter((output) => output.enabled).length,
+        applied_plan: audioProfileAppliedPlan,
+        generated_plan: audioProfileGeneratedPlan === null ? null : audioProfileGeneratedPlan.sha256,
+        pending: audioProfilePending === null ? null : audioProfilePending.token
+      })
+      return
+    }
+    if (method === 'POST' && path === '/__mock/audio-profile-fixture') {
+      const body = await readJsonBody(req)
+      if (!isAudioProfileFixture(body.fixture)) {
+        sendError(res, 400, 'invalid_fixture', 'unknown audio-profile fixture: ' + String(body.fixture))
+        return
+      }
+      seedAudioProfile(body.fixture)
+      sendJson(res, 200, { fixture: audioProfileFixture })
+      return
+    }
+
+    // Dev-only helper: 测试音 fixture（enabled | sound-window-closed | not-wired）。
+    if (method === 'GET' && path === '/__mock/speaker-test') {
+      sendJson(res, 200, {
+        fixture: speakerTestFixture,
+        fixtures: SPEAKER_TEST_FIXTURES,
+        wired: speakerTest.wired,
+        window_open: speakerTest.windowOpen,
+        state: buildSpeakerTestStatus(speakerTest.state)
+      })
+      return
+    }
+    if (method === 'POST' && path === '/__mock/speaker-test-fixture') {
+      const body = await readJsonBody(req)
+      if (!isSpeakerTestFixture(body.fixture)) {
+        sendError(res, 400, 'invalid_fixture', 'unknown speaker-test fixture: ' + String(body.fixture))
+        return
+      }
+      seedSpeakerTest(body.fixture)
+      sendJson(res, 200, { fixture: speakerTestFixture })
       return
     }
 
@@ -2282,6 +4346,43 @@ export function createMockAuthServer(options = {}) {
       return
     }
 
+    // /api/meta、MOTU、音频 profile / 设备输入 / 测试音：全部要求会话；写操作额外要求 CSRF。
+    // （/api/meta 是页面能力入口；MOTU 两阶段没有 abort；测试音必须 audible+confirm。）
+    if (
+      path === '/api/meta' ||
+      path === '/api/motu' ||
+      path === '/api/motu/volume' ||
+      path === '/api/audio-profile' ||
+      path === '/api/audio-profile/plan' ||
+      path === '/api/device/inputs' ||
+      path === '/api/speaker-test' ||
+      path === '/api/speaker-test/stop'
+    ) {
+      const found = sessionFromRequest(req)
+      if (!found) {
+        sendError(res, 401, 'not_authenticated', 'authentication required')
+        return
+      }
+      if (method !== 'GET' && !hasValidCsrf(req, found.session)) {
+        sendError(res, 403, 'csrf_invalid', 'missing or invalid CSRF token')
+        return
+      }
+      if (path === '/api/meta' && method === 'GET') {
+        sendJson(res, 200, buildMetaJson())
+        return
+      }
+      if (path === '/api/motu' || path === '/api/motu/volume') {
+        await handleMotu(req, res, path, method)
+        return
+      }
+      if (path === '/api/audio-profile' || path === '/api/audio-profile/plan' || path === '/api/device/inputs') {
+        await handleAudioProfile(req, res, path, method)
+        return
+      }
+      await handleSpeakerTest(req, res, path, method)
+      return
+    }
+
     // M3 控制面（mute / surface volume|mode|format / commit / abort / device retry）：
     // 与真实 daemon 相同：全部要求会话；写操作额外要求 CSRF。wired=false 时 handler 内 503。
     if (
@@ -2380,6 +4481,13 @@ export function createMockAuthServer(options = {}) {
           document.plan.source = control.basePlan.source ?? null
         }
       }
+      // §12.2 加法字段：测试音运行态（present/stale fixture 恒上报；missing 保持"全字段 null"语义）。
+      if (statusFixture !== 'missing') {
+        document.speaker_test = buildSpeakerTestStatus(speakerTest.state)
+        if (speakerTest.wired !== true) {
+          document.reasons = { ...(document.reasons ?? {}), speaker_test: SPEAKER_TEST_NOT_WIRED_REASON }
+        }
+      }
       sendJson(res, 200, document)
       return
     }
@@ -2472,12 +4580,56 @@ export function createMockAuthServer(options = {}) {
       return channelsFixture
     },
     setChannelsFixture(next) {
-      if (!isChannelsFixture(next)) {
+      if (resolveChannelsFixture(next) === null) {
         throw new Error(
-          'unknown channels fixture: ' + String(next) + ' (expected ' + CHANNELS_FIXTURES.join(' | ') + ')'
+          'unknown channels fixture: ' +
+            String(next) +
+            ' (expected ' +
+            CHANNELS_FIXTURES.join(' | ') +
+            ' | ' +
+            CHANNELS_EXTRA_FIXTURES.join(' | ') +
+            ')'
         )
       }
       seedM4(next)
+    },
+    /** 当前 channels fixture 的运行时模式（normal / mapping-only / reconfigure-failure / host-link-unavailable）。 */
+    get channelsMode() {
+      return channelsMode
+    },
+    /** 切换 MOTU fixture（测试/开发用；会重置设备音量/草稿内存态）。 */
+    get motuFixture() {
+      return motuFixture
+    },
+    setMotuFixture(next) {
+      if (!isMotuFixture(next)) {
+        throw new Error('unknown motu fixture: ' + String(next) + ' (expected ' + MOTU_FIXTURES.join(' | ') + ')')
+      }
+      seedMotu(next)
+    },
+    /** 切换音频 profile fixture（测试/开发用；会重置已保存 profile/草稿）。 */
+    get audioProfileFixture() {
+      return audioProfileFixture
+    },
+    setAudioProfileFixture(next) {
+      if (!isAudioProfileFixture(next)) {
+        throw new Error(
+          'unknown audio-profile fixture: ' + String(next) + ' (expected ' + AUDIO_PROFILE_FIXTURES.join(' | ') + ')'
+        )
+      }
+      seedAudioProfile(next)
+    },
+    /** 切换测试音 fixture（测试/开发用；会清掉正在跑的测试音）。 */
+    get speakerTestFixture() {
+      return speakerTestFixture
+    },
+    setSpeakerTestFixture(next) {
+      if (!isSpeakerTestFixture(next)) {
+        throw new Error(
+          'unknown speaker-test fixture: ' + String(next) + ' (expected ' + SPEAKER_TEST_FIXTURES.join(' | ') + ')'
+        )
+      }
+      seedSpeakerTest(next)
     },
     /** M4 方案/声道 mock 内部状态（测试用；不是对外 API）。 */
     m4: {
@@ -2498,6 +4650,51 @@ export function createMockAuthServer(options = {}) {
       },
       get planHistory() {
         return control.history.map((entry) => ({ ...entry }))
+      }
+    },
+    /** MOTU mock 内部状态（测试用；不是对外 API）。 */
+    motu: {
+      get fixture() {
+        return motuFixture
+      },
+      get detected() {
+        return motu.detected
+      },
+      get vol() {
+        return motu.vol === null ? null : JSON.parse(JSON.stringify(motu.vol))
+      },
+      get draft() {
+        return motu.draft === null ? null : { ...motu.draft }
+      }
+    },
+    /** 音频 profile mock 内部状态（测试用；不是对外 API）。 */
+    audioProfile: {
+      get fixture() {
+        return audioProfileFixture
+      },
+      get saved() {
+        return audioProfileSaved === null ? null : JSON.parse(JSON.stringify(audioProfileSaved))
+      },
+      get revision() {
+        return audioProfileRevision
+      },
+      get appliedPlan() {
+        return { ...audioProfileAppliedPlan }
+      },
+      get pendingToken() {
+        return audioProfilePending === null ? null : audioProfilePending.token
+      }
+    },
+    /** 测试音 mock 内部状态（测试用；不是对外 API）。 */
+    speakerTest: {
+      get fixture() {
+        return speakerTestFixture
+      },
+      get active() {
+        return speakerTest.state.active === true
+      },
+      get state() {
+        return buildSpeakerTestStatus(speakerTest.state)
       }
     },
     /** 系统 mock 内部状态（测试用；不是对外 API）。 */
@@ -2606,6 +4803,10 @@ export function createMockAuthServer(options = {}) {
       configured = false
       systemRestartState = { restartedAt: null, rtHostStarted: false }
       seedControl(DEFAULT_CONTROL_FIXTURE)
+      seedM4(DEFAULT_CHANNELS_FIXTURE)
+      seedMotu('wired')
+      seedAudioProfile(DEFAULT_AUDIO_PROFILE_FIXTURE)
+      seedSpeakerTest(DEFAULT_SPEAKER_TEST_FIXTURE)
     }
   }
 }
@@ -2669,22 +4870,47 @@ if (isMain) {
   const channelsIndex = process.argv.indexOf('--channels-fixture')
   const channelsValue =
     channelsIndex >= 0 ? process.argv[channelsIndex + 1] : process.env.KHAEN_MOCK_CHANNELS_FIXTURE
-  if (channelsValue !== undefined && !isChannelsFixture(channelsValue)) {
+  if (channelsValue !== undefined && !isChannelsFixture(channelsValue) && channelsValue !== 'mapping-only' && channelsValue !== 'reconfigure-failure' && channelsValue !== 'host-link-unavailable') {
     console.error(
       '[mock-auth] invalid channels fixture: ' +
         String(channelsValue) +
         ' (expected ' +
         CHANNELS_FIXTURES.join(' | ') +
-        ')'
+        ' | mapping-only | reconfigure-failure | host-link-unavailable)'
     )
     process.exit(2)
   }
+  const readFixtureFlag = (flag, envName, validate, fixtures) => {
+    const index = process.argv.indexOf(flag)
+    const value = index >= 0 ? process.argv[index + 1] : process.env[envName]
+    if (value !== undefined && !validate(value)) {
+      console.error('[mock-auth] invalid ' + flag + ': ' + String(value) + ' (expected ' + fixtures.join(' | ') + ')')
+      process.exit(2)
+    }
+    return value
+  }
+  const motuValue = readFixtureFlag('--motu-fixture', 'KHAEN_MOCK_MOTU_FIXTURE', isMotuFixture, MOTU_FIXTURES)
+  const audioProfileValue = readFixtureFlag(
+    '--audio-profile-fixture',
+    'KHAEN_MOCK_AUDIO_PROFILE_FIXTURE',
+    isAudioProfileFixture,
+    AUDIO_PROFILE_FIXTURES
+  )
+  const speakerTestValue = readFixtureFlag(
+    '--speaker-test-fixture',
+    'KHAEN_MOCK_SPEAKER_TEST_FIXTURE',
+    isSpeakerTestFixture,
+    SPEAKER_TEST_FIXTURES
+  )
   const mock = createMockAuthServer({
     statusFixture: fixtureValue,
     calibrationFixture: calibrationValue,
     systemFixture: systemValue,
     controlFixture: controlValue,
-    channelsFixture: channelsValue
+    channelsFixture: channelsValue,
+    motuFixture: motuValue,
+    audioProfileFixture: audioProfileValue,
+    speakerTestFixture: speakerTestValue
   })
   const address = await mock.listen({ port })
   console.log('[mock-auth] contract mock listening on ' + address.baseUrl)
@@ -2703,7 +4929,28 @@ if (isMain) {
     '[mock-auth] /api control fixture: ' + mock.controlFixture + ' (' + CONTROL_FIXTURES.join(' | ') + ')'
   )
   console.log(
-    '[mock-auth] /api/channels fixture: ' + mock.channelsFixture + ' (' + CHANNELS_FIXTURES.join(' | ') + ')'
+    '[mock-auth] /api/channels fixture: ' +
+      mock.channelsFixture +
+      ' (' +
+      CHANNELS_FIXTURES.join(' | ') +
+      ' | mapping-only | reconfigure-failure | host-link-unavailable)'
+  )
+  console.log(
+    '[mock-auth] /api/motu fixture: ' + mock.motuFixture + ' (' + MOTU_FIXTURES.join(' | ') + ')'
+  )
+  console.log(
+    '[mock-auth] /api/audio-profile fixture: ' +
+      mock.audioProfileFixture +
+      ' (' +
+      AUDIO_PROFILE_FIXTURES.join(' | ') +
+      ')'
+  )
+  console.log(
+    '[mock-auth] /api/speaker-test fixture: ' +
+      mock.speakerTestFixture +
+      ' (' +
+      SPEAKER_TEST_FIXTURES.join(' | ') +
+      ')'
   )
   console.log('[mock-auth] dev: KHAEN_DEV_API=' + address.baseUrl + ' pnpm dev')
   console.log('[mock-auth] in-memory state; restart resets the setup flow')

@@ -1,19 +1,20 @@
 /**
  * 校准 REST 客户端（PLAN §4.7 job 列表/详情/uploads/artifacts + §10.4 wizard 端点；任务 T37）。
  *
- * 契约（后端由 T36 并行实现，前端按此契约 + mock 开发；字段见 webui/README.md「校准契约」）：
- *   GET  /api/calibration/jobs?limit&offset        -> khaen-calibration-jobs/v1（列表/分页/active job）
- *   POST /api/calibration/jobs                    -> 202 {job_id}（同一时刻只允许一个 active job，冲突 409 switch_busy）
- *   GET  /api/calibration/jobs/{id}               -> khaen-calibration-job/v1（状态机/步骤/产物/verdict）
- *   POST /api/calibration/jobs/{id}/cancel        -> {job_id,status}
- *   POST /api/calibration/jobs/{id}/apply         -> 应用结果（applied/applied_version/graph_id/snapshot/readback）
- *   POST /api/calibration/jobs/{id}/rollback      -> 回滚结果（rolled_back/restored_version/graph_id）
- *   POST /api/calibration/uploads                 -> {upload_id,sha256,bytes}（原始 WAV/校准文件字节 body）
- *   GET  /api/calibration/jobs/{id}/artifacts/{name} -> 产物下载（浏览器直链；daemon 侧按 manifest sha256 校验）
- *   GET  /api/calibration/wizard                  -> khaen-calibration-wizard/v1（配置 + 默认值）
- *   PUT  /api/calibration/wizard                  -> 保存配置（未知字段后端 400）
+ * 契约：docs/API.md v1.1 §7「实际形状 + 加法目标」（以实际形状为准；【加法】字段容忍但不依赖）：
+ *   POST /api/calibration/uploads                 -> 原始字节 {schema?,upload_id,sha256,bytes,created?}（同 sha 200 幂等）
+ *   GET  /api/calibration/jobs?limit&offset       -> {schema,available,reason?,engine?,active_job_id?,total,limit,offset,jobs,reasons}
+ *        canonical job 字段 = id/status（docs/API.md §7 v1.1 裁决 H 已按后端实际修正）；
+ *        解析层保留 job_id/state 旧别名的宽容归一化作防御（不写死旧文档期望）。
+ *   POST /api/calibration/jobs                    -> 202 {job_id,location}（+ok/state）
+ *   GET  /api/calibration/jobs/{id}               -> {schema,job:{...},reasons}（+顶层 result/artifacts/ok）
+ *   POST /api/calibration/jobs/{id}/cancel        -> {job_id,status}（canonical 状态 'cancelled' 双 l）
+ *   POST /api/calibration/jobs/{id}/apply         -> 单发 {}；或 staged {stage:prepare|commit|abort,engine_token?}
+ *   POST /api/calibration/jobs/{id}/rollback      -> 同 apply
+ *   GET  /api/calibration/jobs/{id}/artifacts/{name} -> 二进制产物（带认证下载：getRaw + Content-Disposition）
+ *   GET/PUT /api/calibration/wizard               -> {schema,config,defaults?,saved,updated_at,reasons}
  *   GET  /api/calibration/wizard/state            -> khaen-calibration-wizard-state/v1（每步 gate，刷新可恢复）
- *   POST /api/calibration/wizard/apply            -> 应用最近成功 job 的 plan（走 prepare/commit）
+ *   POST /api/calibration/wizard/apply {job_id?}  -> apply 回执或 {job_id,location}
  *
  * 纪律：
  * - **gate 由后端事实驱动**：每步能否继续只认 wizard/state 的 steps[].status（passed/blocked/not_available）；
@@ -24,6 +25,7 @@
  * - 纯函数（解析/派生/错误归类）不依赖 Vue / DOM，Node 单测直接覆盖。
  */
 import { ApiClient, ApiError } from './client.ts'
+import type { RawBytesResponse } from './client.ts'
 import type { TruthKind } from '../types/ui.ts'
 
 /** 端点 schema 标识（与 daemon 契约一致）。 */
@@ -83,8 +85,10 @@ export interface CalibrationErrorDetail {
 }
 
 export interface CalibrationJobSummary {
+  /** canonical job id（daemon/API 合同 §7 为 `id`；旧文档 `job_id` 仅作防御性兼容）。 */
   id: string
   kind: string
+  /** canonical 状态（daemon/API 合同 §7 为 `status`；旧文档 `state` 仅作防御性兼容）。 */
   status: CalibrationJobStatus
   verdict: CalibrationVerdict | null
   created_at: string | null
@@ -93,6 +97,12 @@ export interface CalibrationJobSummary {
   duration_ms: number | null
   error: CalibrationErrorDetail | null
   reason: string | null
+  /** 【加法】epoch 秒创建时间（缺失为 null，不依赖）。 */
+  created_unix: number | null
+  /** 【加法】epoch 秒更新时间（缺失为 null，不依赖）。 */
+  updated_unix: number | null
+  /** 【加法】0..1 真实进度（缺失为 null：UI 不画假进度条）。 */
+  progress: number | null
 }
 
 export interface CalibrationJobsResponse {
@@ -107,6 +117,8 @@ export interface CalibrationJobsResponse {
   total: number
   limit: number
   offset: number
+  /** daemon 为缺失字段给出的原因（如 jobs/engine/active_job_id）；展示用，不当数据。 */
+  reasons: Record<string, string>
 }
 
 export interface CalibrationStep {
@@ -123,6 +135,8 @@ export interface CalibrationArtifact {
   sha256: string | null
   bytes: number | null
   content_type: string | null
+  /** 【加法】daemon 是否允许经 /artifacts/{name} 下载（缺失按白名单语义处理）。 */
+  downloadable: boolean | null
 }
 
 export interface CalibrationJobInputs {
@@ -151,6 +165,21 @@ export interface CalibrationDesign {
   } | null
 }
 
+/** 实测来源（合同 §7：measured 与 simulated 必须分开标注，不把模拟写成实测）。 */
+export interface CalibrationMeasuredSource {
+  baseline_upload_id: string | null
+  applied_upload_id: string | null
+  sample_rate_hz: number | null
+  source: string | null
+}
+
+/** 模拟来源（方案预测电平；不是实测）。 */
+export interface CalibrationSimulatedSource {
+  predicted_from: string | null
+  plan_sha256: string | null
+  graph_id: string | null
+}
+
 export interface CalibrationJobResult {
   verdict: CalibrationVerdict | null
   max_delta_db: number | null
@@ -160,14 +189,29 @@ export interface CalibrationJobResult {
   bands: CalibrationBand[]
   design: CalibrationDesign | null
   plan: { sha256: string | null; graph_id: string | null } | null
+  /** 【加法】上传录音来源（measured）；null = 后端未上报（UI 不冒充）。 */
+  measured: CalibrationMeasuredSource | null
+  /** 【加法】模拟/预测来源；null = 未上报。 */
+  simulated: CalibrationSimulatedSource | null
 }
 
 /** job 的 apply 状态（daemon 在 detail 里上报，列表不带）。 */
 export type CalibrationApplyState = 'not_applied' | 'applied' | 'rolled_back'
 
+/** job 的 apply 记录（daemon 的 `apply` 对象；apply_state 是兼容旧字段）。 */
+export interface CalibrationJobApply {
+  state: CalibrationApplyState | null
+  applied_version: number | null
+  previous_version: number | null
+  applied_at: string | null
+  plan_sha256: string | null
+}
+
 export interface CalibrationJob extends CalibrationJobSummary {
   /** 引擎真实性原样透传（真实闭环 = actual；mock/fixture = demo）。 */
   engine: string | null
+  /** 当前执行中的步骤名（【加法】，缺失为 null）。 */
+  step: string | null
   /** 该 job 产出的 plan 的应用状态（not_applied / applied / rolled_back）。 */
   apply_state: CalibrationApplyState | null
   /** 已应用版本（apply 后由 daemon 回填）。 */
@@ -176,6 +220,8 @@ export interface CalibrationJob extends CalibrationJobSummary {
   artifacts: CalibrationArtifact[]
   inputs: CalibrationJobInputs | null
   result: CalibrationJobResult | null
+  /** daemon 的 apply 明细对象（缺失时由 apply_state/applied_version 合成）。 */
+  apply: CalibrationJobApply | null
 }
 
 export interface CalibrationJobResponse {
@@ -188,6 +234,10 @@ export interface CalibrationUploadResult {
   upload_id: string
   sha256: string
   bytes: number
+  /** 【加法】响应 schema（daemon 当前不返回；缺失为 null，不依赖）。 */
+  schema: string | null
+  /** 服务端是否新建（false = 同 sha 幂等命中已有上传）。 */
+  created: boolean | null
 }
 
 export interface CalibrationCreateJobInputs {
@@ -206,29 +256,163 @@ export interface CalibrationCreateJobRequest {
 
 export interface CalibrationCreateJobResult {
   job_id: string
+  /** 合同 §7：202 回执的 `location`（缺失为 null，不猜 URL）。 */
+  location: string | null
   status: CalibrationJobStatus
 }
 
+/* ---------------------------------------------------- apply / rollback 回执 */
+
+/** 两阶段 stage（合同 §7【目标】：prepare/commit/abort；旧单发 = 省略 stage）。 */
+export type CalibrationStage = 'prepare' | 'commit' | 'abort'
+
+/** apply/rollback 的请求体：默认单发 `{}`；两阶段按 stage 传。 */
+export type CalibrationStagedRequest =
+  | { stage: 'prepare' }
+  | { stage: 'commit'; engine_token: string }
+  | { stage: 'abort'; engine_token: string }
+
+/** apply 回执里的应用前快照（version/graph_id 可能为 null：不编造）。 */
+export interface CalibrationApplySnapshot {
+  version: number | null
+  graph_id: string | null
+  sha256: string | null
+}
+
+/** 单发（旧语义）或 staged commit 已生效的回执。 */
 export interface CalibrationApplyResult {
+  kind: 'applied'
+  /** single = 旧单发（prepare+commit 一次完成）；commit = staged 的 commit 阶段。 */
+  stage: 'single' | 'commit'
   applied: true
   job_id: string | null
-  applied_version: number
-  graph_id: string
+  applied_version: number | null
+  /** staged commit 回执带应用前版本（缺失为 null）。 */
+  previous_version: number | null
+  graph_id: string | null
   /** 控制面只暴露 version/graph_id 时可能为 null（reasons 里给原因），不当失败。 */
   sha256: string | null
-  snapshot: { version: number; graph_id: string; sha256: string | null } | null
+  snapshot: CalibrationApplySnapshot | null
   ack: { synthetic: boolean; actual: boolean } | null
   readback: Record<string, unknown> | null
   applied_at: string | null
+  /** 回执内嵌的 job（daemon 会带；缺失为 null，调用方应重新 GET 详情）。 */
+  job: CalibrationJob | null
+  reasons: Record<string, string>
 }
 
+/** staged prepare 回执：只生成草稿 + 一次性 token，**未生效**。 */
+export interface CalibrationApplyPrepare {
+  kind: 'prepare'
+  stage: 'prepare'
+  job_id: string | null
+  engine_token: string
+  plan_sha256: string | null
+  previous_version: number | null
+  target_version: number | null
+  job: CalibrationJob | null
+  reasons: Record<string, string>
+  raw: Record<string, unknown>
+}
+
+/** staged abort 回执：草稿已丢弃，运行态不变。 */
+export interface CalibrationApplyAbort {
+  kind: 'abort'
+  stage: 'abort'
+  aborted: true
+  job_id: string | null
+  plan_sha256: string | null
+  target_version: number | null
+  control: Record<string, unknown> | null
+  reasons: Record<string, string>
+  raw: Record<string, unknown>
+}
+
+export type CalibrationApplyOutcome = CalibrationApplyResult | CalibrationApplyPrepare | CalibrationApplyAbort
+
+/** 单发（旧语义）或 staged commit 已回滚的回执。 */
 export interface CalibrationRollbackResult {
+  kind: 'rolled_back'
+  /** single = 旧单发；commit = staged 的 commit 阶段。 */
+  stage: 'single' | 'commit'
   rolled_back: true
-  restored_version: number
-  graph_id: string
+  job_id: string | null
+  restored_version: number | null
+  applied_version: number | null
+  graph_id: string | null
   sha256: string | null
   readback: Record<string, unknown> | null
   rolled_back_at: string | null
+  job: CalibrationJob | null
+  reasons: Record<string, string>
+}
+
+/** staged rollback prepare 回执：只生成草稿 + 一次性 token，**未生效**。 */
+export interface CalibrationRollbackPrepare {
+  kind: 'prepare'
+  stage: 'prepare'
+  job_id: string | null
+  engine_token: string
+  plan_sha256: string | null
+  previous_version: number | null
+  target_version: number | null
+  job: CalibrationJob | null
+  reasons: Record<string, string>
+  raw: Record<string, unknown>
+}
+
+/** staged rollback abort 回执。 */
+export interface CalibrationRollbackAbort {
+  kind: 'abort'
+  stage: 'abort'
+  aborted: true
+  job_id: string | null
+  plan_sha256: string | null
+  target_version: number | null
+  control: Record<string, unknown> | null
+  reasons: Record<string, string>
+  raw: Record<string, unknown>
+}
+
+export type CalibrationRollbackOutcome =
+  | CalibrationRollbackResult
+  | CalibrationRollbackPrepare
+  | CalibrationRollbackAbort
+
+/**
+ * wizard/apply 的防御性兼容分支：旧文档曾写"无 job 时回 {job_id,location}"。
+ * docs/API.md v1.1 裁决 H 后 canonical 只有 apply 回执（无 job 时 409 no_applicable_job）；
+ * 这里保留解析能力只为不把未知形状误判成失败，正常路径不会走它。
+ */
+export interface CalibrationWizardApplyJob {
+  kind: 'job'
+  job_id: string | null
+  location: string | null
+  raw: Record<string, unknown>
+}
+
+export type CalibrationWizardApplyOutcome = CalibrationApplyOutcome | CalibrationWizardApplyJob
+
+/**
+ * 带认证的产物下载结果（ApiClient.getRawBytes：同一套 Cookie/401/错误体/版本头处理）。
+ * `data` 是**无损原始字节**（二进制 plan.bin 也可直接 Blob 保存）；
+ * `text` 只是 UTF-8 解码视图（JSON/CSV 便于展示/调试，不用于二进制）。
+ */
+export interface CalibrationArtifactDownload {
+  job_id: string
+  name: string
+  /** Content-Disposition 的 filename；缺失时回退为 artifact name。 */
+  filename: string
+  content_type: string | null
+  /** daemon 的 x-khaen-artifact-sha256（用于对账；不冒充已本地校验）。 */
+  sha256: string | null
+  status: number
+  data: ArrayBuffer
+  text: string
+  /** 原始字节数（ByteLength）。 */
+  byte_length: number
+  /** filename 是否来自服务端 Content-Disposition。 */
+  from_content_disposition: boolean
 }
 
 export interface WizardSinglePoint {
@@ -267,6 +451,8 @@ export interface CalibrationWizardResponse {
   saved: boolean
   updated_at: string | null
   reasons: Record<string, string>
+  /** 【加法】PUT 回执里 daemon 实际写入的字段（缺失为 []）。 */
+  set_fields: string[]
 }
 
 export interface WizardStepGate {
@@ -439,6 +625,75 @@ function requireEnum<T extends string>(
   return value
 }
 
+/**
+ * 合同 §7 与 daemon 实际字段存在别名（`job_id`/`id`、`state`/`status`）：
+ * 两者都接受并归一化为内部字段；两个都给时以 §7 canonical 名为准。
+ */
+function readAliasedString(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+  endpoint: string,
+  path: string
+): string | null {
+  for (const field of fields) {
+    const value = record[field]
+    if (value !== undefined && value !== null) {
+      return readString(record, field, endpoint, path)
+    }
+  }
+  return null
+}
+
+function requireAliasedString(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+  endpoint: string,
+  path: string
+): string {
+  const value = readAliasedString(record, fields, endpoint, path)
+  if (value === null || value.length === 0) {
+    throw invalidResponse(endpoint, path + '.' + fields[0] + ' must be a non-empty string')
+  }
+  return value
+}
+
+function readAliasedEnum<T extends string>(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+  allowed: readonly T[],
+  endpoint: string,
+  path: string,
+  required: true
+): T
+function readAliasedEnum<T extends string>(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+  allowed: readonly T[],
+  endpoint: string,
+  path: string,
+  required: false
+): T | null
+function readAliasedEnum<T extends string>(
+  record: Record<string, unknown>,
+  fields: readonly string[],
+  allowed: readonly T[],
+  endpoint: string,
+  path: string,
+  required: boolean
+): T | null {
+  const value = readAliasedString(record, fields, endpoint, path)
+  if (value === null) {
+    if (required) {
+      throw invalidResponse(endpoint, path + '.' + fields[0] + ' is required')
+    }
+    return null
+  }
+  if (!(allowed as readonly string[]).includes(value)) {
+    throw invalidResponse(endpoint, path + '.' + fields[0] + ' has unknown value "' + value + '"')
+  }
+  return value as T
+}
+
 function parseReasons(value: unknown, endpoint: string): Record<string, string> {
   if (value === null || value === undefined) {
     return {}
@@ -469,6 +724,7 @@ const APPLY_STATES: readonly CalibrationApplyState[] = ['not_applied', 'applied'
 const RESIDUALS: readonly DesignResidual[] = ['FULL', 'PARTIAL', 'NONE']
 const ORIENTATIONS: readonly WizardOrientation[] = ['0deg', '90deg']
 const TARGET_MODES: readonly WizardTargetMode[] = ['flat', 'tilt10']
+const STAGES: readonly CalibrationStage[] = ['prepare', 'commit', 'abort']
 
 function parseJobError(value: unknown, endpoint: string, path: string): CalibrationErrorDetail | null {
   const record = optionalRecord(value, endpoint, path)
@@ -484,16 +740,21 @@ function parseJobError(value: unknown, endpoint: string, path: string): Calibrat
 function parseJobSummary(value: unknown, endpoint: string, path: string): CalibrationJobSummary {
   const record = asRecord(value, endpoint, path)
   return {
-    id: requireString(record, 'id', endpoint, path),
+    // canonical 是 id/status（docs/API.md §7 裁决 H）；job_id/state 旧别名只做防御性兼容。
+    id: requireAliasedString(record, ['id', 'job_id'], endpoint, path),
     kind: requireString(record, 'kind', endpoint, path),
-    status: requireEnum(record, 'status', JOB_STATUSES, endpoint, path),
+    status: readAliasedEnum(record, ['status', 'state'], JOB_STATUSES, endpoint, path, true),
     verdict: readEnum(record, 'verdict', VERDICTS, endpoint, path),
     created_at: readString(record, 'created_at', endpoint, path),
     started_at: readString(record, 'started_at', endpoint, path),
     finished_at: readString(record, 'finished_at', endpoint, path),
     duration_ms: readNumber(record, 'duration_ms', endpoint, path),
     error: parseJobError(record.error, endpoint, path + '.error'),
-    reason: readString(record, 'reason', endpoint, path)
+    reason: readString(record, 'reason', endpoint, path),
+    // 【加法】字段：有则透传，没有就是 null，绝不补 0。
+    created_unix: readNumber(record, 'created_unix', endpoint, path),
+    updated_unix: readNumber(record, 'updated_unix', endpoint, path),
+    progress: readNumber(record, 'progress', endpoint, path)
   }
 }
 
@@ -515,7 +776,8 @@ function parseArtifact(value: unknown, endpoint: string, path: string): Calibrat
     name: requireString(record, 'name', endpoint, path),
     sha256: readString(record, 'sha256', endpoint, path),
     bytes: readNumber(record, 'bytes', endpoint, path),
-    content_type: readString(record, 'content_type', endpoint, path)
+    content_type: readString(record, 'content_type', endpoint, path),
+    downloadable: readBoolean(record, 'downloadable', endpoint, path)
   }
 }
 
@@ -590,7 +852,35 @@ function parseJobResult(value: unknown, endpoint: string, path: string): Calibra
         : {
             sha256: readString(planRecord, 'sha256', endpoint, path + '.plan'),
             graph_id: readString(planRecord, 'graph_id', endpoint, path + '.plan')
-          }
+          },
+    // 【加法】measured / simulated：如实分开标注，缺失为 null。
+    measured: parseMeasuredSource(record.measured, endpoint, path + '.measured'),
+    simulated: parseSimulatedSource(record.simulated, endpoint, path + '.simulated')
+  }
+}
+
+function parseMeasuredSource(value: unknown, endpoint: string, path: string): CalibrationMeasuredSource | null {
+  const record = optionalRecord(value, endpoint, path)
+  if (record === null) {
+    return null
+  }
+  return {
+    baseline_upload_id: readString(record, 'baseline_upload_id', endpoint, path),
+    applied_upload_id: readString(record, 'applied_upload_id', endpoint, path),
+    sample_rate_hz: readNumber(record, 'sample_rate_hz', endpoint, path),
+    source: readString(record, 'source', endpoint, path)
+  }
+}
+
+function parseSimulatedSource(value: unknown, endpoint: string, path: string): CalibrationSimulatedSource | null {
+  const record = optionalRecord(value, endpoint, path)
+  if (record === null) {
+    return null
+  }
+  return {
+    predicted_from: readString(record, 'predicted_from', endpoint, path),
+    plan_sha256: readString(record, 'plan_sha256', endpoint, path),
+    graph_id: readString(record, 'graph_id', endpoint, path)
   }
 }
 
@@ -614,11 +904,12 @@ export function parseJobsResponse(body: unknown): CalibrationJobsResponse {
     jobs: jobsRaw.map((item, index) => parseJobSummary(item, endpoint, 'jobs[' + String(index) + ']')),
     total: requireNumber(root, 'total', endpoint, 'body'),
     limit: requireNumber(root, 'limit', endpoint, 'body'),
-    offset: requireNumber(root, 'offset', endpoint, 'body')
+    offset: requireNumber(root, 'offset', endpoint, 'body'),
+    reasons: parseReasons(root.reasons, endpoint)
   }
 }
 
-/** 校验 /api/calibration/jobs/{id} 响应。 */
+/** 校验 /api/calibration/jobs/{id} 响应（容忍 §7【加法】顶层 result/artifacts/ok）。 */
 export function parseJobResponse(body: unknown): CalibrationJobResponse {
   const endpoint = '/api/calibration/jobs/{id}'
   const root = asRecord(body, endpoint, 'body')
@@ -626,30 +917,64 @@ export function parseJobResponse(body: unknown): CalibrationJobResponse {
     throw invalidResponse(endpoint, 'schema must be "' + CALIBRATION_JOB_SCHEMA + '"')
   }
   const jobRecord = asRecord(root.job, endpoint, 'job')
-  const summary = parseJobSummary(jobRecord, endpoint, 'job')
-  const stepsRaw = jobRecord.steps
-  const artifactsRaw = jobRecord.artifacts
-  if (!Array.isArray(stepsRaw)) {
-    throw invalidResponse(endpoint, 'job.steps must be an array')
-  }
-  if (!Array.isArray(artifactsRaw)) {
-    throw invalidResponse(endpoint, 'job.artifacts must be an array')
-  }
   return {
     schema: CALIBRATION_JOB_SCHEMA,
-    job: {
-      ...summary,
-      engine: readString(jobRecord, 'engine', endpoint, 'job'),
-      apply_state: readEnum(jobRecord, 'apply_state', APPLY_STATES, endpoint, 'job'),
-      applied_version: readNumber(jobRecord, 'applied_version', endpoint, 'job'),
-      steps: stepsRaw.map((item, index) => parseJobStep(item, endpoint, 'job.steps[' + String(index) + ']')),
-      artifacts: artifactsRaw.map((item, index) =>
-        parseArtifact(item, endpoint, 'job.artifacts[' + String(index) + ']')
-      ),
-      inputs: parseJobInputs(jobRecord.inputs, endpoint, 'job.inputs'),
-      result: parseJobResult(jobRecord.result, endpoint, 'job.result')
-    },
+    job: parseJobObject(jobRecord, endpoint, 'job', root),
     reasons: parseReasons(root.reasons, endpoint)
+  }
+}
+
+/**
+ * 解析 job 对象；`fallback` 是详情响应顶层（§7【加法】把 result/artifacts/error 也放在顶层）。
+ * steps/artifacts 缺失按空数组处理（列表摘要本来就不带），但类型不对仍然拒绝。
+ */
+function parseJobObject(
+  jobRecord: Record<string, unknown>,
+  endpoint: string,
+  path: string,
+  fallback?: Record<string, unknown>
+): CalibrationJob {
+  const summary = parseJobSummary(jobRecord, endpoint, path)
+  const stepsRaw = jobRecord.steps ?? []
+  const artifactsRaw = jobRecord.artifacts ?? fallback?.artifacts ?? []
+  if (!Array.isArray(stepsRaw)) {
+    throw invalidResponse(endpoint, path + '.steps must be an array')
+  }
+  if (!Array.isArray(artifactsRaw)) {
+    throw invalidResponse(endpoint, path + '.artifacts must be an array')
+  }
+  const applyState = readEnum(jobRecord, 'apply_state', APPLY_STATES, endpoint, path)
+  const appliedVersion = readNumber(jobRecord, 'applied_version', endpoint, path)
+  const applyRecord = optionalRecord(jobRecord.apply, endpoint, path + '.apply')
+  return {
+    ...summary,
+    engine: readString(jobRecord, 'engine', endpoint, path),
+    step: readString(jobRecord, 'step', endpoint, path),
+    apply_state: applyState,
+    applied_version: appliedVersion,
+    steps: stepsRaw.map((item, index) => parseJobStep(item, endpoint, path + '.steps[' + String(index) + ']')),
+    artifacts: artifactsRaw.map((item, index) =>
+      parseArtifact(item, endpoint, path + '.artifacts[' + String(index) + ']')
+    ),
+    inputs: parseJobInputs(jobRecord.inputs, endpoint, path + '.inputs'),
+    result: parseJobResult(jobRecord.result ?? fallback?.result, endpoint, path + '.result'),
+    apply: applyRecord === null ? null : parseJobApply(applyRecord, applyState, appliedVersion, endpoint, path + '.apply')
+  }
+}
+
+function parseJobApply(
+  record: Record<string, unknown>,
+  applyState: CalibrationApplyState | null,
+  appliedVersion: number | null,
+  endpoint: string,
+  path: string
+): CalibrationJobApply {
+  return {
+    state: readEnum(record, 'state', APPLY_STATES, endpoint, path) ?? applyState,
+    applied_version: readNumber(record, 'applied_version', endpoint, path) ?? appliedVersion,
+    previous_version: readNumber(record, 'previous_version', endpoint, path),
+    applied_at: readString(record, 'applied_at', endpoint, path),
+    plan_sha256: readString(record, 'plan_sha256', endpoint, path)
   }
 }
 
@@ -674,20 +999,26 @@ function parseWizardConfig(value: unknown, endpoint: string, path: string): Wiza
   }
 }
 
-/** 校验 GET/PUT /api/calibration/wizard 响应。 */
+/**
+ * 校验 GET/PUT /api/calibration/wizard 响应。
+ * daemon 实际字段：schema/config/defaults/saved/updated_at/reasons（+set_fields）；
+ * 合同 §7 只保证 schema/config/state（"..."）：defaults 缺失时回退到 config（同一形状），不拒绝。
+ */
 export function parseWizardResponse(body: unknown): CalibrationWizardResponse {
   const endpoint = '/api/calibration/wizard'
   const root = asRecord(body, endpoint, 'body')
   if (root.schema !== CALIBRATION_WIZARD_SCHEMA) {
     throw invalidResponse(endpoint, 'schema must be "' + CALIBRATION_WIZARD_SCHEMA + '"')
   }
+  const config = parseWizardConfig(root.config, endpoint, 'config')
   return {
     schema: CALIBRATION_WIZARD_SCHEMA,
-    config: parseWizardConfig(root.config, endpoint, 'config'),
-    defaults: parseWizardConfig(root.defaults, endpoint, 'defaults'),
+    config,
+    defaults: root.defaults === undefined ? config : parseWizardConfig(root.defaults, endpoint, 'defaults'),
     saved: readBoolean(root, 'saved', endpoint, 'body') ?? false,
     updated_at: readString(root, 'updated_at', endpoint, 'body'),
-    reasons: parseReasons(root.reasons, endpoint)
+    reasons: parseReasons(root.reasons, endpoint),
+    set_fields: readStringArray(root, 'set_fields', endpoint, 'body')
   }
 }
 
@@ -766,24 +1097,27 @@ export function parseWizardStateResponse(body: unknown): CalibrationWizardStateR
   }
 }
 
-/** 校验 POST /api/calibration/uploads 响应。 */
+/** 校验 POST /api/calibration/uploads 响应（201 新建 / 200 同 sha 幂等）。 */
 export function parseUploadResponse(body: unknown): CalibrationUploadResult {
   const endpoint = '/api/calibration/uploads'
   const root = asRecord(body, endpoint, 'body')
   return {
     upload_id: requireString(root, 'upload_id', endpoint, 'body'),
     sha256: requireString(root, 'sha256', endpoint, 'body'),
-    bytes: requireNumber(root, 'bytes', endpoint, 'body')
+    bytes: requireNumber(root, 'bytes', endpoint, 'body'),
+    schema: readString(root, 'schema', endpoint, 'body'),
+    created: readBoolean(root, 'created', endpoint, 'body')
   }
 }
 
-/** 校验 POST /api/calibration/jobs 响应（202）。 */
+/** 校验 POST /api/calibration/jobs 响应（202 {job_id,location}；容忍 ok/state）。 */
 export function parseCreateJobResponse(body: unknown): CalibrationCreateJobResult {
   const endpoint = '/api/calibration/jobs'
   const root = asRecord(body, endpoint, 'body')
   return {
     job_id: requireString(root, 'job_id', endpoint, 'body'),
-    status: readEnum(root, 'status', JOB_STATUSES, endpoint, 'body') ?? 'queued'
+    location: readString(root, 'location', endpoint, 'body'),
+    status: readAliasedEnum(root, ['state', 'status'], JOB_STATUSES, endpoint, 'body', false) ?? 'queued'
   }
 }
 
@@ -798,45 +1132,182 @@ function parseAck(value: unknown, endpoint: string): { synthetic: boolean; actua
   }
 }
 
-/** 校验 apply 结果（job 详情页与 wizard apply 共用）。 */
-export function parseApplyResult(body: unknown): CalibrationApplyResult {
-  const endpoint = '/api/calibration/apply'
-  const root = asRecord(body, endpoint, 'body')
-  if (readBoolean(root, 'applied', endpoint, 'body') !== true) {
-    throw invalidResponse(endpoint, 'applied must be true')
+/** apply 回执里可能内嵌的 job（{schema, job:{...}}）；不对就按缺失处理，不让回执整体失败。 */
+function parseEmbeddedJob(value: unknown, endpoint: string): CalibrationJob | null {
+  const record = optionalRecord(value, endpoint, 'job')
+  if (record === null) {
+    return null
   }
-  const readback = optionalRecord(root.readback, endpoint, 'readback')
+  const jobRecord = optionalRecord(record.job, endpoint, 'job.job')
+  if (jobRecord === null) {
+    return null
+  }
+  return parseJobObject(jobRecord, endpoint, 'job.job')
+}
+
+function parseApplySnapshot(value: unknown, endpoint: string): CalibrationApplySnapshot | null {
+  const record = optionalRecord(value, endpoint, 'snapshot')
+  if (record === null) {
+    return null
+  }
   return {
+    version: readNumber(record, 'version', endpoint, 'snapshot'),
+    graph_id: readString(record, 'graph_id', endpoint, 'snapshot'),
+    sha256: readString(record, 'sha256', endpoint, 'snapshot')
+  }
+}
+
+function readReadback(record: Record<string, unknown>, endpoint: string): Record<string, unknown> | null {
+  const value = record.readback
+  if (value === null || value === undefined) {
+    return null
+  }
+  return asRecord(value, endpoint, 'readback')
+}
+
+/**
+ * 校验 POST /jobs/{id}/apply 的回执：兼容
+ *  - 旧单发：{applied:true, applied_version, graph_id, snapshot, ack, readback, applied_at}；
+ *  - staged prepare：{stage:"prepare", engine_token, job_id, plan_sha256, previous_version}（**未生效**）；
+ *  - staged commit：{stage:"commit", applied:true, ...}；
+ *  - staged abort：{stage:"abort", aborted:true, ...}。
+ * commit/abort 缺 engine_token 或语义字段（applied/aborted 非 true）一律拒绝，不把草稿当生效。
+ */
+export function parseApplyOutcome(body: unknown): CalibrationApplyOutcome {
+  const endpoint = '/api/calibration/jobs/{id}/apply'
+  const root = asRecord(body, endpoint, 'body')
+  const stage = readEnum(root, 'stage', STAGES, endpoint, 'body')
+  if (stage === 'prepare') {
+    return {
+      kind: 'prepare',
+      stage: 'prepare',
+      job_id: readString(root, 'job_id', endpoint, 'body'),
+      engine_token: requireString(root, 'engine_token', endpoint, 'body'),
+      plan_sha256: readString(root, 'plan_sha256', endpoint, 'body'),
+      previous_version: readNumber(root, 'previous_version', endpoint, 'body'),
+      target_version: readNumber(root, 'target_version', endpoint, 'body'),
+      job: parseEmbeddedJob(root.job, endpoint),
+      reasons: parseReasons(root.reasons, endpoint),
+      raw: root
+    }
+  }
+  if (stage === 'abort') {
+    if (readBoolean(root, 'aborted', endpoint, 'body') !== true) {
+      throw invalidResponse(endpoint, 'aborted must be true for stage=abort')
+    }
+    return {
+      kind: 'abort',
+      stage: 'abort',
+      aborted: true,
+      job_id: readString(root, 'job_id', endpoint, 'body'),
+      plan_sha256: readString(root, 'plan_sha256', endpoint, 'body'),
+      target_version: readNumber(root, 'target_version', endpoint, 'body'),
+      control: optionalRecord(root.control, endpoint, 'control'),
+      reasons: parseReasons(root.reasons, endpoint),
+      raw: root
+    }
+  }
+  // stage=commit 或旧单发：必须是真生效回执（applied:true）。
+  if (readBoolean(root, 'applied', endpoint, 'body') !== true) {
+    throw invalidResponse(endpoint, 'applied must be true (single-shot or stage=commit)')
+  }
+  return {
+    kind: 'applied',
+    stage: stage === 'commit' ? 'commit' : 'single',
     applied: true,
     job_id: readString(root, 'job_id', endpoint, 'body'),
-    applied_version: requireNumber(root, 'applied_version', endpoint, 'body'),
-    graph_id: requireString(root, 'graph_id', endpoint, 'body'),
+    applied_version: readNumber(root, 'applied_version', endpoint, 'body'),
+    previous_version: readNumber(root, 'previous_version', endpoint, 'body'),
+    graph_id: readString(root, 'graph_id', endpoint, 'body'),
     sha256: readString(root, 'sha256', endpoint, 'body'),
-    snapshot: parseSnapshot(root.snapshot, endpoint, 'snapshot'),
+    snapshot: parseApplySnapshot(root.snapshot, endpoint),
     ack: parseAck(root.ack, endpoint),
-    readback,
-    applied_at: readString(root, 'applied_at', endpoint, 'body')
+    readback: readReadback(root, endpoint),
+    applied_at: readString(root, 'applied_at', endpoint, 'body'),
+    job: parseEmbeddedJob(root.job, endpoint),
+    reasons: parseReasons(root.reasons, endpoint)
   }
 }
 
-/** 校验 rollback 结果。 */
-export function parseRollbackResult(body: unknown): CalibrationRollbackResult {
-  const endpoint = '/api/calibration/rollback'
+/**
+ * 校验 POST /jobs/{id}/rollback 的回执：兼容旧单发、staged prepare/commit/abort。
+ * 与 apply 相同：prepare 只是草稿（未生效），commit/abort 必须语义字段为 true。
+ */
+export function parseRollbackOutcome(body: unknown): CalibrationRollbackOutcome {
+  const endpoint = '/api/calibration/jobs/{id}/rollback'
   const root = asRecord(body, endpoint, 'body')
+  const stage = readEnum(root, 'stage', STAGES, endpoint, 'body')
+  if (stage === 'prepare') {
+    return {
+      kind: 'prepare',
+      stage: 'prepare',
+      job_id: readString(root, 'job_id', endpoint, 'body'),
+      engine_token: requireString(root, 'engine_token', endpoint, 'body'),
+      plan_sha256: readString(root, 'plan_sha256', endpoint, 'body'),
+      previous_version: readNumber(root, 'previous_version', endpoint, 'body'),
+      target_version: readNumber(root, 'target_version', endpoint, 'body'),
+      job: parseEmbeddedJob(root.job, endpoint),
+      reasons: parseReasons(root.reasons, endpoint),
+      raw: root
+    }
+  }
+  if (stage === 'abort') {
+    if (readBoolean(root, 'aborted', endpoint, 'body') !== true) {
+      throw invalidResponse(endpoint, 'aborted must be true for stage=abort')
+    }
+    return {
+      kind: 'abort',
+      stage: 'abort',
+      aborted: true,
+      job_id: readString(root, 'job_id', endpoint, 'body'),
+      plan_sha256: readString(root, 'plan_sha256', endpoint, 'body'),
+      target_version: readNumber(root, 'target_version', endpoint, 'body'),
+      control: optionalRecord(root.control, endpoint, 'control'),
+      reasons: parseReasons(root.reasons, endpoint),
+      raw: root
+    }
+  }
   if (readBoolean(root, 'rolled_back', endpoint, 'body') !== true) {
-    throw invalidResponse(endpoint, 'rolled_back must be true')
+    throw invalidResponse(endpoint, 'rolled_back must be true (single-shot or stage=commit)')
   }
   return {
+    kind: 'rolled_back',
+    stage: stage === 'commit' ? 'commit' : 'single',
     rolled_back: true,
-    restored_version: requireNumber(root, 'restored_version', endpoint, 'body'),
-    graph_id: requireString(root, 'graph_id', endpoint, 'body'),
+    job_id: readString(root, 'job_id', endpoint, 'body'),
+    restored_version: readNumber(root, 'restored_version', endpoint, 'body'),
+    applied_version: readNumber(root, 'applied_version', endpoint, 'body'),
+    graph_id: readString(root, 'graph_id', endpoint, 'body'),
     sha256: readString(root, 'sha256', endpoint, 'body'),
-    readback: optionalRecord(root.readback, endpoint, 'readback'),
-    rolled_back_at: readString(root, 'rolled_back_at', endpoint, 'body')
+    readback: readReadback(root, endpoint),
+    rolled_back_at: readString(root, 'rolled_back_at', endpoint, 'body'),
+    job: parseEmbeddedJob(root.job, endpoint),
+    reasons: parseReasons(root.reasons, endpoint)
   }
 }
 
-/** 校验 cancel 响应（宽松：只要 200 即可，body 可选）。 */
+/**
+ * 校验 POST /api/calibration/wizard/apply 的回执。
+ * canonical（docs/API.md §7 裁决 H）：apply 回执（applied/job_id/applied_version/snapshot/ack/readback/applied_at/job/reasons）；
+ * 无 job 时 409 no_applicable_job。旧文档的 {job_id,location} 仅作防御性兼容；都不像就拒绝。
+ */
+export function parseWizardApplyOutcome(body: unknown): CalibrationWizardApplyOutcome {
+  const endpoint = '/api/calibration/wizard/apply'
+  const root = asRecord(body, endpoint, 'body')
+  const hasApplyFields =
+    root.stage !== undefined || readBoolean(root, 'applied', endpoint, 'body') !== null || root.rolled_back !== undefined
+  if (hasApplyFields) {
+    return parseApplyOutcome(body)
+  }
+  const jobId = readString(root, 'job_id', endpoint, 'body')
+  const location = readString(root, 'location', endpoint, 'body')
+  if (jobId !== null || location !== null) {
+    return { kind: 'job', job_id: jobId, location, raw: root }
+  }
+  throw invalidResponse(endpoint, 'response has neither an apply receipt nor job_id/location')
+}
+
+/** 校验 cancel 响应（{job_id,status}；状态 canonical 为 cancelled 双 l）。 */
 export function parseCancelResult(body: unknown): { job_id: string | null; status: CalibrationJobStatus | null } {
   const endpoint = '/api/calibration/jobs/{id}/cancel'
   if (body === undefined || body === null) {
@@ -845,7 +1316,68 @@ export function parseCancelResult(body: unknown): { job_id: string | null; statu
   const root = asRecord(body, endpoint, 'body')
   return {
     job_id: readString(root, 'job_id', endpoint, 'body'),
-    status: readEnum(root, 'status', JOB_STATUSES, endpoint, 'body')
+    status: readAliasedEnum(root, ['status', 'state'], JOB_STATUSES, endpoint, 'body', false)
+  }
+}
+
+/* -------------------------------------------------------- 产物下载（带认证） */
+
+/**
+ * 从 Content-Disposition 解析下载文件名（RFC 6266 的 filename / filename* 都支持）。
+ * system.ts 有同款实现；校准产物下载独立实现，避免跨区域耦合。
+ */
+export function parseContentDispositionFilename(header: string | null | undefined): string | null {
+  if (typeof header !== 'string' || header.length === 0) {
+    return null
+  }
+  const star = /filename\*\s*=\s*([^;]+)/i.exec(header)
+  if (star !== null && star[1] !== undefined) {
+    let value = star[1].trim()
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1)
+    }
+    const encoded = /^[^']*'[^']*'(.*)$/.exec(value)
+    if (encoded !== null && encoded[1] !== undefined) {
+      try {
+        return decodeURIComponent(encoded[1])
+      } catch {
+        return null
+      }
+    }
+    return value.length > 0 ? value : null
+  }
+  const plain = /filename\s*=\s*("[^"]*"|[^;]*)/i.exec(header)
+  if (plain === null || plain[1] === undefined) {
+    return null
+  }
+  let value = plain[1].trim()
+  if (value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1)
+  }
+  return value.length > 0 ? value : null
+}
+
+/** 校验 GET /api/calibration/jobs/{id}/artifacts/{name} 的原始字节响应（下载走 getRawBytes）。 */
+export function parseArtifactDownload(jobId: string, name: string, raw: RawBytesResponse): CalibrationArtifactDownload {
+  const fromHeader = parseContentDispositionFilename(raw.headers.get('Content-Disposition'))
+  const bytes = raw.bytes
+  let text = ''
+  try {
+    text = new TextDecoder('utf-8').decode(bytes)
+  } catch {
+    text = ''
+  }
+  return {
+    job_id: jobId,
+    name,
+    filename: fromHeader ?? name,
+    content_type: raw.headers.get('Content-Type'),
+    sha256: raw.headers.get('X-KHAEN-Artifact-SHA256'),
+    status: raw.status,
+    data: bytes,
+    text,
+    byte_length: bytes.byteLength,
+    from_content_disposition: fromHeader !== null
   }
 }
 
@@ -870,14 +1402,33 @@ export interface CalibrationApi {
   getJob(jobId: string, options?: CalibrationRequestOptions): Promise<CalibrationJobResponse>
   createJob(request: CalibrationCreateJobRequest, options?: CalibrationRequestOptions): Promise<CalibrationCreateJobResult>
   cancelJob(jobId: string, options?: CalibrationRequestOptions): Promise<{ job_id: string | null; status: CalibrationJobStatus | null }>
-  applyJob(jobId: string, options?: CalibrationRequestOptions): Promise<CalibrationApplyResult>
-  rollbackJob(jobId: string, options?: CalibrationRequestOptions): Promise<CalibrationRollbackResult>
+  /**
+   * POST /jobs/{id}/apply。省略 request = 旧单发（body `{}`）；
+   * 传 {stage:"prepare"} 返回草稿+token（未生效），然后再传 commit/abort。
+   */
+  applyJob(
+    jobId: string,
+    request?: CalibrationStagedRequest | null,
+    options?: CalibrationRequestOptions
+  ): Promise<CalibrationApplyOutcome>
+  /** POST /jobs/{id}/rollback，语义同 applyJob。 */
+  rollbackJob(
+    jobId: string,
+    request?: CalibrationStagedRequest | null,
+    options?: CalibrationRequestOptions
+  ): Promise<CalibrationRollbackOutcome>
   upload(body: ArrayBuffer | Blob, options?: CalibrationUploadOptions): Promise<CalibrationUploadResult>
   getWizard(options?: CalibrationRequestOptions): Promise<CalibrationWizardResponse>
   putWizard(request: WizardSaveRequest, options?: CalibrationRequestOptions): Promise<CalibrationWizardResponse>
   getWizardState(options?: CalibrationRequestOptions): Promise<CalibrationWizardStateResponse>
-  applyWizard(options?: CalibrationRequestOptions): Promise<CalibrationApplyResult>
-  /** 产物下载直链（浏览器同源 GET，会话 Cookie 自动携带；daemon 侧校验 manifest sha256）。 */
+  /** POST /wizard/apply {job_id?}：回执可能是 apply 结果，也可能是 {job_id,location}。 */
+  applyWizard(jobId?: string | null, options?: CalibrationRequestOptions): Promise<CalibrationWizardApplyOutcome>
+  /** GET /jobs/{id}/artifacts/{name} 的带认证下载（getRawBytes：Cookie 会话 + 统一 401/错误体处理，无损字节）。 */
+  downloadArtifact(jobId: string, name: string, options?: CalibrationRequestOptions): Promise<CalibrationArtifactDownload>
+  /**
+   * 产物下载直链（仅供调试/测试拼 URL）。页面**不得**直接用 <a href> 下载：
+   * 该路径需要会话 Cookie，必须走 downloadArtifact 的带认证请求。
+   */
   artifactUrl(jobId: string, name: string): string
 }
 
@@ -885,9 +1436,20 @@ function jobPath(jobId: string): string {
   return '/api/calibration/jobs/' + encodeURIComponent(jobId)
 }
 
-/** 产物下载直链（供 <a href> 使用；同源 GET 自动带会话 Cookie，daemon 侧校验 manifest sha256）。 */
+/** 产物下载直链（调试/测试用；浏览器 JS 下载必须走 downloadArtifact）。 */
 export function calibrationArtifactUrl(jobId: string, name: string): string {
   return jobPath(jobId) + '/artifacts/' + encodeURIComponent(name)
+}
+
+/** 把可选的 staged 请求转成请求体：省略 = 旧单发 `{}`（合同 §7 当前后端单发语义）。 */
+function stagedBody(request: CalibrationStagedRequest | null | undefined): Record<string, unknown> {
+  if (request === null || request === undefined) {
+    return {}
+  }
+  if (request.stage === 'prepare') {
+    return { stage: 'prepare' }
+  }
+  return { stage: request.stage, engine_token: request.engine_token }
 }
 
 /** 用共享 ApiClient 构造校准 API（单测注入 fetchImpl/baseUrl 即可脱离网络）。 */
@@ -919,6 +1481,7 @@ export function createCalibrationApi(client: ApiClient): CalibrationApi {
     },
 
     async cancelJob(jobId, options = {}) {
+      // 合同 §7：cancel 无请求体；状态由服务端回执给出（cancelled 双 l）。
       const body = await client.post<unknown>(jobPath(jobId) + '/cancel', undefined, {
         timeoutMs: CALIBRATION_FETCH_TIMEOUT_MS,
         ...(options.signal ? { signal: options.signal } : {})
@@ -926,20 +1489,20 @@ export function createCalibrationApi(client: ApiClient): CalibrationApi {
       return parseCancelResult(body)
     },
 
-    async applyJob(jobId, options = {}) {
-      const body = await client.post<unknown>(jobPath(jobId) + '/apply', undefined, {
+    async applyJob(jobId, request = null, options = {}) {
+      const body = await client.post<unknown>(jobPath(jobId) + '/apply', stagedBody(request), {
         timeoutMs: CALIBRATION_FETCH_TIMEOUT_MS,
         ...(options.signal ? { signal: options.signal } : {})
       })
-      return parseApplyResult(body)
+      return parseApplyOutcome(body)
     },
 
-    async rollbackJob(jobId, options = {}) {
-      const body = await client.post<unknown>(jobPath(jobId) + '/rollback', undefined, {
+    async rollbackJob(jobId, request = null, options = {}) {
+      const body = await client.post<unknown>(jobPath(jobId) + '/rollback', stagedBody(request), {
         timeoutMs: CALIBRATION_FETCH_TIMEOUT_MS,
         ...(options.signal ? { signal: options.signal } : {})
       })
-      return parseRollbackResult(body)
+      return parseRollbackOutcome(body)
     },
 
     async upload(body, options = {}) {
@@ -983,12 +1546,23 @@ export function createCalibrationApi(client: ApiClient): CalibrationApi {
       return parseWizardStateResponse(body)
     },
 
-    async applyWizard(options = {}) {
-      const body = await client.post<unknown>('/api/calibration/wizard/apply', undefined, {
+    async applyWizard(jobId = null, options = {}) {
+      // 合同 §7：{job_id?}；省略 = 应用最近成功 job（daemon 语义）。
+      const body = jobId === null ? {} : { job_id: jobId }
+      const reply = await client.post<unknown>('/api/calibration/wizard/apply', body, {
         timeoutMs: CALIBRATION_FETCH_TIMEOUT_MS,
         ...(options.signal ? { signal: options.signal } : {})
       })
-      return parseApplyResult(body)
+      return parseWizardApplyOutcome(reply)
+    },
+
+    async downloadArtifact(jobId, name, options = {}) {
+      // 带认证下载：getRawBytes 返回无损字节（二进制产物不能被 text 解码破坏）。
+      const raw = await client.getRawBytes(calibrationArtifactUrl(jobId, name), {
+        timeoutMs: CALIBRATION_UPLOAD_TIMEOUT_MS,
+        ...(options.signal ? { signal: options.signal } : {})
+      })
+      return parseArtifactDownload(jobId, name, raw)
     },
 
     artifactUrl(jobId, name) {
@@ -1134,6 +1708,27 @@ export function jobResultTruth(engine: string | null | undefined): TruthKind {
   return isSyntheticEngine(engine) ? 'demo' : 'actual'
 }
 
+/**
+ * job 结果数值的真实性徽标（合同 §7：measured / simulated 必须如实分开标注）：
+ * - result.measured 非 null -> 实测（actual）；
+ * - 否则 result.simulated 非 null -> 示意（demo，不得写成实测）；
+ * - 两者都未上报时按引擎标识判定（engine=synthetic/mock -> 示意）。
+ */
+export function resultTruth(
+  result: CalibrationJobResult | null | undefined,
+  engine: string | null | undefined
+): TruthKind {
+  if (result !== null && result !== undefined) {
+    if (result.measured !== null && result.measured !== undefined) {
+      return 'actual'
+    }
+    if (result.simulated !== null && result.simulated !== undefined) {
+      return 'demo'
+    }
+  }
+  return jobResultTruth(engine)
+}
+
 /** 单点校准默认 1/3-oct 中心频率（25 Hz–20 kHz，30 个；与 calibration CLI 默认同值）。 */
 export const DEFAULT_CENTERS_HZ: readonly number[] = [
   25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000,
@@ -1221,6 +1816,7 @@ const ERROR_KEYS: Record<CalibrationErrorCategory, string> = {
 
 const CODE_CATEGORY: Record<string, CalibrationErrorCategory> = {
   not_wired: 'not_wired',
+  unsupported: 'not_wired',
   switch_busy: 'busy',
   job_not_active: 'busy',
   job_not_succeeded: 'conflict',
@@ -1228,6 +1824,8 @@ const CODE_CATEGORY: Record<string, CalibrationErrorCategory> = {
   rollback_unavailable: 'conflict',
   wizard_not_saved: 'conflict',
   artifact_sha_mismatch: 'conflict',
+  engine_token_invalid: 'conflict',
+  no_applicable_job: 'conflict',
   job_not_found: 'not_found',
   upload_not_found: 'not_found',
   artifact_not_found: 'not_found',

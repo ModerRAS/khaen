@@ -34,8 +34,8 @@ import {
   gateForStep,
   isJobActive,
   isJobTerminal,
-  jobResultTruth,
   maxUnlockedStep,
+  resultTruth,
   stepDisplayState,
   type WizardConfig,
   type WizardOrientation,
@@ -105,6 +105,10 @@ const nextLabel = computed(() => {
   return gate.value?.status === 'not_available' ? t('calibration.wizard.nextSkip') : t('calibration.wizard.next')
 })
 const nextTitle = computed(() => (canGoNext.value ? '' : (nextBlockedReason.value ?? t('calibration.gate.failClosed'))))
+/** 未接入原因一律用 daemon 上报的 reason/detail（不硬编码里程碑号）。 */
+const wizardUnavailableReason = computed(
+  () => state.wizardError?.detail ?? t('calibrationEdit.list.notAvailableNoReason')
+)
 
 /* ------------------------------------------------------------------ 状态数据 */
 
@@ -133,7 +137,7 @@ const measurementShas = computed(() => ({
 }))
 const singlePoint = computed(() => wizard.value?.config.single_point ?? null)
 const settingsSaved = computed(() => wizard.value?.saved === true)
-const jobTruth = computed(() => jobResultTruth(job.value?.engine ?? null))
+const jobTruth = computed(() => resultTruth(job.value?.result ?? null, job.value?.engine ?? null))
 
 function rateText(hz: number | null): string | null {
   const unit = toRateUnit(hz)
@@ -725,9 +729,9 @@ watch(
 
     <div v-else-if="phase === 'unavailable'" class="banner banner--warn" role="status">
       <div class="wizard-notice">
-        <strong>{{ t('calibration.wizard.unavailable.title') }}</strong>
-        <span>{{ t('calibration.wizard.unavailable.desc', { task: 'T70h-b' }) }}</span>
-        <span v-if="state.wizardError?.detail" class="aux-text">{{ state.wizardError.detail }}</span>
+        <strong>NOT_AVAILABLE · {{ t('calibration.wizard.unavailable.title') }}</strong>
+        <span>{{ wizardUnavailableReason }}</span>
+        <TruthTag kind="notWired" />
       </div>
       <el-button size="small" @click="refreshAll">{{ t('common.retry') }}</el-button>
     </div>

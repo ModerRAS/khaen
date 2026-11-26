@@ -361,15 +361,23 @@ test('mock calibration job: create -> poll -> succeeded -> artifacts -> apply ->
 
     const report = detail.job.artifacts.find((artifact) => artifact.name === 'report.json')
     assert.ok(report)
+    // 页面必须走带认证 client 的下载（mock 与 daemon 一致：产物带 Content-Disposition）。
+    const download = await h.calibration.downloadArtifact(created.job_id, 'report.json')
+    assert.equal(download.filename, 'report.json')
+    assert.equal(download.from_content_disposition, true)
+    assert.equal(download.content_type, 'application/json')
+    assert.equal(sha256Of(download.text), report.sha256)
+    assert.equal(download.sha256, report.sha256)
+    assert.equal(download.byte_length, download.data.byteLength)
+    assert.equal(sha256Of(new TextDecoder().decode(download.data)), report.sha256)
+    const parsed = JSON.parse(download.text)
+    assert.equal(parsed.job_id, created.job_id)
+
     const artifactUrl = h.calibration.artifactUrl(created.job_id, 'report.json')
     const response = await h.jar.fetch(baseUrl + artifactUrl)
     assert.equal(response.status, 200)
     assert.equal(response.headers.get('Content-Type'), 'application/json')
     assert.equal(response.headers.get('X-KHAEN-Artifact-SHA256'), report.sha256)
-    const text = await response.text()
-    assert.equal(sha256Of(text), report.sha256)
-    const parsed = JSON.parse(text)
-    assert.equal(parsed.job_id, created.job_id)
 
     const missingArtifact = await expectApiError(() => h.calibration.getJob('job-mock-9999'))
     assert.equal(missingArtifact.status, 404)
@@ -386,8 +394,13 @@ test('mock calibration job: create -> poll -> succeeded -> artifacts -> apply ->
     assert.equal(afterJob.steps[6].status, 'passed')
     assert.equal(afterJob.steps[7].status, 'blocked')
 
+    // mock 后端只有旧单发语义：回执必须是"已生效"（不是 prepare 草稿）。
     const applied = await h.calibration.applyJob(created.job_id)
-    assert.equal(applied.applied, true)
+    assert.equal(applied.kind, 'applied')
+    if (applied.kind !== 'applied') {
+      assert.fail('single-shot apply must return an applied receipt')
+    }
+    assert.equal(applied.stage, 'single')
     assert.equal(applied.applied_version, 4) // status fixture plan version 3 -> 4
     assert.equal(applied.ack?.synthetic, true)
     assert.equal(applied.snapshot?.version, 3)
@@ -399,7 +412,10 @@ test('mock calibration job: create -> poll -> succeeded -> artifacts -> apply ->
     assert.equal(appliedDetail.job.applied_version, 4)
 
     const rolledBack = await h.calibration.rollbackJob(created.job_id)
-    assert.equal(rolledBack.rolled_back, true)
+    assert.equal(rolledBack.kind, 'rolled_back')
+    if (rolledBack.kind !== 'rolled_back') {
+      assert.fail('single-shot rollback must return a rolled_back receipt')
+    }
     assert.equal(rolledBack.restored_version, 3)
 
     const afterRollback = await h.calibration.getWizardState()
@@ -518,7 +534,7 @@ test('mock calibration fixtures: success seeds a PASS job and waits for apply', 
 
     const jobId = list.jobs[0].id
     const applied = await h.calibration.applyJob(jobId)
-    assert.equal(applied.applied, true)
+    assert.equal(applied.kind, 'applied')
     const afterApply = await h.calibration.getWizardState()
     assert.equal(afterApply.steps[7].status, 'passed')
 

@@ -1,5 +1,6 @@
 /**
- * 控制面写操作 store（M3 / 任务 T53）：两阶段草稿状态机 + 静音 + 回执/操作历史。
+ * 控制面写操作 store：五个语义界面（volume/routing/layout/mode/format）共用的两阶段草稿状态机
+ * + 静音 + 回执/操作历史。
  *
  * 职责：
  * - 持有当前 prepare 草稿（最多一份，与后端"单 pending 槽"一致）、最近一次 commit 回执、
@@ -28,6 +29,8 @@ import {
   type DeviceRetryAck,
   type FormatPatch,
   type GainEntry,
+  type LayoutPatch,
+  type RoutingPatch,
   type RunMode
 } from '../api/control.ts'
 import { apiClient } from './session.ts'
@@ -94,6 +97,8 @@ export interface ControlDeps {
 export interface ControlController {
   prepareVolume(gains: readonly GainEntry[]): Promise<ControlDraft | null>
   prepareMode(mode: RunMode): Promise<ControlDraft | null>
+  prepareRouting(patch: RoutingPatch): Promise<ControlDraft | null>
+  prepareLayout(patch: LayoutPatch): Promise<ControlDraft | null>
   prepareFormat(patch: FormatPatch): Promise<ControlDraft | null>
   commit(): Promise<ControlCommitAck | null>
   abort(): Promise<ControlAbortAckLike | null>
@@ -295,6 +300,8 @@ export function createControlController(state: ControlState, deps: ControlDeps):
   return {
     prepareVolume: (gains) => prepare('volume', () => deps.api.prepareVolume(gains)),
     prepareMode: (mode) => prepare('mode', () => deps.api.prepareMode(mode)),
+    prepareRouting: (patch) => prepare('routing', () => deps.api.prepareRouting(patch)),
+    prepareLayout: (patch) => prepare('layout', () => deps.api.prepareLayout(patch)),
     prepareFormat: (patch) => prepare('format', () => deps.api.prepareFormat(patch)),
     commit,
     abort,
@@ -321,6 +328,14 @@ export function prepareVolume(gains: readonly GainEntry[]): Promise<ControlDraft
 
 export function prepareMode(mode: RunMode): Promise<ControlDraft | null> {
   return controller.prepareMode(mode)
+}
+
+export function prepareRouting(patch: RoutingPatch): Promise<ControlDraft | null> {
+  return controller.prepareRouting(patch)
+}
+
+export function prepareLayout(patch: LayoutPatch): Promise<ControlDraft | null> {
+  return controller.prepareLayout(patch)
 }
 
 export function prepareFormat(patch: FormatPatch): Promise<ControlDraft | null> {

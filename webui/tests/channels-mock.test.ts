@@ -1,473 +1,377 @@
+/**
+ * 声道页 mock daemon 集成测试（node --test；不依赖 networking / 不用旧 scripts/mock-auth-server）。
+ *
+ * 用 scripts/mock-test-support.mjs 的 createRecordingFetch 注入 ApiClient：断言真实调用序列
+ * （PUT /api/channels stage=prepare/commit/abort 的 path/method/body）、401/503/501/502/409 语义、
+ * commit_supported=false 时 store 不发 commit、以及方案上传/两阶段仍走控制面端点。
+ *
+ * 所有 mock 返回值都是同步构造的 Response / 立即 resolve 的 promise（node --test 默认无超时，
+ * 不能有挂起的 promise）。
+ */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { ApiClient, isApiError } from '../src/api/client.ts'
-import { createAuthApi } from '../src/api/auth.ts'
-import { createStatusApi } from '../src/api/status.ts'
-import { createChannelsApi } from '../src/api/channels.ts'
-import { createInitialSessionState, createSessionController } from '../src/stores/session.ts'
-import { createMockAuthServer } from '../scripts/mock-auth-server.mjs'
-import { CHANNELS_FIXTURES } from '../scripts/channels-fixtures.mjs'
+import { ApiClient, ApiError, isApiError } from '../src/api/client.ts'
+import {
+  classifyChannelsError,
+  createChannelsApi,
+  sha256Hex
+} from '../src/api/channels.ts'
+import { createChannelsController, createInitialChannelsState } from '../src/stores/channels.ts'
+import {
+  MAPPING_PLAN_OWNED_REASON,
+  buildChannelsAbortAck,
+  buildChannelsCommitAck,
+  buildChannelsCommitFailureDetails,
+  buildChannelsMappingOnlyAck,
+  buildChannelsPrepareAck,
+  buildChannelsSeed
+} from '../scripts/channels-fixtures.mjs'
+import { createRecordingFetch, jsonResponse } from '../scripts/mock-test-support.mjs'
 
+const CHANNELS = buildChannelsSeed('wired').channels
 const PASSWORD = 'khaen-channels-mock-passphrase'
 
-function createJarFetch() {
-  let cookie = null
-  const fetchImpl = async (input, init = {}) => {
-    const headers = new Headers(init.headers ?? {})
-    if (cookie !== null) {
-      headers.set('Cookie', cookie)
-    }
-    const response = await fetch(input, { ...init, headers })
-    const setCookies = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : []
-    for (const raw of setCookies) {
-      const pair = raw.split(';')[0]
-      const index = pair.indexOf('=')
-      if (index < 0) {
-        continue
-      }
-      const name = pair.slice(0, index)
-      const value = pair.slice(index + 1)
-      if (name !== 'khaen_session') {
-        continue
-      }
-      cookie = value.length > 0 ? pair : null
-    }
-    return response
-  }
-  return { fetch: fetchImpl, cookie: () => cookie }
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value))
 }
 
-function createHarness(baseUrl) {
-  const jar = createJarFetch()
-  const state = createInitialSessionState()
-  const notifications = []
+interface Call {
+  url: string
+  method: string
+  headers: Record<string, string>
+  body: unknown
+  credentials: string | undefined
+}
+
+function pathOf(call: Call): string {
+  return String(call.url).replace('http://mock-daemon', '')
+}
+
+function jsonBody(call: Call): unknown {
+  // 原始字节上传（plan/upload）的 body 不是 JSON：不解析，交给调用方按需检查。
+  if (typeof call.body !== 'string') {
+    return undefined
+  }
+  return JSON.parse(call.body)
+}
+
+interface Harness {
+  api: ReturnType<typeof createChannelsApi>
+  calls: Call[]
+  unauthorized: ApiError[]
+}
+
+function createHarness(
+  handler: (call: Call, body: unknown) => Response,
+  options: { csrf?: string | null; baseUrl?: string } = {}
+): Harness {
+  const recording = createRecordingFetch(async (call) => handler(call, jsonBody(call)))
+  const unauthorized: ApiError[] = []
   const client = new ApiClient({
-    baseUrl,
-    fetchImpl: jar.fetch,
-    csrfToken: () => state.csrfToken,
-    onUnauthorized: () => notifications.push('client-401')
-  })
-  const auth = createAuthApi(client)
-  const controller = createSessionController(state, {
-    auth,
-    onUnauthorized: () => notifications.push('redirect')
+    baseUrl: options.baseUrl ?? 'http://mock-daemon',
+    fetchImpl: recording.fetch,
+    csrfToken: () => (options.csrf === undefined ? 'csrf-channel' : options.csrf),
+    onUnauthorized: (error) => unauthorized.push(error)
   })
   return {
-    jar,
-    state,
-    client,
-    auth,
-    controller,
-    notifications,
-    channels: createChannelsApi(client),
-    status: createStatusApi(client)
+    api: createChannelsApi(client),
+    calls: recording.calls as unknown as Call[],
+    unauthorized
   }
 }
 
-async function withMock(run, options = {}) {
-  const mock = createMockAuthServer(options)
-  const address = await mock.listen()
-  try {
-    await run({ mock, baseUrl: address.baseUrl })
-  } finally {
-    await mock.close()
+function wiredDaemon(overrides: { prepare?: unknown; commit?: unknown; abort?: unknown } = {}) {
+  return (call: Call, body: unknown): Response => {
+    const path = pathOf(call)
+    if (path === '/api/channels' && call.method === 'GET') {
+      return jsonResponse(200, clone(CHANNELS))
+    }
+    if (path === '/api/channels' && call.method === 'PUT') {
+      const stage = (body as Record<string, unknown>)?.stage
+      if (stage === 'prepare') {
+        return jsonResponse(200, clone(overrides.prepare ?? buildChannelsPrepareAck()))
+      }
+      if (stage === 'commit') {
+        return jsonResponse(200, clone(overrides.commit ?? buildChannelsCommitAck()))
+      }
+      if (stage === 'abort') {
+        return jsonResponse(200, clone(overrides.abort ?? buildChannelsAbortAck()))
+      }
+      return jsonResponse(400, { error: { code: 'bad_request', message: 'unknown stage' } })
+    }
+    return jsonResponse(404, { error: { code: 'not_found', message: 'unexpected ' + call.method + ' ' + path } })
   }
 }
 
-async function signIn(h) {
-  await h.controller.ensureSession()
-  const result = await h.controller.setup(PASSWORD, PASSWORD)
-  assert.deepEqual(result, { ok: true })
+function m1Error(status: number, code: string, message: string, details?: unknown): Response {
+  return jsonResponse(status, { ok: false, error: { code, message, details } })
 }
 
-async function expectApiError(run) {
+async function captureError(run: () => Promise<unknown>): Promise<ApiError> {
   try {
     await run()
   } catch (error) {
     assert.ok(isApiError(error), 'expected an ApiError, got: ' + String(error))
     return error
   }
-  return assert.fail('expected the request to reject')
+  return assert.fail('expected the request to reject') as never
 }
 
-function planBytes(seed = 7, length = 128): Uint8Array {
-  const bytes = new Uint8Array(length)
-  bytes.fill(seed)
-  return bytes
-}
+/* ------------------------------------------------------------------ 401 / CSRF */
 
-function sha256Of(bytes: Uint8Array): string {
-  return createHash('sha256').update(Buffer.from(bytes)).digest('hex')
-}
+test('mock channels: GET/PUT without a session is 401 and reaches the shared onUnauthorized hook', async () => {
+  const { api, unauthorized } = createHarness(() =>
+    jsonResponse(401, { error: { code: 'not_authenticated', message: 'sign in first' } })
+  )
+  const error = await captureError(() => api.fetchChannels())
+  assert.equal(error.status, 401)
+  assert.equal(error.code, 'not_authenticated')
+  assert.deepEqual(unauthorized.map((item) => item.status), [401])
 
-test('mock M4: layout and history require a session and a 401 reaches the shared hook', async () => {
-  await withMock(async ({ baseUrl }) => {
-    const h = createHarness(baseUrl)
-    const error = await expectApiError(() => h.channels.fetchChannels())
-    assert.equal(error.status, 401)
-    assert.equal(error.code, 'not_authenticated')
-    assert.deepEqual(h.notifications, ['client-401'])
-  })
+  const prepareError = await captureError(() => api.prepareChannels({ channels: 20 }))
+  assert.equal(prepareError.status, 401)
+  assert.equal(unauthorized.length, 2)
 })
 
-test('mock M4: PUT /api/channels without CSRF is rejected with 403', async () => {
-  await withMock(async ({ baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const headers = new Headers({ 'Content-Type': 'application/json' })
-    const cookie = h.jar.cookie()
-    if (cookie !== null) {
-      headers.set('Cookie', cookie)
+test('mock channels: every write carries X-KHAEN-CSRF and credentials include', async () => {
+  const harness = createHarness(wiredDaemon())
+  await harness.api.fetchChannels()
+  await harness.api.prepareChannels({ channels: 20 })
+  await harness.api.commitChannels('channels-token-3')
+  await harness.api.abortChannels('channels-token-3')
+  for (const call of harness.calls) {
+    assert.equal(call.credentials, 'include')
+    if (call.method !== 'GET') {
+      assert.equal(call.headers['X-KHAEN-CSRF'], 'csrf-channel')
+      assert.equal(call.headers['Content-Type'], 'application/json')
     }
-    const response = await fetch(baseUrl + '/api/channels', {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ output: { channels: 20 } })
-    })
-    assert.equal(response.status, 403)
-    const body = await response.json()
-    assert.equal(body.error.code, 'csrf_invalid')
-  })
+  }
 })
 
-test('mock M4: wired fixture exposes 22 output channels, mapping, AES67 input and history', async () => {
-  await withMock(async ({ mock, baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const info = await h.channels.fetchChannels()
-    assert.equal(info.output.channels, 22)
-    assert.equal(info.mapping?.length, 22)
-    assert.deepEqual(info.mapping?.[0], { lane: 0, dac: 0 })
-    assert.equal(info.input.channels, 2)
-    assert.deepEqual(info.input.map, [0, 1])
-    assert.equal(info.input.source, 'sdp')
-    assert.match(String(info.input.sdp_sha256), /^[0-9a-f]{64}$/)
-    assert.equal(info.not_wired.length, 1)
-    assert.match(info.not_wired[0].reason, /M3b/)
+/* -------------------------------------------------- 完整两阶段：prepare→commit→abort */
 
-    // daemon 真实 history 形态（current 对象 + entries + recorded_at）：页面归一化为 current_version/versions。
-    const history = await h.channels.fetchPlanHistory()
-    assert.equal(history.current_version, 7)
-    assert.equal(history.current_graph_id, mock.control.history.at(-1)?.graph_id)
-    assert.equal(history.source, 'daemon-process')
-    assert.deepEqual(history.versions.map((entry) => entry.version), [5, 6, 7])
-    assert.equal(history.versions.at(-1)?.recorded_at, '2026-11-26T06:20:00.000Z')
-    assert.equal(history.versions.at(-1)?.applied_at, '2026-11-26T06:20:00.000Z')
+test('mock channels: wired two-phase goes prepare -> commit (receipt) -> GET refresh -> abort', async () => {
+  const harness = createHarness(wiredDaemon())
+  const info = await harness.api.fetchChannels()
+  assert.equal(info.output.channels, 22)
+  assert.equal(info.hot_reconfigure.wired, true)
 
-    // POST /api/plan/inspect {plan_path}：plan_path 来自上传回执的 stored_path（只读试运行已落盘的方案）。
-    const upload = await h.channels.uploadPlan(planBytes(11), 'inspect.bin')
-    const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, upload.sha256)
-    assert.equal(inspect.compiled, true)
-    assert.equal(inspect.admission_accepted, true)
-    assert.equal(inspect.lanes, 22)
-    assert.equal(inspect.sha256, upload.sha256)
-    assert.equal(inspect.graph_id, upload.graph_id)
+  const prepared = await harness.api.prepareChannels({ channels: 20, sample_rate: 48000 })
+  assert.equal(prepared.commit_supported, true)
+  assert.equal(prepared.engine_token, 'channels-token-3')
 
-    const dev = await fetch(baseUrl + '/__mock/channels')
-    const devBody = await dev.json()
-    assert.equal(devBody.fixture, 'wired')
-    assert.deepEqual(devBody.fixtures, CHANNELS_FIXTURES)
-    assert.equal(mock.channelsFixture, 'wired')
-  })
-})
+  const committed = await harness.api.commitChannels(prepared.engine_token!)
+  assert.equal(committed.applied, true)
+  assert.equal(committed.generation, 4)
+  assert.equal(committed.gap_ms, 37)
+  assert.equal(committed.graph_dropped, true)
+  assert.equal(committed.routing?.plan_recommit_required, true)
 
-test('mock M4: channel prepare returns preview/warnings and commit is 501 host_link_unsupported', async () => {
-  await withMock(async ({ mock, baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const prepared = await h.channels.prepareChannels({ output: { channels: 20, dac_map: Array.from({ length: 20 }, (_, index) => index) } })
-    assert.equal(prepared.changed, true)
-    assert.equal(prepared.preview?.old_channels, 22)
-    assert.equal(prepared.preview?.new_channels, 20)
-    assert.equal(prepared.preview?.audio_gap_ms_estimate, 1200)
-    assert.equal(prepared.warnings.length, 1)
-    assert.deepEqual(prepared.blockers, [])
-    assert.equal(mock.control.pending, 'channels')
+  const aborted = await harness.api.abortChannels('channels-token-3')
+  assert.equal(aborted.aborted, true)
+  assert.equal(aborted.aborted_token, 'channels-token-3')
 
-    // M3b/T52 未完成：commit 必须 501，且不假装成功。
-    const error = await expectApiError(() => h.channels.commit(prepared.engine_token))
-    assert.equal(error.status, 501)
-    assert.equal(error.code, 'host_link_unsupported')
-    assert.equal(mock.control.pending, 'channels')
-
-    const aborted = await h.channels.abort(prepared.engine_token)
-    assert.equal(aborted.aborted, true)
-    assert.equal(mock.control.pending, null)
-  })
-})
-
-test('mock M4: invalid channel patches are rejected with bad_request', async () => {
-  await withMock(async ({ baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const empty = await expectApiError(() => h.channels.prepareChannels({ output: { channels: 33 } }))
-    assert.equal(empty.status, 400)
-    const mapLength = await expectApiError(() => h.channels.prepareChannels({ output: { channels: 20, dac_map: [0, 1] } }))
-    assert.equal(mapLength.status, 400)
-    assert.match(mapLength.message, /dac_map/)
-    const inputRange = await expectApiError(() => h.channels.prepareChannels({ input: { channels: 9 } }))
-    assert.equal(inputRange.status, 400)
-  })
-})
-
-test('mock M4: plan upload verifies sha, prepare/commit apply a new plan version', async () => {
-  await withMock(async ({ mock, baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const bytes = planBytes(7)
-    const sha = sha256Of(bytes)
-
-    const upload = await h.channels.uploadPlan(bytes, 'demo.bin')
-    assert.equal(upload.sha256, sha)
-    // daemon 真实回执：没有 upload_id/version；segments 是区段名数组 + segment_count + stored_path。
-    assert.equal(upload.upload_id, null)
-    assert.equal(upload.version, null)
-    assert.equal(upload.graph_id, sha)
-    assert.equal(upload.segment_count, 1 + (bytes.length % 5))
-    assert.equal(upload.segments?.length, upload.segment_count)
-    assert.equal(upload.segments?.[0], 'content')
-    assert.equal(upload.stored_path, '/var/lib/khaen/plans/' + sha + '.plan')
-    // 幂等：同一字节再上传返回同一记录（created=false）。
-    const again = await h.channels.uploadPlan(bytes, 'demo.bin')
-    assert.deepEqual(again, upload)
-    assert.equal(mock.m4.uploads.length, 1)
-
-    const draft = await h.channels.preparePlan({ plan_path: upload.stored_path!, sha256: sha })
-    assert.equal(draft.surface, 'plan')
-    assert.equal(draft.graph_id, sha)
-    assert.equal(draft.planned_version, 8)
-
-    const ack = await h.channels.commit(draft.engine_token)
-    assert.equal(ack.version, 8)
-    assert.equal(ack.graph_id, sha)
-
-    const history = await h.channels.fetchPlanHistory()
-    assert.equal(history.current_version, 8)
-    assert.equal(history.current_graph_id, sha)
-    assert.equal(history.versions.at(-1)?.version, 8)
-    assert.equal(history.versions.at(-1)?.sha256, sha)
-
-    const status = await h.status.fetchStatus()
-    assert.equal(status.plan.version, 8)
-    assert.equal(status.plan.graph_id, sha)
-
-    const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, sha)
-    assert.equal(inspect.sha256, sha)
-    assert.equal(inspect.graph_id, sha)
-  })
-})
-
-test('mock M4: upload errors are honest (too small / rejected bytes / unknown upload / sha mismatch)', async () => {
-  await withMock(async ({ baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-
-    const tooSmall = await expectApiError(() => h.channels.uploadPlan(new Uint8Array(8), 'tiny.bin'))
-    assert.equal(tooSmall.status, 400)
-    assert.equal(tooSmall.code, 'invalid_plan')
-
-    const reject = new Uint8Array(128)
-    reject.set(Array.from(new TextEncoder().encode('REJECTED')), 0)
-    const rejected = await expectApiError(() => h.channels.uploadPlan(reject, 'bad.bin'))
-    assert.equal(rejected.status, 400)
-    assert.equal(rejected.code, 'invalid_plan')
-
-    // daemon 真实 prepare 读 plan_path：读不到文件 -> 400 bad_request（不是 upload_not_found）。
-    const unknown = await expectApiError(() =>
-      h.channels.preparePlan({ plan_path: '/var/lib/khaen/plans/' + 'f'.repeat(64) + '.plan', sha256: 'f'.repeat(64) })
-    )
-    assert.equal(unknown.status, 400)
-    assert.equal(unknown.code, 'bad_request')
-    assert.match(unknown.message, /cannot read plan file/)
-
-    const bytes = planBytes(9)
-    const upload = await h.channels.uploadPlan(bytes, 'demo.bin')
-    const mismatch = await expectApiError(() =>
-      h.channels.preparePlan({ plan_path: upload.stored_path!, sha256: 'e'.repeat(64) })
-    )
-    assert.equal(mismatch.status, 400)
-    assert.equal(mismatch.code, 'bad_request')
-    assert.match(mismatch.message, /sha256 mismatch/)
-
-    // 4 MiB 上限：mock 用 raw body 限制，超出即 413。
-    const cookie = h.jar.cookie() ?? ''
-    const csrf = h.state.csrfToken ?? ''
-    const oversized = await fetch(baseUrl + '/api/plan/upload', {
-      method: 'POST',
-      headers: {
-        Cookie: cookie,
-        'X-KHAEN-CSRF': csrf,
-        'Content-Type': 'application/octet-stream'
-      },
-      body: Buffer.alloc(4 * 1024 * 1024 + 1)
-    })
-    assert.equal(oversized.status, 413)
-    const body = await oversized.json()
-    assert.equal(body.error.code, 'upload_too_large')
-  })
-})
-
-test('mock M4: rollback creates a new version from history and still needs a commit', async () => {
-  await withMock(async ({ baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const draft = await h.channels.rollbackPlan(5)
-    assert.equal(draft.surface, 'rollback')
-    assert.equal(draft.rolled_back_to, 5)
-    assert.equal(draft.planned_version, 8)
-    const ack = await h.channels.commit(draft.engine_token)
-    assert.equal(ack.version, 8)
-    const history = await h.channels.fetchPlanHistory()
-    assert.equal(history.current_version, 8)
-    assert.equal(history.versions.at(-1)?.version, 8)
-    assert.equal(history.versions.at(-1)?.graph_id, draft.graph_id)
-
-    const missing = await expectApiError(() => h.channels.rollbackPlan(999))
-    assert.equal(missing.status, 400)
-    const current = await expectApiError(() => h.channels.rollbackPlan(8))
-    assert.equal(current.status, 400)
-  })
-})
-
-test('mock M4: degraded fixture reports null fields with reasons, plan endpoints stay honest', async () => {
-  await withMock(
-    async ({ baseUrl }) => {
-      const h = createHarness(baseUrl)
-      await signIn(h)
-      const info = await h.channels.fetchChannels()
-      assert.equal(info.output.channels, null)
-      assert.equal(info.output.dac_map, null)
-      // 真实 daemon 的 routing 未知形态是 mapping=null（不是空数组）。
-      assert.equal(info.mapping, null)
-      assert.match(String(info.reasons['output.channels']), /does not report channels/)
-
-      const prepare = await expectApiError(() => h.channels.prepareChannels({ output: { channels: 20 } }))
-      assert.equal(prepare.status, 409)
-      assert.equal(prepare.code, 'channel_layout_unavailable')
-
-      // inspect 仍是 POST {plan_path}：degraded 下上传可用，试运行如实报不可用（不是假成功）。
-      const upload = await h.channels.uploadPlan(planBytes(6), 'degraded.bin')
-      const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, upload.sha256)
-      assert.equal(inspect.admission_accepted, false)
-      assert.equal(inspect.compiled, false)
-      assert.equal(inspect.rejections[0]?.code, 'rt_host_unavailable')
-      assert.equal(inspect.sha256, upload.sha256)
-
-      // daemon 自己的计划历史仍可读（只有 rt-host 现场字段不可用）。
-      const history = await h.channels.fetchPlanHistory()
-      assert.equal(history.current_version, 7)
-    },
-    { channelsFixture: 'degraded' }
+  // 三次写：prepare / commit / abort 都是 PUT /api/channels + stage 字段，body 精确。
+  const writes = harness.calls.filter((call) => call.method === 'PUT')
+  assert.deepEqual(
+    writes.map((call) => jsonBody(call)),
+    [
+      { stage: 'prepare', channels: 20, sample_rate: 48000 },
+      { stage: 'commit', engine_token: 'channels-token-3' },
+      { stage: 'abort', engine_token: 'channels-token-3' }
+    ]
   )
 })
 
-test('mock M4: partial fixture exposes the real nullable dac_map (partial routing) without invalid_response', async () => {
-  await withMock(async ({ mock, baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    mock.setChannelsFixture('partial')
-    assert.equal(mock.channelsFixture, 'partial')
-    const info = await h.channels.fetchChannels()
-    assert.equal(info.output.channels, 4)
-    // 真实 daemon 的部分路由：dac_map 里 null = 该 DAC 没有 lane 喂入（合法形态，不是畸形响应）。
-    assert.deepEqual(info.output.dac_map, [0, null, 1, null])
-    assert.deepEqual(info.mapping, [
-      { lane: 0, dac: 0 },
-      { lane: 1, dac: 2 }
-    ])
-    // 该 fixture 下上传 + inspect 照常可用（POST {plan_path} 契约）。
-    const upload = await h.channels.uploadPlan(planBytes(12), 'partial.bin')
-    const inspect = await h.channels.fetchPlanInspect(upload.stored_path!, upload.sha256)
-    assert.equal(inspect.compiled, true)
-    assert.equal(inspect.dac_channels, 4)
-  })
-})
+/* ---------------------------------------- commit_supported=false：store 不发 commit */
 
-test('mock M4: POST /api/plan/inspect requires plan_path (GET is 405, unknown stored path is 400)', async () => {
-  await withMock(async ({ baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const cookie = h.jar.cookie() ?? ''
-    const csrf = h.state.csrfToken ?? ''
-    const getResponse = await fetch(baseUrl + '/api/plan/inspect', { headers: { Cookie: cookie } })
-    assert.equal(getResponse.status, 405)
-
-    const headers = { Cookie: cookie, 'X-KHAEN-CSRF': csrf, 'Content-Type': 'application/json' }
-    const missing = await fetch(baseUrl + '/api/plan/inspect', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({})
-    })
-    assert.equal(missing.status, 400)
-    assert.equal((await missing.json()).error.code, 'bad_request')
-
-    const unknown = await fetch(baseUrl + '/api/plan/inspect', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ plan_path: '/var/lib/khaen/plans/' + 'f'.repeat(64) + '.plan' })
-    })
-    assert.equal(unknown.status, 400)
-    const body = await unknown.json()
-    assert.match(body.error.message, /cannot read plan file/)
-  })
-})
-
-test('mock M4: unavailable fixture answers 501 not_wired for every M4 endpoint', async () => {
-  await withMock(
-    async ({ mock, baseUrl }) => {
-      const h = createHarness(baseUrl)
-      await signIn(h)
-      for (const run of [
-        () => h.channels.fetchChannels(),
-        () => h.channels.fetchPlanHistory(),
-        () => h.channels.fetchPlanInspect('/var/lib/khaen/plans/whatever.plan'),
-        () => h.channels.prepareChannels({ output: { channels: 20 } }),
-        () => h.channels.uploadPlan(planBytes(3), 'demo.bin'),
-        () => h.channels.rollbackPlan(5)
-      ]) {
-        const error = await expectApiError(run)
-        assert.equal(error.status, 501)
-        assert.equal(error.code, 'not_wired')
+test('mock channels: mapping-only prepare returns commit_supported=false and the store never sends commit', async () => {
+  const harness = createHarness((call, body) => {
+    const path = pathOf(call)
+    if (path === '/api/channels' && call.method === 'GET') {
+      return jsonResponse(200, clone(CHANNELS))
+    }
+    if (path === '/api/channels' && call.method === 'PUT') {
+      const stage = (body as Record<string, unknown>)?.stage
+      if (stage === 'prepare') {
+        return jsonResponse(200, clone(buildChannelsMappingOnlyAck()))
       }
-      const dev = await fetch(baseUrl + '/__mock/channels')
-      const devBody = await dev.json()
-      assert.equal(devBody.unavailable, true)
-      assert.equal(mock.channelsFixture, 'unavailable')
-    },
-    { channelsFixture: 'unavailable' }
-  )
+      return jsonResponse(200, clone(buildChannelsCommitAck()))
+    }
+    return jsonResponse(404, { error: { code: 'not_found', message: 'nope' } })
+  })
+
+  const state = createInitialChannelsState()
+  const controller = createChannelsController(state, { api: harness.api })
+  await controller.load()
+  const draft = await controller.prepareChannels({ dac_map: [0, null, 1, null] })
+  assert.equal(draft?.commit_supported, false)
+  assert.deepEqual(draft?.blockers, [MAPPING_PLAN_OWNED_REASON])
+  assert.equal(draft?.engine_token, null)
+
+  const committed = await controller.commitChannels()
+  assert.equal(committed, null)
+  assert.equal(state.channelsError?.category, 'commit_unsupported')
+  // 只发生了 prepare 一次 PUT，没有 commit 请求（不假成功）。
+  const writes = harness.calls.filter((call) => call.method === 'PUT')
+  assert.equal(writes.length, 1)
+  assert.deepEqual(jsonBody(writes[0]), { stage: 'prepare', dac_map: [0, null, 1, null] })
+
+  // 无服务端 token：abort 走本地丢弃，不发请求。
+  assert.equal(await controller.abortChannels(), true)
+  assert.equal(harness.calls.filter((call) => call.method === 'PUT').length, 1)
 })
 
-test('mock M4: fixture switching resets upload/pending state and rejects unknown names', async () => {
-  await withMock(async ({ mock, baseUrl }) => {
-    const h = createHarness(baseUrl)
-    await signIn(h)
-    const bytes = planBytes(4)
-    const upload = await h.channels.uploadPlan(bytes, 'demo.bin')
-    await h.channels.preparePlan({ plan_path: upload.stored_path!, sha256: upload.sha256 })
-    assert.equal(mock.control.pending, 'plan')
+/* ------------------------------------------------------ 错误语义：502/503/501/409 */
 
-    const response = await fetch(baseUrl + '/__mock/channels-fixture', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fixture: 'degraded' })
-    })
-    assert.equal(response.status, 200)
-    assert.equal(mock.channelsFixture, 'degraded')
-    assert.equal(mock.control.pending, null)
-    assert.equal(mock.m4.uploads.length, 0)
-
-    const invalid = await fetch(baseUrl + '/__mock/channels-fixture', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fixture: 'nope' })
-    })
-    assert.equal(invalid.status, 400)
-    const invalidBody = await invalid.json()
-    assert.equal(invalidBody.error.code, 'invalid_fixture')
-    assert.throws(() => mock.setChannelsFixture('nope'), /unknown channels fixture/)
-    mock.setChannelsFixture('wired')
-    assert.equal((await h.channels.fetchChannels()).output.channels, 22)
+test('mock channels: 502 ERR_RECONFIGURE_* keeps rolled_back details and the store shows the failure', async () => {
+  const harness = createHarness((call, body) => {
+    const path = pathOf(call)
+    if (path === '/api/channels' && call.method === 'GET') {
+      return jsonResponse(200, clone(CHANNELS))
+    }
+    if (path === '/api/channels' && call.method === 'PUT' && (body as Record<string, unknown>)?.stage === 'prepare') {
+      return jsonResponse(200, clone(buildChannelsPrepareAck()))
+    }
+    if (path === '/api/channels' && call.method === 'PUT' && (body as Record<string, unknown>)?.stage === 'commit') {
+      return m1Error(502, 'ERR_RECONFIGURE_DEVICE', 'cannot reopen the output device', {
+        ...buildChannelsCommitFailureDetails(),
+        phase: 'channels_commit',
+        target: 'rt-host'
+      })
+    }
+    return jsonResponse(404, { error: { code: 'not_found', message: 'nope' } })
   })
+
+  const state = createInitialChannelsState()
+  const controller = createChannelsController(state, { api: harness.api })
+  await controller.load()
+  await controller.prepareChannels({ channels: 20 })
+  const committed = await controller.commitChannels()
+  assert.equal(committed, null)
+  assert.equal(state.channelsError?.category, 'reconfig_failed')
+  assert.equal(state.channelsFailure?.rolled_back, true)
+  assert.equal(state.channelsFailure?.device_started, false)
+  assert.equal(state.channelsFailure?.applied, false)
+  assert.equal(state.channelsFailure?.gap_ms, 412)
+  assert.equal(state.channelsFailure?.code, 'ERR_RECONFIGURE_DEVICE')
+  // 失败后草稿已被 rt-host 消费，本地不再展示可重放的 token。
+  assert.equal(state.channelsDraft, null)
+})
+
+test('mock channels: 503 host_link_unavailable / 501 host_link_unsupported / 409 busy map to honest categories', async () => {
+  const unavailable = createHarness(() =>
+    m1Error(503, 'host_link_unavailable', 'control link down')
+  )
+  const down = await captureError(() => unavailable.api.prepareChannels({ channels: 20 }))
+  assert.equal(down.status, 503)
+  assert.equal(classifyChannelsError(down).category, 'host_link_unavailable')
+
+  // process 目标：任何 stage 都 501 host_link_unsupported（不签发 token、不假成功）。
+  const process = createHarness(() =>
+    m1Error(501, 'host_link_unsupported', 'no data-plane hot reconfiguration for the process target', {
+      target: 'daemon-process',
+      stage: 'prepare',
+      commit_supported: false
+    })
+  )
+  const unsupported = await captureError(() => process.api.prepareChannels({ channels: 20 }))
+  assert.equal(unsupported.status, 501)
+  assert.equal(unsupported.code, 'host_link_unsupported')
+  assert.equal(classifyChannelsError(unsupported).category, 'host_link_unsupported')
+
+  const busy = createHarness((call, body) => {
+    if ((body as Record<string, unknown>)?.stage === 'commit') {
+      return m1Error(409, 'channels_busy', 'a previous channels commit is still in flight')
+    }
+    return jsonResponse(200, clone(buildChannelsPrepareAck()))
+  })
+  const conflict = await captureError(() => busy.api.commitChannels('channels-token-3'))
+  assert.equal(conflict.status, 409)
+  assert.equal(classifyChannelsError(conflict).category, 'conflict')
+})
+
+/* --------------------------------------------- 方案上传/两阶段（既有功能）仍走控制面 */
+
+test('mock channels: plan upload/inspect/prepare/commit keep the control-plane POST contract', async () => {
+  const sha = 'a'.repeat(64)
+  const harness = createHarness((call, body) => {
+    const path = pathOf(call)
+    if (path === '/api/plan/upload' && call.method === 'POST') {
+      // 原始字节上传：body 不在 JSON 解析里（jsonBody 对二进制会抛 / undefined）；只检查头和字节长度。
+      return jsonResponse(201, {
+        ok: true,
+        schema: 'khaen-plan/v1',
+        created: true,
+        sha256: sha,
+        graph_id: 'b'.repeat(64),
+        size_bytes: 128,
+        segments: ['content', 'matrix'],
+        segment_count: 2,
+        latency_samples: 1023,
+        stored_path: '/var/lib/khaen/plans/' + sha + '.plan'
+      })
+    }
+    if (path === '/api/plan/inspect' && call.method === 'POST') {
+      return jsonResponse(200, {
+        sha256: sha,
+        graph_id: 'b'.repeat(64),
+        plan: { sample_rate: 48000, lanes: 22 },
+        compile: { compiled: true, latency_samples: 1023 }
+      })
+    }
+    if (path === '/api/prepare' && call.method === 'POST') {
+      return jsonResponse(200, { ok: true, engine_token: 'plan-token', planned_version: 8, graph_id: 'b'.repeat(64) })
+    }
+    if (path === '/api/commit' && call.method === 'POST' && (body as Record<string, unknown>)?.engine_token === 'plan-token') {
+      return jsonResponse(200, { ok: true, version: 8, applied_block: 1025, all_ack: true })
+    }
+    return jsonResponse(404, { error: { code: 'not_found', message: 'unexpected ' + call.method + ' ' + path } })
+  })
+
+  const bytes = new Uint8Array(128).fill(7)
+  const expectedSha = createHash('sha256').update(Buffer.from(bytes)).digest('hex')
+  const computed = await sha256Hex(bytes)
+  assert.equal(computed, expectedSha)
+
+  const upload = await harness.api.uploadPlan(bytes, 'demo.bin')
+  assert.equal(upload.sha256, sha)
+  assert.equal(upload.segment_count, 2)
+  const uploadCall = harness.calls.find((call) => pathOf(call) === '/api/plan/upload')
+  assert.ok(uploadCall !== undefined)
+  assert.equal(uploadCall.method, 'POST')
+  assert.equal(uploadCall.headers['Content-Type'], 'application/octet-stream')
+  assert.equal((uploadCall.body as Uint8Array).length, 128)
+
+  const inspect = await harness.api.fetchPlanInspect(upload.stored_path!, upload.sha256)
+  assert.equal(inspect.compiled, true)
+  const draft = await harness.api.preparePlan({ plan_path: upload.stored_path!, sha256: upload.sha256 })
+  assert.equal(draft.engine_token, 'plan-token')
+  const commit = await harness.api.commit('plan-token')
+  assert.equal(commit.version, 8)
+
+  const controlCommit = harness.calls.find((call) => pathOf(call) === '/api/commit')
+  assert.ok(controlCommit !== undefined)
+  assert.deepEqual(jsonBody(controlCommit), { engine_token: 'plan-token' })
+})
+
+test('mock channels: degraded fixture keeps nulls + reasons; mapping=null is surfaced as unknown', async () => {
+  const degraded = buildChannelsSeed('degraded').channels
+  const harness = createHarness((call) => {
+    if (pathOf(call) === '/api/channels' && call.method === 'GET') {
+      return jsonResponse(200, clone(degraded))
+    }
+    return jsonResponse(404, { error: { code: 'not_found', message: 'nope' } })
+  })
+  const info = await harness.api.fetchChannels()
+  assert.equal(info.output.channels, null)
+  assert.equal(info.mapping, null)
+  assert.match(String(info.reasons['mapping']), /not known/)
+  assert.equal(info.hot_reconfigure.wired, null)
+
+  // degraded 下热重配不可核实：prepare 由后端 503/501 如实拒绝（这里模拟 503）。
+  const rejecting = createHarness(() => m1Error(503, 'host_link_unavailable', 'rt-host channels status unavailable'))
+  const error = await captureError(() => rejecting.api.prepareChannels({ channels: 20 }))
+  assert.equal(classifyChannelsError(error).category, 'host_link_unavailable')
 })

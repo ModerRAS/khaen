@@ -9,6 +9,8 @@ import {
   VOLUME_GAIN_MIN_DB,
   VOLUME_GAIN_STEP_DB,
   buildGainPatch,
+  buildLayoutPatch,
+  buildRoutingPatch,
   classifyControlError,
   createControlApi,
   createLaneDrafts,
@@ -18,7 +20,9 @@ import {
   parseControlDraft,
   parseControlMuteAck,
   parseDeviceRetryAck,
-  validateGainPatch
+  validateGainPatch,
+  validateLayoutPatch,
+  validateRoutingPatch
 } from '../src/api/control.ts'
 import { createRecordingFetch, jsonResponse } from '../scripts/mock-test-support.mjs'
 
@@ -318,4 +322,81 @@ test('classifyControlError maps stable codes to categories and i18n keys', () =>
 test('supported capability sets mirror the backend', () => {
   assert.deepEqual([...SUPPORTED_SAMPLE_RATES_HZ], [48000, 96000])
   assert.deepEqual([...SUPPORTED_BLOCK_SIZES], [64, 128])
+})
+test('parseControlDraft normalizes routing/layout surface drafts without inventing changed/diff', () => {
+  const routing = parseControlDraft({
+    ok: true,
+    surface: 'routing',
+    engine_token: 'routing-token',
+    planned_version: 12,
+    graph_id: 'routing-graph',
+    admission: { accepted: true, budget: { entries: 3 } }
+  })
+  assert.equal(routing.surface, 'routing')
+  assert.equal(routing.changed, null, 'routing prepare does not report changed (optional field)')
+  assert.equal(routing.diff, null)
+  assert.equal(routing.current, null)
+  assert.deepEqual(routing.admission, { accepted: true, budget: { entries: 3 } })
+
+  const layout = parseControlDraft({
+    ok: true,
+    surface: 'layout',
+    engine_token: 'layout-token',
+    planned_version: 13,
+    changed: true,
+    diff: { folds: [[0, 1, 1]] },
+    current: { in_channels: 2, out_lanes: 2 },
+    target: { in_channels: 2, out_lanes: 2, folds: [[0, 1, 1]] },
+    graph: { action: 'replace' },
+    blockers: ['mapping is plan-owned'],
+    commit_supported: true
+  })
+  assert.equal(layout.surface, 'layout')
+  assert.equal(layout.changed, true)
+  assert.deepEqual(layout.diff, { folds: [[0, 1, 1]] })
+  assert.deepEqual(layout.current, { in_channels: 2, out_lanes: 2 })
+  assert.deepEqual(layout.target, { in_channels: 2, out_lanes: 2, folds: [[0, 1, 1]] })
+  assert.deepEqual(layout.graph, { action: 'replace' })
+  assert.deepEqual(layout.blockers, ['mapping is plan-owned'])
+  assert.equal(layout.commit_supported, true)
+})
+
+test('control API posts the exact routing/layout surface request shapes', async () => {
+  const bodies: Array<Record<string, unknown>> = []
+  const { api } = createClient((call) => {
+    bodies.push(JSON.parse(String(call.body)))
+    return jsonResponse(200, {
+      ok: true,
+      surface: 'routing',
+      engine_token: 'token-1',
+      planned_version: 1,
+      graph_id: 'g'
+    })
+  })
+  await api.prepareRouting({ routes: [[0, 1], [1, 2]], dac_channels: 22 })
+  await api.prepareLayout({ in_channels: 2, out_lanes: 4, folds: [[0, 0, 1], [1, 2, -3.5]] })
+  assert.deepEqual(bodies[0], {
+    surface: 'routing',
+    data: { routes: [[0, 1], [1, 2]], dac_channels: 22 }
+  })
+  assert.deepEqual(bodies[1], {
+    surface: 'layout',
+    data: { in_channels: 2, out_lanes: 4, folds: [[0, 0, 1], [1, 2, -3.5]] }
+  })
+})
+
+test('routing/layout validators reject malformed patches and builders keep tuples', () => {
+  assert.equal(validateRoutingPatch({ routes: [] }), 'empty')
+  assert.equal(validateRoutingPatch({ routes: [[0]] as never }), 'entry')
+  assert.equal(validateRoutingPatch({ routes: [[0, 1], [0, 2]] }), 'duplicate')
+  assert.equal(validateRoutingPatch({ routes: [[-1, 0]] }), 'entry')
+  assert.equal(validateRoutingPatch({ routes: [[0, 1]], dac_channels: 0 }), 'dac_channels')
+  assert.equal(validateRoutingPatch({ routes: [[0, 1]], dac_channels: 22 }), null)
+  assert.deepEqual(buildRoutingPatch([[0, 1]], 22), { routes: [[0, 1]], dac_channels: 22 })
+
+  assert.equal(validateLayoutPatch({ in_channels: 0, out_lanes: 2, folds: [[0, 0, 1]] }), 'channels')
+  assert.equal(validateLayoutPatch({ in_channels: 2, out_lanes: 2, folds: [] }), 'empty')
+  assert.equal(validateLayoutPatch({ in_channels: 2, out_lanes: 2, folds: [[0, 0, Number.NaN]] }), 'entry')
+  assert.equal(validateLayoutPatch({ in_channels: 2, out_lanes: 2, folds: [[0, 0, 1]] }), null)
+  assert.deepEqual(buildLayoutPatch(2, 2, [[0, 0, 1]]), { in_channels: 2, out_lanes: 2, folds: [[0, 0, 1]] })
 })

@@ -1,47 +1,62 @@
 <script setup lang="ts">
 /**
- * 路由矩阵页（M3b / 任务 T58）——「输入 → 矩阵域 → DAC 输出」的只读诊断。
+ * 路由矩阵页（task-68）——「输入 → 矩阵域 → DAC 输出」只读诊断 + lane → DAC 可编辑两阶段。
  *
- * 数据来源（页面唯一事实源，缺失即「未接入」+ 原因）：
- * - GET /api/status（5s 轮询，共享 store）：format.channels、format.aes67.{channels,map}、
- *   plan.{version,latency_samples,graph_id,applied_at,source}、host_link、not_wired/reasons；
- * - GET /api/channels：output.channels/dac_map、mapping[{lane,dac}]、input.*、
- *   plan.{source,version,graph_id,routing_known}、reasons/not_wired；
- * - GET /api/plan/history：current_version + entries（当前版本、latency 的回退来源、applied_at）。
+ * 当前值（唯一来源）：GET /api/channels 的 mapping（daemon 在 prepare/upload 时记录的方案 routing
+ * 镜像，不是数据面实时回读）；页面标注来源/语义/版本/读取时间。mapping=null 时显示「当前值未知」+
+ * 原因，不用 dac_map / 旧值 / 默认值冒充当前值（docs/API.md §5 末条、§9.7、§11 G3/G6）。
+ * mapping 非 null 时预填编辑表（lane → 0-based DAC）。speaker_roles 是 /api/channels 的【加法】字段
+ * （§12.2，后端尚未实现）：有就原样显示 canonical 角色，没有/null 就不显示，不编造。
  *
- * 诚实边界：
- * - 没有 mapping 时不假设「lane i → DAC i」的直通映射（不编造路由）；
- * - 计划区段数（segments）没有只读数据源（daemon 只在 /api/plan/upload 回执里报告）：
- *   如实显示 NOT_AVAILABLE + 原因，不拿路由条目数冒充；
- * - 路由编辑/重排 NOT_AVAILABLE：需要 PlanGraph 编辑器/designer（T59）；控制面低层
- *   /api/surface {surface:"routing"} 片段补丁不是图形编辑器，本页不暴露写入口（不假成功）；
- * - rt-host 不可达 / host_link 断开 / 方案缺失时只显示最后成功快照 + 警示，不清空也不造假。
+ * 可编辑两阶段（写入口复用控制面，docs/API.md §1/§4）：
+ * - 本地 validateRoutingPatch（api/control.ts；本页再补 dac 上界）校验；
+ * - POST /api/surface {surface:"routing", data:{routes, dac_channels?}} → stores/control.prepareRouting；
+ * - DraftReview 展示可选回执（changed/diff/current/target/admission… 缺失显示「服务端未上报」）；
+ * - POST /api/commit {engine_token} 生效 / POST /api/abort {engine_token} 丢弃；
+ * - 409 no_base_plan 引导先 prepare+commit 方案；engine_token_invalid 由 control store 清草稿并提示；
+ *   501/503 显示原因、不假成功；401 交给会话 store。
  *
- * 与 /channels 页的关系：映射口径一致（lane / 0-based DAC / 1-based MOTU 物理输出），
- * 编辑入口不在这里重复——页面给「去 /channels」跳转。
+ * 只读诊断仍保留 /api/status + /api/channels + /api/plan/history 摘要。
  */
-import { computed } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowRight, Refresh } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { Delete, Plus, Refresh } from '@element-plus/icons-vue'
 import PageHeader from '@/components/PageHeader.vue'
 import PanelCard from '@/components/PanelCard.vue'
 import StatRow from '@/components/StatRow.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import TruthTag from '@/components/TruthTag.vue'
+import DraftReview from '@/components/control/DraftReview.vue'
+import ControlErrorNotice from '@/components/control/ControlErrorNotice.vue'
 import { useStatusPolling } from '@/composables/useStatusPolling'
 import { isStatusStale, reasonForPath, runStateKind, runStateLabelKey } from '@/api/status'
 import { MOTU_KNOWN_OUTPUT_NUMBERS, motuOutputLabelKey } from '@/api/channels'
 import {
-  ROUTING_EDIT_TASK,
   ROUTING_MATRIX_LANES,
   buildPlanSummary,
   buildRoutingChain,
-  laneRows,
+  currentRoutingSource,
   reasonForRoutingChannelsPath,
-  type RoutingLaneRow
+  speakerRoleForDac,
+  validateRoutingDraft
 } from '@/api/routing'
-import { loadRouting, refreshRouting, routingState } from '@/stores/routing'
+import type { ControlCommitAck, ControlDraft } from '@/api/control'
+import {
+  createInitialRoutingEditorState,
+  createRoutingEditorController,
+  loadRouting,
+  refreshRouting,
+  routingState
+} from '@/stores/routing'
+import {
+  abortControlDraft,
+  commitControlDraft,
+  controlState,
+  prepareRouting
+} from '@/stores/control'
+import { ensureMeta, metaCapabilityReason, metaSurfaceState } from '@/stores/meta'
 import { formatClock, formatInteger, formatTimestamp, shortenId } from '@/utils/format'
 import type { StatusKind } from '@/types/ui'
 
@@ -59,7 +74,7 @@ const refreshing = computed(() => routingState.refreshing || statusState.refresh
 
 const chain = computed(() => buildRoutingChain(data.value, channels.value))
 const plan = computed(() => buildPlanSummary(data.value, channels.value, history.value))
-const rows = computed(() => laneRows(channels.value))
+const currentSource = computed(() => currentRoutingSource(channels.value))
 
 const statusFatal = computed(() => statusState.phase === 'error' && data.value === null)
 const channelsFatal = computed(
@@ -100,16 +115,6 @@ function sourceText(source: 'sdp' | 'manual' | null): string | null {
   return null
 }
 
-function laneLabel(row: RoutingLaneRow): string | null {
-  if (row.labelKey !== null) {
-    return t(row.labelKey)
-  }
-  if (row.physical === null) {
-    return null
-  }
-  return t('routing.lanes.unknownLabel', { channel: row.physical })
-}
-
 function statusReason(path: string): string | null {
   return reasonForPath(data.value, path)
 }
@@ -120,7 +125,7 @@ function channelsReason(path: string): string | null {
 
 /** /api/channels 整体不可用时的兜底原因（字段级 reason 缺失时用）。 */
 const noChannelsReason = computed(() =>
-  channelsError.value !== null ? t(channelsError.value.i18nKey) : t('routing.unavailable.reason')
+  channelsError.value !== null ? t(channelsError.value.i18nKey) : t('routingEdit.current.sourceUnknown')
 )
 
 const lastUpdateText = computed(() => {
@@ -129,6 +134,18 @@ const lastUpdateText = computed(() => {
   }
   const time = clockText(routingState.loadedAt)
   return time === null ? t('routing.updated.never') : t('routing.updated.last', { time })
+})
+
+/** 当前值未知时的原因（后端 reasons 优先，其次本地化兜底；不得编造原因）。 */
+const currentUnknownReason = computed<string>(() => {
+  const source = currentSource.value
+  if (source.reason !== null) {
+    return source.reason
+  }
+  if (channels.value === null && channelsError.value !== null) {
+    return t(channelsError.value.i18nKey)
+  }
+  return t('routingEdit.current.unknownReason')
 })
 
 /* ------------------------------------------------------------ 顶部状态带 */
@@ -217,19 +234,15 @@ const notices = computed<NoticeBanner[]>(() => {
 const chainTruth = computed(() =>
   chain.value.input.channels.value !== null ||
   chain.value.matrix.lanes.value !== null ||
-  chain.value.output.channels.value !== null ||
-  rows.value.length > 0
+  chain.value.output.channels.value !== null
     ? ('actual' as const)
     : ('notWired' as const)
 )
 
-const lanesTruth = computed(() => (rows.value.length > 0 ? ('actual' as const) : ('notWired' as const)))
-
 const planTruth = computed(() =>
   plan.value.version !== null ||
   plan.value.latencySamples !== null ||
-  plan.value.graphId !== null ||
-  plan.value.dacChannels !== null
+  plan.value.graphId !== null
     ? ('actual' as const)
     : ('notWired' as const)
 )
@@ -247,6 +260,307 @@ const notWiredEntries = computed<Array<{ source: string; path: string; reason: s
   return entries
 })
 
+/* ------------------------------------------------- 当前值来源（只读诊断卡） */
+
+interface KvRow {
+  label: string
+  value: string | null
+  copy?: string | null
+  reason?: string | null
+  tone?: 'ok' | 'warn' | 'bad' | null
+}
+
+const routingKnownText = computed(() => {
+  const known = currentSource.value.routingKnown
+  if (known === null) {
+    return null
+  }
+  return known ? t('common.yes') : t('common.no')
+})
+
+const currentRows = computed<KvRow[]>(() => {
+  const source = currentSource.value
+  return [
+    {
+      label: t('routingEdit.current.source'),
+      value: source.known ? t('routingEdit.current.sourceValue') : t('routingEdit.current.sourceUnknown'),
+      reason: source.known ? null : currentUnknownReason.value
+    },
+    {
+      label: t('routingEdit.current.semantics'),
+      value: source.known ? t('routingEdit.current.semanticsValue') : null,
+      reason: source.known ? null : currentUnknownReason.value
+    },
+    {
+      label: t('routingEdit.current.planVersion'),
+      value: intText(source.planVersion),
+      reason: source.planVersion === null ? (channelsReason('plan') ?? currentUnknownReason.value) : null
+    },
+    {
+      label: t('routingEdit.current.graphId'),
+      value: shortenId(source.planGraphId, 10, 6),
+      copy: source.planGraphId,
+      reason: source.planGraphId === null ? (channelsReason('plan') ?? currentUnknownReason.value) : null
+    },
+    {
+      label: t('routingEdit.current.dacChannels'),
+      value: intText(source.dacChannels),
+      reason: source.dacChannels === null ? channelsReason('output.channels') : null
+    },
+    {
+      label: t('routingEdit.current.routes'),
+      value: source.rows === null ? null : String(source.rows.length),
+      reason: source.rows === null ? (channelsReason('mapping') ?? currentUnknownReason.value) : null
+    },
+    {
+      label: t('routingEdit.current.routingKnown'),
+      value: routingKnownText.value,
+      reason: routingKnownText.value === null ? channelsReason('plan') : null
+    },
+    {
+      label: t('routingEdit.current.readAt'),
+      value: clockText(routingState.loadedAt),
+      reason: routingState.loadedAt === null ? t('routing.updated.never') : null
+    }
+  ]
+})
+
+/* ------------------------------------------------------------- 编辑草稿 */
+
+const editorState = reactive(createInitialRoutingEditorState())
+const editor = createRoutingEditorController(editorState, { current: () => currentSource.value })
+
+/** 刷新时若草稿未被手动编辑，则重新用当前值预填；手动编辑过的草稿不被刷新覆盖。 */
+watch(
+  () => routingState.channels,
+  () => {
+    if (!editorState.dirty) {
+      editor.prefill()
+    }
+  },
+  { immediate: true }
+)
+
+const dacBound = computed<number | null>(() =>
+  editorState.explicitDacChannels && editorState.dacChannels !== null
+    ? editorState.dacChannels
+    : currentSource.value.dacChannels
+)
+
+const dacMax = computed(() => (dacBound.value === null ? 65535 : Math.max(0, dacBound.value - 1)))
+
+const validationKey = computed<string | null>(() =>
+  validateRoutingDraft(editorState.rows, {
+    explicitDacChannels: editorState.explicitDacChannels ? editorState.dacChannels : undefined,
+    knownDacChannels: currentSource.value.dacChannels
+  })
+)
+
+const validationText = computed<string | null>(() => {
+  const key = validationKey.value
+  if (key === null) {
+    return null
+  }
+  if (key === 'dac_range') {
+    return t('routingEdit.edit.validation.dac_range', {
+      channels: intText(dacBound.value) ?? t('common.dash')
+    })
+  }
+  return t('routingEdit.edit.validation.' + key)
+})
+
+const inheritDacText = computed(() =>
+  currentSource.value.dacChannels === null
+    ? t('routingEdit.edit.dacChannelsUnknown')
+    : t('routingEdit.edit.inheritDacValue', { value: intText(currentSource.value.dacChannels) ?? t('common.dash') })
+)
+
+const prefillTimeText = computed(() =>
+  editorState.prefilledAt === null ? null : clockText(editorState.prefilledAt)
+)
+
+/** DAC 物理输出标签（1-based MOTU 输出位；未知位置显示 OUT n，不猜）。 */
+function dacOutputLabel(dac: number): string | null {
+  if (!Number.isInteger(dac) || dac < 0) {
+    return null
+  }
+  const channel = dac + 1
+  const key = motuOutputLabelKey(channel)
+  return key === null ? t('routing.lanes.unknownLabel', { channel }) : t(key)
+}
+
+/** speaker_roles（§12.2 加法字段）：有则原样显示 canonical 角色，缺失/null 显示「—」。 */
+function dacRoleText(dac: number): string | null {
+  const role = speakerRoleForDac(channels.value, dac)
+  return role === null ? null : role.role
+}
+
+function toInteger(value: unknown): number | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  return typeof raw === 'number' && Number.isFinite(raw) ? Math.trunc(raw) : null
+}
+
+function onLaneChange(index: number, value: unknown): void {
+  editor.setLane(index, toInteger(value))
+}
+
+function onDacChange(index: number, value: unknown): void {
+  editor.setDac(index, toInteger(value))
+}
+
+function onExplicitDacChange(value: unknown): void {
+  editor.setExplicitDacChannels(value === true)
+}
+
+function onDacChannelsChange(value: unknown): void {
+  editor.setDacChannels(toInteger(value))
+}
+
+function onPrefill(): void {
+  if (!currentSource.value.known) {
+    return
+  }
+  if (editor.prefill(true)) {
+    ElMessage.success(t('routingEdit.toast.prefilled'))
+  }
+}
+
+function onAddRow(): void {
+  editor.addRow()
+}
+
+function onClearDraft(): void {
+  editor.clear()
+}
+
+/* ----------------------------------------------------------- 能力 / 两阶段 */
+
+const capability = computed(() => metaSurfaceState('routing'))
+const capabilityReason = computed(() => metaCapabilityReason({ surface: 'routing' }))
+const capabilityText = computed(() => {
+  if (capability.value === 'wired') {
+    return t('routingEdit.meta.wired')
+  }
+  if (capability.value === 'not_wired') {
+    return t('routingEdit.meta.notWired')
+  }
+  return t('routingEdit.meta.unknown')
+})
+const capabilityTagType = computed<'success' | 'warning' | 'danger'>(() => {
+  if (capability.value === 'wired') {
+    return 'success'
+  }
+  return capability.value === 'not_wired' ? 'danger' : 'warning'
+})
+
+const busy = computed(() => controlState.busy !== null)
+const prepareBusy = computed(() => controlState.busy === 'prepare')
+const controlError = computed(() => controlState.error)
+const noBasePlan = computed(() => controlError.value?.category === 'no_base_plan')
+const tokenInvalid = computed(() => controlError.value?.category === 'token_invalid')
+
+const routingDraft = computed<ControlDraft | null>(() => {
+  const draft = controlState.draft
+  return draft !== null && draft.surface === 'routing' ? draft : null
+})
+
+const foreignDraft = computed<ControlDraft | null>(() => {
+  const draft = controlState.draft
+  return draft !== null && draft.surface !== 'routing' ? draft : null
+})
+
+const canPrepare = computed(
+  () =>
+    !busy.value &&
+    routingDraft.value === null &&
+    capability.value !== 'not_wired' &&
+    editorState.rows.length > 0 &&
+    validationKey.value === null
+)
+
+const commitReceipt = ref<ControlCommitAck | null>(null)
+
+const commitRows = computed<KvRow[]>(() => {
+  const ack = commitReceipt.value
+  if (ack === null) {
+    return []
+  }
+  return [
+    {
+      label: t('routingEdit.receipt.version'),
+      value: intText(ack.version),
+      reason: ack.version === null ? t('routingEdit.receipt.changedUnreported') : null
+    },
+    {
+      label: t('routingEdit.receipt.appliedBlock'),
+      value: intText(ack.applied_block),
+      reason: ack.applied_block === null ? t('routingEdit.receipt.changedUnreported') : null
+    },
+    {
+      label: t('routingEdit.receipt.graphId'),
+      value: shortenId(ack.graph_id, 10, 6),
+      copy: ack.graph_id,
+      reason: ack.graph_id === null ? t('routingEdit.receipt.changedUnreported') : null
+    },
+    {
+      label: t('routingEdit.receipt.changed'),
+      value:
+        ack.changed === null
+          ? t('routingEdit.receipt.changedUnreported')
+          : ack.changed
+            ? t('common.yes')
+            : t('common.no')
+    },
+    {
+      label: t('routingEdit.receipt.at'),
+      value: clockText(controlState.lastCommitAt)
+    }
+  ]
+})
+
+const receiptTruth = computed(() => (commitReceipt.value === null ? ('notWired' as const) : ('actual' as const)))
+const draftTruth = computed(() => (routingDraft.value === null ? ('notWired' as const) : ('actual' as const)))
+const editorTruth = computed(() => (capability.value === 'not_wired' ? ('notWired' as const) : ('actual' as const)))
+const sourceTruth = computed(() => (currentSource.value.known ? ('actual' as const) : ('notWired' as const)))
+
+async function onPrepare(): Promise<void> {
+  const error = editor.validate()
+  if (error !== null || capability.value === 'not_wired' || routingDraft.value !== null) {
+    return
+  }
+  const draft = await prepareRouting(editor.buildPatch())
+  if (draft !== null) {
+    // 新草稿会替换旧 intent：上一次 commit 回执不再代表当前草稿，先清掉避免误读。
+    commitReceipt.value = null
+    ElMessage.success(t('routingEdit.toast.prepared'))
+  }
+}
+
+async function onCommit(): Promise<void> {
+  if (routingDraft.value === null) {
+    return
+  }
+  const ack = await commitControlDraft()
+  if (ack === null) {
+    return
+  }
+  commitReceipt.value = ack
+  ElMessage.success(t('routingEdit.toast.committed'))
+  await Promise.all([refreshRouting(), refreshStatus()])
+  // commit 成功后当前值可能变了：强制按新的 /api/channels.mapping 重建草稿。
+  editor.prefill(true)
+}
+
+async function onAbort(): Promise<void> {
+  if (routingDraft.value === null) {
+    return
+  }
+  const ack = await abortControlDraft()
+  if (ack !== null) {
+    ElMessage.success(t('routingEdit.toast.aborted'))
+  }
+}
+
 /* ------------------------------------------------------------------ 操作 */
 
 function openChannels(): void {
@@ -258,12 +572,12 @@ function onRefresh(): void {
   void refreshStatus()
 }
 
+void ensureMeta()
 void loadRouting()
 </script>
-
 <template>
   <div class="routing-page">
-    <PageHeader title-key="routing.pageTitle" subtitle-key="routing.subtitle">
+    <PageHeader title-key="routing.pageTitle" subtitle-key="routingEdit.subtitle">
       <template #actions>
         <span class="routing-page__updated">{{ lastUpdateText }}</span>
         <el-button
@@ -286,25 +600,34 @@ void loadRouting()
       <el-button size="small" @click="onRefresh">{{ t('common.retry') }}</el-button>
     </div>
 
-    <!-- /api/channels 未接入：整块 NOT_AVAILABLE + 稳定码 + 原因 + 任务号（T55） -->
+    <!-- /api/channels 不可用：当前值无法读取（不展示假映射，也不用旧值冒充当前值） -->
     <div v-if="channelsFatal" class="banner banner--warn routing-page__not-wired" role="status">
       <div class="routing-page__not-wired-text">
-        <span class="routing-page__not-wired-title">{{ t('routing.unavailable.title') }}</span>
-        <span>{{ t('routing.unavailable.desc', { task: 'T55', message: t(channelsError!.i18nKey) }) }}</span>
+        <span class="routing-page__not-wired-title">{{ t('routingEdit.current.unavailableTitle') }}</span>
+        <span>
+          {{ t('routingEdit.current.unavailableDesc', { message: t(channelsError!.i18nKey) }) }}
+        </span>
         <span v-if="channelsError!.detail" class="aux-text mono">{{ channelsError!.code }} — {{ channelsError!.detail }}</span>
       </div>
       <el-button size="small" @click="onRefresh">{{ t('common.retry') }}</el-button>
     </div>
 
-    <p
-      v-for="banner in notices"
-      :key="banner.text"
-      class="banner"
-      :class="'banner--' + banner.tone"
-      role="status"
-    >
+    <p v-for="banner in notices" :key="banner.text" class="banner" :class="'banner--' + banner.tone" role="status">
       {{ banner.text }}
     </p>
+
+    <ControlErrorNotice :error="controlError" :show-retry="false" />
+
+    <!-- no_base_plan（409）：routing 补丁需要已生效方案作为基线 -->
+    <div v-if="noBasePlan" class="banner banner--warn routing-page__guide" role="status">
+      <span>{{ t('routingEdit.error.noBasePlanGuide') }}</span>
+      <el-button size="small" @click="openChannels">{{ t('routingEdit.error.goChannels') }}</el-button>
+    </div>
+    <!-- engine_token_invalid（409）：control store 已清掉本地草稿 -->
+    <div v-if="tokenInvalid" class="banner banner--warn routing-page__guide" role="status">
+      <span>{{ t('routingEdit.error.tokenInvalidGuide') }}</span>
+      <el-button size="small" @click="onRefresh">{{ t('common.retry') }}</el-button>
+    </div>
 
     <div v-if="data" class="status-band">
       <StatusBadge :kind="hostLinkBadge.kind" :label="t('routing.band.hostLink')" :value="hostLinkBadge.value" />
@@ -334,7 +657,7 @@ void loadRouting()
     </div>
 
     <div v-if="hasFacts" class="grid-12 routing-grid">
-      <!-- ① 输入 → 矩阵域 → DAC 输出 -->
+      <!-- ① 只读诊断：输入 → 矩阵域 → DAC 输出 -->
       <PanelCard
         class="routing-grid__span-12"
         title-key="routing.chain.title"
@@ -367,7 +690,7 @@ void loadRouting()
           </section>
 
           <div class="routing-chain__arrow" aria-hidden="true">
-            <el-icon :size="18"><ArrowRight /></el-icon>
+            <el-icon :size="18">&#8594;</el-icon>
           </div>
 
           <section class="routing-chain__node" :aria-label="t('routing.chain.matrix.title')">
@@ -396,7 +719,7 @@ void loadRouting()
           </section>
 
           <div class="routing-chain__arrow" aria-hidden="true">
-            <el-icon :size="18"><ArrowRight /></el-icon>
+            <el-icon :size="18">&#8594;</el-icon>
           </div>
 
           <section class="routing-chain__node" :aria-label="t('routing.chain.output.title')">
@@ -428,59 +751,232 @@ void loadRouting()
         <p class="aux-text routing-chain__note">{{ t('routing.chain.note') }}</p>
       </PanelCard>
 
-      <!-- ② lane -> DAC 映射表（与 /channels 同口径，不重复编辑入口） -->
+      <!-- ② 当前值来源（/api/channels.mapping；标注来源/语义/版本/读取时间） -->
       <PanelCard
-        class="routing-grid__span-7"
-        title-key="routing.lanes.title"
-        desc-key="routing.lanes.desc"
-        :truth="lanesTruth"
+        class="routing-grid__span-5"
+        title-key="routingEdit.current.title"
+        desc-key="routingEdit.current.desc"
+        :truth="sourceTruth"
       >
-        <template #actions>
-          <el-button size="small" @click="openChannels">
-            <span>{{ t('routing.lanes.openChannels') }}</span>
-            <el-icon><ArrowRight /></el-icon>
-          </el-button>
-        </template>
-        <ul class="kv-list routing-lanes__summary">
+        <div v-if="!currentSource.known" class="banner banner--warn routing-current__unknown" role="status">
+          <div class="routing-current__unknown-text">
+            <strong>{{ t('routingEdit.current.unknownTitle') }}</strong>
+            <span>{{ currentUnknownReason }}</span>
+          </div>
+          <TruthTag kind="notWired" :reason="currentUnknownReason" />
+        </div>
+        <p
+          v-else-if="currentSource.rows !== null && currentSource.rows.length === 0"
+          class="aux-text routing-current__known-zero"
+        >
+          {{ t('routingEdit.current.knownZero') }}
+        </p>
+        <ul class="kv-list">
           <StatRow
-            :label="t('routing.lanes.routedLanes')"
-            :value="intText(chain.matrix.routedLanes.value)"
-            :reason="chain.matrix.routedLanes.reason ?? (channels === null ? noChannelsReason : null)"
-          />
-          <StatRow
-            :label="t('routing.lanes.routes')"
-            :value="intText(chain.matrix.routes.value)"
-            :reason="chain.matrix.routes.reason ?? (channels === null ? noChannelsReason : null)"
+            v-for="row in currentRows"
+            :key="row.label"
+            :label="row.label"
+            :value="row.value"
+            :copy="row.copy ?? null"
+            :reason="row.reason ?? null"
+            :tone="row.tone ?? null"
           />
         </ul>
-        <div v-if="rows.length > 0" class="routing-table__wrap">
+        <p v-if="currentSource.known" class="aux-text">{{ t('routingEdit.current.knownHint') }}</p>
+        <p v-if="channelsError !== null && channels !== null" class="aux-text">
+          {{ t('routingEdit.current.staleHint', { message: t(channelsError.i18nKey) }) }}
+        </p>
+      </PanelCard>
+
+      <!-- ③ 可编辑 lane → DAC 两阶段 -->
+      <PanelCard
+        class="routing-grid__span-7"
+        title-key="routingEdit.edit.title"
+        desc-key="routingEdit.edit.desc"
+        :truth="editorTruth"
+      >
+        <template #actions>
+          <span class="aux-text">{{ t('routingEdit.edit.toolbar.count', { count: editorState.rows.length }) }}</span>
+        </template>
+
+        <div class="routing-edit__capability">
+          <span class="aux-text">{{ t('routingEdit.meta.label') }}</span>
+          <el-tag size="small" :type="capabilityTagType">{{ capabilityText }}</el-tag>
+        </div>
+        <p v-if="capability === 'not_wired' && capabilityReason !== null" class="banner banner--warn" role="status">
+          {{ t('routingEdit.meta.reason', { reason: capabilityReason }) }}
+        </p>
+
+        <div v-if="!currentSource.known" class="banner banner--warn routing-current__unknown" role="status">
+          <span>{{ t('routingEdit.edit.unknownCurrent', { reason: currentUnknownReason }) }}</span>
+        </div>
+
+        <div class="routing-edit__toolbar">
+          <el-button
+            size="small"
+            :disabled="busy || !currentSource.known"
+            :title="currentSource.known ? undefined : t('routingEdit.current.unknownTitle')"
+            @click="onPrefill"
+          >
+            {{ t('routingEdit.edit.toolbar.prefill') }}
+          </el-button>
+          <el-button size="small" :disabled="busy" @click="onAddRow">
+            <el-icon><Plus /></el-icon>
+            <span>{{ t('routingEdit.edit.toolbar.add') }}</span>
+          </el-button>
+          <el-button size="small" :disabled="busy || editorState.rows.length === 0" @click="onClearDraft">
+            {{ t('routingEdit.edit.toolbar.clear') }}
+          </el-button>
+        </div>
+
+        <p v-if="editorState.dirty" class="aux-text">{{ t('routingEdit.edit.editedHint') }}</p>
+        <p v-else-if="prefillTimeText !== null" class="aux-text">
+          {{ t('routingEdit.edit.prefilled', { time: prefillTimeText }) }}
+        </p>
+
+        <div v-if="editorState.rows.length > 0" class="routing-table__wrap">
           <table class="routing-table">
             <thead>
               <tr>
-                <th>{{ t('routing.lanes.table.lane') }}</th>
-                <th>{{ t('routing.lanes.table.dac') }}</th>
-                <th>{{ t('routing.lanes.table.physical') }}</th>
-                <th>{{ t('routing.lanes.table.label') }}</th>
+                <th>{{ t('routingEdit.edit.table.lane') }}</th>
+                <th>{{ t('routingEdit.edit.table.dac') }}</th>
+                <th>{{ t('routingEdit.edit.table.output') }}</th>
+                <th>{{ t('routingEdit.edit.table.role') }}</th>
+                <th>{{ t('routingEdit.edit.table.actions') }}</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in rows" :key="row.lane">
-                <td class="mono">{{ intText(row.lane) }}</td>
-                <td class="mono">{{ row.dac === null ? t('common.dash') : intText(row.dac) }}</td>
-                <td class="mono">{{ row.physical === null ? t('common.dash') : intText(row.physical) }}</td>
-                <td>{{ laneLabel(row) ?? t('common.dash') }}</td>
+              <tr v-for="(row, index) in editorState.rows" :key="index">
+                <td>
+                  <el-input-number
+                    size="small"
+                    :model-value="row.lane"
+                    :min="0"
+                    :step="1"
+                    :precision="0"
+                    :disabled="busy"
+                    :aria-label="t('routingEdit.edit.table.lane')"
+                    @change="onLaneChange(index, $event)"
+                  />
+                </td>
+                <td>
+                  <el-input-number
+                    size="small"
+                    :model-value="row.dac"
+                    :min="0"
+                    :max="dacMax"
+                    :step="1"
+                    :precision="0"
+                    :disabled="busy"
+                    :aria-label="t('routingEdit.edit.table.dac')"
+                    @change="onDacChange(index, $event)"
+                  />
+                </td>
+                <td class="mono">{{ dacOutputLabel(row.dac) ?? t('common.dash') }}</td>
+                <td class="mono">{{ dacRoleText(row.dac) ?? t('common.dash') }}</td>
+                <td>
+                  <el-button
+                    size="small"
+                    text
+                    type="danger"
+                    :disabled="busy"
+                    :aria-label="t('routingEdit.edit.table.remove')"
+                    @click="editor.removeRow(index)"
+                  >
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <p v-else class="aux-text routing-lanes__empty">
-          <TruthTag kind="notWired" :reason="channelsReason('mapping') ?? noChannelsReason" />
-          <span>{{ t('routing.lanes.empty') }}</span>
+        <p v-else class="aux-text">{{ t('routingEdit.edit.noRows') }}</p>
+
+        <div class="routing-edit__dac">
+          <el-checkbox
+            :model-value="editorState.explicitDacChannels"
+            :disabled="busy"
+            @change="onExplicitDacChange"
+          >
+            {{ t('routingEdit.edit.explicitDac') }}
+          </el-checkbox>
+          <template v-if="editorState.explicitDacChannels">
+            <span class="routing-edit__label">{{ t('routingEdit.edit.dacChannels') }}</span>
+            <el-input-number
+              size="small"
+              :model-value="editorState.dacChannels"
+              :min="1"
+              :step="1"
+              :precision="0"
+              :disabled="busy"
+              :aria-label="t('routingEdit.edit.dacChannels')"
+              @change="onDacChannelsChange"
+            />
+          </template>
+          <span v-else class="aux-text">{{ t('routingEdit.edit.inheritDac') }} · {{ inheritDacText }}</span>
+        </div>
+        <p class="aux-text">{{ t('routingEdit.edit.dacChannelsHint') }}</p>
+
+        <p v-if="validationText !== null" class="routing-edit__invalid" role="alert">{{ validationText }}</p>
+
+        <div class="routing-edit__actions">
+          <el-button type="primary" :loading="prepareBusy" :disabled="!canPrepare" @click="onPrepare">
+            {{ prepareBusy ? t('routingEdit.edit.preparing') : t('routingEdit.edit.prepare') }}
+          </el-button>
+          <span v-if="capability === 'not_wired'" class="aux-text">{{ t('routingEdit.edit.prepareBlockedMeta') }}</span>
+          <span v-else-if="routingDraft !== null" class="aux-text">{{ t('routingEdit.edit.prepareBlockedDraft') }}</span>
+          <span v-else-if="foreignDraft !== null" class="aux-text">
+            {{ t('routingEdit.edit.foreignDraft', { surface: foreignDraft.surface ?? t('common.unknown') }) }}
+          </span>
+        </div>
+        <p v-if="capability === 'not_wired' && capabilityReason !== null" class="aux-text">
+          {{ t('routingEdit.edit.prepareBlockedMetaReason', { reason: capabilityReason }) }}
         </p>
-        <p class="aux-text">{{ t('routing.lanes.editHint') }}</p>
+        <p v-else-if="capability === 'unknown'" class="aux-text">{{ t('routingEdit.meta.unknown') }}</p>
+        <p class="aux-text">{{ t('routingEdit.edit.laneHint', { lanes: ROUTING_MATRIX_LANES }) }}</p>
       </PanelCard>
 
-      <!-- ③ 计划内 routing 段摘要 -->
+      <!-- ④ 草稿审查 + commit/abort -->
+      <PanelCard
+        class="routing-grid__span-7"
+        title-key="routingEdit.draft.title"
+        desc-key="routingEdit.draft.desc"
+        :truth="draftTruth"
+      >
+        <DraftReview
+          v-if="routingDraft !== null"
+          :draft="routingDraft"
+          :busy="busy"
+          @commit="onCommit"
+          @abort="onAbort"
+        />
+        <template v-else>
+          <p class="aux-text">{{ t('routingEdit.draft.empty') }}</p>
+          <p class="aux-text">{{ t('routingEdit.draft.abortHint') }}</p>
+        </template>
+      </PanelCard>
+
+      <!-- ⑤ commit 回执（以服务端回执为准） -->
+      <PanelCard
+        class="routing-grid__span-5"
+        title-key="routingEdit.receipt.title"
+        desc-key="routingEdit.receipt.desc"
+        :truth="receiptTruth"
+      >
+        <ul v-if="commitRows.length > 0" class="kv-list">
+          <StatRow
+            v-for="row in commitRows"
+            :key="row.label"
+            :label="row.label"
+            :value="row.value"
+            :copy="row.copy ?? null"
+            :reason="row.reason ?? null"
+          />
+        </ul>
+        <p v-else class="aux-text">{{ t('routingEdit.receipt.empty') }}</p>
+      </PanelCard>
+
+      <!-- ⑥ 只读诊断：计划内 routing 段摘要 -->
       <PanelCard
         class="routing-grid__span-5"
         title-key="routing.plan.title"
@@ -501,7 +997,7 @@ void loadRouting()
           <StatRow
             :label="t('routing.plan.field.segments')"
             :value="intText(plan.segments)"
-            :reason="plan.segmentsReason ?? t(plan.segmentsReasonKey)"
+            :reason="plan.segmentsReason ?? t('routingEdit.plan.segmentsReason')"
           />
           <StatRow
             :label="t('routing.plan.field.graphId')"
@@ -520,61 +1016,17 @@ void loadRouting()
             :reason="statusReason('plan.source')"
           />
           <StatRow
-            :label="t('routing.plan.field.routingKnown')"
-            :value="plan.routingKnown === null ? null : plan.routingKnown ? t('common.yes') : t('common.no')"
-            :reason="plan.routingKnownReason"
-          />
-          <StatRow
-            :label="t('routing.plan.field.dacChannels')"
-            :value="intText(plan.dacChannels)"
-            :reason="channelsReason('output.channels')"
-          />
-          <StatRow
-            :label="t('routing.plan.field.routes')"
-            :value="intText(plan.routes)"
-            :reason="channelsReason('mapping')"
-          />
-          <StatRow
             :label="t('routing.plan.field.historyCurrent')"
             :value="intText(plan.historyCurrentVersion)"
             :reason="historyError !== null ? t(historyError.i18nKey) : history === null ? t('routing.plan.historyReason') : null"
           />
         </ul>
-        <p class="aux-text routing-plan__note">{{ t('routing.plan.segmentsNote') }}</p>
+        <p class="aux-text routing-plan__note">{{ t('routingEdit.plan.segmentsNote') }}</p>
       </PanelCard>
 
-      <!-- ④ 路由编辑/重排：NOT_AVAILABLE（T59），不假成功 -->
+      <!-- ⑦ 后端上报的未接入能力 -->
       <PanelCard
-        class="routing-grid__span-12"
-        title-key="routing.edit.title"
-        desc-key="routing.edit.desc"
-        truth="notWired"
-      >
-        <div class="banner banner--warn routing-edit__banner" role="status">
-          <div class="routing-edit__banner-text">
-            <strong>{{ t('routing.edit.notAvailableTitle', { task: ROUTING_EDIT_TASK }) }}</strong>
-            <span>{{ t('routing.edit.notAvailableDesc', { task: ROUTING_EDIT_TASK }) }}</span>
-          </div>
-          <TruthTag kind="notWired" :reason="t('routing.edit.reason')" />
-        </div>
-        <div class="routing-edit__actions">
-          <el-button disabled :title="t('routing.edit.disabledHint')">{{ t('routing.edit.action.reorder') }}</el-button>
-          <el-button disabled :title="t('routing.edit.disabledHint')">
-            {{ t('routing.edit.action.crosspoint') }}
-          </el-button>
-          <el-button disabled :title="t('routing.edit.disabledHint')">{{ t('routing.edit.action.apply') }}</el-button>
-          <el-button @click="openChannels">{{ t('routing.edit.action.channels') }}</el-button>
-        </div>
-        <ul class="routing-edit__requirements">
-          <li>{{ t('routing.edit.requirement.editor', { task: ROUTING_EDIT_TASK }) }}</li>
-          <li>{{ t('routing.edit.requirement.patch') }}</li>
-          <li>{{ t('routing.edit.requirement.commit', { task: 'T52' }) }}</li>
-        </ul>
-      </PanelCard>
-
-      <!-- ⑤ 后端上报的未接入能力 -->
-      <PanelCard
-        class="routing-grid__span-12"
+        class="routing-grid__span-7"
         title-key="routing.notWired.title"
         desc-key="routing.notWired.desc"
         :truth="notWiredTruth"
@@ -590,7 +1042,11 @@ void loadRouting()
       </PanelCard>
     </div>
 
-    <div v-else-if="statusState.phase === 'loading' || routingState.channelsPhase === 'loading'" class="banner banner--info" aria-busy="true">
+    <div
+      v-else-if="statusState.phase === 'loading' || routingState.channelsPhase === 'loading'"
+      class="banner banner--info"
+      aria-busy="true"
+    >
       {{ t('common.loading') }}
     </div>
   </div>
@@ -628,6 +1084,13 @@ void loadRouting()
 
 .routing-page__not-wired-title {
   font-weight: 600;
+}
+
+.routing-page__guide {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--khaen-space-3);
+  flex-wrap: wrap;
 }
 
 .routing-page__band-item {
@@ -718,10 +1181,69 @@ void loadRouting()
   margin-top: var(--khaen-space-2);
 }
 
-/* --------------------------------------------------------------- 映射表 */
+/* ----------------------------------------------------------- 当前值来源 */
 
-.routing-lanes__summary {
-  margin-bottom: var(--khaen-space-1);
+.routing-current__unknown {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+}
+
+.routing-current__unknown-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.routing-current__known-zero {
+  color: var(--khaen-text-secondary);
+}
+
+/* --------------------------------------------------------------- 编辑表 */
+
+.routing-edit__capability {
+  display: flex;
+  align-items: center;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+}
+
+.routing-edit__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+}
+
+.routing-edit__dac {
+  display: flex;
+  align-items: center;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+}
+
+.routing-edit__label {
+  color: var(--khaen-text-secondary);
+  font-size: var(--khaen-font-aux);
+}
+
+.routing-edit__invalid {
+  color: var(--khaen-danger);
+  font-size: var(--khaen-font-aux);
+}
+
+.routing-edit__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+}
+
+.routing-edit__actions :deep(.el-button) {
+  min-height: 36px;
 }
 
 .routing-table__wrap {
@@ -731,7 +1253,7 @@ void loadRouting()
 
 .routing-table {
   width: 100%;
-  min-width: 360px;
+  min-width: 420px;
   border-collapse: collapse;
   font-size: var(--khaen-font-aux);
 }
@@ -754,51 +1276,10 @@ void loadRouting()
   overflow-wrap: anywhere;
 }
 
-.routing-lanes__empty {
-  display: flex;
-  align-items: center;
-  gap: var(--khaen-space-2);
-  flex-wrap: wrap;
-}
-
 /* ------------------------------------------------------------- 计划摘要 */
 
 .routing-plan__note {
   margin-top: var(--khaen-space-2);
-}
-
-/* ----------------------------------------------------------- 编辑不可用 */
-
-.routing-edit__banner {
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--khaen-space-3);
-  flex-wrap: wrap;
-}
-
-.routing-edit__banner-text {
-  display: flex;
-  flex-direction: column;
-  gap: var(--khaen-space-1);
-  min-width: 0;
-}
-
-.routing-edit__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--khaen-space-2);
-  flex-wrap: wrap;
-  margin-top: var(--khaen-space-1);
-}
-
-.routing-edit__requirements {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: var(--khaen-space-2) 0 0;
-  padding-left: var(--khaen-space-4);
-  color: var(--khaen-text-secondary);
-  font-size: var(--khaen-font-aux);
 }
 
 /* --------------------------------------------------------- 未接入条目 */

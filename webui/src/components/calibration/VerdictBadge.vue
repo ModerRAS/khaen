@@ -4,18 +4,21 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TruthTag from '@/components/TruthTag.vue'
 import { jobResultTruth, verdictTone, type CalibrationVerdict } from '@/api/calibration'
+import type { TruthKind } from '@/types/ui'
 
 const props = defineProps<{
   verdict: CalibrationVerdict | null
   engine?: string | null
   large?: boolean
+  /** 显式真实性（调用方已按 result.measured/simulated 判过时传入，优先于 engine 推断）。 */
+  truth?: TruthKind | null
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
 
 const tone = computed(() => verdictTone(props.verdict))
 const text = computed(() => (props.verdict === null ? t('calibration.verdict.none') : props.verdict))
-const truth = computed(() => jobResultTruth(props.engine ?? null))
+const truth = computed(() => props.truth ?? jobResultTruth(props.engine ?? null))
 </script>
 
 <template>

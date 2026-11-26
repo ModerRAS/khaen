@@ -141,6 +141,13 @@ export interface RawResponse {
   body: string
 }
 
+/** getRawBytes 的返回：保留状态码/响应头/原始字节（二进制下载端点用）。 */
+export interface RawBytesResponse {
+  status: number
+  headers: Headers
+  bytes: ArrayBuffer
+}
+
 /** 同源 REST 客户端。 */
 export class ApiClient {
   private readonly baseUrl: string
@@ -197,6 +204,21 @@ export class ApiClient {
       body = ''
     }
     return { status: response.status, headers: response.headers, body }
+  }
+
+  /**
+   * 原始字节 GET（二进制产物下载等）：与 getRaw 同一套 URL/认证/超时/错误体/401/版本头处理，
+   * 成功时返回状态、响应头与 ArrayBuffer（无损；文本端点无需用它）。
+   */
+  async getRawBytes(path: string, options: RequestOptions = {}): Promise<RawBytesResponse> {
+    const response = await this.send('GET', path, options)
+    let bytes: ArrayBuffer
+    try {
+      bytes = await response.arrayBuffer()
+    } catch {
+      bytes = new ArrayBuffer(0)
+    }
+    return { status: response.status, headers: response.headers, bytes }
   }
 
   /** 构造并发送一次请求：认证头、超时、401 回调、API 版本校验、错误体解析都在这里。 */
@@ -359,15 +381,25 @@ export class ApiClient {
     if (text.length > 0) {
       try {
         const parsed: unknown = JSON.parse(text)
-        if (isRecord(parsed) && isRecord(parsed.error)) {
-          const body = parsed.error
-          if (typeof body.code === 'string' && body.code.length > 0) {
-            code = body.code
+        if (isRecord(parsed)) {
+          if (isRecord(parsed.error)) {
+            // M1 规范错误体：{error:{code,message,details}}
+            const body = parsed.error
+            if (typeof body.code === 'string' && body.code.length > 0) {
+              code = body.code
+            }
+            if (typeof body.message === 'string' && body.message.length > 0) {
+              message = body.message
+            }
+            details = body.details
+          } else if (typeof parsed.error === 'string' && parsed.error.length > 0) {
+            // host_link 转发的 rt-host 错误体：{ok:false, error:"<code>", message, details?}
+            code = parsed.error
+            if (typeof parsed.message === 'string' && parsed.message.length > 0) {
+              message = parsed.message
+            }
+            details = parsed.details
           }
-          if (typeof body.message === 'string' && body.message.length > 0) {
-            message = body.message
-          }
-          details = body.details
         }
       } catch {
         // 非 JSON 错误体（反代 HTML 等）：保留 http_<status> 归类码，便于上层提示刷新。

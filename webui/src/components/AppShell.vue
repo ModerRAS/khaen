@@ -3,9 +3,9 @@
  * 全局外壳（PLAN §11.2）：左侧导航 + 顶栏 + 内容区。
  *
  * - >=1280 侧栏展开 224px；<1280 强制折叠 64px（只留图标）；<768 变抽屉。
- * - 顶栏：页面标题 + 状态徽标组（M2 起接真实数据，现在一律「未接入」）+ 刷新/主题/用户菜单。
- * - 内容区最大 1440px 居中，左右 24px；顶部常驻 M0/M1 骨架提示条。
- * - 未落地的导航项灰显并标注计划里程碑，不做假跳转。
+ * - 顶栏：页面标题 + 状态徽标组（接 /api/status 真实数据，缺失显示「—」）+ 刷新/主题/用户菜单。
+ * - 内容区最大 1440px 居中，左右 24px。
+ * - 全部导航项均已落地（无灰显/占位项）；页面能力差异由各页面按 /api/meta 自行如实标注。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -14,9 +14,11 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Connection,
   DataLine,
   Document,
   Files,
+  Grid,
   Headset,
   Menu,
   Monitor,
@@ -26,10 +28,12 @@ import {
   Refresh,
   Share,
   Sunny,
+  SwitchButton,
   Timer,
   User
 } from '@element-plus/icons-vue'
 import { navGroups, type NavItem } from '@/router'
+import { ensureMeta } from '@/stores/meta'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
 import { useViewport } from '@/composables/useViewport'
 import { setLocale } from '@/i18n'
@@ -51,8 +55,11 @@ const { mode: themeMode, resolved: themeResolved, setThemeMode, toggleTheme } = 
 const ICONS: Record<string, Component> = {
   Odometer,
   Headset,
+  Connection,
+  SwitchButton,
   Files,
   Share,
+  Grid,
   DataLine,
   Timer,
   Monitor,
@@ -150,13 +157,10 @@ function toggleCollapsed(): void {
 }
 
 function navTitle(item: NavItem): string {
-  return item.implemented ? t(item.titleKey) : t('shell.navDisabled', { milestone: item.milestone ?? 'M?' })
+  return t(item.titleKey)
 }
 
 function navigate(item: NavItem): void {
-  if (!item.implemented) {
-    return
-  }
   drawerOpen.value = false
   void router.push(item.path)
 }
@@ -219,6 +223,8 @@ onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   // 顶栏/侧栏版本号 = release 版本（来自匿名 /healthz；失败保持「—」，绝不拿 webui 版本冒充）。
   void loadReleaseVersion()
+  // 能力快照预热（GET /api/meta）：页面首屏即可按真实能力渲染入口；失败保持 unknown 由页面标注。
+  void ensureMeta()
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
@@ -357,25 +363,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <template v-for="group in navGroups" :key="group.key">
         <div v-if="!collapsed" class="nav-group__label">{{ t(group.labelKey) }}</div>
         <nav class="nav">
-          <component
-            :is="item.implemented ? 'a' : 'div'"
+          <a
             v-for="item in group.items"
             :key="item.name"
             class="nav-item"
-            :class="{
-              'is-active': item.implemented && route.name === item.name,
-              'is-disabled': !item.implemented
-            }"
-            :href="item.implemented ? item.path : undefined"
+            :class="{ 'is-active': route.name === item.name }"
+            :href="item.path"
             :title="navTitle(item)"
             @click.prevent="navigate(item)"
           >
             <el-icon :size="18"><component :is="ICONS[item.icon]" /></el-icon>
             <span v-if="!collapsed" class="nav-item__label">{{ t(item.titleKey) }}</span>
-            <span v-if="!collapsed && !item.implemented" class="nav-item__flag">
-              {{ item.milestone }}
-            </span>
-          </component>
+          </a>
         </nav>
       </template>
 
@@ -389,7 +388,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
     <main class="app-main">
       <div class="app-content">
-        <div class="banner banner--info" role="status">{{ t('shell.stubBanner') }}</div>
         <router-view />
       </div>
     </main>

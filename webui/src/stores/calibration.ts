@@ -24,14 +24,17 @@ import {
   createCalibrationApi,
   isJobTerminal,
   type CalibrationApi,
-  type CalibrationApplyResult,
+  type CalibrationApplyOutcome,
+  type CalibrationArtifactDownload,
   type CalibrationCreateJobInputs,
   type CalibrationErrorInfo,
   type CalibrationJob,
   type CalibrationJobStatus,
   type CalibrationJobsResponse,
-  type CalibrationRollbackResult,
+  type CalibrationRollbackOutcome,
+  type CalibrationStagedRequest,
   type CalibrationUploadResult,
+  type CalibrationWizardApplyOutcome,
   type CalibrationWizardResponse,
   type CalibrationWizardStateResponse,
   type WizardConfig,
@@ -41,7 +44,26 @@ import {
 
 export type CalibrationPhase = 'loading' | 'ready' | 'error' | 'unavailable'
 export type JobPhase = 'idle' | 'loading' | 'ready' | 'error'
-export type CalibrationBusyKey = 'wizard' | 'jobs' | 'upload' | 'saveWizard' | 'createJob' | 'cancelJob' | 'apply' | 'rollback'
+export type CalibrationBusyKey =
+  | 'wizard'
+  | 'jobs'
+  | 'upload'
+  | 'saveWizard'
+  | 'createJob'
+  | 'cancelJob'
+  | 'apply'
+  | 'rollback'
+  | 'download'
+
+/** 已 prepare、尚未 commit/abort 的两阶段草稿（一次性 engine_token）。 */
+export interface PendingStagedControl {
+  kind: 'apply' | 'rollback'
+  jobId: string
+  engineToken: string
+  planSha256: string | null
+  previousVersion: number | null
+  targetVersion: number | null
+}
 
 export interface MeasurementDraft {
   baseline: CalibrationUploadResult | null
@@ -72,9 +94,15 @@ export interface CalibrationState {
   busy: Record<CalibrationBusyKey, boolean>
   /** 最近一次动作失败（页面横幅/表单提示）。 */
   actionError: CalibrationErrorInfo | null
-  /** 最近一次 apply / rollback 回执（第 8 步/job 页展示）。 */
-  lastApply: CalibrationApplyResult | null
-  lastRollback: CalibrationRollbackResult | null
+  /** 最近一次 apply / wizard apply 回执（可能是 prepare 草稿，未生效）。 */
+  lastApply: CalibrationWizardApplyOutcome | null
+  /** 最近一次 rollback 回执（可能是 prepare 草稿，未生效）。 */
+  lastRollback: CalibrationRollbackOutcome | null
+  /** staged prepare 后待 commit/abort 的草稿；null = 没有待决草稿。 */
+  pendingApply: PendingStagedControl | null
+  pendingRollback: PendingStagedControl | null
+  /** 最近一次产物下载（文件名/来源；页面负责保存 Blob）。 */
+  lastDownload: CalibrationArtifactDownload | null
 }
 
 export function createInitialCalibrationState(): CalibrationState {
@@ -100,11 +128,15 @@ export function createInitialCalibrationState(): CalibrationState {
       createJob: false,
       cancelJob: false,
       apply: false,
-      rollback: false
+      rollback: false,
+      download: false
     },
     actionError: null,
     lastApply: null,
-    lastRollback: null
+    lastRollback: null,
+    pendingApply: null,
+    pendingRollback: null,
+    lastDownload: null
   }
 }
 
@@ -137,16 +169,25 @@ export interface CalibrationController {
   saveWizard(config: WizardConfig, measurement?: WizardMeasurementDraft): Promise<CalibrationActionResult<CalibrationWizardResponse>>
   uploadMeasurement(input: MeasurementUploadInput): Promise<CalibrationActionResult<CalibrationUploadResult>>
   uploadMicCal(input: { bytes: ArrayBuffer; filename: string; contentType: string }): Promise<CalibrationActionResult<CalibrationUploadResult>>
-  createJob(inputs: CalibrationCreateJobInputs): Promise<CalibrationActionResult<{ job_id: string }>>
+  createJob(inputs: CalibrationCreateJobInputs): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>>
   loadJob(jobId: string): Promise<CalibrationActionResult<CalibrationJob>>
   startJobPolling(jobId: string): void
   stopJobPolling(): void
   pauseJobPolling(): void
   resumeJobPolling(): void
   cancelJob(jobId: string): Promise<CalibrationActionResult<CalibrationJobStatus | null>>
-  applyJob(jobId: string): Promise<CalibrationActionResult<CalibrationApplyResult>>
-  applyWizard(): Promise<CalibrationActionResult<CalibrationApplyResult>>
-  rollbackJob(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackResult>>
+  /** 单发 apply（request 省略）或 staged prepare/commit/abort。 */
+  applyJob(jobId: string, request?: CalibrationStagedRequest | null): Promise<CalibrationActionResult<CalibrationApplyOutcome>>
+  /** 用最近一次 apply prepare 的 token commit；没有待决草稿时返回本地错误（不发请求）。 */
+  commitApply(jobId: string): Promise<CalibrationActionResult<CalibrationApplyOutcome>>
+  /** 丢弃 apply prepare 的草稿（运行态不变）。 */
+  abortApply(jobId: string): Promise<CalibrationActionResult<CalibrationApplyOutcome>>
+  applyWizard(jobId?: string | null): Promise<CalibrationActionResult<CalibrationWizardApplyOutcome>>
+  rollbackJob(jobId: string, request?: CalibrationStagedRequest | null): Promise<CalibrationActionResult<CalibrationRollbackOutcome>>
+  commitRollback(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackOutcome>>
+  abortRollback(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackOutcome>>
+  /** 带认证下载产物（getRaw）；页面拿到 text/filename 后自行 Blob 保存。 */
+  downloadArtifact(jobId: string, name: string): Promise<CalibrationActionResult<CalibrationArtifactDownload>>
   refreshAll(params?: { limit?: number; offset?: number }): Promise<void>
   clearActionError(): void
   reset(): void
@@ -426,7 +467,7 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
 
   async function createJob(
     inputs: CalibrationCreateJobInputs
-  ): Promise<CalibrationActionResult<{ job_id: string }>> {
+  ): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>> {
     setBusy('createJob', true)
     state.actionError = null
     try {
@@ -436,7 +477,7 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
       state.jobError = null
       // 进度全部来自真实 job 状态轮询（创建响应只有 job_id，不猜状态）。
       startJobPolling(created.job_id)
-      return { ok: true, value: { job_id: created.job_id } }
+      return { ok: true, value: { job_id: created.job_id, location: created.location } }
     } catch (error) {
       const info = classifyCalibrationError(error)
       state.actionError = info
@@ -483,12 +524,60 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
     }
   }
 
-  async function applyJob(jobId: string): Promise<CalibrationActionResult<CalibrationApplyResult>> {
+  function pendingControl(kind: 'apply' | 'rollback', jobId: string, engineToken: string, planSha256: string | null): PendingStagedControl {
+    return {
+      kind,
+      jobId,
+      engineToken,
+      planSha256,
+      previousVersion: null,
+      targetVersion: null
+    }
+  }
+
+  /** 记录 apply/rollback 回执；prepare 时把一次性 token 存为待决草稿，单发/commit 后清空。 */
+  function recordApplyOutcome(jobId: string, outcome: CalibrationApplyOutcome | CalibrationWizardApplyOutcome): void {
+    state.lastApply = outcome
+    if (outcome.kind === 'prepare') {
+      state.pendingApply = {
+        ...pendingControl('apply', jobId, outcome.engine_token, outcome.plan_sha256),
+        previousVersion: outcome.previous_version,
+        targetVersion: outcome.target_version
+      }
+    } else if (outcome.kind === 'applied' || outcome.kind === 'abort') {
+      state.pendingApply = null
+    }
+  }
+
+  function recordRollbackOutcome(jobId: string, outcome: CalibrationRollbackOutcome): void {
+    state.lastRollback = outcome
+    if (outcome.kind === 'prepare') {
+      state.pendingRollback = {
+        ...pendingControl('rollback', jobId, outcome.engine_token, outcome.plan_sha256),
+        previousVersion: outcome.previous_version,
+        targetVersion: outcome.target_version
+      }
+    } else if (outcome.kind === 'rolled_back' || outcome.kind === 'abort') {
+      state.pendingRollback = null
+    }
+  }
+
+  function engineTokenFor(pending: PendingStagedControl | null, jobId: string): string | null {
+    if (pending === null || pending.jobId !== jobId) {
+      return null
+    }
+    return pending.engineToken
+  }
+
+  async function applyJob(
+    jobId: string,
+    request: CalibrationStagedRequest | null = null
+  ): Promise<CalibrationActionResult<CalibrationApplyOutcome>> {
     setBusy('apply', true)
     state.actionError = null
     try {
-      const result = await deps.api.applyJob(jobId)
-      state.lastApply = result
+      const result = await deps.api.applyJob(jobId, request)
+      recordApplyOutcome(jobId, result)
       await loadWizardState()
       return { ok: true, value: result }
     } catch (error) {
@@ -500,12 +589,49 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
     }
   }
 
-  async function applyWizard(): Promise<CalibrationActionResult<CalibrationApplyResult>> {
+  async function commitApply(jobId: string): Promise<CalibrationActionResult<CalibrationApplyOutcome>> {
+    const engineToken = engineTokenFor(state.pendingApply, jobId)
+    if (engineToken === null) {
+      // 本地拒绝：没有 prepare 回执就 commit 会把"未生效"当成功，属于假成功。
+      const info = classifyCalibrationError(
+        new Error('no pending apply draft for job ' + jobId + ': prepare first')
+      )
+      state.actionError = info
+      return { ok: false, error: info }
+    }
+    return applyJob(jobId, { stage: 'commit', engine_token: engineToken })
+  }
+
+  async function abortApply(jobId: string): Promise<CalibrationActionResult<CalibrationApplyOutcome>> {
+    const engineToken = engineTokenFor(state.pendingApply, jobId)
+    if (engineToken === null) {
+      const info = classifyCalibrationError(
+        new Error('no pending apply draft for job ' + jobId + ': prepare first')
+      )
+      state.actionError = info
+      return { ok: false, error: info }
+    }
+    return applyJob(jobId, { stage: 'abort', engine_token: engineToken })
+  }
+
+  async function applyWizard(jobId: string | null = null): Promise<CalibrationActionResult<CalibrationWizardApplyOutcome>> {
     setBusy('apply', true)
     state.actionError = null
     try {
-      const result = await deps.api.applyWizard()
+      const result = await deps.api.applyWizard(jobId)
       state.lastApply = result
+      if (result.kind === 'prepare') {
+        // wizard/apply 的 staged 目标 job 由回执给出；没有 job_id 时不能 commit（token 仍显示）。
+        if (result.job_id !== null) {
+          state.pendingApply = {
+            ...pendingControl('apply', result.job_id, result.engine_token, result.plan_sha256),
+            previousVersion: result.previous_version,
+            targetVersion: result.target_version
+          }
+        }
+      } else if (result.kind === 'applied' || result.kind === 'abort') {
+        state.pendingApply = null
+      }
       await loadWizardState()
       return { ok: true, value: result }
     } catch (error) {
@@ -517,12 +643,15 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
     }
   }
 
-  async function rollbackJob(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackResult>> {
+  async function rollbackJob(
+    jobId: string,
+    request: CalibrationStagedRequest | null = null
+  ): Promise<CalibrationActionResult<CalibrationRollbackOutcome>> {
     setBusy('rollback', true)
     state.actionError = null
     try {
-      const result = await deps.api.rollbackJob(jobId)
-      state.lastRollback = result
+      const result = await deps.api.rollbackJob(jobId, request)
+      recordRollbackOutcome(jobId, result)
       await loadWizardState()
       return { ok: true, value: result }
     } catch (error) {
@@ -531,6 +660,49 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
       return { ok: false, error: info }
     } finally {
       setBusy('rollback', false)
+    }
+  }
+
+  async function commitRollback(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackOutcome>> {
+    const engineToken = engineTokenFor(state.pendingRollback, jobId)
+    if (engineToken === null) {
+      const info = classifyCalibrationError(
+        new Error('no pending rollback draft for job ' + jobId + ': prepare first')
+      )
+      state.actionError = info
+      return { ok: false, error: info }
+    }
+    return rollbackJob(jobId, { stage: 'commit', engine_token: engineToken })
+  }
+
+  async function abortRollback(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackOutcome>> {
+    const engineToken = engineTokenFor(state.pendingRollback, jobId)
+    if (engineToken === null) {
+      const info = classifyCalibrationError(
+        new Error('no pending rollback draft for job ' + jobId + ': prepare first')
+      )
+      state.actionError = info
+      return { ok: false, error: info }
+    }
+    return rollbackJob(jobId, { stage: 'abort', engine_token: engineToken })
+  }
+
+  async function downloadArtifact(
+    jobId: string,
+    name: string
+  ): Promise<CalibrationActionResult<CalibrationArtifactDownload>> {
+    setBusy('download', true)
+    state.actionError = null
+    try {
+      const result = await deps.api.downloadArtifact(jobId, name)
+      state.lastDownload = result
+      return { ok: true, value: result }
+    } catch (error) {
+      const info = classifyCalibrationError(error)
+      state.actionError = info
+      return { ok: false, error: info }
+    } finally {
+      setBusy('download', false)
     }
   }
 
@@ -562,8 +734,13 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
     resumeJobPolling,
     cancelJob,
     applyJob,
+    commitApply,
+    abortApply,
     applyWizard,
     rollbackJob,
+    commitRollback,
+    abortRollback,
+    downloadArtifact,
     refreshAll,
     clearActionError,
     reset
@@ -613,7 +790,7 @@ export function uploadCalibrationMicCal(input: {
 
 export function createCalibrationJob(
   inputs: CalibrationCreateJobInputs
-): Promise<CalibrationActionResult<{ job_id: string }>> {
+): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>> {
   return controller.createJob(inputs)
 }
 
@@ -641,16 +818,52 @@ export function cancelCalibrationJob(jobId: string): Promise<CalibrationActionRe
   return controller.cancelJob(jobId)
 }
 
-export function applyCalibrationJob(jobId: string): Promise<CalibrationActionResult<CalibrationApplyResult>> {
-  return controller.applyJob(jobId)
+export function applyCalibrationJob(
+  jobId: string,
+  request: CalibrationStagedRequest | null = null
+): Promise<CalibrationActionResult<CalibrationApplyOutcome>> {
+  return controller.applyJob(jobId, request)
 }
 
-export function applyCalibrationWizard(): Promise<CalibrationActionResult<CalibrationApplyResult>> {
-  return controller.applyWizard()
+/** 用 apply prepare 的 token 提交（没有待决草稿时本地拒绝，不发请求）。 */
+export function commitCalibrationApply(jobId: string): Promise<CalibrationActionResult<CalibrationApplyOutcome>> {
+  return controller.commitApply(jobId)
 }
 
-export function rollbackCalibrationJob(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackResult>> {
-  return controller.rollbackJob(jobId)
+/** 丢弃 apply prepare 的草稿（运行态不变）。 */
+export function abortCalibrationApply(jobId: string): Promise<CalibrationActionResult<CalibrationApplyOutcome>> {
+  return controller.abortApply(jobId)
+}
+
+export function applyCalibrationWizard(
+  jobId: string | null = null
+): Promise<CalibrationActionResult<CalibrationWizardApplyOutcome>> {
+  return controller.applyWizard(jobId)
+}
+
+export function rollbackCalibrationJob(
+  jobId: string,
+  request: CalibrationStagedRequest | null = null
+): Promise<CalibrationActionResult<CalibrationRollbackOutcome>> {
+  return controller.rollbackJob(jobId, request)
+}
+
+/** 用 rollback prepare 的 token 提交。 */
+export function commitCalibrationRollback(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackOutcome>> {
+  return controller.commitRollback(jobId)
+}
+
+/** 丢弃 rollback prepare 的草稿（运行态不变）。 */
+export function abortCalibrationRollback(jobId: string): Promise<CalibrationActionResult<CalibrationRollbackOutcome>> {
+  return controller.abortRollback(jobId)
+}
+
+/** 带认证下载校准产物（页面拿到 text/filename 后 Blob 保存）。 */
+export function downloadCalibrationArtifact(
+  jobId: string,
+  name: string
+): Promise<CalibrationActionResult<CalibrationArtifactDownload>> {
+  return controller.downloadArtifact(jobId, name)
 }
 
 export function refreshCalibrationAll(params?: { limit?: number; offset?: number }): Promise<void> {

@@ -10,12 +10,15 @@ import {
   WIZARD_STEP_KEYS,
   createCalibrationApi,
   type CalibrationApi,
-  type CalibrationApplyResult,
+  type CalibrationApplyOutcome,
+  type CalibrationArtifactDownload,
   type CalibrationJob,
   type CalibrationJobResponse,
   type CalibrationJobsResponse,
-  type CalibrationRollbackResult,
+  type CalibrationRollbackOutcome,
+  type CalibrationStagedRequest,
   type CalibrationUploadResult,
+  type CalibrationWizardApplyOutcome,
   type CalibrationWizardResponse,
   type CalibrationWizardStateResponse,
   type WizardConfig,
@@ -80,7 +83,8 @@ function wizardResponse(saved = true): CalibrationWizardResponse {
     },
     saved,
     updated_at: '2026-11-26T06:00:00.000Z',
-    reasons: {}
+    reasons: {},
+    set_fields: []
   }
 }
 
@@ -113,13 +117,14 @@ function jobsResponse(available = true): CalibrationJobsResponse {
   return {
     schema: CALIBRATION_JOBS_SCHEMA,
     available,
-    reason: available ? null : 'calibration job backend not wired (T70h-b)',
+    reason: available ? null : 'calibration job backend not wired',
     engine: null,
     active_job_id: null,
     jobs: [],
     total: 0,
     limit: 20,
-    offset: 0
+    offset: 0,
+    reasons: available ? {} : { jobs: 'calibration job backend not wired' }
   }
 }
 
@@ -135,7 +140,11 @@ function jobDetail(status: CalibrationJob['status'] = 'running'): CalibrationJob
     duration_ms: status === 'succeeded' ? 8000 : null,
     error: null,
     reason: null,
+    created_unix: null,
+    updated_unix: null,
+    progress: null,
     engine: 'synthetic',
+    step: null,
     apply_state: 'not_applied',
     applied_version: null,
     steps: [
@@ -150,30 +159,82 @@ function jobDetail(status: CalibrationJob['status'] = 'running'): CalibrationJob
     ],
     artifacts: [],
     inputs: null,
-    result: null
+    result: null,
+    apply: null
   }
   return { schema: CALIBRATION_JOB_SCHEMA, job, reasons: {} }
 }
 
-const APPLY_RESULT: CalibrationApplyResult = {
+const APPLY_RESULT: CalibrationApplyOutcome = {
+  kind: 'applied',
+  stage: 'single',
   applied: true,
   job_id: 'job-new',
   applied_version: 4,
+  previous_version: 3,
   graph_id: 'graph-new',
   sha256: 'b'.repeat(64),
   snapshot: { version: 3, graph_id: 'graph-old', sha256: 'a'.repeat(64) },
   ack: { synthetic: true, actual: false },
   readback: { actual_version: 4 },
-  applied_at: '2026-11-26T06:00:10.000Z'
+  applied_at: '2026-11-26T06:00:10.000Z',
+  job: null,
+  reasons: {}
 }
 
-const ROLLBACK_RESULT: CalibrationRollbackResult = {
+const APPLY_PREPARE: CalibrationApplyOutcome = {
+  kind: 'prepare',
+  stage: 'prepare',
+  job_id: 'job-new',
+  engine_token: 'token-apply',
+  plan_sha256: 'b'.repeat(64),
+  previous_version: 3,
+  target_version: null,
+  job: null,
+  reasons: {},
+  raw: {}
+}
+
+const ROLLBACK_RESULT: CalibrationRollbackOutcome = {
+  kind: 'rolled_back',
+  stage: 'single',
   rolled_back: true,
+  job_id: 'job-new',
   restored_version: 3,
+  applied_version: 3,
   graph_id: 'graph-old',
   sha256: 'a'.repeat(64),
   readback: null,
-  rolled_back_at: '2026-11-26T06:00:11.000Z'
+  rolled_back_at: '2026-11-26T06:00:11.000Z',
+  job: null,
+  reasons: {}
+}
+
+const ROLLBACK_PREPARE: CalibrationRollbackOutcome = {
+  kind: 'prepare',
+  stage: 'prepare',
+  job_id: 'job-new',
+  engine_token: 'token-rollback',
+  plan_sha256: null,
+  previous_version: 4,
+  target_version: 3,
+  job: null,
+  reasons: {},
+  raw: {}
+}
+
+const DOWNLOAD_BYTES = new TextEncoder().encode('{"ok":true}').buffer
+const DOWNLOAD: CalibrationArtifactDownload = {
+  job_id: 'job-new',
+  name: 'report.json',
+  filename: 'report.json',
+  content_type: 'application/json',
+  sha256: 'c'.repeat(64),
+  status: 200,
+  data: DOWNLOAD_BYTES,
+  text: '{"ok":true}',
+  byte_length: 11,
+  from_content_disposition: true
 }
 
 interface FakeApiCalls {
@@ -185,9 +246,10 @@ interface FakeApiCalls {
   createJob: Array<{ kind: string; inputs: Record<string, unknown> }>
   getJob: string[]
   cancelJob: string[]
-  applyJob: string[]
-  rollbackJob: string[]
-  applyWizard: number
+  applyJob: Array<{ jobId: string; request: CalibrationStagedRequest | null }>
+  rollbackJob: Array<{ jobId: string; request: CalibrationStagedRequest | null }>
+  applyWizard: Array<string | null>
+  downloadArtifact: Array<{ jobId: string; name: string }>
 }
 
 function createFakeApi(overrides: Partial<CalibrationApi> = {}) {
@@ -202,7 +264,8 @@ function createFakeApi(overrides: Partial<CalibrationApi> = {}) {
     cancelJob: [],
     applyJob: [],
     rollbackJob: [],
-    applyWizard: 0
+    applyWizard: [],
+    downloadArtifact: []
   }
   const api: CalibrationApi = {
     async listJobs() {
@@ -215,18 +278,50 @@ function createFakeApi(overrides: Partial<CalibrationApi> = {}) {
     },
     async createJob(request) {
       calls.createJob.push(request as unknown as { kind: string; inputs: Record<string, unknown> })
-      return { job_id: 'job-new', status: 'queued' }
+      return { job_id: 'job-new', location: '/api/calibration/jobs/job-new', status: 'queued' }
     },
     async cancelJob(jobId) {
       calls.cancelJob.push(jobId)
       return { job_id: jobId, status: 'cancelled' }
     },
-    async applyJob(jobId) {
-      calls.applyJob.push(jobId)
+    async applyJob(jobId, request = null) {
+      calls.applyJob.push({ jobId, request })
+      if (request?.stage === 'prepare') {
+        return APPLY_PREPARE
+      }
+      if (request?.stage === 'abort') {
+        return {
+          kind: 'abort',
+          stage: 'abort',
+          aborted: true,
+          job_id: jobId,
+          plan_sha256: null,
+          target_version: null,
+          control: null,
+          reasons: {},
+          raw: {}
+        }
+      }
       return APPLY_RESULT
     },
-    async rollbackJob(jobId) {
-      calls.rollbackJob.push(jobId)
+    async rollbackJob(jobId, request = null) {
+      calls.rollbackJob.push({ jobId, request })
+      if (request?.stage === 'prepare') {
+        return ROLLBACK_PREPARE
+      }
+      if (request?.stage === 'abort') {
+        return {
+          kind: 'abort',
+          stage: 'abort',
+          aborted: true,
+          job_id: jobId,
+          plan_sha256: null,
+          target_version: 3,
+          control: null,
+          reasons: {},
+          raw: {}
+        }
+      }
       return ROLLBACK_RESULT
     },
     async upload(body, options) {
@@ -234,7 +329,9 @@ function createFakeApi(overrides: Partial<CalibrationApi> = {}) {
       const result: CalibrationUploadResult = {
         upload_id: 'up-' + String(calls.upload.length),
         sha256: 'c'.repeat(64),
-        bytes: 44
+        bytes: 44,
+        schema: null,
+        created: true
       }
       return result
     },
@@ -250,9 +347,14 @@ function createFakeApi(overrides: Partial<CalibrationApi> = {}) {
       calls.getWizardState += 1
       return wizardState()
     },
-    async applyWizard() {
-      calls.applyWizard += 1
-      return APPLY_RESULT
+    async applyWizard(jobId = null) {
+      calls.applyWizard.push(jobId)
+      const outcome: CalibrationWizardApplyOutcome = APPLY_RESULT
+      return outcome
+    },
+    async downloadArtifact(jobId, name) {
+      calls.downloadArtifact.push({ jobId, name })
+      return DOWNLOAD
     },
     artifactUrl(jobId, name) {
       return '/api/calibration/jobs/' + jobId + '/artifacts/' + name
@@ -322,6 +424,7 @@ test('loadJobs distinguishes available=false from a hard failure', async () => {
   await h.controller.loadJobs()
   assert.equal(h.state.jobsPhase, 'unavailable')
   assert.equal(h.state.jobs?.available, false)
+  assert.equal(h.state.jobs?.reason, 'calibration job backend not wired')
   assert.equal(h.state.jobsError, null)
 
   const failed = createHarness({
@@ -445,6 +548,7 @@ test('createJob starts real status polling and stops on a terminal job', async (
   assert.equal(result.ok, true)
   if (result.ok === true) {
     assert.equal(result.value.job_id, 'job-new')
+    assert.equal(result.value.location, '/api/calibration/jobs/job-new')
   }
   assert.equal(h.calls.createJob.length, 1)
   assert.equal(h.calls.createJob[0].kind, 'single_point_offline')
@@ -545,27 +649,94 @@ test('cancelJob stops polling and reloads the terminal job', async () => {
 
 /* --------------------------------------------------------- apply / rollback */
 
-test('applyJob records the readback and refreshes gates', async () => {
+test('applyJob (single-shot) records the readback and refreshes gates', async () => {
   const h = createHarness()
   const result = await h.controller.applyJob('job-new')
   assert.equal(result.ok, true)
-  assert.deepEqual(h.calls.applyJob, ['job-new'])
-  assert.equal(h.state.lastApply?.applied_version, 4)
-  assert.equal(h.state.lastApply?.ack?.synthetic, true)
+  assert.equal(h.calls.applyJob.length, 1)
+  assert.deepEqual(h.calls.applyJob[0], { jobId: 'job-new', request: null })
+  assert.equal(h.state.lastApply?.kind, 'applied')
+  if (h.state.lastApply?.kind === 'applied') {
+    assert.equal(h.state.lastApply.applied_version, 4)
+    assert.equal(h.state.lastApply.ack?.synthetic, true)
+  }
   assert.equal(h.state.busy.apply, false)
   assert.equal(h.calls.getWizardState, 1)
+  assert.equal(h.state.pendingApply, null)
 })
 
-test('applyWizard and rollbackJob record their receipts and failures', async () => {
+test('staged apply: prepare stores token, commit/abort consume it exactly once', async () => {
+  const h = createHarness()
+  const prepared = await h.controller.applyJob('job-new', { stage: 'prepare' })
+  assert.equal(prepared.ok, true)
+  assert.equal(h.state.pendingApply?.engineToken, 'token-apply')
+  assert.equal(h.state.pendingApply?.jobId, 'job-new')
+  assert.equal(h.state.lastApply?.kind, 'prepare')
+  assert.equal(h.calls.applyJob[0].request?.stage, 'prepare')
+
+  const committed = await h.controller.commitApply('job-new')
+  assert.equal(committed.ok, true)
+  assert.equal(h.calls.applyJob[1].request?.stage, 'commit')
+  assert.equal(h.calls.applyJob[1].request?.engine_token, 'token-apply')
+  assert.equal(h.state.pendingApply, null)
+
+  // 再 commit：本地拒绝，不发请求（避免把"未生效"当成功）。
+  const again = await h.controller.commitApply('job-new')
+  assert.equal(again.ok, false)
+  assert.equal(h.calls.applyJob.length, 2)
+  assert.equal(h.state.actionError !== null, true)
+})
+
+test('staged apply: abort clears the pending draft and does not claim applied', async () => {
+  const h = createHarness()
+  await h.controller.applyJob('job-new', { stage: 'prepare' })
+  const aborted = await h.controller.abortApply('job-new')
+  assert.equal(aborted.ok, true)
+  assert.equal(h.calls.applyJob[1].request?.stage, 'abort')
+  assert.equal(h.state.pendingApply, null)
+  assert.equal(h.state.lastApply?.kind, 'abort')
+})
+
+test('staged rollback: prepare + commit/abort path and local no-pending guard', async () => {
+  const h = createHarness()
+  const noPending = await h.controller.commitRollback('job-new')
+  assert.equal(noPending.ok, false)
+  assert.equal(h.calls.rollbackJob.length, 0)
+
+  await h.controller.rollbackJob('job-new', { stage: 'prepare' })
+  assert.equal(h.state.pendingRollback?.targetVersion, 3)
+  const committed = await h.controller.commitRollback('job-new')
+  assert.equal(committed.ok, true)
+  assert.equal(h.calls.rollbackJob[1].request?.stage, 'commit')
+  assert.equal(h.calls.rollbackJob[1].request?.engine_token, 'token-rollback')
+  assert.equal(h.state.pendingRollback, null)
+
+  await h.controller.rollbackJob('job-new', { stage: 'prepare' })
+  await h.controller.abortRollback('job-new')
+  assert.equal(h.calls.rollbackJob[3].request?.stage, 'abort')
+})
+
+test('applyWizard sends no job_id by default and records the outcome', async () => {
   const h = createHarness()
   const applied = await h.controller.applyWizard()
   assert.equal(applied.ok, true)
-  assert.equal(h.calls.applyWizard, 1)
+  assert.deepEqual(h.calls.applyWizard, [null])
+  assert.equal(h.state.lastApply?.kind, 'applied')
 
+  const withJob = await h.controller.applyWizard('job-new')
+  assert.equal(withJob.ok, true)
+  assert.deepEqual(h.calls.applyWizard, [null, 'job-new'])
+})
+
+test('rollbackJob records its receipt and failures', async () => {
+  const h = createHarness()
   const rolled = await h.controller.rollbackJob('job-new')
   assert.equal(rolled.ok, true)
-  assert.deepEqual(h.calls.rollbackJob, ['job-new'])
-  assert.equal(h.state.lastRollback?.restored_version, 3)
+  assert.equal(h.calls.rollbackJob.length, 1)
+  assert.equal(h.state.lastRollback?.kind, 'rolled_back')
+  if (h.state.lastRollback?.kind === 'rolled_back') {
+    assert.equal(h.state.lastRollback.restored_version, 3)
+  }
 
   const failing = createHarness({
     async applyJob() {
@@ -580,6 +751,33 @@ test('applyWizard and rollbackJob record their receipts and failures', async () 
   assert.equal(failing.state.actionError?.category, 'conflict')
 })
 
+/* ------------------------------------------------------------ 产物下载（认证） */
+
+test('downloadArtifact records the authenticated download payload', async () => {
+  const h = createHarness()
+  const result = await h.controller.downloadArtifact('job-new', 'report.json')
+  assert.equal(result.ok, true)
+  assert.deepEqual(h.calls.downloadArtifact, [{ jobId: 'job-new', name: 'report.json' }])
+  assert.equal(h.state.lastDownload?.filename, 'report.json')
+  assert.equal(h.state.lastDownload?.text, '{"ok":true}')
+  assert.equal(h.state.busy.download, false)
+})
+
+test('downloadArtifact failure records the stable error and keeps no fake bytes', async () => {
+  const h = createHarness({
+    async downloadArtifact() {
+      throw new ApiError({ status: 404, code: 'artifact_not_found', message: 'unknown artifact' })
+    }
+  })
+  const result = await h.controller.downloadArtifact('job-new', 'nope.bin')
+  assert.equal(result.ok, false)
+  if (result.ok === false) {
+    assert.equal(result.error.category, 'not_found')
+  }
+  assert.equal(h.state.lastDownload, null)
+  assert.equal(h.state.actionError?.code, 'artifact_not_found')
+})
+
 test('reset clears state and stops polling', async () => {
   const h = createHarness()
   await h.controller.loadWizard()
@@ -589,6 +787,8 @@ test('reset clears state and stops polling', async () => {
   assert.equal(h.state.wizard, null)
   assert.equal(h.state.wizardPhase, 'loading')
   assert.equal(h.state.polling, false)
+  assert.equal(h.state.pendingApply, null)
+  assert.equal(h.state.lastDownload, null)
   assert.equal(h.clock.pending(), 0)
 })
 
@@ -613,5 +813,8 @@ test('createCalibrationApi is wired to the shared ApiClient shape', () => {
   const api = createCalibrationApi(new ApiClient({ fetchImpl: async () => jsonResponse(200, {}) }))
   assert.equal(typeof api.listJobs, 'function')
   assert.equal(typeof api.upload, 'function')
+  assert.equal(typeof api.downloadArtifact, 'function')
+  assert.equal(typeof api.applyJob, 'function')
+  assert.equal(typeof api.applyWizard, 'function')
   assert.equal(typeof api.getWizardState, 'function')
 })

@@ -203,16 +203,21 @@ function succeededJob(jobId, inputs) {
     created_at: JOB_CREATED_AT,
     started_at: JOB_STARTED_AT,
     finished_at: JOB_FINISHED_AT,
+    // 【加法】epoch 秒字段：真实 daemon 会带；缺失也应容忍（unit test 覆盖）。
+    created_unix: Math.floor(Date.parse(JOB_CREATED_AT) / 1000),
+    updated_unix: Math.floor(Date.parse(JOB_FINISHED_AT) / 1000),
     duration_ms: 8000,
     engine: 'synthetic',
     apply_state: 'not_applied',
     applied_version: null,
     steps,
+    // 【加法】downloadable 由 daemon 的白名单决定（fixture 里与真实白名单一致）。
     artifacts: built.artifacts.map((artifact) => ({
       name: artifact.name,
       sha256: sha256Hex(artifact.content.toString('utf8')),
       bytes: artifact.content.length,
-      content_type: artifact.content_type
+      content_type: artifact.content_type,
+      downloadable: true
     })),
     inputs,
     result: built.resultWithPlan,
@@ -254,6 +259,8 @@ function failedJob(jobId, inputs) {
     created_at: JOB_CREATED_AT,
     started_at: JOB_STARTED_AT,
     finished_at: '2026-11-26T06:05:06.000Z',
+    created_unix: Math.floor(Date.parse(JOB_CREATED_AT) / 1000),
+    updated_unix: Math.floor(Date.parse('2026-11-26T06:05:06.000Z') / 1000),
     duration_ms: 5000,
     engine: 'synthetic',
     apply_state: 'not_applied',
@@ -371,7 +378,8 @@ export function finalizeJobSuccess(job, now) {
     name: artifact.name,
     sha256: sha256Hex(artifact.content.toString('utf8')),
     bytes: artifact.content.length,
-    content_type: artifact.content_type
+    content_type: artifact.content_type,
+    downloadable: true
   }))
   job.artifactContent = built.artifacts
   job.steps = job.steps.map((step) => ({

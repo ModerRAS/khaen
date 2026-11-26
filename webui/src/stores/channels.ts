@@ -1,19 +1,22 @@
 /**
- * 方案与声道页 store（M4 / 任务 T54）。
+ * 方案与声道页 store。
  *
  * 两个独立控制器状态机：
- * - 声道（channels）：GET /api/channels（读） + PUT /api/channels prepare → 共享 commit/abort（写）。
- *   M3b 热重配未完成时 commit 返回 501 host_link_unsupported：页面如实显示 NOT_AVAILABLE + 原因；
- *   此前 prepare 的 preview/warnings/blockers 照实展示（不假装已应用）。
+ * - 声道热重配（channels）：GET /api/channels（只读，恒 200）+ PUT /api/channels 两阶段
+ *   （stage=prepare → commit / abort，docs/API.md §5）。prepare 只生成 rt-host 草稿不改变运行态；
+ *   commit 在块边界生效并返回真实回执（applied/generation/gap_ms/format/graph_dropped/…）；
+ *   mapping/dac_map 是**方案 routing**：commit_supported=false 时 store 拒绝发 commit
+ *   （本地 error=commit_unsupported + 展示 blockers），绝不假成功；502 reconfig_failed 的
+ *   details.rolled_back 等失败明细保存在 channelsFailure 里原样展示。
  * - 方案（plan）：客户端 sha256（WebCrypto）→ POST /api/plan/upload → 服务端 sha 双侧比对 →
  *   POST /api/plan/inspect {plan_path} 预览（plan_path = 上传回执的 stored_path；失败降级为上传摘要，
- *   不编造）→ POST /api/prepare {plan_path, plan_sha256} → commit/abort；
+ *   不编造）→ POST /api/prepare {plan_path, plan_sha256} → POST /api/commit / POST /api/abort；
  *   历史 GET /api/plan/history（daemon 真实形态 current:{version},entries[]）；回滚 POST /api/rollback
  *   （版本号递增，仍需 commit）。上传回执没有 stored_path（旧后端/mock）时 inspect/prepare 显示
  *   NOT_AVAILABLE + 稳定码 plan_path_unavailable，不猜路径、不假成功。
  *
  * 纪律：
- * - 同一时刻只允许一个写操作（busy 互斥）；失败保留已有数据并记录稳定错误码；
+ * - 同一时刻只允许一个写操作（busy 互斥）；失败保留已有读取数据并记录稳定错误码；
  * - 上传 sha 双侧不一致 = 失败（不信任任何一侧）；
  * - 历史/预览接口不可用（404/501/503）显示「未接入」+ 原因，清空对应数据而不是留旧数据冒充最新；
  * - 401 交给共享 ApiClient（会话 store 清态跳登录）。
@@ -25,7 +28,10 @@ import {
   classifyChannelsError,
   createChannelsApi,
   sha256Hex,
+  type ChannelsAbortAck,
   type ChannelsApi,
+  type ChannelsCommitAck,
+  type ChannelsCommitFailure,
   type ChannelsErrorInfo,
   type ChannelsInfo,
   type ChannelsPatch,
@@ -40,6 +46,8 @@ import { apiClient } from './session.ts'
 export type ChannelsPhase = 'loading' | 'ready' | 'error'
 export type PlanBusy = 'upload' | 'inspect' | 'prepare' | 'commit' | 'abort' | 'rollback' | null
 export type ChannelsWriteBusy = 'prepare' | 'commit' | 'abort' | null
+/** 声道写操作阶段（失败时用于页面标注是 prepare / commit / abort 哪一步）。 */
+export type ChannelsWriteStage = 'prepare' | 'commit' | 'abort'
 
 /** 本地上传态：文件名/字节/客户端 sha256 + 后端回执。byteLength 足够页面显示大小。 */
 export interface PlanUploadState {
@@ -70,10 +78,16 @@ export interface ChannelsState {
   }
   history: PlanHistory | null
   historyError: ChannelsErrorInfo | null
-  /** 声道布局编辑（两阶段；M3b 未完成时 commit 如实失败）。 */
+  /** 声道热重配两阶段（PUT /api/channels）。 */
   channelsDraft: ChannelsPrepareAck | null
-  channelsCommit: ControlCommitAck | null
+  /** 最近一次 commit 的真实回执（applied/generation/gap_ms/format/graph_dropped/routing）。 */
+  channelsCommit: ChannelsCommitAck | null
+  channelsCommitAt: number | null
   channelsError: ChannelsErrorInfo | null
+  /** 502 热重配失败明细（details.rolled_back/device_started/applied/…）；非 502 为 null。 */
+  channelsFailure: ChannelsCommitFailure | null
+  /** 最近一次失败发生在哪一阶段（页面据此提示「prepare/commit 失败」）。 */
+  channelsErrorStage: ChannelsWriteStage | null
   channelsBusy: ChannelsWriteBusy
 }
 
@@ -102,7 +116,10 @@ export function createInitialChannelsState(): ChannelsState {
     historyError: null,
     channelsDraft: null,
     channelsCommit: null,
+    channelsCommitAt: null,
     channelsError: null,
+    channelsFailure: null,
+    channelsErrorStage: null,
     channelsBusy: null
   }
 }
@@ -131,9 +148,17 @@ export interface ChannelsController {
   abortPlan(): Promise<boolean>
   /** 准备历史回滚草稿（版本号递增，仍需 commit）。 */
   prepareRollback(target: number): Promise<ControlDraft | null>
+  /** PUT /api/channels {stage:'prepare', ...patch}：只生成草稿，不改变运行态。 */
   prepareChannels(patch: ChannelsPatch): Promise<ChannelsPrepareAck | null>
-  commitChannels(): Promise<ControlCommitAck | null>
+  /**
+   * PUT /api/channels {stage:'commit', engine_token}。
+   * commit_supported=false（mapping 属方案 routing）时不发请求：本地记 commit_unsupported + blockers。
+   */
+  commitChannels(): Promise<ChannelsCommitAck | null>
+  /** PUT /api/channels {stage:'abort', engine_token}；没有服务端 token 时等价本地丢弃。 */
   abortChannels(): Promise<boolean>
+  /** 本地丢弃草稿（不假定服务端草稿已删；用于 token=null / abort 失败后的诚实退出）。 */
+  discardChannelsDraft(): void
   reset(): void
 }
 
@@ -206,15 +231,11 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
       }
       const inspect = await deps.api.fetchPlanInspect(planPath, planSha256)
       state.plan.inspect = inspect
-      planInspectErrorClear()
+      state.plan.inspectError = null
     } catch (error) {
       state.plan.inspect = null
       state.plan.inspectError = classifyChannelsError(error)
     }
-  }
-
-  function planInspectErrorClear(): void {
-    state.plan.inspectError = null
   }
 
   async function loadInspect(planPath?: string | null): Promise<void> {
@@ -389,12 +410,28 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
     }
   }
 
+  /* ------------------------------------------------------- 声道热重配（PUT 两阶段） */
+
+  function localCommitUnsupportedError(draft: ChannelsPrepareAck): ChannelsErrorInfo {
+    const blockers = draft.blockers.length > 0 ? draft.blockers : [draft.mapping?.reason ?? 'commit_supported=false']
+    return {
+      category: 'commit_unsupported',
+      status: 0,
+      code: 'commit_unsupported',
+      i18nKey: 'channelsEdit.error.commitUnsupported',
+      detail: blockers.join(' | '),
+      retryable: false
+    }
+  }
+
   async function prepareChannels(patch: ChannelsPatch): Promise<ChannelsPrepareAck | null> {
     if (state.channelsBusy !== null) {
       return null
     }
     state.channelsBusy = 'prepare'
     state.channelsError = null
+    state.channelsErrorStage = null
+    state.channelsFailure = null
     try {
       const ack = await deps.api.prepareChannels(patch)
       state.channelsDraft = ack
@@ -402,28 +439,48 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
     } catch (error) {
       state.channelsDraft = null
       state.channelsError = classifyChannelsError(error)
+      state.channelsErrorStage = 'prepare'
+      state.channelsFailure = state.channelsError.failure ?? null
       return null
     } finally {
       state.channelsBusy = null
     }
   }
 
-  async function commitChannels(): Promise<ControlCommitAck | null> {
+  async function commitChannels(): Promise<ChannelsCommitAck | null> {
     const draft = state.channelsDraft
     if (draft === null || state.channelsBusy !== null) {
       return null
     }
+    // mapping/dac_map 属方案 routing：后端明确 commit_supported=false 时禁止发 commit（不假成功）。
+    if (!draft.commit_supported || draft.engine_token === null) {
+      state.channelsError = localCommitUnsupportedError(draft)
+      state.channelsErrorStage = 'commit'
+      state.channelsFailure = null
+      return null
+    }
     state.channelsBusy = 'commit'
     state.channelsError = null
+    state.channelsErrorStage = null
+    state.channelsFailure = null
     try {
-      const ack = await deps.api.commit(draft.engine_token)
+      const ack = await deps.api.commitChannels(draft.engine_token)
       state.channelsCommit = ack
+      state.channelsCommitAt = now()
       state.channelsDraft = null
+      // 生效后重新读 GET /api/channels（数据面真实配置 + mapping 可信度 + generation）。
       await load()
       return ack
     } catch (error) {
-      // M3b 未完成时 commit 返回 501 host_link_unsupported：保留草稿与错误码，不假装成功。
-      state.channelsError = classifyChannelsError(error)
+      const info = classifyChannelsError(error)
+      state.channelsError = info
+      state.channelsErrorStage = 'commit'
+      state.channelsFailure = info.failure ?? null
+      // rt-host 在 commit 开始时消费草稿（失败即丢弃）：token 不可重放。
+      // 只有 409 冲突（busy/cal_busy/reconfiguring/token 不符）可能草稿仍在，保留以便重试/abort。
+      if (info.category !== 'conflict') {
+        state.channelsDraft = null
+      }
       return null
     } finally {
       state.channelsBusy = null
@@ -435,18 +492,55 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
     if (draft === null || state.channelsBusy !== null) {
       return false
     }
+    const token = draft.engine_token
+    if (token === null) {
+      // commit_supported=false（mapping-only）：后端没有草稿/token，本地丢弃即可（不假装调用服务端）。
+      state.channelsDraft = null
+      state.channelsError = null
+      state.channelsErrorStage = null
+      state.channelsFailure = null
+      return true
+    }
     state.channelsBusy = 'abort'
     state.channelsError = null
+    state.channelsErrorStage = null
+    state.channelsFailure = null
     try {
-      await deps.api.abort(draft.engine_token)
+      const ack: ChannelsAbortAck = await deps.api.abortChannels(token)
+      if (ack.aborted === false) {
+        // 后端明确说没丢（例如 no_channels_draft）：如实报错，不显示成功。
+        state.channelsError = {
+          category: 'conflict',
+          status: 200,
+          code: 'abort_not_applied',
+          i18nKey: 'channelsEdit.error.abortNotApplied',
+          detail: ack.note ?? 'the backend reported aborted=false',
+          retryable: true
+        }
+        state.channelsErrorStage = 'abort'
+        return false
+      }
       state.channelsDraft = null
       return true
     } catch (error) {
-      state.channelsError = classifyChannelsError(error)
+      const info = classifyChannelsError(error)
+      state.channelsError = info
+      state.channelsErrorStage = 'abort'
+      state.channelsFailure = info.failure ?? null
       return false
     } finally {
       state.channelsBusy = null
     }
+  }
+
+  function discardChannelsDraft(): void {
+    if (state.channelsBusy !== null) {
+      return
+    }
+    state.channelsDraft = null
+    state.channelsError = null
+    state.channelsErrorStage = null
+    state.channelsFailure = null
   }
 
   return {
@@ -463,6 +557,7 @@ export function createChannelsController(state: ChannelsState, deps: ChannelsDep
     prepareChannels,
     commitChannels,
     abortChannels,
+    discardChannelsDraft,
     reset(): void {
       Object.assign(state, createInitialChannelsState())
     }
@@ -521,12 +616,16 @@ export function prepareChannelLayout(patch: ChannelsPatch): Promise<ChannelsPrep
   return controller.prepareChannels(patch)
 }
 
-export function commitChannelLayout(): Promise<ControlCommitAck | null> {
+export function commitChannelLayout(): Promise<ChannelsCommitAck | null> {
   return controller.commitChannels()
 }
 
 export function abortChannelLayout(): Promise<boolean> {
   return controller.abortChannels()
+}
+
+export function discardChannelLayoutDraft(): void {
+  controller.discardChannelsDraft()
 }
 
 export function resetChannelsState(): void {

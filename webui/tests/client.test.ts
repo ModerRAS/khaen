@@ -175,3 +175,46 @@ test('parseRetryAfter accepts seconds and rejects garbage', () => {
   assert.equal(parseRetryAfter('Wed, 21 Oct 2015 07:28:00 GMT'), null)
   assert.equal(parseRetryAfter(null), null)
 })
+test('forwarded rt-host error bodies ({ok:false,error:"<code>",message}) map to ApiError', async () => {
+  const recorder = createRecordingFetch(() =>
+    jsonResponse(502, {
+      ok: false,
+      error: 'ERR_RECONFIGURE_DEVICE',
+      message: 'device reopen failed, rolled back',
+      details: { rolled_back: true }
+    })
+  )
+  const client = new ApiClient({ fetchImpl: recorder.fetch })
+  const error = await captureError(() => client.post('/api/channels', { stage: 'commit' }))
+  assert.equal(error.status, 502)
+  assert.equal(error.code, 'ERR_RECONFIGURE_DEVICE')
+  assert.equal(error.message, 'device reopen failed, rolled back')
+  assert.deepEqual(error.details, { rolled_back: true })
+})
+
+test('M1 error body keeps priority over the forwarded string form', async () => {
+  const recorder = createRecordingFetch(() =>
+    jsonResponse(409, { error: { code: 'engine_token_invalid', message: 'token spent' } })
+  )
+  const client = new ApiClient({ fetchImpl: recorder.fetch })
+  const error = await captureError(() => client.post('/api/commit', {}))
+  assert.equal(error.code, 'engine_token_invalid')
+  assert.equal(error.message, 'token spent')
+})
+test('getRawBytes keeps binary payloads lossless (text getRaw is lossy for binary)', async () => {
+  const payload = new Uint8Array([0xff, 0xfe, 0x00, 0x80, 0x41])
+  const recording = createRecordingFetch(
+    () =>
+      new Response(payload, {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': 'attachment; filename="plan.bin"' }
+      })
+  )
+  const client = new ApiClient({ fetchImpl: recording.fetch, csrfToken: () => 'csrf' })
+  const raw = await client.getRawBytes('/api/calibration/jobs/j1/artifacts/plan.bin')
+  assert.equal(raw.status, 200)
+  assert.equal(raw.headers.get('Content-Disposition'), 'attachment; filename="plan.bin"')
+  assert.deepEqual([...new Uint8Array(raw.bytes)], [...payload])
+  assert.equal(recording.calls[0].method, 'GET')
+  assert.equal(recording.calls[0].credentials, 'include')
+})
