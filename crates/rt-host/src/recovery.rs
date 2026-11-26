@@ -304,7 +304,8 @@ fn persist_status<P: PcmOutput>(
 /// 数据面主循环（平台无关；`P` 为 PCM 设备类型，真机是 AlsaPcm，测试用脚本化假设备）。
 ///
 /// 无控制通道的入口：等价于 [drive_loop_with_control] + 一个 disabled 的控制桥
-/// （既有 T42o 行为与测试不变）。
+/// （既有 T42o 行为与测试不变；生产只用带控制通道的入口，本函数仅测试用）。
+#[cfg(test)]
 pub fn drive_loop<P: PcmOutput + 'static, C: LoopPacer>(
     runtime: &mut Runtime<P>,
     options: &LoopOptions,

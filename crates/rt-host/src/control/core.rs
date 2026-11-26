@@ -259,6 +259,7 @@ impl ControlCore {
     }
 
     /// 重配/校准互斥门句柄（测试/诊断用；提交执行期间被占用）。
+    #[cfg(test)]
     pub(crate) fn reconfigure_gate(&self) -> Arc<ReconfigGate> {
         Arc::clone(&self.gate)
     }

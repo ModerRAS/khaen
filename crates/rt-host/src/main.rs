@@ -537,7 +537,8 @@ mod app {
     /// `device_state`=present|absent、`absent_since`（进程内单调毫秒或 null）、
     /// `reopen_attempts`（本次缺失期间的重开次数）、`last_device_error`（null 或转义后的错误文本）。
     /// 设备缺失期间 `safe` 恒为 true（fail-closed：没有输出）。
-    /// 旧入口（保持向后兼容）：不含 format/reconfigure 增量字段。
+    /// 旧入口（保持向后兼容）：不含 format/reconfigure 增量字段；仅测试使用。
+    #[cfg(test)]
     pub fn write_status_file(
         path: &Path,
         status: &RuntimeStatus,

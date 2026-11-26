@@ -74,7 +74,8 @@ impl ControlBridge {
         Arc::clone(&self.reconfigure)
     }
 
-    /// 是否接上了控制通道。
+    /// 是否接上了控制通道（测试用）。
+    #[cfg(test)]
     pub fn enabled(&self) -> bool {
         self.commands.is_some()
     }
