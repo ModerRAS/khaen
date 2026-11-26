@@ -25,6 +25,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use khaen_daemon::motu::{MotuConfig, MotuControl, NativeMotu};
 use khaen_daemon::status::DEFAULT_RT_STATUS_FILE;
 use khaen_daemon::{serve, DaemonState, DeviceMonitor};
 use khaen_host::supervisor::{
@@ -75,13 +76,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 系统页重启能力（T46）：只有 KHAEN_ALLOW_RESTART=1 才允许 POST /api/system/restart
     // 重启 khaen-rt-host；handler 不读环境，解析后注入 DaemonState。
     let restart_policy = khaen_daemon::system::RestartPolicy::from_env();
+    // MOTU 控制面（T57）：默认跟随 crate 默认检测（/proc/asound/cards + 169.254.111.126:1280）；
+    // KHAEN_MOTU_* 覆盖地址/密码/超时或显式关闭，非法值启动即失败（与 bind 同样的 fail-closed）。
+    let motu_config = match MotuConfig::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("khaen-daemon: {error}");
+            std::process::exit(2);
+        }
+    };
+    let motu_control: Arc<dyn MotuControl> = Arc::new(NativeMotu::new(motu_config.clone()));
     let state = Arc::new(
         DaemonState::new(config)?
             .with_bind(bind)
             .with_device(device_monitor(plan_rate))
             .with_rt_status_file(rt_status_file)
             .with_restart_policy(restart_policy.clone())
-            .with_host_link(host_link),
+            .with_host_link(host_link)
+            .with_motu(Arc::clone(&motu_control)),
     );
 
     let poll_ms = std::env::var("KHAEN_DEVICE_POLL_MS")
@@ -109,6 +121,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "khaen-daemon system restart rt-host allowed={} reason={}",
         restart_policy.allowed(),
         restart_policy.reason().unwrap_or("-")
+    );
+    // MOTU 检测结果（只读：Windows/无设备 detected=false 不报错）。
+    let motu_detection = motu_control.detection();
+    println!(
+        "khaen-daemon motu detected={} control_reachable={} model={} reason={} disabled={}",
+        motu_detection.detected,
+        motu_detection.control_reachable,
+        motu_detection.model.as_deref().unwrap_or("-"),
+        motu_detection.reason,
+        motu_config.disabled,
     );
     let device = state.device_json();
     println!(

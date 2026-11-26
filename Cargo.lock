@@ -430,6 +430,7 @@ dependencies = [
  "khaen-core",
  "khaen-designer",
  "khaen-host",
+ "khaen-motu-cuemix",
  "serde_json",
  "tokio",
 ]

@@ -48,6 +48,12 @@
 //! - `/api/channels` 与 `/api/plan/upload|history`：T55 M4 后端（见 `channels` / `plan_api` /
 //!   `plan_store` 模块）。PUT /api/channels 两阶段：prepare 真实校验并返回 token/planned diff，
 //!   commit 在 rt-host 热重配接通前返回 501 `host_link_unsupported`（不假成功）。
+//! - `/api/motu`：T57 MOTU 控制面（见 `motu` 模块）。GET 恒 200：检测对象
+//!   （detected/model/control_reachable/reason）+ mute/vol 现状，设备读不到就 null + reasons，
+//!   Windows/无设备 detected=false 不报错。POST/PUT `/api/motu/volume` 两阶段：prepare 只校验
+//!   并签发 token（不写设备），commit 才逐通道单键写 + 回读；批量 400、设备写失败 502 + 设备码。
+//!   POST `/api/mute` 在 target=process 且检测到 MOTU 时把同一次静音写成设备副作用
+//!   （kMuteEnable[0] 单键写 + 回读，失败 502 且响应保留原控制面回执 `control`）。
 //! - `/api/auth/*`：M1 认证（setup/login/session/logout/password），argon2id PHC 存
 //!   `${KHAEN_STATE_DIR:-/var/lib/khaen}/auth.json`（见 `auth` 模块）。除 `/healthz` 与
 //!   `/api/auth/status|setup|login` 外，全部 `/api` 要求会话；写方法（Cookie 会话）额外要求
@@ -69,6 +75,8 @@ pub mod device;
 /// daemon → rt-host 控制通道代理（T70f-b）：契约 B 行 JSON 客户端 + 诚实降级。
 pub mod host_link;
 mod meta;
+/// MOTU UltraLite-mk5 控制面（T57）：/api/motu 检测 + 两阶段音量 + /api/mute 设备副作用。
+pub mod motu;
 /// M4 方案 REST（T55）：POST /api/plan/upload、GET /api/plan/history。
 pub mod plan_api;
 /// 方案库（T55）：上传内容寻址存储 + 已 prepare/commit 方案元数据与生效历史。
@@ -182,6 +190,8 @@ pub struct DaemonState {
     last_restart: Mutex<Option<String>>,
     /// 方案库（T55）：上传内容寻址存储 + 已 prepare/commit 方案元数据 + 生效历史。
     plans: plan_store::PlanStore,
+    /// MOTU 控制面（T57）：检测 + 两阶段音量草稿 + 设备实现（生产 NativeMotu，测试注入假控制面）。
+    motu: motu::MotuHub,
 }
 
 impl DaemonState {
@@ -215,6 +225,9 @@ impl DaemonState {
             restart: system::RestartPolicy::from_env(),
             last_restart: Mutex::new(None),
             plans: plan_store::PlanStore::new(&state_dir),
+            // 默认实现：crate 默认的 /proc/asound/cards + 默认控制网地址、无密码；
+            // Windows/无设备时检测如实 detected=false，不建立任何连接。
+            motu: motu::MotuHub::new(std::sync::Arc::new(motu::NativeMotu::default())),
             state_dir,
         })
     }
@@ -249,6 +262,18 @@ impl DaemonState {
     /// 控制通道客户端（handler 用；`Arc` 便于把阻塞的 socket 往返丢给 blocking 线程池）。
     pub fn host_link(&self) -> &Arc<HostLink> {
         &self.host_link
+    }
+
+    /// 注入 MOTU 控制面实现（生产由 `main` 按环境变量构造 [motu::NativeMotu]；
+    /// 测试注入 FakeCueMix，禁真实网络/设备）。
+    pub fn with_motu(mut self, control: Arc<dyn motu::MotuControl>) -> Self {
+        self.motu = motu::MotuHub::new(control);
+        self
+    }
+
+    /// MOTU 控制面（/api/motu* 与 /api/mute 副作用使用）。
+    pub fn motu(&self) -> &motu::MotuHub {
+        &self.motu
     }
 
     /// 注入校准 job 服务（替换默认未接线实现；daemon 会把事件汇注入给它）。
@@ -437,6 +462,8 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         // T55 M4 后端（channels 两阶段、plan upload/history）。
         .merge(channels::routes())
         .merge(plan_api::routes())
+        // T57 MOTU 控制面（/api/motu 检测 + /api/motu/volume 两阶段）。
+        .merge(motu::routes())
         // 非 /api 的 GET/HEAD 走内嵌静态资源 + SPA 回退；未知 /api/* 返回结构化 JSON 404。
         .fallback(webui::fallback)
         // 认证守卫包住全部路由（含 fallback）：只对 /api 生效，并给 /api 响应补版本/缓存头。
@@ -620,10 +647,10 @@ async fn mute(
         None => return bad_request("missing field: mute"),
     };
     if state.host_link().target() == Target::Process {
-        return (
-            StatusCode::OK,
-            Json(process_marker(state.control().mute_json(mute))),
-        );
+        // 原控制面路径先走完（语义不变），MOTU 设备写入只作为附加副作用；
+        // 设备写失败会把状态码改成 502 并在响应里保留这里的 control 回执（不假成功）。
+        let control_body = process_marker(state.control().mute_json(mute));
+        return crate::motu::api::with_mute_side_effect(&state, mute, control_body).await;
     }
     forward(&state, serde_json::json!({ "op": "mute", "mute": mute })).await
 }

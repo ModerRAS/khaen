@@ -11,6 +11,8 @@
 
 pub mod calibration_fake;
 pub mod host_link_fake;
+/// 注入用的假 MOTU CueMix 控制面（T57；禁真实网络/设备）。
+pub mod motu_fake;
 pub mod plan_fixture;
 
 use std::net::SocketAddr;
@@ -22,6 +24,7 @@ use std::time::Duration;
 use khaen_daemon::auth::{AuthConfig, SESSION_COOKIE};
 use khaen_daemon::calibration::service::CalibrationService;
 use khaen_daemon::host_link::{HostLink, HostLinkConfig, Transport};
+use khaen_daemon::motu::MotuControl;
 use khaen_daemon::system::{BuildInfo, RestartPolicy, SystemProbe};
 use khaen_daemon::{router, DaemonState};
 use khaen_host::EngineConfig;
@@ -30,6 +33,15 @@ use tokio::net::TcpListener;
 
 /// 测试用固定密码（满足 >=8 字符；只在临时状态目录里使用）。
 pub const TEST_PASSWORD: &str = "khaen-test-password";
+
+/// 测试默认的 MOTU 控制面：检测不到设备（no_motu_card），**绝不碰真实设备**。
+///
+/// 需求 T57 的"检测到 MOTU 时 /api/mute 同时写设备"在测试里必须用 `spawn_with_motu` 显式注入
+/// `FakeCueMix` 才能触发；否则即使这台机器接着 MOTU，测试也不会写任何 CueMix 属性
+/// （避免 `cargo test` 在设备机上造成未授权写入）。
+pub fn default_test_motu() -> Arc<dyn MotuControl> {
+    motu_fake::FakeCueMix::no_motu_card()
+}
 
 /// 进程内目标（仅测试/离线演示）：控制 op 作用于 daemon 进程内引擎，响应标 `target: daemon-process`。
 ///
@@ -153,7 +165,7 @@ pub async fn spawn_at(state_dir: &Path) -> TestServer {
 
 /// 用指定状态目录 + 自定义认证配置（如短会话 TTL）启动服务；不自动登录。
 pub async fn spawn_at_with_config(state_dir: &Path, config: AuthConfig) -> TestServer {
-    spawn_custom(state_dir, config, None, None, None).await
+    spawn_custom(state_dir, config, None, None, None, None).await
 }
 
 /// 同 spawn_at_with_config，但注入 rt-host 状态文件路径（测试 M2 聚合的 fixture）。
@@ -162,6 +174,7 @@ pub async fn spawn_at_with_rt_status_file(state_dir: &Path, rt_status_file: Path
         state_dir,
         AuthConfig::for_tests(state_dir.to_path_buf()),
         Some(rt_status_file),
+        None,
         None,
         None,
     )
@@ -180,6 +193,7 @@ pub async fn spawn_at_with_link(
         rt_status_file,
         None,
         Some(link),
+        None,
     )
     .await
 }
@@ -223,6 +237,7 @@ pub async fn spawn_at_with_system(
     .with_bind(addr)
     .with_rt_status_file(state_dir.join("rt-host-status.json"))
     .with_host_link(process_link())
+    .with_motu(default_test_motu())
     .with_system_probe(probe)
     .with_build_info(build)
     .with_restart_policy(restart);
@@ -261,6 +276,29 @@ pub async fn spawn_at_with_service(
         None,
         Some(service),
         None,
+        None,
+    )
+    .await
+}
+
+/// 用临时状态目录 + 注入 MOTU 控制面启动服务（T57；自动 setup/login）。
+pub async fn spawn_with_motu(motu: Arc<dyn MotuControl>) -> TestServer {
+    let dir = Arc::new(TempStateDir::new("motu"));
+    let mut server = spawn_at_with_motu(dir.path(), motu).await;
+    server.owned_dir = Some(Arc::clone(&dir));
+    server.session = Some(bootstrap_session(&server).await);
+    server
+}
+
+/// 同 [`spawn_with_motu`]，但不自动登录（匿名 / 缺 CSRF 场景）。
+pub async fn spawn_at_with_motu(state_dir: &Path, motu: Arc<dyn MotuControl>) -> TestServer {
+    spawn_custom(
+        state_dir,
+        AuthConfig::for_tests(state_dir.to_path_buf()),
+        None,
+        None,
+        None,
+        Some(motu),
     )
     .await
 }
@@ -274,6 +312,7 @@ async fn spawn_custom(
     rt_status_file: Option<PathBuf>,
     calibration: Option<Arc<dyn CalibrationService>>,
     link: Option<Arc<HostLink>>,
+    motu: Option<Arc<dyn MotuControl>>,
 ) -> TestServer {
     // 先绑定端口，再构造 state：daemon.bind 必须是启动时解析的真实监听地址。
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
@@ -288,6 +327,7 @@ async fn spawn_custom(
         state = state.with_calibration(calibration);
     }
     state = state.with_host_link(link.unwrap_or_else(process_link));
+    state = state.with_motu(motu.unwrap_or_else(default_test_motu));
     let state = Arc::new(state);
     let app = router(Arc::clone(&state)).into_make_service_with_connect_info::<SocketAddr>();
     let handle = tokio::spawn(async move {
