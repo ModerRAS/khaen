@@ -2774,7 +2774,7 @@ export function createMockAuthServer(options = {}) {
     }
     return {
       ok: true,
-      api_version: '1',
+      api_version: 1,
       web_version: 'mock',
       ops: control.wired
         ? ['status', 'mute', 'prepare', 'commit', 'abort', 'coeff', 'surface', 'inspect', 'rollback', 'format']

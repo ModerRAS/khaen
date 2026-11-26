@@ -40,7 +40,7 @@
 | GET | `/api/auth/session` | 需会话 | `{authenticated:true, csrf, expires_at}`（RFC3339）；无会话 401 |
 | POST | `/api/auth/logout` | — | **200** `{ok:true}` + 清 Cookie（幂等） |
 | POST | `/api/auth/password` | `{old, new}` | **200** `{csrf, expires_in}` + 新 Set-Cookie（旧会话全部失效） |
-| GET | `/api/meta` | — | `{api_version, web_version, ops:[], surfaces:[], calibration:{wired,reason?}, host_link:{...}, not_wired:[{op,reason}|{surface,reason}]}`（`ok` 可缺省；not_wired 项为 op/surface 二选一形状） |
+| GET | `/api/meta` | — | `{ok?, api_version:number, web_version:string, ops:string[], surfaces:string[], calibration:{wired:boolean, reason:string|null}, host_link:{...}, not_wired:[{op?,reason}|{surface?,reason}]}`；`not_wired` 项 op/surface 二选一；`surfaces` 实际为字符串数组（也兼容 `{surface:bool}` 旧形态）；前端把 `api_version` 归一化成 string。 |
 
 ## 3. 状态与只读视图
 | 方法 | 路径 | 成功响应要点 |

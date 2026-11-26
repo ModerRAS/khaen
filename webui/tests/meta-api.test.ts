@@ -12,7 +12,8 @@ import {
 import { createRecordingFetch, jsonResponse } from '../scripts/mock-test-support.mjs'
 
 const META = {
-  api_version: '1',
+  // 真实 daemon /api/meta 的 api_version 是整数（mock 之前用字符串，两边都接受）。
+  api_version: 1,
   web_version: '0.3.0',
   ops: ['status', 'mute', 'prepare', 'commit', 'abort', 'coeff', 'surface', 'inspect', 'rollback'],
   surfaces: ['volume', 'routing', 'layout', 'format', 'mode'],
@@ -26,6 +27,8 @@ const META = {
 test('parseMeta reads the real capability document (no ok field required)', () => {
   const meta = parseMeta(META)
   assert.equal(meta.apiVersion, '1')
+  // 旧/mock 形态给字符串时也归一化成 string（同一能力文档两种历史形状都接受）。
+  assert.equal(parseMeta({ ...META, api_version: '1' }).apiVersion, '1')
   assert.equal(meta.webVersion, '0.3.0')
   assert.deepEqual(meta.surfaces, ['volume', 'routing', 'layout', 'format', 'mode'])
   assert.deepEqual(meta.surfaceStates, {})

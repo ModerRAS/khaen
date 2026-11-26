@@ -79,6 +79,21 @@ function readString(record: Record<string, unknown>, field: string): string | nu
   return value
 }
 
+/** 标量文本字段：真实 daemon 的 api_version 是整数，旧/mock 可能是字符串；归一化成 string。 */
+function readScalarText(record: Record<string, unknown>, field: string): string | null {
+  const value = record[field]
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value)
+  }
+  throw invalidResponse(field + ' must be a string/number or null')
+}
+
 function readBoolean(record: Record<string, unknown>, field: string): boolean | null {
   const value = record[field]
   if (value === null || value === undefined) {
@@ -176,7 +191,7 @@ export function parseMeta(body: unknown): MetaCapabilities {
     reason: calibrationRecord === null ? null : readString(calibrationRecord, 'reason')
   }
   return {
-    apiVersion: readString(record, 'api_version'),
+    apiVersion: readScalarText(record, 'api_version'),
     webVersion: readString(record, 'web_version'),
     ops,
     surfaces: surfaces.list,
