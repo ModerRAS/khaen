@@ -188,7 +188,7 @@ v1 的 `tspi-motu-48k-keeper` 与 `tspi-motu-net.service` 在 v2 里被**监督�
 约束与未决：
 
 1. **设备单一 owner**：设备监督器在 daemon 里（`/api/device` 是其快照）；实时侧打开 PCM 之前，必须由监督器把设备推进到 `Streaming` 且速率已回读断言——否则 fail-closed。
-2. **进程边界未定（T70f）**：当前 `Runtime` 与 daemon 在同一台机器上、进程边界待定；两进程之间的方案切换通道（共享内存 ring 或 unix socket）**尚未实现**。在它有之前，daemon 的 `prepare/commit` 只作用于 daemon 自己的 `SlotEngine` 副本，**不宣称**已影响正在出声的 `Runtime`；`/api/status` 不会把这种状态报成"已生效"。
+2. **进程边界（T70f）**：`Runtime` 与 daemon 同机分进程；方案切换通道已由 T70f-b/T70f-c 以 **UNIX socket 控制通道**落地（rt-host 默认 `KHAEN_CONTROL=on`，daemon `KHAEN_RT_TARGET=rt-host` 时转发 prepare/commit/abort/mute 到 rt-host；socket 不可用时如实 503 + reason，不宣称已生效）。共享内存 ring 方案未采用；`KHAEN_RT_TARGET=process` 只作用于 daemon 进程内 `SlotEngine`，`/api/status` 会按真实目标如实标注，不把进程内状态报成已影响出声的 `Runtime`。
 3. **单进程模式可行**：若短期先要一处出声，可把 `Runtime` 跑在独占设备的进程里、daemon 只做只读观测；这条路径不需要 IPC，但方案切换要重启该进程（UX 上明确标注）。
 
 ## 五个语义界面（surface）进度（如实）

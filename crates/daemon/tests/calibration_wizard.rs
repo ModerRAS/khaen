@@ -342,10 +342,10 @@ async fn state_derives_real_gates_and_marks_unwired_steps_not_available() {
     assert_eq!(body["steps"][2]["status"], json!("blocked"));
     // 第 4 步：单点支持，passed（多点/ART 在 reason 里明说 NOT_AVAILABLE）。
     assert_eq!(body["steps"][3]["status"], json!("passed"));
-    // 第 5-8 步：job 后端未接线 → not_available + task，不阻塞向导。
+    // 第 5-8 步：测试服务未注入生产 backend（降级）→ not_available + reason，无任务号，不阻塞向导。
     for index in 4..8 {
         assert_eq!(body["steps"][index]["status"], json!("not_available"));
-        assert_eq!(body["steps"][index]["task"], json!("T70h-b"));
+        assert_eq!(body["steps"][index]["task"], Value::Null);
         assert!(body["steps"][index]["reason"]
             .as_str()
             .is_some_and(|text| !text.is_empty()));

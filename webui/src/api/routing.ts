@@ -265,7 +265,7 @@ function parseMapping(value: unknown): Array<{ lane: number; dac: number }> | nu
 }
 
 /**
- * 解析【加法】字段 speaker_roles（docs/API.md §12.2；后端未实现时缺省/null）。
+ * 解析【加法】字段 speaker_roles（docs/API.md §12.2；旧后端/不可读时缺省/null）。
  * - 缺失/null → null（不是错误，也不编造角色）；
  * - 结构漂移（数组项非对象 / dac 非非负整数 / role 非字符串）→ invalid_response。
  */

@@ -1,7 +1,7 @@
-//! 默认校准服务实现：后端未接线（NotWired）。
+//! 校准服务降级实现：后端未接线（NotWired）。
 //!
-//! daemon 的 M2 形态没有校准 job 执行后端（crates/calibration 的生产 backend 由并行任务
-//! T70h-b 实现中）。本实现的语义只有一条：**如实报告未接线**——
+//! 生产校准 backend 已实现（T70h-b/T61）。本实现只在 **KHAEN_CAL_BACKEND=off**（显式关闭）
+//! 或生产 backend 初始化失败时作为诚实降级使用。语义只有一条：**如实报告未接线**——
 //!
 //! - GET /api/calibration/jobs 返回空列表（200），REST 层补 available=false + reason，
 //!   前端显示 NOT_AVAILABLE，而不是收到一个假 job 或 500；
@@ -16,11 +16,11 @@ use super::service::{
 };
 
 /// 未接线原因（稳定文案；/api/status 的 reasons、503 错误体、meta 的 not_wired 共用）。
-pub const NOT_WIRED_REASON: &str = "calibration job backend is not wired: crates/calibration has no production job backend in this daemon build yet (T70h-b); uploads and wizard configuration work, but jobs cannot start and no job state exists";
+pub const NOT_WIRED_REASON: &str = "calibration job backend is not wired in this daemon configuration: it is disabled by KHAEN_CAL_BACKEND=off or failed to initialize; uploads and wizard configuration work, but jobs cannot start and no job state exists";
 
 /// 未接线（或初始化失败）校准服务。
 ///
-/// - `new()`：构建期就没有生产 backend（历史默认，测试用）；
+/// - `new()`：后端被显式关闭或测试环境的默认降级；
 /// - `with_reason(reason)`：生产 backend 初始化失败时如实降级，reason 里带真实失败原因
 ///   （例如 state 目录不可写），不再用一句"没有 backend"掩盖实际错误。
 #[derive(Debug, Clone)]

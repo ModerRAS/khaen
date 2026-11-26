@@ -98,7 +98,7 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
     /opt/khaen/current/bin/khaen-rt-host
 
 - **独占设备**：运行前确认没有 keeper / `prod_bridge.py` / aplay 占着 PCM；运行中不要从别的进程打开同一设备。
-- **方案**：启动时读一次 `KHAEN_PLAN`（ABI v3，`prepare` 的准入与图编译在这里复用）；运行期不换图——跨进程换图通道（T70f 后续）**未实现**，脚本里不要把 daemon 的 commit 当成已作用于 rt-host。
+- **方案**：手工直启时启动读一次 `KHAEN_PLAN`（ABI v3，`prepare` 的准入与图编译在这里复用）。运行期换图**已实现**（T70f-b/T70f-c）：rt-host 默认 `KHAEN_CONTROL=on` 开控制 socket（`/run/khaen/rt-host.sock`），daemon 在 `KHAEN_RT_TARGET=rt-host`（默认）时经 `KHAEN_RT_SOCKET` 把 `prepare/commit/abort/mute` 真实下发到 rt-host；若手工直启时设了 `KHAEN_CONTROL=off`，就没有运行期换图入口，脚本不要假设。
 - **未加载方案**时默认 `KHAEN_UNLOADED=silence`（fail-closed）；联调链路可用 `passthrough`。
 - 设备监督器默认不装配（`SupervisorOptions::enabled=false`，状态如实 `absent`）；给齐 `KHAEN_DEVICE_ID`/`KHAEN_RATE_READ`/`KHAEN_RATE_ASSERT` 才装配真实监督器。
 - 监控与 supervise 轮询目前在块线程上（每 `KHAEN_STATS_EVERY_BLOCKS` 块），**这是验证工具的让步，不是 RT 认证形态**；生产形态见 `docs/DESIGN.md` 的线程模型。
@@ -106,7 +106,7 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 - **systemd 形态**：发布包内含 `deploy/khaen-rt-host.service` 与 `deploy/rt-host.env.example`；`install.sh` 只安装 unit、**不 enable、不启动**（数据面独占 ALSA 设备，出声需要窗口与许可），配置文件复制到 `/etc/khaen/rt-host.env` 且不覆盖已有文件。
 - unit 里用 `Conflicts=tspi-rt-host.service tspi-motu-48k-keeper.service` 保证与 v1/keeper 互斥：设备被占时宁可起不来，也不和旧链路抢设备。
 - **实时调度尚未认证**：unit 目前只给 `Nice=-10`，没有 `SCHED_FIFO`/RLIMIT_RTPRIO；真机 RT 调度与 xrun 长稳属于后续实测项，标记 **NOT_RUN**。
-- **静音**：`Runtime::request_mute(bool)` 是块边界生效的用户静音；它与安全静音相互独立——用户解除静音不会清除安全故障，锁存期间 `run_block` 仍整块清零（fail-closed）。daemon/rt-host 的跨进程静音命令属于 T70f 后续（当前 rt-host 没有 socket，无运行期静音入口）。
+- **静音**：`Runtime::request_mute(bool)` 是块边界生效的用户静音；它与安全静音相互独立——用户解除静音不会清除安全故障，锁存期间 `run_block` 仍整块清零（fail-closed）。跨进程静音**已实现**（T70f-b）：daemon 的 `/api/mute` 在 `target=rt-host` 时经控制 socket 下发 `mute` op；`target=process` 只作用于 daemon 进程内引擎（离线测试），不会伪装成已作用于 rt-host。
 - **无人值守取证**：设置 `KHAEN_STATUS_FILE=/var/lib/khaen/rt-status.json` 后每统计周期原子写一行 JSON（schema `khaen-rt-status/v1`：blocks/state/muted/safe/plan_rate/device_rate/rate_asserted/input/output/receiver/graph_id/last_error），soak 结束直接拷文件即可，不需要人盯控制台。
 
 ### 4.4 v1.2 运行时开关（daemon / rt-host）

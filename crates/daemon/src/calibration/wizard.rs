@@ -984,7 +984,7 @@ pub(crate) fn derive_state(inputs: WizardStateInputs<'_>) -> Value {
         json!("P3"),
     ));
 
-    // 5-8：job 后端未接线 → 如实 not_available（不阻塞向导）。
+    // 5-8：job 后端被关闭/初始化失败 → 如实 not_available（不阻塞向导；无任务号）。
     if !inputs.calibration.wired {
         for (step_number, key, label) in [
             (5usize, "measurement", "job backend"),
@@ -1002,7 +1002,9 @@ pub(crate) fn derive_state(inputs: WizardStateInputs<'_>) -> Value {
                     .as_deref()
                     .map(|reason| json!(reason))
                     .unwrap_or_else(|| json!(format!("{label} is not wired"))),
-                json!("T70h-b"),
+                // 生产 backend 已交付（T70h-b）：这里只是被配置关闭/初始化失败的降级，
+                // 不是“缺少后续任务”，因此不再给任务号。
+                Value::Null,
             ));
         }
     } else {
