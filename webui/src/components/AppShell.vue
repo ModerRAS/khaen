@@ -34,8 +34,12 @@ import { useTheme, type ThemeMode } from '@/composables/useTheme'
 import { useViewport } from '@/composables/useViewport'
 import { setLocale } from '@/i18n'
 import { logout } from '@/stores/session'
+import { refreshStatus, statusState } from '@/stores/status'
+import { isStatusStale, runStateKind, runStateLabelKey } from '@/api/status'
+import { formatDecimal, toRateUnit } from '@/utils/format'
 import { APP_VERSION } from '@/config'
 import StatusBadge from './StatusBadge.vue'
+import type { StatusKind } from '@/types/ui'
 
 const { t, locale } = useI18n({ useScope: 'global' })
 const route = useRoute()
@@ -75,6 +79,66 @@ const collapsed = computed(() => !isMobile.value && (isNarrow.value || userColla
 
 const pageTitle = computed(() => t(route.meta.titleKey ?? 'nav.overview'))
 
+/* ------------------------------------------ 顶栏徽标 / 侧栏链路：接真实 /api/status */
+
+const runStateBadge = computed<{ kind: StatusKind; value: string | undefined }>(() => {
+  const current = statusState.data?.state ?? null
+  const key = runStateLabelKey(current)
+  const fallback = current !== null && current.value !== null ? current.value : undefined
+  return { kind: runStateKind(current), value: key !== null ? t(key) : fallback }
+})
+
+const planBadge = computed<string | undefined>(() => {
+  const version = statusState.data?.plan.version ?? null
+  return version === null ? undefined : 'v' + String(version)
+})
+
+const planBadgeKind = computed<StatusKind>(() => (planBadge.value === undefined ? 'unknown' : 'safe'))
+
+const deviceRateBadge = computed<string | undefined>(() => {
+  const unit = toRateUnit(statusState.data?.format.device_rate ?? null)
+  if (unit === null) {
+    return undefined
+  }
+  const value = formatDecimal(unit.value, 2, locale.value === 'en-US' ? 'en-US' : 'zh-CN')
+  return value === null ? undefined : value + ' ' + t(unit.unitKey)
+})
+
+const deviceRateBadgeKind = computed<StatusKind>(() => {
+  if (deviceRateBadge.value === undefined) {
+    return 'unknown'
+  }
+  return statusState.data?.format.rate_asserted === false ? 'muted' : 'safe'
+})
+
+const hostLinkHealth = computed<'ok' | 'stale' | 'unknown'>(() => {
+  const current = statusState.data
+  if (current === null) {
+    return 'unknown'
+  }
+  if (isStatusStale(current)) {
+    return 'stale'
+  }
+  return current.host_link.connected === true ? 'ok' : 'unknown'
+})
+
+const hostLinkDotClass = computed(() => {
+  if (hostLinkHealth.value === 'ok') {
+    return 'connection-dot--ok'
+  }
+  return hostLinkHealth.value === 'stale' ? 'connection-dot--warn' : ''
+})
+
+const hostLinkText = computed(() => {
+  if (hostLinkHealth.value === 'ok') {
+    return t('shell.hostLinkConnected')
+  }
+  return hostLinkHealth.value === 'stale' ? t('shell.hostLinkStale') : t('shell.hostLinkNotWired')
+})
+
+function onRefresh(): void {
+  void refreshStatus()
+}
 
 function toggleCollapsed(): void {
   userCollapsed.value = !userCollapsed.value
@@ -184,15 +248,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <span class="topbar__spacer" />
 
       <div class="topbar__badges">
-        <StatusBadge kind="unknown" :label="t('topbar.runState')" />
-        <StatusBadge kind="unknown" :label="t('topbar.plan')" />
-        <StatusBadge kind="unknown" :label="t('topbar.deviceRate')" />
+        <StatusBadge :kind="runStateBadge.kind" :label="t('topbar.runState')" :value="runStateBadge.value" />
+        <StatusBadge :kind="planBadgeKind" :label="t('topbar.plan')" :value="planBadge" />
+        <StatusBadge :kind="deviceRateBadgeKind" :label="t('topbar.deviceRate')" :value="deviceRateBadge" />
       </div>
 
       <div class="topbar__actions">
-        <el-tooltip :content="t('topbar.refreshTodo', { milestone: 'M2' })" placement="bottom">
-          <el-button text class="touch-target" :aria-label="t('common.refresh')" disabled>
-            <el-icon :size="18"><Refresh /></el-icon>
+        <el-tooltip :content="t('common.refresh')" placement="bottom">
+          <el-button
+            text
+            class="touch-target"
+            :aria-label="t('common.refresh')"
+            :loading="statusState.refreshing"
+            :disabled="statusState.refreshing"
+            @click="onRefresh"
+          >
+            <el-icon v-if="!statusState.refreshing" :size="18"><Refresh /></el-icon>
           </el-button>
         </el-tooltip>
 
@@ -294,8 +365,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       </template>
 
       <div class="sidebar-footer">
-        <span class="connection-dot" aria-hidden="true" />
-        <span v-if="!collapsed">{{ t('shell.hostLinkNotWired') }}</span>
+        <span class="connection-dot" :class="hostLinkDotClass" aria-hidden="true" />
+        <span v-if="!collapsed">{{ hostLinkText }}</span>
       </div>
     </aside>
 

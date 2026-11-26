@@ -497,6 +497,19 @@ a:hover {
   color: var(--khaen-text-muted);
 }
 
+/* 指标语义色（欠载率/xrun/设备缺失等分级；见 OverviewView） */
+.metric__value--ok {
+  color: var(--khaen-success);
+}
+
+.metric__value--warn {
+  color: var(--khaen-warning);
+}
+
+.metric__value--bad {
+  color: var(--khaen-danger);
+}
+
 .metric__unit {
   color: var(--khaen-text-secondary);
   font-size: var(--khaen-font-aux);

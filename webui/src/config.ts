@@ -10,5 +10,5 @@ export const APP_BUILD_ID: string = __APP_BUILD_ID__
 /** 管理员密码最小长度（PLAN §6.1：至少 8 个字符；后端 M1 复核）。 */
 export const MIN_PASSWORD_LENGTH = 8
 
-/** 轮询间隔（PLAN §6：页面可见时 2s，隐藏时暂停；M2 才真正轮询）。 */
-export const STATUS_POLL_INTERVAL_MS = 2000
+// 概览轮询间隔与 stale 阈值属于状态模块：见 src/stores/status.ts（STATUS_POLL_INTERVAL_MS）
+// 与 src/api/status.ts（STALE_STATUS_AGE_MS），避免构建期常量与纯逻辑模块耦合。

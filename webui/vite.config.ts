@@ -27,6 +27,26 @@ export default defineConfig({
       '/api': {
         target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
         changeOrigin: false
+      },
+      // 契约 mock 的 dev-only fixture 切换端点（真实 daemon 不存在该路径）。
+      '/__mock': {
+        target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
+        changeOrigin: false
+      }
+    }
+  },
+  preview: {
+    // 视觉/浏览器验收用：直接预览 dist，同样把 /api 转给本机 daemon 或契约 mock。
+    host: '127.0.0.1',
+    port: 4173,
+    proxy: {
+      '/api': {
+        target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
+        changeOrigin: false
+      },
+      '/__mock': {
+        target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
+        changeOrigin: false
       }
     }
   },

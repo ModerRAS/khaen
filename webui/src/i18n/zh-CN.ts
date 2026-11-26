@@ -20,7 +20,11 @@ const messages = {
     confirm: '确认',
     close: '关闭',
     loading: '加载中',
-    unknown: '未知'
+    unknown: '未知',
+    yes: '是',
+    no: '否',
+    none: '无',
+    retry: '重试'
   },
   nav: {
     overview: '概览',
@@ -45,16 +49,19 @@ const messages = {
     expand: '展开侧栏',
     menu: '打开导航',
     navDisabled: '该页面尚未接入（计划 {milestone}）',
-    stubBanner: 'M1：认证与会话已接入；状态与控制类接口自 M2 起逐个接入，未接入前一律显示「未接入」，不展示假数据。',
+    stubBanner:
+      'M2：概览页已接 daemon 的 /api/status 聚合（5s 轮询，页面隐藏暂停）；音量、方案与声道、路由、格式、校准、系统页面尚未接入，未接入前一律显示「未接入」，不展示假数据。',
     hostLink: '控制通道',
-    hostLinkNotWired: '控制通道未接入'
+    hostLinkNotWired: '控制通道未接入',
+    hostLinkConnected: '控制通道已连接',
+    hostLinkStale: '控制通道状态过期',
+    hostLinkDisconnected: '控制通道已断开'
   },
   topbar: {
     runState: '运行状态',
     plan: '方案版本',
     deviceRate: '设备速率',
     hostLink: '控制通道',
-    refreshTodo: '手动刷新待接入（计划 {milestone}）',
     changePassword: '修改密码',
     logout: '退出登录',
     comingSoon: '{milestone} 接入',
@@ -143,17 +150,68 @@ const messages = {
       network: '无法连接 daemon（后端未启动或网络中断），请检查后重试',
       server: '服务器错误，请稍后重试',
       unknown: '未知错误，请重试'
+    },
+    status: {
+      network: '无法获取状态：daemon 不可达（后端未启动或网络中断），请检查后重试。',
+      timeout: '获取状态超时，请重试。',
+      unauthorized: '会话已过期，请重新登录。',
+      server: 'daemon 返回服务器错误，请稍后重试。',
+      invalidResponse: 'daemon 返回的状态结构不合法（不是 khaen-status/v1），已拒绝显示。',
+      unknown: '获取状态失败，请重试。'
     }
   },
   overview: {
     title: '概览',
-    subtitle: '运行状态、输入/输出统计、当前方案与控制通道。数据来自 daemon 的 /api/status 聚合（M2 接入）。',
+    subtitle:
+      '运行状态、输入/输出统计、当前方案与控制通道。数据来自 daemon 的 /api/status 聚合，5 秒轮询，页面隐藏时暂停。',
+    error: {
+      title: '无法获取运行状态'
+    },
     band: {
       runState: '运行状态',
       lastError: '最近错误',
       hostLink: '控制通道',
       lastUpdate: '最后更新 {time}',
-      neverUpdated: '尚未刷新'
+      neverUpdated: '尚未刷新',
+      noError: '无'
+    },
+    hostLink: {
+      connected: '已连接',
+      stale: '已过期',
+      disconnected: '已断开',
+      disconnectedStale: '已断开（状态过期）'
+    },
+    notice: {
+      stale: '控制通道状态过期（连接={connected}，新鲜度={age}）；当前显示的是最后一次成功获取的数据。',
+      hostLinkNotWired: '控制通道（T70f）尚未接入：host_link 字段全部为 null，变更控制需重启后端。',
+      hostLinkNotWiredReason: '控制通道（T70f）尚未接入：{reason}',
+      refreshFailed: '刷新失败：{message}（最后成功更新 {time}）。仍在显示最后一次成功获取的数据。'
+    },
+    uptime: {
+      withDays: '{d} 天 {h} 时 {m} 分 {s} 秒',
+      withoutDays: '{h} 时 {m} 分 {s} 秒'
+    },
+    calibration: {
+      none: '尚无记录'
+    },
+    device: {
+      present: '在位',
+      absent: '不在位'
+    },
+    plan: {
+      source: {
+        upload: '上传',
+        calibration: '校准'
+      }
+    },
+    copy: {
+      action: '复制',
+      copied: '已复制',
+      failed: '复制失败（浏览器未允许访问剪贴板）'
+    },
+    notWiredList: {
+      title: '未接入项（daemon 上报）',
+      desc: '以下能力由 /api/status 的 not_wired 如实上报为未接入，页面不展示假数据。'
     },
     card: {
       runtime: {
@@ -173,6 +231,7 @@ const messages = {
         field: {
           packets: '收包数',
           underruns: '欠载次数',
+          underrunRate: '欠载率',
           jitterFill: '抖动缓冲填充',
           ssrc: 'SSRC',
           queueFullDrops: '队列满丢弃',
@@ -203,13 +262,18 @@ const messages = {
       },
       format: {
         title: '格式与设备',
-        desc: '方案速率与实际设备速率',
+        desc: '方案速率、设备回读与实际输出格式',
         field: {
           planRate: '方案速率',
           deviceRate: '设备速率',
+          rateAsserted: '速率已确认',
           blockFrames: '块长',
           channels: '声道数',
-          encoding: '编码'
+          encoding: '编码',
+          deviceId: '设备 id',
+          deviceState: '设备状态',
+          deviceCard: 'ALSA 卡',
+          rateReadback: '速率回读'
         }
       },
       aoip: {
@@ -228,30 +292,40 @@ const messages = {
         desc: '最近一次校准 job 与结论',
         field: {
           lastJob: '最近 job',
-          verdict: '结论'
-        }
+          verdict: '结论',
+          activeJob: '进行中 job'
+        },
+        stub: '校准页在 M5 接入，本卡只读展示 daemon 上报的最近一次 job。'
       },
       control: {
         title: '控制通道',
         desc: 'daemon ↔ rt-host 控制链路（T70f）',
         field: {
           connected: '已连接',
-          statusAgeMs: '状态新鲜度'
-        }
+          statusAgeMs: '状态新鲜度',
+          since: '连接起始时间',
+          socket: 'socket 路径'
+        },
+        notWiredHint: '控制通道（T70f）未接入：变更控制需重启后端。'
       }
-    },
-    notWired: {
-      reason: '未接入：等待 {milestone} 提供该数据源'
     }
   },
   unit: {
     db: 'dB',
     hz: 'Hz',
+    khz: 'kHz',
+    mhz: 'MHz',
     ms: 'ms',
     s: 's',
     percent: '%',
     blocks: '块',
+    packets: '包',
+    channels: '声道',
     bytes: 'B',
+    kib: 'KiB',
+    mib: 'MiB',
+    gib: 'GiB',
+    tib: 'TiB',
     samples: 'samples'
   }
 }

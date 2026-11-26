@@ -18,7 +18,11 @@ const messages: Messages = {
     confirm: 'Confirm',
     close: 'Close',
     loading: 'Loading',
-    unknown: 'Unknown'
+    unknown: 'Unknown',
+    yes: 'Yes',
+    no: 'No',
+    none: 'None',
+    retry: 'Retry'
   },
   nav: {
     overview: 'Overview',
@@ -44,16 +48,18 @@ const messages: Messages = {
     menu: 'Open navigation',
     navDisabled: 'This page is not wired yet (planned {milestone})',
     stubBanner:
-      'M1: authentication and sessions are wired. Status and control endpoints land from M2 on; until then every value is a "not wired" placeholder, never fake data.',
+      'M2: the overview page is wired to the daemon /api/status aggregate (5s polling, paused while the tab is hidden). Volume, plan & channels, routing, format, calibration and system pages are not wired yet; until then every value is a "not wired" placeholder, never fake data.',
     hostLink: 'Control link',
-    hostLinkNotWired: 'Control link not wired'
+    hostLinkNotWired: 'Control link not wired',
+    hostLinkConnected: 'Control link connected',
+    hostLinkStale: 'Control link status is stale',
+    hostLinkDisconnected: 'Control link disconnected'
   },
   topbar: {
     runState: 'Run state',
     plan: 'Plan version',
     deviceRate: 'Device rate',
     hostLink: 'Control link',
-    refreshTodo: 'Manual refresh is not wired yet (planned {milestone})',
     changePassword: 'Change password',
     logout: 'Sign out',
     comingSoon: 'Wired in {milestone}',
@@ -142,18 +148,70 @@ const messages: Messages = {
       network: 'Cannot reach the daemon (not running or network down). Check it and retry.',
       server: 'Server error. Please retry later.',
       unknown: 'Unexpected error. Please retry.'
+    },
+    status: {
+      network: 'Cannot fetch the status: daemon unreachable (not running or network down). Check it and retry.',
+      timeout: 'Fetching the status timed out. Please retry.',
+      unauthorized: 'Your session has expired. Please sign in again.',
+      server: 'The daemon returned a server error. Please retry later.',
+      invalidResponse: 'The daemon returned an invalid status document (not khaen-status/v1); it was rejected instead of displayed.',
+      unknown: 'Fetching the status failed. Please retry.'
     }
   },
   overview: {
     title: 'Overview',
     subtitle:
-      'Run state, input/output counters, current plan and the control link. Data comes from the daemon /api/status aggregate (wired in M2).',
+      'Run state, input/output counters, current plan and the control link. Data comes from the daemon /api/status aggregate, polled every 5 seconds and paused while the tab is hidden.',
+    error: {
+      title: 'Cannot load the run state'
+    },
     band: {
       runState: 'Run state',
       lastError: 'Last error',
       hostLink: 'Control link',
       lastUpdate: 'Updated {time}',
-      neverUpdated: 'Never refreshed'
+      neverUpdated: 'Never refreshed',
+      noError: 'None'
+    },
+    hostLink: {
+      connected: 'Connected',
+      stale: 'Stale',
+      disconnected: 'Disconnected',
+      disconnectedStale: 'Disconnected (stale)'
+    },
+    notice: {
+      stale:
+        'The control link is stale (connected={connected}, freshness={age}); the values shown are from the last successful fetch.',
+      hostLinkNotWired:
+        'The control link (T70f) is not wired yet: every host_link field is null, so changing control state requires a backend restart.',
+      hostLinkNotWiredReason: 'The control link (T70f) is not wired yet: {reason}',
+      refreshFailed: 'Refresh failed: {message} (last successful update {time}). The last successful values are still shown.'
+    },
+    uptime: {
+      withDays: '{d}d {h}h {m}m {s}s',
+      withoutDays: '{h}h {m}m {s}s'
+    },
+    calibration: {
+      none: 'No records yet'
+    },
+    device: {
+      present: 'Present',
+      absent: 'Absent'
+    },
+    plan: {
+      source: {
+        upload: 'Upload',
+        calibration: 'Calibration'
+      }
+    },
+    copy: {
+      action: 'Copy',
+      copied: 'Copied',
+      failed: 'Copy failed (the browser denied clipboard access)'
+    },
+    notWiredList: {
+      title: 'Not wired (reported by the daemon)',
+      desc: 'The capabilities below are reported as not wired by /api/status not_wired; this page never shows fake data for them.'
     },
     card: {
       runtime: {
@@ -173,6 +231,7 @@ const messages: Messages = {
         field: {
           packets: 'Packets',
           underruns: 'Underruns',
+          underrunRate: 'Underrun rate',
           jitterFill: 'Jitter buffer fill',
           ssrc: 'SSRC',
           queueFullDrops: 'Queue-full drops',
@@ -203,13 +262,18 @@ const messages: Messages = {
       },
       format: {
         title: 'Format & device',
-        desc: 'Plan rate against the actual device rate',
+        desc: 'Plan rate, device readback and the actual output format',
         field: {
           planRate: 'Plan rate',
           deviceRate: 'Device rate',
+          rateAsserted: 'Rate asserted',
           blockFrames: 'Block frames',
           channels: 'Channels',
-          encoding: 'Encoding'
+          encoding: 'Encoding',
+          deviceId: 'Device id',
+          deviceState: 'Device state',
+          deviceCard: 'ALSA card',
+          rateReadback: 'Rate readback'
         }
       },
       aoip: {
@@ -228,30 +292,40 @@ const messages: Messages = {
         desc: 'Most recent calibration job and verdict',
         field: {
           lastJob: 'Last job',
-          verdict: 'Verdict'
-        }
+          verdict: 'Verdict',
+          activeJob: 'Active job'
+        },
+        stub: 'The calibration page lands in M5; this card only reads the last job reported by the daemon.'
       },
       control: {
         title: 'Control link',
         desc: 'daemon ↔ rt-host control path (T70f)',
         field: {
           connected: 'Connected',
-          statusAgeMs: 'Status age'
-        }
+          statusAgeMs: 'Status age',
+          since: 'Connected since',
+          socket: 'Socket path'
+        },
+        notWiredHint: 'The control link (T70f) is not wired yet: changing control state requires a backend restart.'
       }
-    },
-    notWired: {
-      reason: 'Not wired: waiting for {milestone} to provide this data source'
     }
   },
   unit: {
     db: 'dB',
     hz: 'Hz',
+    khz: 'kHz',
+    mhz: 'MHz',
     ms: 'ms',
     s: 's',
     percent: '%',
     blocks: 'blocks',
+    packets: 'pkts',
+    channels: 'ch',
     bytes: 'B',
+    kib: 'KiB',
+    mib: 'MiB',
+    gib: 'GiB',
+    tib: 'TiB',
     samples: 'samples'
   }
 }
