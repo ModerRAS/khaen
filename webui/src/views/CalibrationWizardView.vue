@@ -5,8 +5,9 @@
  * 数据纪律：
  * - 每步能否继续**只认后端** GET /api/calibration/wizard/state 的 steps[].status（passed/blocked/not_available）；
  *   缺失 gate 一律 fail closed（下一步禁用），前端不自行判过；
- * - 第 2 步（/api/channels 属 M4）、第 4 步多点/ART（P3）、第 5 步实时测量（T42/P2）是**声明式能力缺口**：
- *   灰态 + NOT_AVAILABLE + 原因 + 任务号，不产生任何数据，也不阻塞向导（不伪造映射/采集/进度）；
+ * - 第 2 步只读展示 /api/status 的 format/channels（/api/channels 已实现；可读即 passed、不可读 blocked）；
+ *   第 4 步多点/ART（P3）、第 5 步实时测量（T42/P2）是**声明式能力缺口**：灰态 + NOT_AVAILABLE + 原因 + 任务号，
+ *   不产生任何数据，也不阻塞向导（不伪造映射/采集/进度）；
  * - 进度全部来自真实 job 状态轮询（stores/calibration.ts），无定时器假进度；
  * - 刷新恢复：配置/上传草稿/job 状态来自后端（?step= 记住当前步）；失败/中断保留已完成步骤；
  * - mock/fixture 引擎的数据由 VerdictBadge/JobResultPanel 标「示意」，不冒充实测。
@@ -631,7 +632,7 @@ const gateFacts = computed<Array<{ label: string; value: string }>>(() => {
     facts.push({ label: t('calibration.wizard.device.hostLink'), value: boolText(statusData.value?.host_link.connected ?? null) ?? t('common.dash') })
   } else if (currentStep.value === 2) {
     facts.push({ label: t('calibration.wizard.channels.channels'), value: statusData.value?.format.channels === null || statusData.value?.format.channels === undefined ? t('common.dash') : String(statusData.value?.format.channels) })
-    facts.push({ label: t('calibration.wizard.channels.task'), value: 'M4' })
+    facts.push({ label: t('calibration.wizard.channels.encoding'), value: statusData.value?.format.encoding ?? t('common.dash') })
   } else if (currentStep.value === 3) {
     facts.push({ label: t('calibration.wizard.mic.savedSha'), value: form.micCalSha256 === null ? t('common.dash') : shortenId(form.micCalSha256, 12, 8) ?? t('common.dash') })
     facts.push({ label: t('calibration.wizard.mic.orientation'), value: form.orientation === '' ? t('common.dash') : t('calibration.wizard.mic.orientation' + (form.orientation === '0deg' ? '0' : '90')) })
@@ -773,17 +774,23 @@ watch(
             </div>
           </section>
 
-          <!-- 第 2 步：布局与声道（M4 未接：只读 + NOT_AVAILABLE） -->
+          <!-- 第 2 步：布局与声道（只读；gate 由后端按 /api/status format/channels 判定） -->
           <section v-else-if="currentStep === 2" class="step-panel">
             <h2 class="step-panel__title">{{ t('calibration.step.names.layout_channels') }}</h2>
             <p class="step-panel__desc">{{ t('calibration.wizard.channels.desc') }}</p>
-            <div class="banner banner--warn" role="status">
+            <div v-if="gate === null" class="banner banner--warn" role="status">
               <div class="wizard-notice">
-                <strong>NOT_AVAILABLE</strong>
-                <span>{{ gate?.reason ?? t('calibration.wizard.channels.notAvailable') }}</span>
-                <span class="aux-text">{{ t('calibration.gate.task', { task: 'M4' }) }}</span>
+                <strong>{{ t('calibration.gate.missing') }}</strong>
+                <span>{{ t('calibration.gate.failClosed') }}</span>
               </div>
-              <TruthTag kind="notWired" />
+            </div>
+            <div v-else class="banner" :class="gate.status === 'passed' ? 'banner--info' : 'banner--warn'" role="status">
+              <div class="wizard-notice">
+                <strong>{{ t('calibration.gate.' + gate.status) }}</strong>
+                <span v-if="gate.reason">{{ t('calibration.gate.reason', { reason: gate.reason }) }}</span>
+                <span v-if="gate.task" class="aux-text">{{ t('calibration.gate.task', { task: gate.task }) }}</span>
+              </div>
+              <TruthTag v-if="gate.status === 'not_available'" kind="notWired" />
             </div>
             <dl v-if="channelFacts.length > 0" class="fact-list">
               <div v-for="row in channelFacts" :key="row.label" class="fact-list__row">

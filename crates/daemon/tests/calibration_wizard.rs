@@ -332,9 +332,12 @@ async fn state_derives_real_gates_and_marks_unwired_steps_not_available() {
     assert!(body["steps"][0]["reason"]
         .as_str()
         .is_some_and(|text| text.contains("device")));
-    // 第 2 步是 M4 未实现能力：not_available + task。
-    assert_eq!(body["steps"][1]["status"], json!("not_available"));
-    assert_eq!(body["steps"][1]["task"], json!("M4"));
+    // 第 2 步：/api/channels 已实现；status.format.channels 可读 → passed（只读，无 task）。
+    assert_eq!(body["steps"][1]["status"], json!("passed"));
+    assert_eq!(body["steps"][1]["task"], Value::Null);
+    assert!(body["steps"][1]["reason"]
+        .as_str()
+        .is_some_and(|text| text.contains("readable")));
     // 第 3 步：向导配置没保存 → blocked。
     assert_eq!(body["steps"][2]["status"], json!("blocked"));
     // 第 4 步：单点支持，passed（多点/ART 在 reason 里明说 NOT_AVAILABLE）。

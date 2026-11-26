@@ -119,6 +119,8 @@
 | GET/PUT | `/api/calibration/wizard` | 配置对象 | `{schema, config, state, ...}`（实际字段以 daemon 实现为准） |
 | POST | `/api/calibration/wizard/apply` | `{job_id?}`（缺省用 last_job_id） | **apply 回执**（与 `/jobs/{id}/apply` 旧单发同形：`{ok, applied:true, job_id, applied_version?, applied_block?, graph_id?, sha256?, snapshot, ack, readback, applied_at, job, reasons}`）；无可用 job 409 `no_applicable_job`，未接线 503 not_wired |
 
+- **wizard/state 第 2 步（`layout_channels`）**：`/api/channels` 已实现，daemon 不再固定返回 `not_available`/`task=M4`。daemon 按 `/api/status` 的 `format.channels` 判定：可读（非 null、>0）→ `passed`（只读步骤；reason 说明实时映射看 `/api/channels`、编辑用「方案与声道」页）；不可读 → `blocked` + 真实 reason（fail-closed）。
+
 - 状态枚举（canonical）：`queued|running|succeeded|failed|cancelled`（双 l，与实现/现有测试一致；旧文档的 `canceled` 作废）。
 - job 审计字段：`job_id, kind, state, created_at/started_at/finished_at`（RFC3339）、`duration_ms, steps, apply, error`；【加法】`created_unix, updated_unix, progress`。
 - `measured`/`simulated` 必须如实标记；**模拟结果不得写成实测**。

@@ -17,7 +17,7 @@
 //! # 状态（GET /api/calibration/wizard/state）
 //!
 //! 由 **真实来源**推导，刷新可恢复：步骤 1 读 /api/status 聚合（设备/速率/主机连接），
-//! 步骤 2 是未实现的 M4 能力（not_available + task），步骤 3/4 读向导配置，步骤 5-8 读最近
+//! 步骤 2 只读展示 /api/status 的 format/channels（/api/channels 已实现；不可读时 blocked），步骤 3/4 读向导配置，步骤 5-8 读最近
 //! 一个校准 job 与 apply 状态；后端未接线时步骤 5-8 一律 not_available + reason（不阻塞
 //! 向导）。没有数据来源的字段给 null + reasons，不编进度。
 
@@ -915,14 +915,28 @@ pub(crate) fn derive_state(inputs: WizardStateInputs<'_>) -> Value {
     );
     steps.push(device_step);
 
-    // 2. 布局与声道：daemon 还没有 /api/channels（M4），如实灰态。
-    steps.push(step(
-        2,
-        "layout_channels",
-        "not_available",
-        json!("channel layout API (/api/channels) is not implemented in the daemon yet: output channels / AES67 mapping / lane labels are not readable from the control plane"),
-        json!("M4"),
-    ));
+    // 2. 布局与声道：/api/channels 已实现（T55/T58/T61），本步只读展示 /api/status 的
+    //    format/channels 事实；可读即 passed，不可读则 blocked（fail-closed，不写死 milestone）。
+    let output_channels = inputs.status["format"]["channels"].as_u64();
+    let channels_step = match output_channels {
+        Some(channels) if channels > 0 => step(
+            2,
+            "layout_channels",
+            "passed",
+            json!(format!(
+                "output format is readable from /api/status ({channels} channels); this wizard step is read-only. Live channel mapping is served by /api/channels and edited on the Plan & channels page"
+            )),
+            Value::Null,
+        ),
+        _ => step(
+            2,
+            "layout_channels",
+            "blocked",
+            json!("channel/format status is unavailable: /api/status format.channels is null, so the wizard cannot verify the output layout. Check rt-host status (or /api/channels) and retry"),
+            Value::Null,
+        ),
+    };
+    steps.push(channels_step);
 
     // 3. 麦克风与校准设置：向导配置真实字段。
     let mut missing: Vec<&str> = Vec::new();
@@ -1391,7 +1405,7 @@ mod tests {
     fn state_marks_unwired_job_steps_not_available_and_derives_step1() {
         let status = json!({
             "device": {"state": "present"},
-            "format": {"rate_asserted": true},
+            "format": {"rate_asserted": true, "channels": 22},
             "host_link": {"connected": true},
         });
         let control = json!({"actual_version": Value::Null});
@@ -1416,8 +1430,9 @@ mod tests {
         });
         assert_eq!(state["schema"], json!(WIZARD_STATE_SCHEMA));
         assert_eq!(state["steps"][0]["status"], json!("passed"));
-        assert_eq!(state["steps"][1]["status"], json!("not_available"));
-        assert_eq!(state["steps"][1]["task"], json!("M4"));
+        // 第 2 步：/api/channels 已实现，只读展示 status.format.channels → passed（无 task）。
+        assert_eq!(state["steps"][1]["status"], json!("passed"));
+        assert_eq!(state["steps"][1]["task"], Value::Null);
         assert_eq!(state["steps"][2]["status"], json!("blocked"));
         assert_eq!(state["current_step"], json!(3));
         for index in 4..8 {
@@ -1425,5 +1440,39 @@ mod tests {
         }
         assert!(state["snapshot"].is_null());
         assert!(state["reasons"]["snapshot"].is_string());
+    }
+
+    #[test]
+    fn layout_step_is_blocked_when_channel_status_is_missing() {
+        let status = json!({
+            "device": {"state": "present"},
+            "format": {"rate_asserted": true, "channels": Value::Null},
+            "host_link": {"connected": true},
+        });
+        let control = json!({"actual_version": Value::Null});
+        let calibration = CalibrationStatus {
+            wired: false,
+            engine: None,
+            active_job: None,
+            last_job_id: None,
+            last_verdict: None,
+            reason: Some("not wired".into()),
+        };
+        let stored = WizardStored::default();
+        let measurement = MeasurementDraft::default();
+        let state = derive_state(WizardStateInputs {
+            status: &status,
+            control_status: &control,
+            calibration: &calibration,
+            last_job: None,
+            stored: &stored,
+            measurement: &measurement,
+            updated_at: "2026-01-01T00:00:00Z",
+        });
+        assert_eq!(state["steps"][1]["status"], json!("blocked"));
+        assert_eq!(state["steps"][1]["task"], Value::Null);
+        assert!(state["steps"][1]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("format.channels")));
     }
 }
