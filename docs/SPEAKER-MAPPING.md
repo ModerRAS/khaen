@@ -59,12 +59,13 @@
   ]
 }
 ```
-- `preset`：`2.0` / `5.1` / `7.1` / `5.1.2` / `5.1.4` / `7.1.4` / `custom`。**预设决定"期望角色集"与默认 DAC 分配**，最终以 outputs 为准；预设是布局的起点，不是硬约束。
+- **角色自选模型（主模型）**：用户先勾选"有哪些角色"（地面：L/R/C/Ls/Rs/Lb/Rb；天空：Tfl/Tfr/Trl/Trr 任选；低频：LFE/Sub 可多只），每个角色可以有多只；再把每一只分配到物理输出 DAC。布局名字是**派生结果**，不是输入约束。
 - **首次运行默认 = 2.0**：`L=DAC0`、`R=DAC1`（MOTU Main 1/2），其余 DAC 全部 `enabled=false, role=None`；输入映射默认 流ch0=L、流ch1=R。
-- 切换预设时的行为：UI 按预设的角色集与"canonical 顺序→DAC 顺序"给出建议分配，**需要用户确认**后才覆盖 outputs（不静默丢弃手工编辑）。
-- 预设的角色集：2.0=[L,R]；5.1=[L,R,C,LFE,Ls,Rs]；7.1=5.1+[Lb,Rb]；5.1.2=5.1+[Tfl,Tfr]；5.1.4=5.1+[Tfl,Tfr,Trl,Trr]；7.1.4=7.1+[Tfl,Tfr,Trl,Trr]；custom=任意。
+- **快捷预设仅作填充器**：2.0 / 5.1 / 7.1 / 5.1.2 / 5.1.4 / 7.1.4 只是"一键勾选对应角色集并给建议 DAC 分配"的按钮；用户可以在此基础上增删角色、给同一角色加多只、改任何 DAC。预设不写入方案、不构成约束。
+- **布局标签自动派生**：例如勾选 L/R/C/LFE/Ls/Rs + Tfl/Tfr 时显示「5.1.2（8 只）」；若同一角色多只（L×8/R×8）则显示「自定义：地面 8 + 天空 0 + 低音炮 3」；不强制用户先选一个标准 layout。
 - `inputs`：AES67 输入流通道 → 角色（当前 2ch，默认 0→L、1→R）；不改变接收侧映射，只决定 content.folds。
-- `outputs` 固定列出全部设备通道（22），`enabled=false` 的行 role 必须为 None。
+- `outputs` 固定列出全部设备通道（22），`enabled=false` 的行 role 必须为 None；同一 role 可出现在任意多行（多只同类音箱），组内按 DAC 升序。
+- 输入侧：每个角色可对应 0..k 个流通道（当前 2ch 只有 L/R 有输入），生成 content.folds 时按角色 fan-out。
 - `gain_db`（可选，默认 0）：该物理输出的电平微调；生成方案时写入对应 lane 的 protection gain。
 
 ## 4. 方案生成规则（profile → plan）
@@ -72,7 +73,7 @@
 2. `content`: `in_channels=22`，`out_lanes=N`，`folds`: 输入流通道（AES67 map 后的引擎通道）→ **该角色的每一条 lane 都连一条 fold**（fan-out，增益 1.0，最终电平再由每 lane 的 protection gain/gain_db 调整）；输入角色缺失时该组静音（不报错）；
 3. MIMO 背景：重复角色 = 同一角色的多个执行器，后续 MIMO/modal 设计可按角色组拿到多条 IR，用于多音箱抵消；plan 本身不需要额外字段。
 4. `crossover`: 每 lane 的滤波器（identity 或校准 FIR）；`matrix`: N×N（identity 或设计结果）；`protection`: N lane（gain = profile gain_db）；
-5. `routing`: `dac_channels=22`，`routes = [[lane_i, dac_i], ...]`（profile 的启用行）；未启用 DAC 不列，输出为静音；
+5. `routing`: `dac_channels=22`，`routes = [[lane_i, dac_i], ...]`（profile 的启用行）；未启用 DAC 不列路由。**未使用的 DAC 不做任何静音/控制面写入**：rt-host 输出缓冲照常写零（自然无信号），不折腾 MOTU/CueMix；它们就"放在那儿"，不会影响任何功能，也不会有人用；
 6. 生成后必须走 `inspect`（准入预算/图编译）→ `prepare` → `commit`，失败/mismatch 如实报错，不自动回退到旧方案。
 
 ## 5. API 增量（加到 docs/API.md，均为加法）
@@ -82,15 +83,17 @@
 | PUT | `/api/output-profile` | 两阶段：`{stage:"prepare", profile}` → `{ok, profile, diff, validation, token}`（不碰引擎）；`{stage:"commit", token}` 保存；`{stage:"abort", token}` 丢弃 |
 | POST | `/api/output-profile/plan` | `{}` → 用已保存 profile + 当前滤波器状态生成方案 `{ok, plan_path, sha256, lane_count, inspect}`；之后走现有 `/api/prepare`+`/api/commit` |
 | GET | `/api/channels` | 加法字段 `speaker_roles:[{dac, role, enabled}]`（给 routing/channels 页显示角色名） |
-| POST | `/api/speaker-test` | 通道识别测试音：`{dac:0..21, ms:500..10000, kind:"noise"\|"sine", freq_hz?:number, db?:-60..-6, audible:true, confirm:true}` → `{ok, dac, ms, kind, level_db, remaining_ms}`；经 daemon 校验后转发 rt-host 新控制 op `test_tone` |
+| POST | `/api/speaker-test` | 通道识别测试音：`{dac:0..21, ms:500..10000, kind:"noise"\|"sine", freq_hz?:number, db?:-60..-12, audible:true, confirm:true}` → `{ok, dac, ms, kind, level_db, remaining_ms}`；默认 db=-30（很轻，有声即可）；经 daemon 校验后转发 rt-host 新控制 op `test_tone` |
 | POST | `/api/speaker-test/stop` | 立即停止当前测试音（幂等） |
 | GET | `/api/status` | 加法字段 `speaker_test:{active, dac, remaining_ms, kind}` |
 - 错误体沿用 M1；保存 profile 不改数据面，只有"应用"才 prepare/commit 方案。
 
 ## 6. UI 设计（新页面"输出映射 / Speaker Layout"）
-- 顶部：设备/引擎信息（设备通道数 22、当前引擎 22ch、当前方案 graph/version）、**布局预设选择**（2.0/5.1/7.1/5.1.2/5.1.4/7.1.4/custom，首次默认 2.0）、输入映射（AES67 ch→角色）。
-- 选择预设时自动给出建议的 DAC→角色分配（按 canonical 顺序），弹确认后再应用；用户可再手工改任意行/重复角色。
-- 表格：22 行物理输出，列：物理通道号（1..22）｜当前方案 lane/DAC（来自 /api/channels mapping，未知则"—"）｜启用开关｜角色下拉（中文显示）｜自定义名称（仅 Custom）｜备注。
+- 顶部：设备/引擎信息（设备通道数 22、当前引擎 22ch、当前方案 graph/version）、布局摘要（自动派生，如「5.1.2（8 只）」）、快捷预设按钮（仅填充用）。
+- **第 1 步「选择角色」**：按组展示可选项——地面（左 L / 右 R / 中置 C / 左侧环绕 Ls / 右侧环绕 Rs / 左后环绕 Lb / 右后环绕 Rb）、天空（左前 Tfl / 右前 Tfr / 左后 Trl / 右后 Trr）、低频（低音炮 LFE / 辅助超低音 Sub）。每个角色旁有数量（默认 1，可加多只）；自定义角色可加名称。
+- **第 2 步「分配到输出」**：每个角色实例一行 → 选择物理输出通道（DAC 下拉，显示通道号/当前 lane/来源）；同一角色多只时逐只分配；未分配的实例不生成 lane，页面提示"还有 N 只未分配"。
+- 分配完成后显示：将生成 N lane、角色组统计（左 ×8 / 右 ×8 / 低音炮 ×3）、未使用 DAC 列表（保持无信号：不做静音操作、不写 MOTU/CueMix，就放在那里）。
+- 物理输出表格视图（可选切换）：22 行，列：物理通道号（1..22）｜当前方案 lane/DAC（来自 /api/channels mapping，未知则"—"）｜启用开关｜角色下拉（中文显示，可重复）｜自定义名称｜gain_db｜识别按钮。
 - 实时校验区：**重复角色是正常的**（不报错，显示组统计如「左 ×8 / 右 ×8 / 低音炮 ×3」）；只报结构性矛盾（启用但角色为未使用、DAC 越界、全部禁用、Custom 无名称）；缺少角色只做信息提示；显示「将生成 N lane 方案，未选通道静音」。
 - 角色分组视图：按角色汇总（L、R、LFE…）列出各组的物理输出号与数量，方便确认「8 只左主箱都标成 L」这类配置。
 - 底部：保存草稿（PUT prepare → 展示 diff/校验）→ 应用（POST output-profile/plan → inspect 预览 → prepare/commit/abort）；取消/丢弃。
@@ -98,6 +101,7 @@
 - **通道识别测试音（首版做）**：表格每行一个「识别」按钮；点击后弹确认框（显示将出声的物理通道、时长、电平），确认后 POST `/api/speaker-test`，运行时显示「正在出声 1.0 s（第 3 号输出）」，按钮可「立即停止」。
 - 测试音语义：**直接写 rt-host 的 ALSA 输出通道（原始 DAC 号），不经过 plan routing**——目的是识别"物理输出号线 ↔ 实际音箱"，与当前方案路由无关；测试期间输出只在该通道放测试音、其余静音，结束后自动恢复方案输出，plan/图/状态不变。
 - 安全约束（服务端强制）：每次 ≤10 s（默认 1 s，UI 上限 3 s）、`audible:true`+`confirm:true` 必须同时给、同一时刻只允许一个测试音、`/api/speaker-test/stop` 与 `/api/mute` 都能立即打断、结束自动静音；忙（校准/热重配）时拒绝 409。
+- **音量要轻**：默认 **-30 dBFS**（"有声就行"，不是演示音量），三档可选 -40 / -30 / -20，服务端硬上限 **-12 dBFS**；首尾各 20 ms 淡入/淡出，避免"咔哒"声比测试音还响；噪声用带限粉噪（500 Hz–4 kHz，不刺耳）。
 - 出声窗口：daemon 配置 `KHAEN_SPEAKER_TEST=on` 才启用；可选 `KHAEN_SOUND_WINDOW=08:30-12:00,14:30-18:00` 服务端校验，窗口外 403 `sound_window_closed`（与工作区出声规则一致，需用户明确授权）。
 
 ## 7. 分阶段
@@ -113,4 +117,4 @@
 3. 输入映射（AES67 2ch→L/R）是否同页（建议是）？
 4. ~~通道识别测试音是否纳入首版~~ → **已确认纳入首版**（受 `KHAEN_SPEAKER_TEST`/出声窗口/≤10 s 约束，真机出声验证留窗口）。
 5. 同角色 fan-out 的默认电平：每条 lane 都拿满电平（1.0，靠 gain_db 微调，适合 MIMO 单独驱动），还是按组做 1/√N 归一化（适合被动并联音箱）？（建议默认 1.0，保留 group 归一化作为可选项）
-6. 测试音默认参数：噪声 1 s、-20 dBFS（上限 3 s/次）是否合适？
+6. 测试音默认参数：带限粉噪 1 s、**-30 dBFS**（三档 -40/-30/-20，硬上限 -12，20 ms 淡入淡出）是否合适？
