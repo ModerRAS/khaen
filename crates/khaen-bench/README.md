@@ -1,12 +1,13 @@
 # khaen-bench
 
-khaen 实时 DSP 链性能基线与 kernel 级 SIMD 对照（T38 基线 → T39a kernel SIMD）。
+khaen 实时 DSP 链性能基线、host graph SIMD 派发对照与 kernel 级 SIMD 对照
+（T38 基线 → T39a kernel SIMD → T56 host graph 接 SIMD 派发）。
 
 ## 用法
 
 ```
 khaen-bench [选项]
-  --json                  只输出机器可读 JSON（schema khaen-bench/v1）
+  --json                  只输出机器可读 JSON（schema khaen-bench/v2）
   --quick                 快速模式：warmup=10 measure=60 repeats=2
   --lanes N               通道数 = lane 数（默认 22，最大 32）
   --block-frames N        每块帧数（默认 128）
@@ -15,7 +16,7 @@ khaen-bench [选项]
   --matrix-taps N         matrix 每格抽头数（默认 8）
   --factor N              matrix 抽取 / 插值因子（默认 16 = 48k/16 = 3 kHz）
   --active-lanes N        非恒等 matrix 子块边长（默认 16）
-  --kernel MODE           kernel 级对照：auto（默认，两列）/ scalar / optimized
+  --kernel MODE           graph 档位与 kernel 级对照的列：auto（默认，两列）/ scalar / optimized
   --warmup N              每档预热块数（默认 50）
   --measure N             每档每次重复的测量块数（默认 300）
   --repeats N             每档重复次数（默认 3）
@@ -24,17 +25,30 @@ khaen-bench [选项]
 
 ## 两类档位
 
-1. **graph 档位**（`A-identity` … `E1-matrix-full-rate-1tap`）：计时对象是
-   `PlanGraph::process` 每块耗时（DSP 链本体，host 当前接的内核实现），预算 = 帧数 / 采样率
-   （128 帧 @ 48 kHz = 2.667 ms）。用于回答"整条链离预算多远"。
+1. **graph 档位**（`A-identity` / `B0-crossover96` / `B-crossover2048` / `B2-crossover4096` /
+   `C-matrix3k` / `D-crossover+matrix3k` / `E-matrix-full-rate` / `C1-matrix3k-1tap` /
+   `E1-matrix-full-rate-1tap`）：计时对象是 `PlanGraph::process` 每块耗时（DSP 链本体），
+   预算 = 帧数 / 采样率（128 帧 @ 48 kHz = 2.667 ms）。同一方案用
+   **`KernelChoice::Scalar`（标量参考内核，bit-exact 口径）与 `KernelChoice::Optimized`（core 的
+   SIMD 派发入口）两列**分别编译，报告每列 p50/p99/min、budget 占比、加速比（spd = scalar /
+   optimized）与 parity（两列输出的最大绝对差异）。用于回答"整条链离预算多远"和"host 接上
+   SIMD 后整条链快多少"。
 2. **kernel 档位**（`K-direct-crossover` / `K-direct-crossover4096` / `K-part-3khz` /
    `K-part-fft256` / `K-part-1024tap` / `K-part-4096tap`）：绕过 host 图，直接计时内核入口，
-   同一 workload、同一输入下给出
-   **scalar（标量参考内核）与 optimized（运行时派发的 SIMD 内核）两列**以及加速比与 parity
-   （两路径输出的最大绝对差异，证明同一语义）。用于回答"内核本身被 SIMD 化后快多少"。
+   同一 workload、同一输入下给出标量参考内核与 SIMD 内核两列 + 加速比 + parity。用于回答
+   "内核本身被 SIMD 化后快多少"。
 
-kernel 档位在 `--kernel scalar` / `optimized` 下只测一列（另一列输出 `-`）；默认 `auto`
-两列都测。本机实际后端见报告 `kernel_backend` 字段（`scalar` / `avx2+fma` / `neon`）。
+两类档位都在 `--kernel scalar` / `optimized` 下只测一列（另一列输出 `-`）；默认 `auto`
+两列都测。本机实际派发后端见报告 `graph_kernel.backend` / `kernel_backend` 字段
+（`scalar` / `avx2+fma` / `neon`，来自 host graph 的 `KernelDispatch` 真实探测值），
+`graph_kernel.auto_path` 是 `KernelChoice::Auto` 在本机解析出的路径。
+
+**读报告注意**：`parity ≠ 0` 且 `spd > 1` 才是该档位真实的 SIMD 收益。`parity = 0` 表示两列
+走完全相同的实现（identity 档、matrix 档），那里的 `spd` 只反映测量噪声（应接近 1，min 列比
+p50 稳；共享 Windows 桌面上 p50 会被抬升）。T56 只接了 crossover 的两条卷积路径（≤ 96 taps
+的 direct 直算与 > 96 taps 的 partitioned 分区卷积）；matrix 段（含 3 kHz 低速率域的重采样器
+与矩阵 FIR）目前仍是标量实现，`C/E/C1/E1` 与 `D` 的矩阵部分不会因 T56 变快（实测拆分与
+"暂不接线"的依据见 `crates/host/src/graph/matrix.rs` 模块文档）。
 
 ## 计时口径
 

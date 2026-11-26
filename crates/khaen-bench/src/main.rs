@@ -1,6 +1,6 @@
 //! khaen-bench 命令行：跑本机性能基线并打印人类可读表或 JSON。
 //!
-//! 用法见 --help。人类可读表与 --json 是同一份数据（schema khaen-bench/v1）。
+//! 用法见 --help。人类可读表与 --json 是同一份数据（schema khaen-bench/v2）。
 
 use std::process::ExitCode;
 
@@ -69,11 +69,11 @@ fn parse_value<T: std::str::FromStr>(value: &str, flag: &str) -> Result<T, Strin
 
 fn print_usage() {
     println!(
-        r#"khaen-bench —— khaen 实时图性能基线（T38）
+        r#"khaen-bench —— khaen 实时图性能基线（T38 基线 + T56 host graph SIMD 派发）
 
 用法: khaen-bench [选项]
 
-  --json                  只输出机器可读 JSON（schema khaen-bench/v1）
+  --json                  只输出机器可读 JSON（schema khaen-bench/v2）
   --quick                 快速模式：warmup=10 measure=60 repeats=2
   --lanes N               通道数 = lane 数（默认 22，最大 32）
   --block-frames N        每块帧数（默认 128）
@@ -82,14 +82,18 @@ fn print_usage() {
   --matrix-taps N         matrix 每格抽头数（默认 8）
   --factor N              matrix 抽取 / 插值因子（默认 16；48000/16 = 3 kHz）
   --active-lanes N        非恒等 matrix 子块边长（默认 16）
-  --kernel MODE           kernel 级对照：auto（默认，标量 vs SIMD 两列）/ scalar / optimized
+  --kernel MODE           graph 档位与 kernel 级对照的列：auto（默认，标量 vs SIMD 两列）/
+                          scalar / optimized
   --warmup N              每档预热块数（默认 50）
   --measure N             每档每次重复的测量块数（默认 300）
   --repeats N             每档重复次数（默认 3）
   -h, --help              显示本帮助
 
-计时口径: PlanGraph::process 每块耗时（DSP 链本体）；不含后端 capture/playout、
-线程调度与 daemon 开销。默认跑 A/B/B2/C/D/E/C1/E1 八个档位，见 lib.rs scenarios()。"#
+计时口径: graph 档位计时对象是 PlanGraph::process 每块耗时（DSP 链本体）；kernel 档位是内核
+入口每块耗时。都不含后端 capture/playout、线程调度与 daemon 开销。
+graph 档位两列 = 同一方案分别用 KernelChoice::Scalar（标量参考内核，bit-exact 口径）与
+KernelChoice::Optimized（core 的 SIMD 派发入口）编译；报告给出加速比、budget 占比与 parity。
+默认跑 A/B0/B/B2/C/D/E/C1/E1 九个档位，见 lib.rs scenarios()。"#
     );
 }
 

@@ -1,12 +1,17 @@
-//! khaen 性能基线 bench（T38）。
+//! khaen 性能基线 bench（T38 基线 → T56 host 接 SIMD 派发）。
 //!
-//! 用 host 的图编译 / 执行 API（PlanGraph::compile + Processor::process）构造并计时实时
-//! 链路，回答两个问题：
+//! 用 host 的图编译 / 执行 API（PlanGraph::compile_with_kernel + Processor::process）构造并
+//! 计时实时链路，回答三个问题：
 //!
 //! 1. **3 kHz 低速率矩阵域（T22）到底省了多少**：同一组矩阵系数在全速率（F = 1）与
 //!    3 kHz 域（F = 16，48 kHz / 16）下每 128 帧块的实测成本对比；
-//! 2. **graph/crossover.rs 的标量 direct 卷积占多少预算**：每 lane 一条 ≤ 4096 taps 的
-//!    全采样率 FIR，在 128 帧 / 2.667 ms 块预算下的占比。
+//! 2. **graph/crossover.rs 的卷积占多少预算**：每 lane 一条 ≤ 4096 taps 的全采样率 FIR，
+//!    在 128 帧 / 2.667 ms 块预算下的占比；
+//! 3. **host 图接上核心 SIMD 入口（T56）后整条链快多少**：同一方案分别用
+//!    `KernelChoice::Scalar`（标量参考内核，bit-exact 口径）与 `KernelChoice::Optimized`
+//!    （core 的 SIMD 入口）编译同一个 PlanGraph，报告两列耗时、加速比、budget 占比与
+//!    两列输出的 parity（最大绝对差异，证明同一语义）。graph 档位与 kernel 档位都受
+//!    `KernelMode` 控制：auto 给两列 + 加速比，scalar / optimized 只测一列。
 //!
 //! # 计时口径
 //!
@@ -32,6 +37,7 @@ use khaen_core::plan::{
     ProtectionSection, RoutingSection,
 };
 use khaen_core::rt::SAMPLE_RATES_HZ;
+use khaen_host::graph::{KernelChoice, KernelDispatch, KernelPath, CROSSOVER_PARTITIONED_MIN_TAPS};
 use khaen_host::{
     admit, AdmissionLimits, Budget, CompileError, EngineConfig, PlanGraph, Processor,
     MAX_BLOCK_FRAMES,
@@ -42,7 +48,10 @@ pub mod kernel_bench;
 pub use kernel_bench::KernelTierReport;
 
 /// 输出数据的 schema 标识（人类可读报告与 --json 是同一份数据）。
-pub const SCHEMA: &str = "khaen-bench/v1";
+///
+/// v2（T56）：graph 档位从单列（当前接的内核）改成 scalar / optimized 双列 + 加速比 +
+/// parity，新增 `graph_kernel` 段与 `B0-crossover96` 档；kernel 档位结构不变。
+pub const SCHEMA: &str = "khaen-bench/v2";
 
 /// 矩阵抽取 / 插值因子上限，与 host graph::matrix::MAX_MATRIX_RATE_FACTOR 一致；那里是
 /// crate 内部常量，bench 只做入参校验，不复制实现。
@@ -70,10 +79,11 @@ const TIMER_OVERHEAD_SAMPLES: usize = 1000;
 // 配置
 // ===========================================================================
 
-/// kernel 对照模式（`--kernel`）：控制 kernel 级对照段测哪一列。
+/// 内核列模式（`--kernel`）：控制 graph 档位与 kernel 级对照段各测哪一列。
 ///
-/// `Auto`（默认）同时测标量参考内核与 SIMD 优化内核两列并给出加速比；`Scalar` / `Optimized`
-/// 只测一列（用于只想看一侧或在不便同时跑两列的机器上采集）。
+/// `Auto`（默认）同时测标量参考内核（graph: `KernelChoice::Scalar`；kernel: 标量入口）与
+/// SIMD 优化内核（graph: `KernelChoice::Optimized`；kernel: `*_optimized` 入口）两列并给出
+/// 加速比；`Scalar` / `Optimized` 只测一列（用于只想看一侧或在不便同时跑两列的机器上采集）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum KernelMode {
     /// 同时测标量参考与优化内核（默认；输出两列 + 加速比）。
@@ -314,19 +324,28 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    /// 编译为可执行图（准入失败 / 超预算在这里 fail-closed）。
+    /// 编译为可执行图（准入失败 / 超预算在这里 fail-closed；`KernelChoice::Auto`）。
     pub fn compile(&self, limits: &AdmissionLimits) -> Result<PlanGraph, CompileError> {
         PlanGraph::compile(&self.plan, &self.engine_config, limits)
     }
+
+    /// 按显式内核选择编译为可执行图（标量列 / SIMD 列对照用）。
+    pub fn compile_with_kernel(
+        &self,
+        limits: &AdmissionLimits,
+        choice: KernelChoice,
+    ) -> Result<PlanGraph, CompileError> {
+        PlanGraph::compile_with_kernel(&self.plan, &self.engine_config, limits, choice)
+    }
 }
 
-/// 构造全部基准档位（A / B / B2 / C / D / E / C1 / E1，见各档 purpose）。
+/// 构造全部基准档位（A / B0 / B / B2 / C / D / E / C1 / E1，见各档 purpose）。
 pub fn scenarios(config: &BenchConfig) -> Vec<Scenario> {
     let taps = config.matrix_taps;
     let factor = config.matrix_factor;
     let low_rate_hz = config.sample_rate / u32::from(factor.max(1));
     let active = config.matrix_active_lanes.min(config.lanes);
-    let mut list = Vec::with_capacity(8);
+    let mut list = Vec::with_capacity(9);
 
     list.push(make_scenario(
         "A-identity",
@@ -335,10 +354,20 @@ pub fn scenarios(config: &BenchConfig) -> Vec<Scenario> {
         identity_plan(config),
         config,
     ));
+    // 阈值（96 taps）上的 direct 直算路径：T56 起接 core 的 SIMD A-FIR（之前是标量 direct）。
+    list.push(make_scenario(
+        "B0-crossover96",
+        format!(
+            "每 lane 一条 {CROSSOVER_PARTITIONED_MIN_TAPS}-tap FIR（= 分区阈值，graph/crossover.rs 的 \
+             direct 直算路径），matrix identity：T56 的 direct 路径 SIMD 收益档"
+        ),
+        crossover_plan(config, CROSSOVER_PARTITIONED_MIN_TAPS),
+        config,
+    ));
     list.push(make_scenario(
         "B-crossover2048",
         format!(
-            "每 lane 一条 {}-tap 标量 direct FIR（graph/crossover.rs 的 direct_block_f32），matrix identity",
+            "每 lane 一条 {}-tap crossover FIR（> 阈值：分区 UPOLS 路径），matrix identity",
             config.crossover_taps
         ),
         crossover_plan(config, config.crossover_taps),
@@ -347,7 +376,7 @@ pub fn scenarios(config: &BenchConfig) -> Vec<Scenario> {
     list.push(make_scenario(
         "B2-crossover4096",
         format!(
-            "每 lane 一条 {DIRECT_MAX_TAPS}-tap 标量 direct FIR（DIRECT_MAX_TAPS 上限），matrix identity"
+            "每 lane 一条 {DIRECT_MAX_TAPS}-tap crossover FIR（> 阈值：分区 UPOLS 路径，DIRECT_MAX_TAPS 上限），matrix identity"
         ),
         crossover_plan(config, DIRECT_MAX_TAPS),
         config,
@@ -800,7 +829,24 @@ impl TierStats {
     }
 }
 
-/// 一个档位的完整报告。
+/// graph 档位的一列（scalar 或 optimized）：每次重复的统计 + 跨次汇总 + 离散度。
+#[derive(Debug, Clone, PartialEq)]
+pub struct GraphColumn {
+    /// 该列实际使用的内核入口名（`scalar` / `optimized`）。
+    pub path: &'static str,
+    /// 每次重复的统计。
+    pub repeats: Vec<TierStats>,
+    /// 跨次中位数统计。
+    pub aggregate: TierStats,
+    /// 各次 p50 的离散度（max-min）/ median（%）。
+    pub spread_pct: f64,
+}
+
+/// 一个 graph 档位的完整报告：同一方案的 scalar 列 / optimized 列 + 加速比 + parity。
+///
+/// 两列是**同一个 Plan、同一输入**、只换编译期内核选择（`KernelChoice::Scalar` vs
+/// `KernelChoice::Optimized`）得到的；parity 是两列从零 state 起跑同一段流后同一块的
+/// 输出最大绝对差异（证明只差浮点舍入，不是换了语义）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct TierReport {
     /// 档位名。
@@ -811,12 +857,32 @@ pub struct TierReport {
     pub construction: Construction,
     /// matrix 段估算延迟（全采样率样本；crossover / protection 不在内）。
     pub estimated_latency_samples: u64,
-    /// 每次重复的统计。
-    pub repeats: Vec<TierStats>,
-    /// 跨次中位数统计。
-    pub aggregate: TierStats,
-    /// 各次 p50 的离散度（max-min）/ median（%）。
-    pub spread_pct: f64,
+    /// 本机派发后端（真实探测值：scalar / avx2+fma / neon）。
+    pub backend: String,
+    /// [`KernelMode::Auto`] 在本机解析出的优化列路径（scalar 机器上仍会回退标量）。
+    pub auto_path: &'static str,
+    /// 标量参考内核列（`KernelChoice::Scalar`）。
+    pub scalar: Option<GraphColumn>,
+    /// 核心 SIMD 优化入口列（`KernelChoice::Optimized`）。
+    pub optimized: Option<GraphColumn>,
+    /// scalar.p50 / optimized.p50（> 1 表示优化后更快）。
+    pub speedup_p50: Option<f64>,
+    /// 同上，p99。
+    pub speedup_p99: Option<f64>,
+    /// 同上，min。
+    pub speedup_min: Option<f64>,
+    /// 两列输出最大绝对差异（0 = 逐位相同，例如 identity 档或矩阵段未接 SIMD）。
+    pub parity_max_abs: f32,
+}
+
+impl TierReport {
+    /// 某一列的跨次汇总（没有测该列时为 None）。
+    pub fn column(&self, path: KernelPath) -> Option<&GraphColumn> {
+        match path {
+            KernelPath::Scalar => self.scalar.as_ref(),
+            KernelPath::Optimized => self.optimized.as_ref(),
+        }
+    }
 }
 
 /// 一次完整 bench 的报告。
@@ -830,8 +896,10 @@ pub struct BenchReport {
     pub budget_us: f64,
     /// 计时器空转基线（µs/块，已从每块样本中扣除）。
     pub timer_overhead_us: f64,
-    /// 本机内核派发后端（scalar / avx2+fma / neon）。
+    /// 本机内核派发后端（scalar / avx2+fma / neon；host graph 的 `KernelDispatch` 真实探测值）。
     pub kernel_backend: String,
+    /// `KernelChoice::Auto` 在本机解析出的路径（scalar / optimized）。
+    pub graph_auto_path: String,
     /// 各 graph 档位报告（按 scenarios 顺序；计时对象 PlanGraph::process）。
     pub tiers: Vec<TierReport>,
     /// kernel 级对照（同一 workload 的标量参考内核 vs SIMD 优化内核）。
@@ -875,49 +943,79 @@ impl std::error::Error for BenchError {
 }
 
 /// 跑全部档位，返回报告。计时对象是 PlanGraph::process 每块耗时。
+///
+/// graph 档位按 [`KernelMode`] 测一列或两列：两列是同一个 Plan、同一输入，只换编译期的
+/// 内核选择（`KernelChoice::Scalar` / `KernelChoice::Optimized`）。parity 用两列各自的
+/// 同一条输入流（从零 state 起跑）最后一块输出求最大绝对差异，mouth 证明只差浮点舍入。
 pub fn run(config: &BenchConfig) -> Result<BenchReport, BenchError> {
     config.validate().map_err(BenchError::Config)?;
     let limits = AdmissionLimits::default();
     let budget_us = config.budget_us();
     let platform = Platform::detect();
     let timer_overhead_us = measure_timer_overhead(TIMER_OVERHEAD_SAMPLES);
-    let mut tiers = Vec::new();
+    // 本机派发快照从 host graph 读（T56 ③：真实探测值，不自己编）。
+    let dispatch = KernelDispatch::detect(KernelChoice::Auto);
+    let measure_scalar = matches!(config.kernel_mode, KernelMode::Auto | KernelMode::Scalar);
+    let measure_optimized = matches!(config.kernel_mode, KernelMode::Auto | KernelMode::Optimized);
+    let mut tiers = Vec::with_capacity(9);
     for (index, scenario) in scenarios(config).into_iter().enumerate() {
-        let mut graph = scenario
-            .compile(&limits)
+        // 两列用同一条确定性输入（同一 seed、同一波形），parity 才有意义。
+        let seed = 0x9e37_79b9_u32.wrapping_add((index as u32).wrapping_mul(0x85eb_ca6b));
+        let estimated_latency_samples = scenario
+            .compile_with_kernel(&limits, KernelChoice::Scalar)
             .map_err(|error| BenchError::Compile {
                 tier: scenario.name,
                 error,
-            })?;
-        let estimated_latency_samples = graph.estimated_latency_samples();
-        let mut input = vec![0.0f32; config.samples_per_block()];
-        fill_signal(
-            &mut input,
-            0x9e37_79b9_u32.wrapping_add((index as u32).wrapping_mul(0x85eb_ca6b)),
-        );
-        let mut output = vec![0.0f32; config.samples_per_block()];
-        let mut repeats = Vec::with_capacity(config.repeats);
-        for _ in 0..config.repeats {
-            repeats.push(measure_graph(
-                &mut graph,
-                &input,
-                &mut output,
-                config.warmup_blocks,
-                config.measure_blocks,
+            })?
+            .estimated_latency_samples();
+        let scalar = if measure_scalar {
+            Some(run_graph_column(
+                &scenario,
+                KernelChoice::Scalar,
+                config,
+                seed,
                 budget_us,
                 timer_overhead_us,
-            ));
-        }
-        let aggregate = aggregate(&repeats, budget_us);
-        let spread_pct = spread_pct(&repeats);
+                &limits,
+            )?)
+        } else {
+            None
+        };
+        let optimized = if measure_optimized {
+            Some(run_graph_column(
+                &scenario,
+                KernelChoice::Optimized,
+                config,
+                seed,
+                budget_us,
+                timer_overhead_us,
+                &limits,
+            )?)
+        } else {
+            None
+        };
+        let parity_max_abs = graph_parity(&scenario, config, seed, &limits)?;
+        let (speedup_p50, speedup_p99, speedup_min) = match (scalar.as_ref(), optimized.as_ref()) {
+            (Some(scalar), Some(optimized)) => (
+                Some(scalar.aggregate.p50_us / optimized.aggregate.p50_us),
+                Some(scalar.aggregate.p99_us / optimized.aggregate.p99_us),
+                Some(scalar.aggregate.min_us / optimized.aggregate.min_us),
+            ),
+            _ => (None, None, None),
+        };
         tiers.push(TierReport {
             name: scenario.name.to_string(),
             purpose: scenario.purpose,
             construction: scenario.construction,
             estimated_latency_samples,
-            repeats,
-            aggregate,
-            spread_pct,
+            backend: dispatch.backend_name().to_string(),
+            auto_path: dispatch.path_name(),
+            scalar,
+            optimized,
+            speedup_p50,
+            speedup_p99,
+            speedup_min,
+            parity_max_abs,
         });
     }
     let kernel_tiers = kernel_bench::run_kernel_tiers(config, budget_us, timer_overhead_us);
@@ -926,12 +1024,96 @@ pub fn run(config: &BenchConfig) -> Result<BenchReport, BenchError> {
         config: *config,
         budget_us,
         timer_overhead_us,
-        kernel_backend: khaen_core::kernels::dispatch::SimdBackend::detect()
-            .name()
-            .to_string(),
+        kernel_backend: dispatch.backend_name().to_string(),
+        graph_auto_path: dispatch.path_name().to_string(),
         tiers,
         kernel_tiers,
     })
+}
+
+/// 跑 graph 档位的一列：按 `choice` 编译图，预热 + 逐块计时，重复 `config.repeats` 次。
+#[allow(clippy::too_many_arguments)]
+fn run_graph_column(
+    scenario: &Scenario,
+    choice: KernelChoice,
+    config: &BenchConfig,
+    seed: u32,
+    budget_us: f64,
+    timer_overhead_us: f64,
+    limits: &AdmissionLimits,
+) -> Result<GraphColumn, BenchError> {
+    let mut input = vec![0.0f32; config.samples_per_block()];
+    fill_signal(&mut input, seed);
+    let mut output = vec![0.0f32; config.samples_per_block()];
+    let mut repeats = Vec::with_capacity(config.repeats);
+    for _ in 0..config.repeats {
+        // 每次重复重新编译：state 从零开始，跨次互不影响。
+        let mut graph = scenario
+            .compile_with_kernel(limits, choice)
+            .map_err(|error| BenchError::Compile {
+                tier: scenario.name,
+                error,
+            })?;
+        repeats.push(measure_graph(
+            &mut graph,
+            &input,
+            &mut output,
+            config.warmup_blocks,
+            config.measure_blocks,
+            budget_us,
+            timer_overhead_us,
+        ));
+    }
+    let aggregate = aggregate(&repeats, budget_us);
+    let spread_pct = spread_pct(&repeats);
+    Ok(GraphColumn {
+        path: choice.resolve_path().name(),
+        repeats,
+        aggregate,
+        spread_pct,
+    })
+}
+
+/// 两列 parity：同一输入流、同一块数，从零 state 起跑后比较最后一块输出。
+///
+/// 预热 `warmup_blocks` 块让历史进入稳态，再处理一块并比较（图内无反馈，两列只差内核的
+/// 浮点舍入，因此逐块差异有界；identity 档两列同一实现，差异为 0）。
+fn graph_parity(
+    scenario: &Scenario,
+    config: &BenchConfig,
+    seed: u32,
+    limits: &AdmissionLimits,
+) -> Result<f32, BenchError> {
+    let mut input = vec![0.0f32; config.samples_per_block()];
+    fill_signal(&mut input, seed);
+    let mut scalar_graph = scenario
+        .compile_with_kernel(limits, KernelChoice::Scalar)
+        .map_err(|error| BenchError::Compile {
+            tier: scenario.name,
+            error,
+        })?;
+    let mut optimized_graph = scenario
+        .compile_with_kernel(limits, KernelChoice::Optimized)
+        .map_err(|error| BenchError::Compile {
+            tier: scenario.name,
+            error,
+        })?;
+    let mut scalar_output = vec![0.0f32; config.samples_per_block()];
+    let mut optimized_output = vec![0.0f32; config.samples_per_block()];
+    let warmup = config.warmup_blocks.max(1);
+    for _ in 0..warmup {
+        scalar_graph.process(&input, &mut scalar_output);
+        optimized_graph.process(&input, &mut optimized_output);
+    }
+    scalar_graph.process(&input, &mut scalar_output);
+    optimized_graph.process(&input, &mut optimized_output);
+    let parity = scalar_output
+        .iter()
+        .zip(optimized_output.iter())
+        .map(|(scalar, optimized)| (scalar - optimized).abs())
+        .fold(0.0f32, f32::max);
+    std::hint::black_box(parity);
+    Ok(parity)
 }
 
 /// 确定性伪随机输入（LCG；只用整数运算与 f32 除法，跨平台一致）。
@@ -1085,7 +1267,8 @@ impl BenchReport {
             .map_or_else(|| "unknown".to_string(), |cores| cores.to_string());
         let _ = writeln!(
             out,
-            "khaen 性能基线 bench（T38 基线 + T39a kernel SIMD 对照） — schema {SCHEMA}（--json 输出同一份数据）"
+            "khaen 性能基线 bench（T38 基线 + T39a kernel SIMD + T56 host graph SIMD 派发对照） \
+             — schema {SCHEMA}（--json 输出同一份数据）"
         );
         let _ = writeln!(
             out,
@@ -1124,48 +1307,89 @@ impl BenchReport {
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "{:<24} {:>9} {:>9} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7}  repeat p50 (µs)",
-            "tier",
-            "mean µs",
-            "p50 µs",
-            "p99 µs",
-            "p999 µs",
-            "min µs",
-            "mean %",
-            "p99 %",
-            "min %",
-            "spread"
+            "\ngraph 档位（计时对象 PlanGraph::process 每块；scalar = KernelChoice::Scalar \
+             （khaen-core 标量参考内核，bit-exact 口径），optimized = KernelChoice::Optimized \
+             （core 的 SIMD 派发入口）；backend={}，Auto 解析出的路径={}）：",
+            self.kernel_backend, self.graph_auto_path
         );
-        let _ = writeln!(out, "{}", "-".repeat(142));
+        let cell = |column: Option<GraphColumn>, field: fn(&TierStats) -> f64| match column {
+            Some(column) => format!("{:.2}", field(&column.aggregate)),
+            None => "-".to_string(),
+        };
+        let pct = |column: Option<GraphColumn>| match column {
+            Some(column) => format!("{:.2}%", column.aggregate.budget_pct_mean),
+            None => "-".to_string(),
+        };
+        let _ = writeln!(
+            out,
+            "{:<22} {:>9} {:>9} {:>9} {:>8} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8} {:>10}",
+            "tier",
+            "sc p50",
+            "sc p99",
+            "sc min",
+            "sc mean%",
+            "op p50",
+            "op p99",
+            "op min",
+            "op mean%",
+            "spd p50",
+            "spd min",
+            "parity"
+        );
+        let _ = writeln!(out, "{}", "-".repeat(131));
         for tier in &self.tiers {
-            let stats = &tier.aggregate;
-            let repeat_p50 = tier
-                .repeats
-                .iter()
-                .map(|repeat| format!("{:.2}", repeat.p50_us))
-                .collect::<Vec<_>>()
-                .join("/");
+            let ratio =
+                |value: Option<f64>| value.map_or_else(|| "-".to_string(), |v| format!("{v:.3}"));
             let _ = writeln!(
                 out,
-                "{:<24} {:>9.2} {:>9.2} {:>9.2} {:>9.2} {:>9.2} {:>7.2}% {:>7.2}% {:>7.2}% \
-                 {:>6.1}%  {}",
+                "{:<22} {:>9} {:>9} {:>9} {:>8} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8} {:>10.3e}",
                 tier.name,
-                stats.mean_us,
-                stats.p50_us,
-                stats.p99_us,
-                stats.p999_us,
-                stats.min_us,
-                stats.budget_pct_mean,
-                stats.budget_pct_p99,
-                stats.min_us / self.budget_us * 100.0,
-                tier.spread_pct,
-                repeat_p50
+                cell(tier.scalar.clone(), |stats| stats.p50_us),
+                cell(tier.scalar.clone(), |stats| stats.p99_us),
+                cell(tier.scalar.clone(), |stats| stats.min_us),
+                pct(tier.scalar.clone()),
+                cell(tier.optimized.clone(), |stats| stats.p50_us),
+                cell(tier.optimized.clone(), |stats| stats.p99_us),
+                cell(tier.optimized.clone(), |stats| stats.min_us),
+                pct(tier.optimized.clone()),
+                ratio(tier.speedup_p50),
+                ratio(tier.speedup_min),
+                tier.parity_max_abs
             );
         }
         let _ = writeln!(
             out,
-            "\n预算判定：p99 % > 100 表示该档单块处理时间超过 {:.3} ms（单线程、无后端开销；\
-             真实 xrun 判定还需端到端运行，NOT_RUN）；min % > 100 表示即使最安静块也超预算。",
+            "\nspd p50 / spd min = scalar 的 p50 / min ÷ optimized 的同统计（> 1 表示 optimized 更快；\
+             仅 Auto 模式下给出）。parity = 两列从零 state 起跑同一输入流后最后一块输出的最大绝对\
+             差异（0 = 逐位相同）。\n\
+             **读法**：parity ≠ 0 且 spd > 1 才是该档位真实的 SIMD 收益；parity = 0 意味着两列走\
+             完全相同的实现（identity 档、matrix 档），那里的 spd 只反映测量噪声（应接近 1，\
+             偏差即这次运行的噪声量级，min 列比 p50 稳）。T56 只接了 crossover 的两条卷积路径\
+             （direct 直算 / partitioned 分区卷积）；matrix 低速率域的重采样器与 matrix FIR\
+             仍是标量实现（实测拆分见 graph::matrix 模块文档）。"
+        );
+        for tier in &self.tiers {
+            let repeat_p50 = |column: &Option<GraphColumn>| match column {
+                Some(column) => column
+                    .repeats
+                    .iter()
+                    .map(|repeat| format!("{:.2}", repeat.p50_us))
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                None => "-".to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "  {:<20} repeat p50 (µs): scalar [{}] optimized [{}]",
+                tier.name,
+                repeat_p50(&tier.scalar),
+                repeat_p50(&tier.optimized)
+            );
+        }
+        let _ = writeln!(
+            out,
+            "\n预算判定：mean% / p99 对应的预算 = {:.3} ms/块（单线程、无后端开销；真实 xrun 判定\
+             还需端到端运行，NOT_RUN）。",
             self.budget_us / 1000.0
         );
         let _ = writeln!(out, "\n构造信息（含 host 准入预算估算）：");
@@ -1263,6 +1487,14 @@ impl BenchReport {
             "  \"timer_overhead_us\": {:.6},",
             self.timer_overhead_us
         );
+        let _ = writeln!(out, "  \"graph_kernel\": {{");
+        let _ = writeln!(
+            out,
+            "    \"backend\": {}, \"auto_path\": {}",
+            json_string(&self.kernel_backend),
+            json_string(&self.graph_auto_path)
+        );
+        let _ = writeln!(out, "  }},");
         let _ = writeln!(out, "  \"tiers\": [");
         for (index, tier) in self.tiers.iter().enumerate() {
             let _ = writeln!(out, "    {{");
@@ -1278,18 +1510,30 @@ impl BenchReport {
                 "      \"estimated_latency_samples\": {},",
                 tier.estimated_latency_samples
             );
-            let _ = writeln!(out, "      \"spread_pct\": {:.3},", tier.spread_pct);
-            let _ = writeln!(out, "      \"aggregate\": {},", stats_json(&tier.aggregate));
-            let _ = writeln!(out, "      \"repeats\": [");
-            for (repeat_index, stats) in tier.repeats.iter().enumerate() {
-                let comma = if repeat_index + 1 < tier.repeats.len() {
-                    ","
-                } else {
-                    ""
-                };
-                let _ = writeln!(out, "        {}{comma}", stats_json(stats));
-            }
-            let _ = writeln!(out, "      ]");
+            let _ = writeln!(out, "      \"backend\": {},", json_string(&tier.backend));
+            let _ = writeln!(out, "      \"auto_path\": {},", json_string(tier.auto_path));
+            let _ = writeln!(
+                out,
+                "      \"parity_max_abs\": {:.6e},",
+                tier.parity_max_abs
+            );
+            let ratio = |value: Option<f64>| match value {
+                Some(value) => format!("{value:.3}"),
+                None => "null".to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "      \"speedup_p50\": {}, \"speedup_p99\": {}, \"speedup_min\": {},",
+                ratio(tier.speedup_p50),
+                ratio(tier.speedup_p99),
+                ratio(tier.speedup_min)
+            );
+            let column_json = |column: &Option<GraphColumn>| match column {
+                Some(column) => graph_column_json(column),
+                None => String::from("null"),
+            };
+            let _ = writeln!(out, "      \"scalar\": {},", column_json(&tier.scalar));
+            let _ = writeln!(out, "      \"optimized\": {}", column_json(&tier.optimized));
             let comma = if index + 1 < self.tiers.len() {
                 ","
             } else {
@@ -1316,6 +1560,26 @@ impl BenchReport {
         let _ = writeln!(out, "}}");
         out
     }
+}
+
+/// graph 档位一列的 JSON（path + spread + aggregate + repeats）。
+fn graph_column_json(column: &GraphColumn) -> String {
+    let mut out = String::with_capacity(1024);
+    let _ = write!(
+        out,
+        "{{\"path\": {}, \"spread_pct\": {:.3}, \"aggregate\": {}, \"repeats\": [",
+        json_string(column.path),
+        column.spread_pct,
+        stats_json(&column.aggregate)
+    );
+    for (repeat_index, stats) in column.repeats.iter().enumerate() {
+        if repeat_index > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&stats_json(stats));
+    }
+    out.push_str("]}");
+    out
 }
 
 fn stats_json(stats: &TierStats) -> String {
@@ -1412,7 +1676,11 @@ mod tests {
         let config = tiny_config();
         let limits = AdmissionLimits::default();
         let scenarios = scenarios(&config);
-        assert_eq!(scenarios.len(), 8, "档位数固定为 8");
+        assert_eq!(
+            scenarios.len(),
+            9,
+            "档位数固定为 9（含 T56 的 B0-crossover96）"
+        );
         let samples = config.samples_per_block();
         for scenario in &scenarios {
             let mut graph = scenario
@@ -1562,13 +1830,46 @@ mod tests {
             ..tiny_config()
         };
         let report = run(&config).expect("小配置 bench 运行失败");
-        assert_eq!(report.tiers.len(), 8);
+        assert_eq!(report.tiers.len(), 9);
+        assert_eq!(
+            report.graph_auto_path,
+            KernelChoice::Auto.resolve_path().name(),
+            "graph 档位的 auto 路径必须是 host graph 的真实解析结果"
+        );
         for tier in &report.tiers {
-            assert!(tier.aggregate.p50_us <= tier.aggregate.p99_us);
-            assert!(tier.aggregate.p99_us <= tier.aggregate.p999_us);
-            assert!(tier.aggregate.budget_pct_p99 > 0.0);
-            assert_eq!(tier.repeats.len(), 1);
+            // Auto 模式：graph 档位两列都要有（scalar = 标量参考内核，optimized = 核心 SIMD 入口）。
+            let scalar = tier.scalar.as_ref().expect("Auto 模式缺标量列");
+            let optimized = tier.optimized.as_ref().expect("Auto 模式缺优化列");
+            assert_eq!(scalar.path, "scalar");
+            assert_eq!(optimized.path, "optimized");
+            for column in [scalar, optimized] {
+                assert!(column.aggregate.p50_us <= column.aggregate.p99_us);
+                assert!(column.aggregate.p99_us <= column.aggregate.p999_us);
+                assert!(column.aggregate.budget_pct_p99 > 0.0);
+                assert_eq!(column.repeats.len(), 1);
+            }
+            assert!(
+                tier.speedup_p50.is_some()
+                    && tier.speedup_p99.is_some()
+                    && tier.speedup_min.is_some(),
+                "两列都测时必须给出加速比: {}",
+                tier.name
+            );
+            assert!(
+                tier.parity_max_abs.is_finite() && tier.parity_max_abs <= 1.0e-2,
+                "graph 两列 parity 过大: {} -> {}",
+                tier.name,
+                tier.parity_max_abs
+            );
+            assert!(!tier.backend.is_empty());
         }
+        // identity 档两列走同一套直通/折叠实现：parity 必须逐位为 0。
+        let identity = report
+            .tiers
+            .iter()
+            .find(|tier| tier.name == "A-identity")
+            .expect("identity 档位");
+        assert_eq!(identity.parity_max_abs, 0.0, "identity 档两列应逐位相同");
         // kernel 级对照（T39a）：默认 auto 模式必须给出两列与加速比 + parity。
         assert!(
             !report.kernel_tiers.is_empty(),
@@ -1601,7 +1902,7 @@ mod tests {
         let json = report.to_json();
         assert!(json.starts_with('{'));
         assert!(json.trim_end().ends_with('}'));
-        assert!(json.contains("\"schema\": \"khaen-bench/v1\""));
+        assert!(json.contains("\"schema\": \"khaen-bench/v2\""));
         assert!(json.contains("\"p50_us\""));
         assert!(json.contains("\"aggregate\""));
         assert!(json.contains("\"construction\""));
@@ -1609,9 +1910,19 @@ mod tests {
         assert!(json.contains("\"kernel_tiers\""));
         assert!(json.contains("\"K-direct-crossover\""));
         assert!(json.contains("\"parity_max_abs\""));
+        // T56：graph 档位两列 + graph_kernel 段（真实后端 / auto 路径）。
+        assert!(json.contains("\"graph_kernel\""));
+        assert!(json.contains("\"auto_path\""));
+        assert!(json.contains("\"scalar\": {\"path\": \"scalar\""));
+        assert!(json.contains("\"optimized\": {\"path\": \"optimized\""));
+        assert!(json.contains("\"speedup_p50\""));
+        assert!(json.contains("\"B0-crossover96\""));
         let table = report.human_report();
         assert!(table.contains("A-identity"));
-        assert!(table.contains("p50 µs"));
+        assert!(table.contains("sc p50"));
+        assert!(table.contains("op p50"));
+        assert!(table.contains("spd p50"));
+        assert!(table.contains("graph 档位"));
         assert!(table.contains("kernel 级对照"));
         for tier in &report.kernel_tiers {
             assert!(
@@ -1644,6 +1955,19 @@ mod tests {
         };
         config.kernel_mode = KernelMode::Scalar;
         let report = run(&config).expect("scalar-only bench");
+        for tier in &report.tiers {
+            assert!(
+                tier.scalar.is_some(),
+                "scalar 模式缺 graph 标量列: {}",
+                tier.name
+            );
+            assert!(
+                tier.optimized.is_none(),
+                "scalar 模式不应测 graph 优化列: {}",
+                tier.name
+            );
+            assert!(tier.speedup_p50.is_none(), "只测一列时不应有 graph 加速比");
+        }
         for tier in &report.kernel_tiers {
             assert!(tier.scalar.is_some(), "scalar 模式缺标量列: {}", tier.name);
             assert!(
@@ -1655,6 +1979,18 @@ mod tests {
         }
         config.kernel_mode = KernelMode::Optimized;
         let report = run(&config).expect("optimized-only bench");
+        for tier in &report.tiers {
+            assert!(
+                tier.optimized.is_some(),
+                "optimized 模式缺 graph 优化列: {}",
+                tier.name
+            );
+            assert!(
+                tier.scalar.is_none(),
+                "optimized 模式不应测 graph 标量列: {}",
+                tier.name
+            );
+        }
         for tier in &report.kernel_tiers {
             assert!(
                 tier.optimized.is_some(),
@@ -1678,6 +2014,46 @@ mod tests {
             KernelMode::Optimized
         );
         assert!(KernelMode::parse("fast").is_err());
+    }
+
+    #[test]
+    fn graph_crossover_tiers_show_simd_parity_against_scalar() {
+        // 小配置（2 lane、64 帧）：B0/B 两档都走 direct 路径；B2 = 4096 taps 走分区路径。
+        let config = BenchConfig {
+            warmup_blocks: 2,
+            measure_blocks: 6,
+            repeats: 1,
+            ..tiny_config()
+        };
+        let report = run(&config).expect("小配置 bench 运行失败");
+        for name in ["B0-crossover96", "B2-crossover4096"] {
+            let tier = report
+                .tiers
+                .iter()
+                .find(|tier| tier.name == name)
+                .unwrap_or_else(|| panic!("缺少档位 {name}"));
+            // 两列都是同一方案、同一输入：parity 只能来自内核浮点舍入，容差与 core 对拍同量级。
+            assert!(
+                tier.parity_max_abs.is_finite() && tier.parity_max_abs <= 1.0e-3,
+                "{name}: 两列 parity {} 超过 1e-3",
+                tier.parity_max_abs
+            );
+            let scalar = tier.scalar.as_ref().expect("标量列");
+            let optimized = tier.optimized.as_ref().expect("优化列");
+            assert!(scalar.aggregate.p50_us > 0.0, "{name}: 标量列耗时应为正");
+            assert!(optimized.aggregate.p50_us > 0.0, "{name}: 优化列耗时应为正");
+        }
+        // 矩阵低速率域档（C-matrix3k）目前没有 SIMD 入口：两列必须逐位相同（parity = 0），
+        // 否则说明 matrix 段被意外改了数值行为。
+        let matrix_tier = report
+            .tiers
+            .iter()
+            .find(|tier| tier.name == "C-matrix3k")
+            .expect("C 档位");
+        assert_eq!(
+            matrix_tier.parity_max_abs, 0.0,
+            "matrix3k 档两列应逐位相同（matrix 段尚未接 SIMD）"
+        );
     }
 
     #[test]
