@@ -109,6 +109,27 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 - **静音**：`Runtime::request_mute(bool)` 是块边界生效的用户静音；它与安全静音相互独立——用户解除静音不会清除安全故障，锁存期间 `run_block` 仍整块清零（fail-closed）。daemon/rt-host 的跨进程静音命令属于 T70f 后续（当前 rt-host 没有 socket，无运行期静音入口）。
 - **无人值守取证**：设置 `KHAEN_STATUS_FILE=/var/lib/khaen/rt-status.json` 后每统计周期原子写一行 JSON（schema `khaen-rt-status/v1`：blocks/state/muted/safe/plan_rate/device_rate/rate_asserted/input/output/receiver/graph_id/last_error），soak 结束直接拷文件即可，不需要人盯控制台。
 
+### 4.4 v1.2 运行时开关（daemon / rt-host）
+
+| 环境变量 | 进程 | 含义 | 不设置/默认 |
+| --- | --- | --- | --- |
+| `KHAEN_RT_TARGET` | daemon | 控制 op 目标：`rt-host`（默认，经 UNIX socket）或 `process`（仅离线测试） | `rt-host` |
+| `KHAEN_RT_SOCKET` | daemon | rt-host 控制 socket 路径，必须与 rt-host 的 `KHAEN_CONTROL_SOCKET` 一致 | `/run/khaen/rt-host.sock` |
+| `KHAEN_RT_TIMEOUT_MS` | daemon | 单次往返超时（毫秒），必须大于 5 s 块边界 ack 上限 | `10000` |
+| `KHAEN_CAL_BACKEND` | daemon | 校准 job 后端开关；`off/0` 关闭后如实 `not_wired` | 开 |
+| `KHAEN_ALLOW_RESTART` | daemon | 允许 `/api/system/restart` 经 systemctl 重启 rt-host | 关（403） |
+| `KHAEN_SPEAKER_TEST` | daemon | 通道识别测试音开关；`on` 才允许 `/api/speaker-test` | 关 |
+| `KHAEN_SOUND_WINDOW` | daemon | 测试音出声窗口（`HH:MM-HH:MM` 逗号分隔，本地时间） | 不限（仍受开关约束） |
+| `KHAEN_CAL` | rt-host | 进程内校准播放/采集开关；`off/0` 关闭 | 开 |
+| `KHAEN_CAL_DIR` | rt-host | 校准产物目录 | `/var/lib/khaen/cal` |
+| `KHAEN_UMIK_DEVICE/SERIAL/CAL_FILE/CAL_SHA256` | rt-host | UMIK 采集声明（必填项缺失即 `mic_declaration_missing`，不猜） | 未声明 |
+| `KHAEN_CAL_CAPTURE_CHANNELS` | rt-host | 采集读块通道数（1ch 设备设 1） | `2` |
+| `KHAEN_CAL_CHANNELS` / `KHAEN_CAL_LAYOUT` / `KHAEN_CAL_LEVEL_DBFS` | rt-host | 播放通道/布局/驱动电平 | `0,1,2,3,4,5,7` / `4.1.2` / `-12` |
+
+- **MOTU/CueMix 写入边界（硬规则）**：只允许 4 类用途——切采样率、切光口模式（ADAT↔Toslink）、整体静音、整体音量；不做 per-channel 写入，不给未使用 DAC 静音。
+- **测试音安全**：默认关；开启后仍要求 `audible:true`+`confirm:true`、单次 ≤10 s（默认 1 s、-30 dBFS）、自动恢复节目输出、`/api/mute` 可立即打断；真机出声验证需白天窗口与用户许可。
+- **深度诊断**：`GET /api/status` 加法 `mode`（rt-host socket 主路径有真值；file/process/不可用 → null+reason）；`GET /api/meta` 加法 `speaker_test` 能力三态。
+
 ## 5. 验证状态（如实标注）
 
 | 项 | 状态 |

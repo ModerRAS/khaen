@@ -373,7 +373,7 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
 name = "khaen-analyze"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "khaen-calibration",
  "realfft",
@@ -382,11 +382,11 @@ dependencies = [
 
 [[package]]
 name = "khaen-aoip-aes67"
-version = "0.1.8"
+version = "0.1.9"
 
 [[package]]
 name = "khaen-asrc"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "audioadapter",
  "rubato",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "khaen-bench"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "khaen-core",
  "khaen-host",
@@ -402,7 +402,7 @@ dependencies = [
 
 [[package]]
 name = "khaen-cal-tools"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "khaen-calibration",
  "khaen-core",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "khaen-calibration"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "khaen-core",
  "khaen-designer",
@@ -426,11 +426,11 @@ dependencies = [
 
 [[package]]
 name = "khaen-core"
-version = "0.1.8"
+version = "0.1.9"
 
 [[package]]
 name = "khaen-daemon"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "argon2",
  "axum",
@@ -448,11 +448,11 @@ dependencies = [
 
 [[package]]
 name = "khaen-designer"
-version = "0.1.8"
+version = "0.1.9"
 
 [[package]]
 name = "khaen-host"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "alsa",
  "khaen-asrc",
@@ -462,11 +462,11 @@ dependencies = [
 
 [[package]]
 name = "khaen-mimo-design"
-version = "0.1.8"
+version = "0.1.9"
 
 [[package]]
 name = "khaen-modal-design"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "khaen-core",
  "khaen-designer",
@@ -474,11 +474,11 @@ dependencies = [
 
 [[package]]
 name = "khaen-motu-cuemix"
-version = "0.1.8"
+version = "0.1.9"
 
 [[package]]
 name = "khaen-plan-builder"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "khaen-core",
  "khaen-host",
@@ -486,18 +486,18 @@ dependencies = [
 
 [[package]]
 name = "khaen-room-sim"
-version = "0.1.8"
+version = "0.1.9"
 
 [[package]]
 name = "khaen-rt-check"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "khaen-core",
 ]
 
 [[package]]
 name = "khaen-rt-host"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "alsa",
  "khaen-calibration",
