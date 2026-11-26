@@ -18,18 +18,49 @@ use super::service::{
 /// 未接线原因（稳定文案；/api/status 的 reasons、503 错误体、meta 的 not_wired 共用）。
 pub const NOT_WIRED_REASON: &str = "calibration job backend is not wired: crates/calibration has no production job backend in this daemon build yet (T70h-b); uploads and wizard configuration work, but jobs cannot start and no job state exists";
 
-/// 默认（未接线）校准服务。
-#[derive(Debug, Default, Clone, Copy)]
-pub struct NotWiredCalibration;
+/// 未接线（或初始化失败）校准服务。
+///
+/// - `new()`：构建期就没有生产 backend（历史默认，测试用）；
+/// - `with_reason(reason)`：生产 backend 初始化失败时如实降级，reason 里带真实失败原因
+///   （例如 state 目录不可写），不再用一句"没有 backend"掩盖实际错误。
+#[derive(Debug, Clone)]
+pub struct NotWiredCalibration {
+    reason: String,
+}
+
+impl Default for NotWiredCalibration {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl NotWiredCalibration {
-    /// 新建。
+    /// 新建（稳定未接线原因）。
     pub fn new() -> Self {
-        Self
+        Self {
+            reason: NOT_WIRED_REASON.to_string(),
+        }
+    }
+
+    /// 用真实降级原因构造（生产 backend 初始化失败时用；reason 不得为空）。
+    pub fn with_reason(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        Self {
+            reason: if reason.trim().is_empty() {
+                NOT_WIRED_REASON.to_string()
+            } else {
+                reason
+            },
+        }
+    }
+
+    /// 当前降级原因。
+    pub fn reason(&self) -> &str {
+        &self.reason
     }
 
     fn not_wired<T>(&self) -> Result<T, CalibrationError> {
-        Err(CalibrationError::not_wired(NOT_WIRED_REASON))
+        Err(CalibrationError::not_wired(&self.reason))
     }
 }
 
@@ -41,7 +72,7 @@ impl CalibrationService for NotWiredCalibration {
             active_job: None,
             last_job_id: None,
             last_verdict: None,
-            reason: Some(NOT_WIRED_REASON.to_string()),
+            reason: Some(self.reason.clone()),
         })
     }
 
@@ -142,6 +173,24 @@ mod tests {
         assert!(status.engine.is_none());
         assert_eq!(status.reason.as_deref(), Some(NOT_WIRED_REASON));
         assert!(!service.wired());
+    }
+
+    #[test]
+    fn init_failure_keeps_the_real_reason_visible() {
+        let service = NotWiredCalibration::with_reason("state dir /var/lib/khaen is not writable");
+        let status = service.status().expect("status");
+        assert!(!status.wired);
+        assert!(status
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("not writable"));
+        let error = service.job("job-0001").expect_err("job");
+        assert_eq!(error.code(), code::NOT_WIRED);
+        assert!(error.message().contains("not writable"));
+        // 空原因回退到稳定文案，绝不返回空 reason。
+        let fallback = NotWiredCalibration::with_reason("   ");
+        assert_eq!(fallback.reason(), NOT_WIRED_REASON);
     }
 
     #[test]

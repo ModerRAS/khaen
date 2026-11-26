@@ -14,6 +14,9 @@
 //!   解析结果注入 `DaemonState`，handler 不读环境。
 //! - `KHAEN_CONTROL_COMMAND`：可选的“拉起控制通道”命令（等价 v1 的 tspi-motu-net-up）。
 //! - `KHAEN_DEVICE_POLL_MS`：监督器轮询间隔，默认 500。
+//! - `KHAEN_CAL_BACKEND`：校准 job 生产后端开关（缺省在 daemon 状态目录下接线
+//!   JobManager + 离线 backend；`off`/`0` 显式关闭）。初始化失败（目录不可写/索引损坏）
+//!   如实降级为 not_wired + 真实原因，不静默、不假成功。
 //! - `KHAEN_RT_TARGET` / `KHAEN_RT_SOCKET` / `KHAEN_RT_TIMEOUT_MS`：daemon→rt-host 控制通道
 //!   （T70f-b，见 `khaen_daemon::host_link`）。目标默认 `rt-host`（`process` 仅测试/离线演示，
 //!   响应与状态显式标 `target: daemon-process`）；socket 默认 `/run/khaen/rt-host.sock`；
@@ -86,15 +89,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let motu_control: Arc<dyn MotuControl> = Arc::new(NativeMotu::new(motu_config.clone()));
-    let state = Arc::new(
-        DaemonState::new(config)?
-            .with_bind(bind)
-            .with_device(device_monitor(plan_rate))
-            .with_rt_status_file(rt_status_file)
-            .with_restart_policy(restart_policy.clone())
-            .with_host_link(host_link)
-            .with_motu(Arc::clone(&motu_control)),
-    );
+    let mut state = DaemonState::new(config)?
+        .with_bind(bind)
+        .with_device(device_monitor(plan_rate))
+        .with_rt_status_file(rt_status_file)
+        .with_restart_policy(restart_policy.clone())
+        .with_host_link(host_link)
+        .with_motu(Arc::clone(&motu_control));
+    // 校准 job 生产后端（T70h-b）：默认在 daemon 状态目录下接线 JobManager + 离线 backend。
+    // 初始化失败（目录不可写/索引损坏）时如实降级为 not_wired + 真实原因，不静默吞掉；
+    // KHAEN_CAL_BACKEND=off 显式关闭（保留上传/向导，job 写操作 503 not_wired）。
+    let calibration_backend = match std::env::var("KHAEN_CAL_BACKEND").ok().as_deref() {
+        Some("off") | Some("0") => Err(
+            "KHAEN_CAL_BACKEND=off: the calibration job backend is disabled by configuration"
+                .to_string(),
+        ),
+        _ => khaen_daemon::calibration::backend::JobManagerCalibration::new(state.state_dir()),
+    };
+    match calibration_backend {
+        Ok(backend) => {
+            let status =
+                khaen_daemon::calibration::CalibrationService::status(&backend).unwrap_or_default();
+            println!(
+                "khaen-daemon calibration backend wired=true state_dir={} engine={}",
+                state.state_dir().display(),
+                status.engine.as_deref().unwrap_or("-")
+            );
+            state = state.with_calibration(Arc::new(backend));
+        }
+        Err(reason) => {
+            eprintln!("khaen-daemon calibration backend not wired: {reason}");
+            state = state.with_calibration(Arc::new(
+                khaen_daemon::calibration::NotWiredCalibration::with_reason(format!(
+                    "calibration job backend failed to initialize: {reason}"
+                )),
+            ));
+        }
+    }
+    let state = Arc::new(state);
 
     let poll_ms = std::env::var("KHAEN_DEVICE_POLL_MS")
         .ok()

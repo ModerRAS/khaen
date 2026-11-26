@@ -533,9 +533,9 @@ async fn restart_is_disabled_by_default_and_daemon_self_restart_is_501() {
     assert_eq!(response.status, 501, "{}", response.body_text());
     assert_eq!(
         response.json()["error"]["code"],
-        Value::String("not_implemented".into())
+        Value::String("unsupported".into())
     );
-    // 未知目标：400。
+    // 未知目标：501 unsupported（合同 §8：只实现 rt-host，其它如实未实现）。
     let response = support::request_json(
         &server,
         "POST",
@@ -543,7 +543,11 @@ async fn restart_is_disabled_by_default_and_daemon_self_restart_is_501() {
         &serde_json::json!({"target": "bogus"}).to_string(),
     )
     .await;
-    assert_eq!(response.status, 400);
+    assert_eq!(response.status, 501);
+    assert_eq!(
+        response.json()["error"]["code"],
+        Value::String("unsupported".into())
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

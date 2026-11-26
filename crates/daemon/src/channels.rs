@@ -625,6 +625,7 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
     };
     let routing_known = mapping_trusted && routing.is_some();
     json!({
+        "ok": true,
         "schema": SCHEMA,
         "target": state.host_link().target().as_str(),
         "runtime_mode": live.mode,

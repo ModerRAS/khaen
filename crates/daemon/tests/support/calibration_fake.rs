@@ -94,7 +94,7 @@ impl FakeCalibration {
         self.lock().jobs.push(record);
     }
 
-    /// 造一个已成功、带 4 个步骤 sha、result.plan 的 job；返回 job_id。
+    /// 造一个已成功、带 5 个步骤 sha、result.plan 的 job；返回 job_id。
     pub fn seed_succeeded(&self, verdict: &str, plan_sha: &str, graph_id: &str) -> String {
         let mut state = self.lock();
         state.next_id += 1;
@@ -118,8 +118,11 @@ impl FakeCalibration {
             active_step: None,
             verdict: Some(verdict.to_string()),
             created_at: Some(TS.to_string()),
+            created_unix: Some(1_700_000_000),
             started_at: Some(TS.to_string()),
             finished_at: Some(TS.to_string()),
+            updated_unix: Some(1_700_000_001),
+            progress: Some(1.0),
             duration_ms: Some(1234),
             engine: None,
             steps,
@@ -149,6 +152,8 @@ impl FakeCalibration {
                     sha256: plan_sha.to_string(),
                     graph_id: graph_id.to_string(),
                 }),
+                measured: None,
+                simulated: None,
             }),
             error: None,
             apply: JobApply::default(),

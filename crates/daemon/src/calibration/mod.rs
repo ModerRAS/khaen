@@ -2,10 +2,12 @@
 //!
 //! # 范围
 //!
-//! 本模块只做 **REST + 存储 + 向导状态**，不含 job 执行后端：
+//! 本模块做 **REST + 存储 + 向导状态 + 生产 job 后端接线**：
 //!
 //! - [`service`]：服务抽象（`CalibrationService` + `JobSink`）与稳定错误；
-//! - [`not_wired`]：生产默认实现（后端未接线 → 503 `not_wired` / 空列表 + reason）；
+//! - [`backend`]：生产实现（khaen-calibration JobManager + 离线 OfflineJobBackend +
+//!   daemon 侧 job 审计索引；main 注入）；
+//! - [`not_wired`]：未接线/初始化失败时的诚实降级（503 `not_wired` / 空列表 + reason）；
 //! - [`store`]：上传文件存储（内容寻址 + 原子写 + 0600）、产物白名单与 Content-Type；
 //! - [`wizard`]：`wizard.json` 持久化、PUT 校验、向导状态推导；
 //! - [`api`]：axum 路由与 handler（登录会话 + 写操作 CSRF 由现有 auth 中间件统一守）。
@@ -29,11 +31,13 @@
 //! [`DaemonState`]: crate::DaemonState
 
 pub mod api;
+pub mod backend;
 pub mod not_wired;
 pub mod service;
 pub mod store;
 pub mod wizard;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -52,6 +56,8 @@ pub struct CalibrationHub {
     state_dir: PathBuf,
     uploads: UploadStore,
     wizard: WizardStore,
+    /// apply/rollback 两阶段草稿（REST prepare 签发，commit/abort 消费；见 [`ApplyStaging`]）。
+    staging: ApplyStaging,
 }
 
 impl std::fmt::Debug for CalibrationHub {
@@ -62,6 +68,7 @@ impl std::fmt::Debug for CalibrationHub {
             .field("state_dir", &self.state_dir)
             .field("uploads", &self.uploads.root())
             .field("wizard", &self.wizard.path())
+            .field("staged_ops", &self.staging.len())
             .finish()
     }
 }
@@ -77,6 +84,7 @@ impl CalibrationHub {
             telemetry,
             uploads: UploadStore::new(&state_dir),
             wizard: WizardStore::new(&state_dir),
+            staging: ApplyStaging::new(),
             state_dir,
         }
     }
@@ -106,6 +114,11 @@ impl CalibrationHub {
     /// 状态目录（auth.json / uploads / wizard.json 同源）。
     pub fn state_dir(&self) -> &Path {
         &self.state_dir
+    }
+
+    /// apply/rollback 两阶段草稿表。
+    pub fn staging(&self) -> &ApplyStaging {
+        &self.staging
     }
 
     /// 事件缓存快照（/api/status 与 wizard/state 的兜底来源）。
@@ -144,6 +157,111 @@ impl CalibrationHub {
             }
         }
         status
+    }
+}
+
+// ---------------------------------------------------------------------------
+// apply/rollback 两阶段草稿
+// ---------------------------------------------------------------------------
+
+/// 两阶段草稿的类型（apply 或 rollback；两者共用 token 表但不可混用）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagedControlKind {
+    /// job 产物方案 -> 控制面 plan 草稿。
+    Apply,
+    /// 回滚到 job apply 前的版本 -> 控制面 rollback 草稿。
+    Rollback,
+}
+
+impl StagedControlKind {
+    /// REST 机器名。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Apply => "apply",
+            Self::Rollback => "rollback",
+        }
+    }
+}
+
+/// 一份已签发但未消费的控制面草稿。
+///
+/// token 就是控制面自己的 engine_token（process 目标是进程内控制线程的 token，rt-host 目标是
+/// rt-host 的 token）：commit/abort 时原样转回同一个控制面，绝不重新 prepare 一个"看起来一样"
+/// 的草稿。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedControlOp {
+    /// 签发草稿的 job id。
+    pub job_id: String,
+    /// apply / rollback。
+    pub kind: StagedControlKind,
+    /// 控制面 engine_token（一次性）。
+    pub control_token: String,
+    /// apply 的目标方案 sha256（rollback 为 None）。
+    pub plan_sha256: Option<String>,
+    /// rollback 的目标版本（apply 为 None）。
+    pub target_version: Option<u64>,
+    /// prepare 时的运行版本（apply 的回滚目标 / rollback 的快照）。
+    pub previous_version: Option<u64>,
+    /// 签发时刻（RFC3339 UTC）。
+    pub created_at: String,
+}
+
+/// 两阶段草稿表：token -> op；取走即消费（一次性），并发线程安全。
+#[derive(Debug, Default)]
+pub struct ApplyStaging {
+    staged: Mutex<BTreeMap<String, StagedControlOp>>,
+}
+
+impl ApplyStaging {
+    /// 空表。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 登记一份草稿（token 唯一；重复 token 覆盖旧值，避免控制面 token 复用造成串草稿）。
+    pub fn stage(&self, op: StagedControlOp) {
+        let token = op.control_token.clone();
+        self.lock().insert(token, op);
+    }
+
+    /// 一次性取走：token 存在、job id 相同且类型相同才消费；否则返回 None（不消费别人的草稿）。
+    pub fn take(
+        &self,
+        token: &str,
+        job_id: &str,
+        kind: StagedControlKind,
+    ) -> Option<StagedControlOp> {
+        let mut staged = self.lock();
+        let matches = staged
+            .get(token)
+            .map(|op| op.job_id == job_id && op.kind == kind)
+            .unwrap_or(false);
+        if matches {
+            staged.remove(token)
+        } else {
+            None
+        }
+    }
+
+    /// 显式丢弃一份草稿（abort 成功后调用）。
+    pub fn remove(&self, token: &str) -> Option<StagedControlOp> {
+        self.lock().remove(token)
+    }
+
+    /// 当前未消费草稿数（诊断/测试）。
+    pub fn len(&self) -> usize {
+        self.lock().len()
+    }
+
+    /// 是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, StagedControlOp>> {
+        self.staged
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -224,6 +342,51 @@ impl JobSink for Telemetry {
 mod tests {
     use super::*;
     use service::{code, JobState};
+
+    #[test]
+    fn staging_tokens_are_single_use_and_bound_to_their_job() {
+        let staging = ApplyStaging::new();
+        assert!(staging.is_empty());
+        staging.stage(StagedControlOp {
+            job_id: "job-0001".to_string(),
+            kind: StagedControlKind::Apply,
+            control_token: "tok-1".to_string(),
+            plan_sha256: Some("a".repeat(64)),
+            target_version: None,
+            previous_version: Some(1),
+            created_at: "2026-11-26T00:00:00Z".to_string(),
+        });
+        assert_eq!(staging.len(), 1);
+        // 错的 job id / 错的 kind 不能消费别人的草稿（且不删除）。
+        assert!(staging
+            .take("tok-1", "job-0002", StagedControlKind::Apply)
+            .is_none());
+        assert!(staging
+            .take("tok-1", "job-0001", StagedControlKind::Rollback)
+            .is_none());
+        assert_eq!(staging.len(), 1);
+        // 正确的绑定：一次性消费。
+        let op = staging
+            .take("tok-1", "job-0001", StagedControlKind::Apply)
+            .expect("token is consumed");
+        assert_eq!(op.plan_sha256, Some("a".repeat(64)));
+        assert!(staging
+            .take("tok-1", "job-0001", StagedControlKind::Apply)
+            .is_none());
+        assert!(staging.is_empty());
+        // abort 路径：显式 remove 幂等。
+        staging.stage(StagedControlOp {
+            job_id: "job-0002".to_string(),
+            kind: StagedControlKind::Rollback,
+            control_token: "tok-2".to_string(),
+            plan_sha256: None,
+            target_version: Some(1),
+            previous_version: Some(2),
+            created_at: "2026-11-26T00:00:01Z".to_string(),
+        });
+        assert!(staging.remove("tok-2").is_some());
+        assert!(staging.remove("tok-2").is_none());
+    }
 
     #[test]
     fn default_hub_is_unwired_but_uploads_and_wizard_work() {

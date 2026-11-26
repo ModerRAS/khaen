@@ -62,9 +62,10 @@ async fn forwards_every_control_op_to_rt_host_and_returns_its_response() {
     let response = support::request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#).await;
     assert_eq!(response.status, 200);
     assert_api_headers(&response);
+    // docs/API.md §4：回执同时回传 mute（真实回读）与 muted 别名；其余字段原样透传。
     assert_eq!(
         response.json(),
-        json!({ "ok": true, "mute": true, "applied_block": 11, "idempotent": false })
+        json!({ "ok": true, "mute": true, "muted": true, "applied_block": 11, "idempotent": false })
     );
 
     // 2) prepare

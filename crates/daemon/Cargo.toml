@@ -8,6 +8,10 @@ license.workspace = true
 [dependencies]
 khaen-core = { path = "../core" }
 khaen-host = { path = "../host" }
+# 校准 job 生产后端（T70h-b）：JobManager 状态机 + 离线闭环 backend（daemon 生产代码依赖）。
+khaen-calibration = { path = "../calibration" }
+# job 索引持久化（daemon 自己的审计缓存，state 目录下的 jobs-index.json）。
+serde = { version = "1", features = ["derive"] }
 # MOTU UltraLite-mk5 CueMix 控制客户端（T40/T57）：单键写 + 回读、检测；纯 std、零外部依赖。
 khaen-motu-cuemix = { path = "../motu-cuemix" }
 axum = "0.8"
@@ -20,5 +24,4 @@ getrandom = "0.2"
 
 [dev-dependencies]
 # 校准产物 → 控制面两阶段下发的端到端测试：编译真实校准方案并通过 REST 下发/回滚。
-khaen-calibration = { path = "../calibration" }
 khaen-designer = { path = "../designer" }

@@ -70,6 +70,8 @@ pub mod error_code {
     pub const RESTART_DISABLED: &str = "restart_disabled";
     /// 目标不支持（daemon 自身重启）。
     pub const NOT_IMPLEMENTED: &str = "not_implemented";
+    /// 501 的合同码（docs/API.md §1：op 存在但未实现 = unsupported）。
+    pub const UNSUPPORTED: &str = "unsupported";
     /// systemctl restart 失败。
     pub const RESTART_FAILED: &str = "restart_failed";
     /// 未预期的内部错误（采集/存储任务 panic 等）。

@@ -182,7 +182,11 @@ pub fn compose_info(state: &DaemonState, now: SystemTime) -> Value {
     };
 
     json!({
+        "ok": true,
         "schema": INFO_SCHEMA,
+        // 合同 §3 的 {version, host}：分别取 healthz 同一版本口径与 hostname（加法别名，不改旧字段）。
+        "version": build.healthz_version(),
+        "host": hostname,
         "crate_version": build.crate_version,
         "release_version": option_field(&build.release_version),
         "commit": option_field(&build.commit),
@@ -400,6 +404,7 @@ fn compose_host_link(
 fn fallback_info_body(state: &DaemonState, message: &str) -> Value {
     let build = state.build_info();
     json!({
+        "ok": true,
         "schema": INFO_SCHEMA,
         "crate_version": build.crate_version,
         "release_version": build.release_version,
@@ -624,10 +629,23 @@ pub(crate) async fn password(
             json!({"field": "<body>"}),
         );
     };
-    let old_password = match object.get("old") {
-        Some(Value::String(value)) => value.clone(),
-        Some(_) => return invalid_request("field old must be a string", json!({"field": "old"})),
-        None => return invalid_request("missing field: old", json!({"field": "old"})),
+    // docs/API.md §8 字段名 current；旧客户端用 old，作为别名保留（两者都给且不同 → 400）。
+    let old_password = match (object.get("current"), object.get("old")) {
+        (Some(Value::String(current)), None) | (None, Some(Value::String(current))) => {
+            current.clone()
+        }
+        (Some(Value::String(current)), Some(Value::String(old))) if current == old => {
+            current.clone()
+        }
+        (Some(_), _) | (_, Some(_)) => {
+            return invalid_request(
+                "fields current/old must be strings and must not disagree",
+                json!({"field": "current"}),
+            )
+        }
+        (None, None) => {
+            return invalid_request("missing field: current", json!({"field": "current"}))
+        }
     };
     let new_password = match object.get("new") {
         Some(Value::String(value)) => value.clone(),
@@ -689,17 +707,19 @@ pub(crate) async fn restart(
             json!({"field": "<body>"}),
         );
     };
+    // docs/API.md §8：请求可以是 {confirm} 或 {target}；缺省 target 视为 rt-host
+    //（前端二次确认只需要 confirm，不必重复写 target）。
     let target = match object.get("target") {
         Some(Value::String(target)) => target.clone(),
         Some(_) => {
             return invalid_request("field target must be a string", json!({"field": "target"}))
         }
-        None => return invalid_request("missing field: target", json!({"field": "target"})),
+        None => RESTART_TARGET.to_string(),
     };
     if target == "daemon" || target == "self" || target == "daemon-self" {
         return error_response(
             StatusCode::NOT_IMPLEMENTED,
-            code::NOT_IMPLEMENTED,
+            code::UNSUPPORTED,
             "daemon self-restart is not implemented",
             json!({
                 "reason": "restarting the daemon would terminate this API server; use systemctl (or the deploy pipeline) from a maintenance shell, then reconnect",
@@ -708,9 +728,12 @@ pub(crate) async fn restart(
         );
     }
     if target != RESTART_TARGET {
-        return invalid_request(
-            format!("unsupported restart target {target:?}"),
-            json!({"field": "target", "supported": [RESTART_TARGET]}),
+        // 合同 §8：只实现了 rt-host；其它 target 如实 501 unsupported（不假称可重启）。
+        return error_response(
+            StatusCode::NOT_IMPLEMENTED,
+            code::UNSUPPORTED,
+            format!("restart target {target:?} is not implemented"),
+            json!({"field": "target", "supported": [RESTART_TARGET], "target": target}),
         );
     }
     let policy = state.restart_policy().clone();

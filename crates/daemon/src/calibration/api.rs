@@ -34,6 +34,7 @@ use serde_json::{json, Map, Value};
 
 use khaen_core::sha256::sha256_hex;
 
+use super::{StagedControlKind, StagedControlOp};
 use crate::calibration::service::{
     AppliedVersion, CalibrationError, JobApply, JobInputs, JobQuery, JobRecord, JobResult,
     JobState, JobStep, NewJob, OFFLINE_JOB_STEPS,
@@ -41,6 +42,7 @@ use crate::calibration::service::{
 use crate::calibration::store::{self, MAX_UPLOAD_BYTES};
 use crate::calibration::wizard::{self, MeasurementDraft, WizardStateInputs, WIZARD_SCHEMA};
 use crate::calibration::CalibrationHub;
+use crate::host_link::{LinkSnapshot, Target};
 use crate::{error_response, DaemonState};
 
 /// job 列表 schema。
@@ -85,7 +87,11 @@ fn now_rfc3339() -> String {
     crate::status::rfc3339_utc(SystemTime::now())
 }
 
-fn ok_json(value: Value) -> Response {
+fn ok_json(mut value: Value) -> Response {
+    // docs/API.md §1：成功体推荐 ok:true（新端点应带）；对已有对象追加，不改任何既有字段。
+    if let Some(object) = value.as_object_mut() {
+        object.insert("ok".to_string(), Value::Bool(true));
+    }
     (StatusCode::OK, Json(value)).into_response()
 }
 
@@ -398,8 +404,11 @@ pub(crate) async fn list_jobs(
                 "status": summary.state.as_str(),
                 "verdict": summary.verdict,
                 "created_at": summary.created_at,
+                "created_unix": summary.created_unix,
                 "started_at": summary.started_at,
                 "finished_at": summary.finished_at,
+                "updated_unix": summary.updated_unix,
+                "progress": summary.progress,
                 "duration_ms": summary.duration_ms,
                 "error": summary.error.as_ref().map(|error| json!({"code": error.code, "message": error.message})),
                 "reason": summary.reason,
@@ -515,7 +524,9 @@ pub(crate) async fn create_job(
             (
                 StatusCode::ACCEPTED,
                 Json(json!({
+                    "ok": true,
                     "job_id": record.job_id,
+                    "state": record.state.as_str(),
                     "location": location,
                 })),
             )
@@ -693,11 +704,18 @@ pub(crate) async fn job_detail(
     }
     let hub = state.calibration();
     match hub.service().job(&job_id) {
-        Ok(record) => ok_json(json!({
-            "schema": JOB_SCHEMA,
-            "job": job_json(&record),
-            "reasons": job_reasons(&record),
-        })),
+        Ok(record) => {
+            let job = job_json(&record);
+            ok_json(json!({
+                "schema": JOB_SCHEMA,
+                "job": job,
+                // docs/API.md §7 加法：详情顶层也暴露 result/artifacts/error（与 job 内同源）。
+                "result": job["result"].clone(),
+                "artifacts": job["artifacts"].clone(),
+                "error": job["error"].clone(),
+                "reasons": job_reasons(&record),
+            }))
+        }
         Err(error) => error.into_response(),
     }
 }
@@ -714,6 +732,7 @@ pub(crate) async fn cancel_job(
         Ok(record) => ok_json(json!({
             "job_id": record.job_id,
             "status": record.state.as_str(),
+            "state": record.state.as_str(),
         })),
         Err(error) => error.into_response(),
     }
@@ -766,8 +785,11 @@ fn job_json(record: &JobRecord) -> Value {
         "step": record.active_step,
         "verdict": record.verdict,
         "created_at": record.created_at,
+        "created_unix": record.created_unix,
         "started_at": record.started_at,
         "finished_at": record.finished_at,
+        "updated_unix": record.updated_unix,
+        "progress": record.progress,
         "duration_ms": record.duration_ms,
         "engine": record.engine,
         "steps": steps,
@@ -836,6 +858,18 @@ fn result_json(result: &JobResult) -> Value {
         "plan": result.plan.as_ref().map(|plan| json!({
             "sha256": plan.sha256,
             "graph_id": plan.graph_id,
+        })),
+        // 合同 §7：measured（上传录音）与 simulated（方案预测电平）必须如实分开标注。
+        "measured": result.measured.as_ref().map(|measured| json!({
+            "baseline_upload_id": measured.baseline_upload_id,
+            "applied_upload_id": measured.applied_upload_id,
+            "sample_rate_hz": measured.sample_rate_hz,
+            "source": measured.source,
+        })),
+        "simulated": result.simulated.as_ref().map(|simulated| json!({
+            "predicted_from": simulated.predicted_from,
+            "plan_sha256": simulated.plan_sha256,
+            "graph_id": simulated.graph_id,
         })),
     })
 }
@@ -939,14 +973,28 @@ fn job_reasons(record: &JobRecord) -> Map<String, Value> {
 // ---------------------------------------------------------------------------
 
 /// POST /api/calibration/jobs/{id}/apply
+///
+/// 无 stage 字段 = 旧单发语义（prepare+commit 一次完成，现有前端/测试兼容）；
+/// stage=prepare|commit|abort = 两阶段（token 只能消费一次；apply 按 host_link.target 路由）。
 pub(crate) async fn apply_job(
     State(state): State<std::sync::Arc<DaemonState>>,
     Path(job_id): Path<String>,
+    body: Body,
 ) -> Response {
     if let Err(error) = validate_job_id(&job_id) {
         return error.into_response();
     }
-    apply_flow(&state, &job_id).await
+    match parse_staged_request(body).await {
+        Ok(StagedRequest::Legacy) => apply_flow(&state, &job_id).await,
+        Ok(StagedRequest::Prepare) => apply_prepare(&state, &job_id).await,
+        Ok(StagedRequest::Commit { engine_token }) => {
+            apply_commit(&state, &job_id, &engine_token).await
+        }
+        Ok(StagedRequest::Abort { engine_token }) => {
+            apply_abort(&state, &job_id, &engine_token).await
+        }
+        Err(error) => error.into_response(),
+    }
 }
 
 /// POST /api/calibration/wizard/apply {job_id?}
@@ -1013,7 +1061,7 @@ pub(crate) async fn wizard_apply(
     apply_flow(&state, &job_id).await
 }
 
-async fn apply_flow(state: &DaemonState, job_id: &str) -> Response {
+async fn apply_flow(state: &std::sync::Arc<DaemonState>, job_id: &str) -> Response {
     let service = std::sync::Arc::clone(state.calibration().service());
     // 1) 服务侧校验 job 状态并给出 plan 引用。
     let apply_plan = match service.apply(job_id) {
@@ -1021,28 +1069,27 @@ async fn apply_flow(state: &DaemonState, job_id: &str) -> Response {
         Err(error) => return error.into_response(),
     };
     // 2) 记录 apply 前的运行状态（snapshot：回滚目标）。
-    let before = state.control().status_json();
+    let before = control_status(state).await;
     let plan_path = apply_plan.plan_path.to_string_lossy().to_string();
-    // 3) 现有控制面两阶段：prepare → commit（同一把控制面锁内完成）。
-    let (commit, readback) = {
-        let mut control = state.control();
-        let prepare = match control.prepare_json(&plan_path, &apply_plan.plan_sha256) {
-            Ok(prepare) => prepare,
-            Err(error) => return error_response(error).into_response(),
-        };
-        let Some(engine_token) = prepare["engine_token"].as_str() else {
-            return CalibrationError::internal(
-                "control plane prepare response has no engine_token",
-            )
-            .into_response();
-        };
-        let commit = match control.commit_json(engine_token) {
-            Ok(commit) => commit,
-            Err(error) => return error_response(error).into_response(),
-        };
-        let readback = control.status_json();
-        (commit, readback)
+    // 3) 控制面两阶段：prepare -> commit（按 host_link.target 路由：process=进程内，
+    //    rt-host=控制通道；绝不把 rt-host 的 apply 打到 daemon 进程内引擎）。
+    let prepare = match control_prepare_plan(state, &plan_path, &apply_plan.plan_sha256).await {
+        Ok(prepare) => prepare,
+        Err(response) => return response,
     };
+    let Some(engine_token) = prepare["engine_token"].as_str() else {
+        return CalibrationError::internal("control plane prepare response has no engine_token")
+            .into_response();
+    };
+    // 先 commit（process 目标下是同步的，不引入 await 空隙让别人顶掉草稿），
+    // 再 best-effort 记录方案元数据；记录失败不影响已成功的 commit。
+    let commit = match control_commit(state, engine_token).await {
+        Ok(commit) => commit,
+        Err(response) => return response,
+    };
+    crate::record_prepared_plan(state, plan_path.clone()).await;
+    crate::record_commit(state, &commit);
+    let readback = control_status(state).await;
     let version = commit["version"].as_u64();
     let graph_id = commit["graph_id"].as_str().unwrap_or_default().to_string();
     let previous_version = before["actual_version"].as_u64();
@@ -1109,38 +1156,54 @@ async fn apply_flow(state: &DaemonState, job_id: &str) -> Response {
 }
 
 /// POST /api/calibration/jobs/{id}/rollback
+///
+/// 无 stage 字段 = 旧单发语义（prepare+commit 一次完成，现有前端/测试兼容）；
+/// stage=prepare|commit|abort = 两阶段（token 只能消费一次；按 host_link.target 路由）。
 pub(crate) async fn rollback_job(
     State(state): State<std::sync::Arc<DaemonState>>,
     Path(job_id): Path<String>,
+    body: Body,
 ) -> Response {
     if let Err(error) = validate_job_id(&job_id) {
         return error.into_response();
     }
+    match parse_staged_request(body).await {
+        Ok(StagedRequest::Legacy) => rollback_flow(&state, &job_id).await,
+        Ok(StagedRequest::Prepare) => rollback_prepare(&state, &job_id).await,
+        Ok(StagedRequest::Commit { engine_token }) => {
+            rollback_commit(&state, &job_id, &engine_token).await
+        }
+        Ok(StagedRequest::Abort { engine_token }) => {
+            rollback_abort(&state, &job_id, &engine_token).await
+        }
+        Err(error) => error.into_response(),
+    }
+}
+
+/// 旧单发语义的 rollback 流程（prepare -> commit 一次完成）。
+async fn rollback_flow(state: &std::sync::Arc<DaemonState>, job_id: &str) -> Response {
+    let state = std::sync::Arc::clone(state);
+    let job_id = job_id.to_string();
     let service = std::sync::Arc::clone(state.calibration().service());
     let target = match service.rollback(&job_id) {
         Ok(target) => target,
         Err(error) => return error.into_response(),
     };
-    let before = state.control().status_json();
-    let (commit, readback) = {
-        let mut control = state.control();
-        let prepare = match control.rollback_json(Some(target.target_version)) {
-            Ok(prepare) => prepare,
-            Err(error) => return error_response(error).into_response(),
-        };
-        let Some(engine_token) = prepare["engine_token"].as_str() else {
-            return CalibrationError::internal(
-                "control plane rollback response has no engine_token",
-            )
-            .into_response();
-        };
-        let commit = match control.commit_json(engine_token) {
-            Ok(commit) => commit,
-            Err(error) => return error_response(error).into_response(),
-        };
-        let readback = control.status_json();
-        (commit, readback)
+    let before = control_status(&state).await;
+    let prepare = match control_rollback(&state, Some(target.target_version)).await {
+        Ok(prepare) => prepare,
+        Err(response) => return response,
     };
+    let Some(engine_token) = prepare["engine_token"].as_str() else {
+        return CalibrationError::internal("control plane rollback response has no engine_token")
+            .into_response();
+    };
+    let commit = match control_commit(&state, engine_token).await {
+        Ok(commit) => commit,
+        Err(response) => return response,
+    };
+    crate::record_commit(&state, &commit);
+    let readback = control_status(&state).await;
     let version = commit["version"].as_u64();
     let graph_id = commit["graph_id"].as_str().unwrap_or_default().to_string();
     let rolled_back_at = now_rfc3339();
@@ -1197,6 +1260,441 @@ pub(crate) async fn rollback_job(
         "rolled_back_at": rolled_back_at,
         "job": job_value,
         "reasons": reasons.into_iter().map(|(key, value)| (key, Value::String(value))).collect::<Map<String, Value>>(),
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// 两阶段控制面路由（process / rt-host）与 apply/rollback staged 流程
+// ---------------------------------------------------------------------------
+
+/// apply/rollback 请求体的 stage 分支（无 stage = 旧单发语义）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StagedRequest {
+    /// 旧单发：prepare+commit 一次完成。
+    Legacy,
+    /// 只 prepare，返回 token。
+    Prepare,
+    /// 用 prepare 的 token 生效。
+    Commit { engine_token: String },
+    /// 丢弃 prepare 的草稿。
+    Abort { engine_token: String },
+}
+
+/// 读 apply/rollback 请求体：空 body / 无 stage = Legacy；其它严格校验（未知字段 400）。
+async fn parse_staged_request(body: Body) -> Result<StagedRequest, CalibrationError> {
+    let value = read_json_body(body).await?;
+    let object = match value {
+        Value::Null => return Ok(StagedRequest::Legacy),
+        Value::Object(object) => object,
+        _ => {
+            return Err(CalibrationError::invalid_request(
+                "<body>",
+                "request body must be a JSON object or empty",
+            ))
+        }
+    };
+    reject_unknown_fields(&object, &["stage", "engine_token"], "")?;
+    let Some(stage) = object.get("stage") else {
+        if object.contains_key("engine_token") {
+            return Err(CalibrationError::invalid_request(
+                "stage",
+                "engine_token requires stage \"commit\" or stage \"abort\"",
+            ));
+        }
+        return Ok(StagedRequest::Legacy);
+    };
+    let stage = stage
+        .as_str()
+        .ok_or_else(|| CalibrationError::invalid_request("stage", "stage must be a string"))?;
+    match stage {
+        "prepare" => Ok(StagedRequest::Prepare),
+        "commit" => Ok(StagedRequest::Commit {
+            engine_token: required_string(&object, "engine_token")?,
+        }),
+        "abort" => Ok(StagedRequest::Abort {
+            engine_token: required_string(&object, "engine_token")?,
+        }),
+        other => Err(CalibrationError::invalid_request(
+            "stage",
+            format!("unknown stage {other:?}: expected prepare, commit or abort"),
+        )),
+    }
+}
+
+/// 未知/已消费 token（409 engine_token_invalid；不泄露其它 job 的草稿信息）。
+fn engine_token_invalid(engine_token: &str) -> CalibrationError {
+    CalibrationError::new(
+        StatusCode::CONFLICT,
+        super::service::code::ENGINE_TOKEN_INVALID,
+        format!(
+            "engine_token {engine_token:?} is unknown or was already consumed: it must come from a prepare response of this same job"
+        ),
+    )
+}
+
+/// 控制面 prepare（方案草稿）：process 目标走进程内控制线程，rt-host 目标走控制通道转发。
+#[allow(clippy::result_large_err)] // Err 是已经构造好的 axum Response：必须原样保留转发状态码/错误体
+async fn control_prepare_plan(
+    state: &std::sync::Arc<DaemonState>,
+    plan_path: &str,
+    plan_sha256: &str,
+) -> Result<Value, Response> {
+    if state.host_link().target() == Target::Process {
+        return state
+            .control()
+            .prepare_json(plan_path, plan_sha256)
+            .map_err(|error| error_response(error).into_response());
+    }
+    let reply = crate::forward(
+        state,
+        json!({ "op": "prepare", "plan_path": plan_path, "plan_sha256": plan_sha256 }),
+    )
+    .await;
+    control_reply(reply)
+}
+
+/// 控制面 commit（块边界生效）。
+#[allow(clippy::result_large_err)] // Err 是已经构造好的 axum Response：必须原样保留转发状态码/错误体
+async fn control_commit(
+    state: &std::sync::Arc<DaemonState>,
+    engine_token: &str,
+) -> Result<Value, Response> {
+    if state.host_link().target() == Target::Process {
+        return state
+            .control()
+            .commit_json(engine_token)
+            .map_err(|error| error_response(error).into_response());
+    }
+    let reply = crate::forward(
+        state,
+        json!({ "op": "commit", "engine_token": engine_token }),
+    )
+    .await;
+    control_reply(reply)
+}
+
+/// 控制面 abort（丢弃草稿）。
+#[allow(clippy::result_large_err)] // Err 是已经构造好的 axum Response：必须原样保留转发状态码/错误体
+async fn control_abort(
+    state: &std::sync::Arc<DaemonState>,
+    engine_token: &str,
+) -> Result<Value, Response> {
+    if state.host_link().target() == Target::Process {
+        return state
+            .control()
+            .abort_json(engine_token)
+            .map_err(|error| error_response(error).into_response());
+    }
+    let reply = crate::forward(
+        state,
+        json!({ "op": "abort", "engine_token": engine_token }),
+    )
+    .await;
+    control_reply(reply)
+}
+
+/// 控制面 rollback 草稿（第一个阶段）。
+#[allow(clippy::result_large_err)] // Err 是已经构造好的 axum Response：必须原样保留转发状态码/错误体
+async fn control_rollback(
+    state: &std::sync::Arc<DaemonState>,
+    target: Option<u64>,
+) -> Result<Value, Response> {
+    if state.host_link().target() == Target::Process {
+        return state
+            .control()
+            .rollback_json(target)
+            .map_err(|error| error_response(error).into_response());
+    }
+    let mut request = json!({ "op": "rollback" });
+    if let Some(version) = target {
+        request["target"] = json!(version);
+    }
+    control_reply(crate::forward(state, request).await)
+}
+
+/// 当前控制面 status 快照（拿不到返回 null，由调用方如实处理）。
+async fn control_status(state: &std::sync::Arc<DaemonState>) -> Value {
+    if state.host_link().target() == Target::Process {
+        return state.control().status_json();
+    }
+    let worker = std::sync::Arc::clone(state);
+    match tokio::task::spawn_blocking(move || worker.host_link().status_snapshot()).await {
+        Ok(LinkSnapshot::Socket { status, .. }) => status,
+        _ => Value::Null,
+    }
+}
+
+/// 转发应答 -> 成功取 body / 失败原样返回（保留 rt-host 的业务错误码与 HTTP 映射）。
+#[allow(clippy::result_large_err)] // Err 是已经构造好的 axum Response（转发状态码/错误体原样保留）
+fn control_reply((status, Json(body)): (StatusCode, Json<Value>)) -> Result<Value, Response> {
+    if status.is_success() {
+        Ok(body)
+    } else {
+        Err((status, Json(body)).into_response())
+    }
+}
+
+/// apply 第一阶段：job 产物 -> 控制面 prepare 草稿 + 一次性 token。
+async fn apply_prepare(state: &std::sync::Arc<DaemonState>, job_id: &str) -> Response {
+    let service = std::sync::Arc::clone(state.calibration().service());
+    let apply_plan = match service.apply(job_id) {
+        Ok(plan) => plan,
+        Err(error) => return error.into_response(),
+    };
+    let before = control_status(state).await;
+    let plan_path = apply_plan.plan_path.to_string_lossy().to_string();
+    let prepare = match control_prepare_plan(state, &plan_path, &apply_plan.plan_sha256).await {
+        Ok(prepare) => prepare,
+        Err(response) => return response,
+    };
+    let Some(engine_token) = prepare["engine_token"].as_str().map(str::to_string) else {
+        return CalibrationError::internal("control plane prepare response has no engine_token")
+            .into_response();
+    };
+    crate::record_prepared_plan(state, plan_path).await;
+    let previous_version = before["actual_version"].as_u64();
+    state.calibration().staging().stage(StagedControlOp {
+        job_id: job_id.to_string(),
+        kind: StagedControlKind::Apply,
+        control_token: engine_token.clone(),
+        plan_sha256: Some(apply_plan.plan_sha256.clone()),
+        target_version: None,
+        previous_version,
+        created_at: now_rfc3339(),
+    });
+    let mut body = prepare;
+    if let Some(object) = body.as_object_mut() {
+        object.insert("stage".to_string(), json!("prepare"));
+        object.insert("job_id".to_string(), json!(job_id));
+        object.insert("plan_sha256".to_string(), json!(apply_plan.plan_sha256));
+        object.insert("previous_version".to_string(), json!(previous_version));
+        object.insert("engine_token".to_string(), json!(engine_token));
+    }
+    ok_json(body)
+}
+
+/// apply 第二阶段：commit 生效并回写 job apply 记录。
+async fn apply_commit(
+    state: &std::sync::Arc<DaemonState>,
+    job_id: &str,
+    engine_token: &str,
+) -> Response {
+    let Some(op) =
+        state
+            .calibration()
+            .staging()
+            .take(engine_token, job_id, StagedControlKind::Apply)
+    else {
+        return engine_token_invalid(engine_token).into_response();
+    };
+    let commit = match control_commit(state, engine_token).await {
+        Ok(commit) => commit,
+        Err(response) => return response,
+    };
+    crate::record_commit(state, &commit);
+    let version = commit["version"].as_u64();
+    let graph_id = commit["graph_id"].as_str().unwrap_or_default().to_string();
+    let readback = control_status(state).await;
+    let service = std::sync::Arc::clone(state.calibration().service());
+    let mut reasons: BTreeMap<String, String> = BTreeMap::new();
+    let job_value = match version {
+        Some(version) => {
+            let applied = AppliedVersion {
+                version,
+                graph_id: graph_id.clone(),
+                previous_version: op.previous_version,
+            };
+            match service.apply_committed(job_id, &applied) {
+                Ok(record) => job_json(&record),
+                Err(error) => {
+                    reasons.insert(
+                        "job".to_string(),
+                        format!(
+                            "the plan was applied but the calibration service could not record it: {}",
+                            error.message()
+                        ),
+                    );
+                    Value::Null
+                }
+            }
+        }
+        None => {
+            reasons.insert(
+                "applied_version".to_string(),
+                "control plane commit response has no version field".to_string(),
+            );
+            Value::Null
+        }
+    };
+    ok_json(json!({
+        "stage": "commit",
+        "applied": true,
+        "job_id": job_id,
+        "applied_version": version,
+        "applied_block": commit["applied_block"].clone(),
+        "graph_id": graph_id,
+        "sha256": op.plan_sha256,
+        "previous_version": op.previous_version,
+        "readback": readback,
+        "job": job_value,
+        "reasons": reasons,
+    }))
+}
+
+/// apply abort：丢弃控制面草稿，不改变运行态。
+async fn apply_abort(
+    state: &std::sync::Arc<DaemonState>,
+    job_id: &str,
+    engine_token: &str,
+) -> Response {
+    let Some(op) =
+        state
+            .calibration()
+            .staging()
+            .take(engine_token, job_id, StagedControlKind::Apply)
+    else {
+        return engine_token_invalid(engine_token).into_response();
+    };
+    let abort = match control_abort(state, engine_token).await {
+        Ok(abort) => abort,
+        Err(response) => return response,
+    };
+    ok_json(json!({
+        "stage": "abort",
+        "aborted": true,
+        "job_id": job_id,
+        "plan_sha256": op.plan_sha256,
+        "control": abort,
+    }))
+}
+
+/// rollback 第一阶段：job apply 前的版本 -> 控制面 rollback 草稿 + token。
+async fn rollback_prepare(state: &std::sync::Arc<DaemonState>, job_id: &str) -> Response {
+    let service = std::sync::Arc::clone(state.calibration().service());
+    let target = match service.rollback(job_id) {
+        Ok(target) => target,
+        Err(error) => return error.into_response(),
+    };
+    let before = control_status(state).await;
+    let prepare = match control_rollback(state, Some(target.target_version)).await {
+        Ok(prepare) => prepare,
+        Err(response) => return response,
+    };
+    let Some(engine_token) = prepare["engine_token"].as_str().map(str::to_string) else {
+        return CalibrationError::internal("control plane rollback response has no engine_token")
+            .into_response();
+    };
+    let previous_version = before["actual_version"].as_u64();
+    state.calibration().staging().stage(StagedControlOp {
+        job_id: job_id.to_string(),
+        kind: StagedControlKind::Rollback,
+        control_token: engine_token.clone(),
+        plan_sha256: None,
+        target_version: Some(target.target_version),
+        previous_version,
+        created_at: now_rfc3339(),
+    });
+    let mut body = prepare;
+    if let Some(object) = body.as_object_mut() {
+        object.insert("stage".to_string(), json!("prepare"));
+        object.insert("job_id".to_string(), json!(job_id));
+        object.insert("target_version".to_string(), json!(target.target_version));
+        object.insert("previous_version".to_string(), json!(previous_version));
+        object.insert("engine_token".to_string(), json!(engine_token));
+    }
+    ok_json(body)
+}
+
+/// rollback 第二阶段：commit 生效并回写 job rolled_back 记录。
+async fn rollback_commit(
+    state: &std::sync::Arc<DaemonState>,
+    job_id: &str,
+    engine_token: &str,
+) -> Response {
+    let Some(op) =
+        state
+            .calibration()
+            .staging()
+            .take(engine_token, job_id, StagedControlKind::Rollback)
+    else {
+        return engine_token_invalid(engine_token).into_response();
+    };
+    let commit = match control_commit(state, engine_token).await {
+        Ok(commit) => commit,
+        Err(response) => return response,
+    };
+    crate::record_commit(state, &commit);
+    let version = commit["version"].as_u64();
+    let graph_id = commit["graph_id"].as_str().unwrap_or_default().to_string();
+    let readback = control_status(state).await;
+    let service = std::sync::Arc::clone(state.calibration().service());
+    let mut reasons: BTreeMap<String, String> = BTreeMap::new();
+    let job_value = match version {
+        Some(version) => {
+            let applied = AppliedVersion {
+                version,
+                graph_id: graph_id.clone(),
+                previous_version: op.target_version,
+            };
+            match service.rollback_committed(job_id, &applied) {
+                Ok(record) => job_json(&record),
+                Err(error) => {
+                    reasons.insert(
+                        "job".to_string(),
+                        format!(
+                            "the plan was rolled back but the calibration service could not record it: {}",
+                            error.message()
+                        ),
+                    );
+                    Value::Null
+                }
+            }
+        }
+        None => {
+            reasons.insert(
+                "applied_version".to_string(),
+                "control plane commit response has no version field".to_string(),
+            );
+            Value::Null
+        }
+    };
+    ok_json(json!({
+        "stage": "commit",
+        "rolled_back": true,
+        "job_id": job_id,
+        "restored_version": op.target_version,
+        "applied_version": version,
+        "graph_id": graph_id,
+        "readback": readback,
+        "job": job_value,
+        "reasons": reasons,
+    }))
+}
+
+/// rollback abort：丢弃控制面草稿，不改变运行态。
+async fn rollback_abort(
+    state: &std::sync::Arc<DaemonState>,
+    job_id: &str,
+    engine_token: &str,
+) -> Response {
+    let Some(op) =
+        state
+            .calibration()
+            .staging()
+            .take(engine_token, job_id, StagedControlKind::Rollback)
+    else {
+        return engine_token_invalid(engine_token).into_response();
+    };
+    let abort = match control_abort(state, engine_token).await {
+        Ok(abort) => abort,
+        Err(response) => return response,
+    };
+    ok_json(json!({
+        "stage": "abort",
+        "aborted": true,
+        "job_id": job_id,
+        "target_version": op.target_version,
+        "control": abort,
     }))
 }
 
@@ -1497,7 +1995,7 @@ mod tests {
         assert_eq!(job["id"], json!("job-0001"));
         assert_eq!(job["status"], json!("queued"));
         assert_eq!(job["verdict"], Value::Null);
-        assert_eq!(job["steps"].as_array().expect("steps").len(), 4);
+        assert_eq!(job["steps"].as_array().expect("steps").len(), 5);
         for step in job["steps"].as_array().expect("steps") {
             assert_eq!(step["status"], json!("pending"));
             assert_eq!(step["sha256"], Value::Null);

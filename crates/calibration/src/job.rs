@@ -612,8 +612,13 @@ impl JobRequest {
         if !self.drive_level_dbfs.is_finite() || !(-60.0..=0.0).contains(&self.drive_level_dbfs) {
             return Err("drive_level_dbfs must be finite and in -60..=0".to_string());
         }
-        if !self.audible_sweep_authorized {
-            return Err("audible_sweep_authorized must be true (P08)".to_string());
+        // 离线证据 job（SinglePointOffline）不打开设备、不播放扫频，P08 的可闻授权不适用；
+        // 任何会采音/出声的 kind 仍必须显式授权（fail-closed）。
+        if !self.audible_sweep_authorized && self.kind != JobKind::SinglePointOffline {
+            return Err(
+                "audible_sweep_authorized must be true for jobs that capture audio (P08)"
+                    .to_string(),
+            );
         }
         match self.kind {
             JobKind::Full | JobKind::SinglePointOffline => {
@@ -4042,6 +4047,32 @@ mod tests {
             auto_apply: false,
             ..full_request(false)
         }
+    }
+
+    fn offline_request(audible: bool) -> JobRequest {
+        JobRequest {
+            kind: JobKind::SinglePointOffline,
+            audible_sweep_authorized: audible,
+            ..full_request(false)
+        }
+    }
+
+    #[test]
+    fn single_point_offline_does_not_require_audible_sweep_authorization() {
+        // 离线证据 job 不打开设备、不播放扫频：P08 的可闻授权不适用，传 false 才诚实；
+        // 采音类 kind 仍然必须显式授权（fail-closed，不允许靠 kind 绕过）。
+        offline_request(false)
+            .validate()
+            .expect("offline job is silent and needs no audible authorization");
+        offline_request(true)
+            .validate()
+            .expect("an explicit authorization flag is still accepted");
+        let mut full = full_request(false);
+        full.audible_sweep_authorized = false;
+        assert!(full.validate().is_err());
+        let mut retest = retest_request();
+        retest.audible_sweep_authorized = false;
+        assert!(retest.validate().is_err());
     }
 
     fn wait_state(

@@ -84,6 +84,7 @@ pub(crate) async fn api_meta(State(state): State<Arc<DaemonState>>) -> impl Into
     (
         StatusCode::OK,
         Json(json!({
+            "ok": true,
             "api_version": API_VERSION,
             "web_version": WEB_VERSION,
             "ops": WIRED_OPS,

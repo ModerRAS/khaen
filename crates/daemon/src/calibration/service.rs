@@ -29,6 +29,7 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,8 @@ pub mod code {
     pub const ROLLBACK_UNAVAILABLE: &str = "rollback_unavailable";
     /// 向导应用时没有可应用的 job（409）。
     pub const NO_APPLICABLE_JOB: &str = "no_applicable_job";
+    /// 两阶段 token 无效/已消费/不属于该 job（409）。
+    pub const ENGINE_TOKEN_INVALID: &str = "engine_token_invalid";
     /// 内部错误（500）。
     pub const INTERNAL_ERROR: &str = "internal_error";
 }
@@ -316,8 +319,9 @@ impl IntoResponse for CalibrationError {
 /// 唯一已定义的 job 种类：离线单点校准（PLAN §4.7）。
 pub const JOB_KIND_SINGLE_POINT_OFFLINE: &str = "single_point_offline";
 
-/// 离线单点 job 的步骤顺序（如实映射校准 CLI 阶段；不允许跳过步骤直接成功）。
-pub const OFFLINE_JOB_STEPS: [&str; 4] = ["compile", "levels", "closed_loop", "bundle"];
+/// 离线单点 job 的步骤顺序（如实映射 khaen_calibration::job::SINGLE_POINT_OFFLINE_PLAN：
+/// validate → compile → levels → closed_loop → bundle；不允许跳过步骤直接成功）。
+pub const OFFLINE_JOB_STEPS: [&str; 5] = ["validate", "compile", "levels", "closed_loop", "bundle"];
 
 /// job 状态机（PLAN §4.7：queued → running(步骤) → succeeded|failed|cancelled）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -405,7 +409,8 @@ impl StepState {
 }
 
 /// job 的 apply 生命周期（与 job 执行状态机分开：回滚不改 job 的执行结果）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ApplyState {
     /// 还没应用。
     NotApplied,
@@ -427,7 +432,7 @@ impl ApplyState {
 }
 
 /// job 输入（创建时校验并持久化；列表/详情回显同一份）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JobInputs {
     /// 基准方案的 sha256（64 位十六进制）。
     pub plan_sha: String,
@@ -504,7 +509,7 @@ pub struct ArtifactInfo {
 }
 
 /// 一个频带的对比结果（result.bands）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BandResult {
     /// 中心频率（Hz）。
     pub hz: f64,
@@ -519,7 +524,7 @@ pub struct BandResult {
 }
 
 /// 设计阶段的残差与准入结论（result.design）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DesignResult {
     /// 残差等级（FULL|PARTIAL|NONE；backend 未给为 None）。
     pub residual: Option<String>,
@@ -532,7 +537,7 @@ pub struct DesignResult {
 }
 
 /// 应用所需的方案产物（result.plan）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanResult {
     /// 方案文件 sha256。
     pub sha256: String,
@@ -540,8 +545,35 @@ pub struct PlanResult {
     pub graph_id: String,
 }
 
+/// 实测来源（离线 job：两段上传的真实录音；绝不把模拟值写进这里）。
+///
+/// 合同要求 `measured`/`simulated` 如实标记：本结构只描述**录音输入**，字段全部来自上传
+/// 内容寻址 id（内容 sha256），daemon 不重新编造。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JobMeasured {
+    /// baseline 录音的上传 id（= 内容 sha256）。
+    pub baseline_upload_id: String,
+    /// applied 录音的上传 id。
+    pub applied_upload_id: String,
+    /// 录音采样率（Hz）。
+    pub sample_rate_hz: u32,
+    /// 数据来源（固定说明，例如 "uploaded WAV recordings (offline job)"）。
+    pub source: String,
+}
+
+/// 模拟来源（离线 job：由方案预测出的带域电平；绝不把模拟值写进 `measured`）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JobSimulated {
+    /// 预测电平的来源（例如 "plan_levels: plan.bin 的方案预测，非实测"）。
+    pub predicted_from: String,
+    /// 预测所用方案的 sha256。
+    pub plan_sha256: String,
+    /// 预测所用方案的 graph_id。
+    pub graph_id: String,
+}
+
 /// job 结果（PLAN §10 第 6/7 步：predicted vs observed + verdict + 残差 + plan）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobResult {
     /// 判定（PASS|FAIL|INCOMPLETE）。
     pub verdict: Option<String>,
@@ -559,10 +591,14 @@ pub struct JobResult {
     pub design: Option<DesignResult>,
     /// 可应用的方案产物。
     pub plan: Option<PlanResult>,
+    /// 实测来源（两段上传录音；缺失为 None，不编）。
+    pub measured: Option<JobMeasured>,
+    /// 模拟来源（方案预测电平；缺失为 None，不编）。
+    pub simulated: Option<JobSimulated>,
 }
 
 /// job 失败详情（稳定码 + 人读）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobError {
     /// 稳定错误码（backend 提供，例如 E_CLOSED_LOOP_INPUT）。
     pub code: String,
@@ -571,7 +607,7 @@ pub struct JobError {
 }
 
 /// job 的 apply 状态快照。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobApply {
     /// apply 生命周期状态。
     pub state: ApplyState,
@@ -612,12 +648,18 @@ pub struct JobRecord {
     pub verdict: Option<String>,
     /// 创建时刻。
     pub created_at: Option<String>,
+    /// 创建时刻（unix 秒；审计字段，与 created_at 同源）。
+    pub created_unix: Option<u64>,
     /// 开始时刻。
     pub started_at: Option<String>,
     /// 结束时刻。
     pub finished_at: Option<String>,
+    /// 最近更新时刻（unix 秒）。
+    pub updated_unix: Option<u64>,
     /// 耗时（毫秒）。
     pub duration_ms: Option<u64>,
+    /// 整体进度 0.0..=1.0（backend 上报；未知为 None，不编）。
+    pub progress: Option<f64>,
     /// 执行引擎（离线 job 一般 None；backend 报到什么就填什么，不编）。
     pub engine: Option<String>,
     /// 四个步骤（允许缺失的置 Pending）。
@@ -661,9 +703,12 @@ impl JobRecord {
             active_step: None,
             verdict: None,
             created_at,
+            created_unix: None,
             started_at: None,
             finished_at: None,
+            updated_unix: None,
             duration_ms: None,
+            progress: None,
             engine: None,
             steps,
             artifacts: Vec::new(),
@@ -689,10 +734,16 @@ pub struct JobSummary {
     pub verdict: Option<String>,
     /// 创建时刻。
     pub created_at: Option<String>,
+    /// 创建时刻（unix 秒）。
+    pub created_unix: Option<u64>,
     /// 开始时刻。
     pub started_at: Option<String>,
     /// 结束时刻。
     pub finished_at: Option<String>,
+    /// 最近更新时刻（unix 秒）。
+    pub updated_unix: Option<u64>,
+    /// 整体进度 0.0..=1.0。
+    pub progress: Option<f64>,
     /// 耗时（毫秒）。
     pub duration_ms: Option<u64>,
     /// 失败详情。
@@ -710,8 +761,11 @@ impl JobSummary {
             state: record.state,
             verdict: record.verdict.clone(),
             created_at: record.created_at.clone(),
+            created_unix: record.created_unix,
             started_at: record.started_at.clone(),
             finished_at: record.finished_at.clone(),
+            updated_unix: record.updated_unix,
+            progress: record.progress,
             duration_ms: record.duration_ms,
             error: record.error.clone(),
             reason: record.reasons.get("state").cloned(),
@@ -914,12 +968,12 @@ mod tests {
         assert_eq!(StepState::parse("done"), None);
         assert_eq!(
             OFFLINE_JOB_STEPS,
-            ["compile", "levels", "closed_loop", "bundle"]
+            ["validate", "compile", "levels", "closed_loop", "bundle"]
         );
     }
 
     #[test]
-    fn queued_job_has_all_four_steps_pending_and_no_invented_values() {
+    fn queued_job_has_all_five_steps_pending_and_no_invented_values() {
         let new_job = NewJob {
             kind: JOB_KIND_SINGLE_POINT_OFFLINE.to_string(),
             inputs: JobInputs {
@@ -946,7 +1000,7 @@ mod tests {
         let record =
             JobRecord::new_queued("job-0001", &new_job, Some("2026-01-01T00:00:00Z".into()));
         assert_eq!(record.state, JobState::Queued);
-        assert_eq!(record.steps.len(), 4);
+        assert_eq!(record.steps.len(), 5);
         assert!(record
             .steps
             .iter()

@@ -392,7 +392,30 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
     // 数据面块长/通道数：socket status 的 format 是权威（它驱动真正出块的引擎）。
     let (block_frames, channels) = format_dimensions(sources, source, &mut reasons);
 
+    // 热重配追踪（M3b）：socket/file 的 rt-host status 都带 reconfigure 段；daemon 聚合原样带出
+    // （合同 §3 的 reconfigure:{generation,...}），拿不到就 null + reason。
+    let reconfigure = match (&sources.link, file.as_ref()) {
+        (LinkSnapshot::Socket { status, .. }, _) => {
+            status.get("reconfigure").cloned().unwrap_or(Value::Null)
+        }
+        (_, Some(RtFile::Fresh { document, .. })) => {
+            document.get("reconfigure").cloned().unwrap_or(Value::Null)
+        }
+        _ => Value::Null,
+    };
+    if reconfigure.is_null() {
+        insert_reason(
+            &mut reasons,
+            "reconfigure",
+            "the current rt-host status source does not expose reconfigure (generation/last_gap_ms/last_result); only M3b rt-host builds report it",
+        );
+    }
+    // 合同 §3 的顶层 muted/safe 别名（真实值来自 state 块，同源不重造）。
+    let state_muted = rt.state_muted.clone();
+    let state_safe = rt.state_safe.clone();
+
     json!({
+        "ok": true,
         "schema": SCHEMA,
         "daemon": {
             "version": VERSION,
@@ -414,6 +437,9 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
             "safe": rt.state_safe,
             "last_error": rt.state_last_error,
         },
+        "muted": state_muted,
+        "safe": state_safe,
+        "reconfigure": reconfigure,
         "plan": {
             "graph_id": rt.graph_id,
             "sha256": Value::Null,
@@ -1800,6 +1826,8 @@ mod tests {
         let body = aggregate_with(&path, SystemTime::now());
 
         // 顶层字段集严格照 PLAN §4.4，不多不少。
+        // 顶层字段集：PLAN §4.4 的 12 个必备字段 + 合同 §3 的加法别名
+        // （ok/muted/safe/reconfigure，见 docs/API.md §3 与 v1.1/v1.2 变更记录）。
         let expected: Vec<String> = [
             "calibration",
             "daemon",
@@ -1807,10 +1835,14 @@ mod tests {
             "format",
             "host_link",
             "input",
+            "muted",
             "not_wired",
+            "ok",
             "output",
             "plan",
             "reasons",
+            "reconfigure",
+            "safe",
             "schema",
             "state",
         ]

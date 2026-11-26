@@ -41,7 +41,12 @@
 //! - `/api/meta`：`{api_version,web_version,ops,surfaces,not_wired}`，值与能力来自
 //!   `khaen_host::control` 的既有常量（见 `meta` 模块）。
 //! - `/api/calibration/*`：T36 校准 REST（uploads/jobs/artifacts/wizard，见 `calibration` 模块）。
-//!   默认后端未接线：写操作 503 `not_wired`、job 列表 200 空 + reason，上传与向导配置照常可用。
+//!   T70h-b 起 `main` 注入生产后端 `calibration::backend::JobManagerCalibration`
+//!   （khaen-calibration 的 JobManager + 离线 OfflineJobBackend；全程离线、不打开设备、不出声）：
+//!   job 状态机 queued/running/succeeded/failed/cancelled + created/updated unix + progress +
+//!   白名单 artifacts（manifest sha 下载时重算校验）+ apply/rollback 两阶段（按
+//!   `host_link.target` 路由 process/rt-host）。初始化失败时如实降级 not_wired + 真实原因
+//!   （`calibration::not_wired`）；上传与向导配置不依赖 job 后端，照常可用。
 //! - `/api/system/*`：T46 系统页后端（info/logs/diagnostics/password/restart，见 `system` 模块）。
 //!   缺失字段 null + reasons；journalctl 不可用 503 `logs_unavailable`；重启需
 //!   `KHAEN_ALLOW_RESTART=1`（否则 403 `restart_disabled`）；daemon 自身重启 501。
@@ -575,6 +580,10 @@ fn monitor_with_source(monitor: Value, source: &str, unavailable: Option<&String
     let mut snapshot = monitor;
     if let Some(object) = snapshot.as_object_mut() {
         object.insert("source".to_string(), Value::String(source.to_string()));
+        // 合同 §3：设备状态拿不到时 state 必须是 null（缺失键不算"null"），reason 说明原因。
+        if !object.contains_key("state") {
+            object.insert("state".to_string(), Value::Null);
+        }
         if let Some(reason) = unavailable {
             object.insert(
                 "rt_host_unavailable".to_string(),
@@ -658,18 +667,34 @@ async fn mute(
     State(state): State<Arc<DaemonState>>,
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
-    let mute = match payload.get("mute") {
-        Some(Value::Bool(mute)) => *mute,
-        Some(_) => return bad_request("field mute must be a boolean"),
-        None => return bad_request("missing field: mute"),
+    // docs/API.md §4：字段名 mute；旧名 muted 作为别名接受（两者都给且冲突时 400）。
+    let mute = match (payload.get("mute"), payload.get("muted")) {
+        (Some(Value::Bool(mute)), None) | (None, Some(Value::Bool(mute))) => *mute,
+        (Some(Value::Bool(mute)), Some(Value::Bool(muted))) if mute == muted => *mute,
+        (Some(_), _) | (_, Some(_)) => {
+            return bad_request("fields mute/muted must be booleans and must not disagree")
+        }
+        (None, None) => return bad_request("missing field: mute"),
     };
     if state.host_link().target() == Target::Process {
         // 原控制面路径先走完（语义不变），MOTU 设备写入只作为附加副作用；
         // 设备写失败会把状态码改成 502 并在响应里保留这里的 control 回执（不假成功）。
-        let control_body = process_marker(state.control().mute_json(mute));
+        let mut control_body = process_marker(state.control().mute_json(mute));
+        if let Some(object) = control_body.as_object_mut() {
+            object.insert("muted".to_string(), Value::Bool(mute));
+        }
         return crate::motu::api::with_mute_side_effect(&state, mute, control_body).await;
     }
-    forward(&state, serde_json::json!({ "op": "mute", "mute": mute })).await
+    let (status, Json(mut body)) =
+        forward(&state, serde_json::json!({ "op": "mute", "mute": mute })).await;
+    if status.is_success() {
+        // 合同 §4：回执同时回传 mute（真实回读）与 muted 别名。
+        let echo = body["mute"].clone();
+        if let Some(object) = body.as_object_mut() {
+            object.insert("muted".to_string(), echo);
+        }
+    }
+    (status, Json(body))
 }
 
 async fn prepare(
@@ -841,7 +866,10 @@ async fn inspect(
             .control()
             .inspect_json(&plan_path, plan_sha256.as_deref())
         {
-            Ok(body) => (StatusCode::OK, Json(process_marker(body))),
+            Ok(body) => (
+                StatusCode::OK,
+                Json(inspect_contract_aliases(process_marker(body))),
+            ),
             Err(err) => error_response(err),
         };
     }
@@ -849,7 +877,37 @@ async fn inspect(
     if let Some(sha256) = plan_sha256 {
         request["plan_sha256"] = Value::String(sha256);
     }
-    forward(&state, request).await
+    let (status, Json(body)) = forward(&state, request).await;
+    if status.is_success() {
+        (status, Json(inspect_contract_aliases(body)))
+    } else {
+        (status, Json(body))
+    }
+}
+
+/// docs/API.md 第 3 节的 inspect 回执要点（decoded/admission/graph_id/budget）：
+/// 控制面原始回执已含 ok/graph_id/admission（budget 在 admission.budget 内）与 plan 摘要。
+/// 这里只做加法别名（不改任何原字段）：decoded = {staged,sha256,plan}，budget = admission.budget。
+fn inspect_contract_aliases(mut body: Value) -> Value {
+    if let Some(object) = body.as_object_mut() {
+        if !object.contains_key("decoded") {
+            let decoded = serde_json::json!({
+                "staged": object.get("staged").cloned().unwrap_or(Value::Bool(false)),
+                "sha256": object.get("sha256").cloned().unwrap_or(Value::Null),
+                "plan": object.get("plan").cloned().unwrap_or(Value::Null),
+            });
+            object.insert("decoded".to_string(), decoded);
+        }
+        if !object.contains_key("budget") {
+            let budget = object
+                .get("admission")
+                .and_then(|admission| admission.get("budget"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            object.insert("budget".to_string(), budget);
+        }
+    }
+    body
 }
 
 /// prepare 成功后旁路记录方案元数据（T55：/api/channels 需要当前已生效方案的 routing 段）。

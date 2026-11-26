@@ -501,7 +501,11 @@ fn compose_history(state: &DaemonState, now: SystemTime, limit: usize, offset: u
     let start = offset.min(total);
     let end = start.saturating_add(limit).min(total);
     let page = list.drain(start..end).collect::<Vec<Value>>();
+    // terms of docs/API.md §11-D：entries 是历史形状（保留不改义），
+    // versions 是同一份数据的别名（加法），ok 是成功字段。
+    let versions_alias = page.clone();
     json!({
+        "ok": true,
         "schema": SCHEMA_HISTORY,
         "source": live.source,
         "current": {
@@ -509,6 +513,7 @@ fn compose_history(state: &DaemonState, now: SystemTime, limit: usize, offset: u
             "graph_id": live.current_graph_id,
         },
         "entries": page,
+        "versions": versions_alias,
         "pagination": {
             "limit": limit,
             "offset": offset,

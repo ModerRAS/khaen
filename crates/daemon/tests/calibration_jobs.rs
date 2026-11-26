@@ -347,11 +347,11 @@ async fn create_list_and_detail_reflect_the_backend_state_machine() {
     assert_eq!(job["id"], json!(job_id));
     assert_eq!(job["kind"], json!("single_point_offline"));
     assert_eq!(job["status"], json!("running"));
-    assert_eq!(job["step"], json!("compile"));
+    assert_eq!(job["step"], json!("validate"));
     assert_eq!(job["apply_state"], json!("not_applied"));
     let steps = job["steps"].as_array().expect("steps");
-    assert_eq!(steps.len(), 4);
-    assert_eq!(steps[0]["name"], json!("compile"));
+    assert_eq!(steps.len(), 5);
+    assert_eq!(steps[0]["name"], json!("validate"));
     assert_eq!(steps[0]["status"], json!("running"));
     assert_eq!(steps[1]["status"], json!("pending"));
     assert_eq!(steps[0]["sha256"], Value::Null);
