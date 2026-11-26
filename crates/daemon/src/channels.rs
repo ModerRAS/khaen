@@ -62,6 +62,8 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Map, Value};
 
+use crate::audio_profile::model::{AudioProfile, SpeakerRole};
+use crate::audio_profile::store::CurrentProfile;
 use crate::channels_mirror::PendingRouting;
 use crate::host_link::{LinkError, LinkSnapshot, Target, WireReply, HOST_LINK_UNAVAILABLE};
 use crate::plan_store::{PlanRecord, RoutingView};
@@ -377,8 +379,11 @@ fn degraded_channels_body(reason: &str) -> Value {
         "last_result": Value::Null,
         "applied": Value::Null,
         "hot_reconfigure": { "wired": Value::Null, "reason": reason },
+        // T71 加法字段：profile 不可用时如实空数组 + 原因（不编角色）。
+        "speaker_roles": [],
+        "input_roles": [],
         "not_wired": [{ "path": "channels", "reason": reason }],
-        "reasons": { "channels": reason },
+        "reasons": { "channels": reason, "speaker_roles": reason, "input_roles": reason },
     })
 }
 
@@ -624,6 +629,8 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
         Vec::new()
     };
     let routing_known = mapping_trusted && routing.is_some();
+    // T71 加法字段：profile 的物理输出角色 / 已启用输入通道角色（给 routing/channels 页显示角色名）。
+    let (speaker_roles, input_roles) = profile_role_fields(state, &mut reasons);
     json!({
         "ok": true,
         "schema": SCHEMA,
@@ -661,6 +668,8 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
         "last_gap_ms": last_gap_ms,
         "last_result": last_result,
         "applied": applied,
+        "speaker_roles": speaker_roles,
+        "input_roles": input_roles,
         "hot_reconfigure": {
             "wired": hot_wired,
             "reason": hot_reason,
@@ -676,6 +685,54 @@ fn reasons_json(reasons: &BTreeMap<String, String>) -> Value {
         object.insert(path.clone(), Value::String(reason.clone()));
     }
     Value::Object(object)
+}
+
+/// /api/channels 的加法字段（T71）：profile 的 22 行输出角色 + 已启用输入源的角色通道。
+///
+/// 只读自 audio-profile store（首次运行默认 2.0）；profile 文件不可读时如实空数组 + 原因，
+/// 不编角色。既有 channels 形状不变（纯加法）。
+fn profile_role_fields(
+    state: &DaemonState,
+    reasons: &mut BTreeMap<String, String>,
+) -> (Value, Value) {
+    let current = state.audio_profile().current();
+    let profile = match current {
+        CurrentProfile::Default { .. } => AudioProfile::default(),
+        CurrentProfile::Saved(saved) => saved.profile,
+        CurrentProfile::Unreadable { reason } => {
+            reasons.insert("speaker_roles".to_string(), reason.clone());
+            reasons.insert("input_roles".to_string(), reason);
+            return (json!([]), json!([]));
+        }
+    };
+    let speaker_roles = profile
+        .outputs
+        .iter()
+        .map(|row| {
+            json!({
+                "dac": row.dac,
+                "role": row.role.as_str(),
+                "enabled": row.enabled,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut input_roles = Vec::new();
+    for source in &profile.sources {
+        if !source.enabled {
+            continue;
+        }
+        for channel in &source.channels {
+            if channel.role == SpeakerRole::None {
+                continue;
+            }
+            input_roles.push(json!({
+                "source": source.kind.as_str(),
+                "channel": channel.channel,
+                "role": channel.role.as_str(),
+            }));
+        }
+    }
+    (json!(speaker_roles), json!(input_roles))
 }
 
 // ===========================================================================

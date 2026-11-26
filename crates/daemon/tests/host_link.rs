@@ -557,12 +557,13 @@ async fn meta_reports_the_live_host_link_capability() {
     );
     assert_eq!(meta["host_link"]["error"], Value::Null);
     // 能力清单语义不变（仍逐项来自契约常量 + 校准后端）。
+    // +1 校准后端（默认未接线）+1 测试音（T71：KHAEN_SPEAKER_TEST 默认关闭）。
     assert_eq!(
         meta["not_wired"].as_array().map(Vec::len),
         Some(
             khaen_host::control::NOT_WIRED_OPS.len()
                 + khaen_host::control::NOT_WIRED_SURFACES.len()
-                + 1
+                + 2
         )
     );
 

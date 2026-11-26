@@ -78,6 +78,11 @@ pub const CHANNELS_OPS: &[&str] = &[
     "channels_abort",
 ];
 
+/// rt-host 通道识别测试音 op（T71）：与 `crates/rt-host/src/control/test_tone.rs` 的
+/// `TEST_TONE_OPS` 同源。它们是 rt-host 控制层对契约 B 的增量能力（同一行 JSON 通道），
+/// 因此和 CHANNELS_OPS 一样单独成表，不并入与 `WIRED_OPS` 一一对应的 `FORWARDED_OPS`。
+pub const SPEAKER_TEST_OPS: &[&str] = &["test_tone", "test_tone_stop"];
+
 /// 控制目标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -431,7 +436,11 @@ impl HostLink {
 /// - `channels_commit`：重试可能得到 `channels_busy`（首笔仍在飞）或 `no_channels_draft`；
 /// - `channels_abort`：首笔若已丢弃草稿，重试会得到 `no_channels_draft`（把“已 abort”报成错误）。
 fn retry_after_ambiguous_failure(op: &str) -> bool {
-    !matches!(op, "commit" | "channels_commit" | "channels_abort")
+    // 测试音起停不是可安全重放的 op：超时后重试可能再起一段或把"已停止"报成 stopped:false。
+    !matches!(
+        op,
+        "commit" | "channels_commit" | "channels_abort" | "test_tone" | "test_tone_stop"
+    )
 }
 
 #[cfg(test)]
@@ -775,9 +784,25 @@ mod tests {
             .iter()
             .chain(std::iter::once(&STATUS_OP))
             .chain(CHANNELS_OPS.iter())
+            .chain(SPEAKER_TEST_OPS.iter())
         {
-            let expected = !matches!(*op, "commit" | "channels_commit" | "channels_abort");
+            let expected = !matches!(
+                *op,
+                "commit" | "channels_commit" | "channels_abort" | "test_tone" | "test_tone_stop"
+            );
             assert_eq!(retry_after_ambiguous_failure(op), expected, "{op}");
+        }
+    }
+
+    #[test]
+    fn speaker_test_ops_are_a_separate_rt_host_extension_set() {
+        // 测试音 op 是 rt-host 控制层的增量能力：不能混进 FORWARDED_OPS（与 WIRED_OPS 一一对应），
+        // 也不能自造 op（必须是这两个 test_tone*）。
+        assert_eq!(SPEAKER_TEST_OPS, &["test_tone", "test_tone_stop"]);
+        for op in SPEAKER_TEST_OPS {
+            assert!(op.starts_with("test_tone"), "{op}");
+            assert!(!FORWARDED_OPS.contains(op), "{op}");
+            assert!(!CHANNELS_OPS.contains(op), "{op}");
         }
     }
 

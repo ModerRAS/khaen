@@ -14,6 +14,8 @@ khaen-calibration = { path = "../calibration" }
 serde = { version = "1", features = ["derive"] }
 # MOTU UltraLite-mk5 CueMix 控制客户端（T40/T57）：单键写 + 回读、检测；纯 std、零外部依赖。
 khaen-motu-cuemix = { path = "../motu-cuemix" }
+# 方案组装器（T71，docs/API.md §12.3）：把 profile 拼成 ABI v3 方案（内部 path 依赖，无外部新 crate）。
+khaen-plan-builder = { path = "../plan-builder" }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "io-util"] }
 serde_json = "1"

@@ -405,6 +405,23 @@ fn default_reply(op: &str, request: &Value, state: &FakeState) -> WireReply {
             "aborted_token": request.get("token").cloned().unwrap_or(Value::Null),
             "note": "fake transport: channels draft discarded",
         }),
+        // T71 通道识别测试音（与 crates/rt-host/src/control/test_tone.rs 的回执同形）：
+        // 把请求字段原样当回执（forwarded 字段可在 calls() 里逐字断言）。
+        "test_tone" => json!({
+            "ok": true,
+            "dac": request.get("dac").cloned().unwrap_or(json!(0)),
+            "ms": request.get("ms").cloned().unwrap_or(json!(1000)),
+            "kind": request.get("kind").cloned().unwrap_or(json!("noise")),
+            "freq_hz": request.get("freq_hz").cloned().unwrap_or(Value::Null),
+            "level_db": request.get("db").cloned().unwrap_or(json!(-30.0)),
+            "total_blocks": 8,
+            "remaining_ms": request.get("ms").cloned().unwrap_or(json!(1000)),
+        }),
+        "test_tone_stop" => json!({
+            "ok": true,
+            "stopped": true,
+            "was_active": true,
+        }),
         other => {
             return WireReply::Failure {
                 code: "unknown_op".to_string(),

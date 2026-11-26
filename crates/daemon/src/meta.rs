@@ -52,22 +52,37 @@ pub(crate) async fn api_meta(State(state): State<Arc<DaemonState>>) -> impl Into
     let calibration = state.calibration_status();
     // host_link 能力：现取 probe（socket status 往返可能阻塞，放到 blocking 线程池）。
     let worker = Arc::clone(&state);
-    let host_link = match tokio::task::spawn_blocking(move || {
-        crate::status::link_capability(&worker, std::time::SystemTime::now())
+    let (host_link, speaker_test) = match tokio::task::spawn_blocking(move || {
+        let host_link = crate::status::link_capability(&worker, std::time::SystemTime::now());
+        // T71：测试音能力（KHAEN_SPEAKER_TEST 配置 + rt-host status.wired 是否含 test_tone）。
+        let speaker_test = crate::speaker_test::meta_capability(&worker);
+        (host_link, speaker_test)
     })
     .await
     {
-        Ok(host_link) => host_link,
-        Err(join_error) => json!({
-            "target": state.host_link().target().as_str(),
-            "mode": "none",
-            "connected": false,
-            "socket": state.host_link().socket().map(|path| path.display().to_string()),
-            "error": format!("host_link probe task failed: {join_error}"),
-        }),
+        Ok(pair) => pair,
+        Err(join_error) => (
+            json!({
+                "target": state.host_link().target().as_str(),
+                "mode": "none",
+                "connected": false,
+                "socket": state.host_link().socket().map(|path| path.display().to_string()),
+                "error": format!("host_link probe task failed: {join_error}"),
+            }),
+            json!({
+                "configured": state.speaker_test().config().enabled(),
+                "wired": false,
+                "code": "internal_error",
+                "window": {
+                    "configured": state.speaker_test().config().window().is_some(),
+                    "spec": Value::Null,
+                },
+                "reason": format!("speaker test capability task failed: {join_error}"),
+            }),
+        ),
     };
     let mut not_wired: Vec<Value> =
-        Vec::with_capacity(NOT_WIRED_OPS.len() + NOT_WIRED_SURFACES.len() + 1);
+        Vec::with_capacity(NOT_WIRED_OPS.len() + NOT_WIRED_SURFACES.len() + 2);
     for &(op, reason) in NOT_WIRED_OPS {
         not_wired.push(json!({ "op": op, "reason": reason }));
     }
@@ -80,6 +95,14 @@ pub(crate) async fn api_meta(State(state): State<Arc<DaemonState>>) -> impl Into
             .clone()
             .unwrap_or_else(|| crate::calibration::NOT_WIRED_REASON.to_string());
         not_wired.push(json!({ "op": "calibration.jobs", "reason": reason }));
+    }
+    // T71：测试音能力未接通时如实进 not_wired（关闭 / rt-host 不支持 / 链路不可用）。
+    if speaker_test.get("wired") != Some(&Value::Bool(true)) {
+        let reason = speaker_test
+            .get("reason")
+            .cloned()
+            .unwrap_or_else(|| json!("the speaker test output is not wired"));
+        not_wired.push(json!({ "op": "speaker_test", "reason": reason }));
     }
     (
         StatusCode::OK,
@@ -94,6 +117,7 @@ pub(crate) async fn api_meta(State(state): State<Arc<DaemonState>>) -> impl Into
                 "reason": calibration.reason,
             },
             "host_link": host_link,
+            "speaker_test": speaker_test,
             "not_wired": not_wired,
         })),
     )

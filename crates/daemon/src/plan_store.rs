@@ -602,7 +602,9 @@ impl DecodedMeta {
 }
 
 /// 原子写：先写同目录唯一 tmp，再 rename（读方永远看不到半截文件）。
-fn write_atomic(dir: &Path, destination: &Path, bytes: &[u8]) -> Result<(), String> {
+///
+/// T71 起 audio-profile 的 profile 文件与生成的方案文件复用同一套原子写语义。
+pub(crate) fn write_atomic(dir: &Path, destination: &Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::create_dir_all(dir)
         .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
     let unique = std::time::SystemTime::now()

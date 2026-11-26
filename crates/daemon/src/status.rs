@@ -44,6 +44,7 @@ use khaen_host::EngineConfig;
 
 use crate::calibration::service::CalibrationStatus;
 use crate::host_link::{LinkSnapshot, Target, HOST_LINK_UNAVAILABLE};
+use crate::speaker_test;
 use crate::{DaemonState, VERSION};
 
 /// 聚合对象 schema 版本（PLAN §4.4）。
@@ -410,6 +411,33 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
             "the current rt-host status source does not expose reconfigure (generation/last_gap_ms/last_result); only M3b rt-host builds report it",
         );
     }
+    // 测试音状态（T71 加法字段）：socket status 优先；文件回退里 speaker_test=null / 缺失时
+    // 给全 null + 原因（控制通道未启用时状态文件写不出真实状态），绝不编 active:false。
+    let speaker_socket_document = match &sources.link {
+        LinkSnapshot::Socket { status, .. } => Some(status),
+        _ => None,
+    };
+    // 状态文件里的 document 是 Map；project_status 统一吃 Value（克隆一份很小的快照）。
+    let speaker_file_document = match file.as_ref() {
+        Some(RtFile::Fresh { document, .. }) => Some(Value::Object(document.clone())),
+        _ => None,
+    };
+    let speaker_unavailable_reason = match sources.link {
+        LinkSnapshot::Unavailable { reason, .. } => {
+            format!("the rt-host control socket is unavailable ({reason})")
+        }
+        LinkSnapshot::Process => PROCESS_TARGET_REASON.to_string(),
+        LinkSnapshot::Socket { .. } => "the rt-host control status is unavailable".to_string(),
+    };
+    let (speaker_test, speaker_test_reason) = speaker_test::project_status(
+        speaker_socket_document,
+        speaker_file_document.as_ref(),
+        &speaker_unavailable_reason,
+    );
+    if let Some(reason) = speaker_test_reason {
+        insert_reason(&mut reasons, "speaker_test", reason);
+    }
+
     // 合同 §3 的顶层 muted/safe 别名（真实值来自 state 块，同源不重造）。
     let state_muted = rt.state_muted.clone();
     let state_safe = rt.state_safe.clone();
@@ -440,6 +468,7 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         "muted": state_muted,
         "safe": state_safe,
         "reconfigure": reconfigure,
+        "speaker_test": speaker_test,
         "plan": {
             "graph_id": rt.graph_id,
             "sha256": Value::Null,
@@ -1844,6 +1873,7 @@ mod tests {
             "reconfigure",
             "safe",
             "schema",
+            "speaker_test",
             "state",
         ]
         .iter()

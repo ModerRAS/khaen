@@ -60,10 +60,10 @@ async fn api_meta_reports_real_version_and_capability_constants() {
     assert_eq!(body["surfaces"], serde_json::json!(WIRED_SURFACES));
 
     let not_wired = body["not_wired"].as_array().expect("not_wired 必须是数组");
-    // 控制面能力（逐项照常量）+ 校准 job 后端（默认未接线，条目随实现状态变化）。
+    // 控制面能力（逐项照常量）+ 校准 job 后端（默认未接线）+ 测试音（默认未启用；T71）。
     assert_eq!(
         not_wired.len(),
-        NOT_WIRED_OPS.len() + NOT_WIRED_SURFACES.len() + 1,
+        NOT_WIRED_OPS.len() + NOT_WIRED_SURFACES.len() + 2,
         "not_wired 必须完整反映未实现 op / 未接通 surface / 未接线后端: {not_wired:?}"
     );
     for ((op, reason), entry) in NOT_WIRED_OPS.iter().zip(not_wired.iter()) {
@@ -77,7 +77,19 @@ async fn api_meta_reports_real_version_and_capability_constants() {
         assert_eq!(entry["surface"], Value::String((*surface).to_string()));
         assert_eq!(entry["reason"], Value::String((*reason).to_string()));
     }
-    let calibration_entry = not_wired.last().expect("not_wired 非空");
+    // T71：测试音能力（KHAEN_SPEAKER_TEST 默认关闭 -> not_wired 条目）。
+    let speaker_test_entry = not_wired.last().expect("not_wired 非空");
+    assert_eq!(
+        speaker_test_entry["op"],
+        Value::String("speaker_test".into())
+    );
+    assert!(
+        speaker_test_entry["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("KHAEN_SPEAKER_TEST")),
+        "测试音条目必须带真实原因: {speaker_test_entry}"
+    );
+    let calibration_entry = &not_wired[not_wired.len() - 2];
     assert_eq!(
         calibration_entry["op"],
         Value::String("calibration.jobs".into())

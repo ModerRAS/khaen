@@ -76,6 +76,10 @@
 // 大号 status fixture（serde_json::json!）在测试里需要更深的宏递归。
 #![recursion_limit = "256"]
 
+/// 新增端点共用的 M1 错误体（docs/API.md §11-A）。
+mod api_error;
+/// 音频通道 profile 后端（T71，docs/API.md §12）：模型/校验/存储/方案生成/只读能力探测。
+pub mod audio_profile;
 pub mod auth;
 pub mod bind;
 /// 校准 REST 层（T36）：jobs / uploads / artifacts / wizard。
@@ -94,6 +98,8 @@ pub mod motu;
 pub mod plan_api;
 /// 方案库（T55）：上传内容寻址存储 + 已 prepare/commit 方案元数据与生效历史。
 pub mod plan_store;
+/// 通道识别测试音代理（T71，docs/API.md §12.2/§12.6）：daemon 侧安全门 + rt-host test_tone 转发。
+pub mod speaker_test;
 pub mod status;
 /// 系统信息 / 日志 / 诊断 / 改密 / 重启 API（T46，M6 系统页后端提前）。
 pub mod system;
@@ -208,6 +214,10 @@ pub struct DaemonState {
     channels_mirror: channels_mirror::ChannelsMirror,
     /// MOTU 控制面（T57）：检测 + 两阶段音量草稿 + 设备实现（生产 NativeMotu，测试注入假控制面）。
     motu: motu::MotuHub,
+    /// 音频通道 profile（T71）：已保存 profile（audio-profile.json）+ prepare 草稿。
+    audio_profile: audio_profile::AudioProfileStore,
+    /// 通道识别测试音（T71）：服务端安全门配置 + 可注入墙钟（生产由 main 从环境变量解析）。
+    speaker_test: speaker_test::SpeakerTestRuntime,
 }
 
 impl DaemonState {
@@ -245,6 +255,10 @@ impl DaemonState {
             // 默认实现：crate 默认的 /proc/asound/cards + 默认控制网地址、无密码；
             // Windows/无设备时检测如实 detected=false，不建立任何连接。
             motu: motu::MotuHub::new(std::sync::Arc::new(motu::NativeMotu::default())),
+            audio_profile: audio_profile::AudioProfileStore::new(&state_dir),
+            speaker_test: speaker_test::SpeakerTestRuntime::new(
+                speaker_test::SpeakerTestConfig::disabled_default(),
+            ),
             state_dir,
         })
     }
@@ -291,6 +305,28 @@ impl DaemonState {
     /// MOTU 控制面（/api/motu* 与 /api/mute 副作用使用）。
     pub fn motu(&self) -> &motu::MotuHub {
         &self.motu
+    }
+
+    /// 音频通道 profile 存储（/api/audio-profile 与 /api/channels 的角色加法字段使用）。
+    pub fn audio_profile(&self) -> &audio_profile::AudioProfileStore {
+        &self.audio_profile
+    }
+
+    /// 测试音运行时配置（/api/speaker-test 安全门与 /api/meta 能力条目使用）。
+    pub fn speaker_test(&self) -> &speaker_test::SpeakerTestRuntime {
+        &self.speaker_test
+    }
+
+    /// 注入测试音配置（main 从 KHAEN_SPEAKER_TEST/KHAEN_SOUND_WINDOW 解析后注入）。
+    pub fn with_speaker_test(mut self, config: speaker_test::SpeakerTestConfig) -> Self {
+        self.speaker_test = speaker_test::SpeakerTestRuntime::new(config);
+        self
+    }
+
+    /// 注入完整测试音运行时（测试注入假墙钟；生产用 with_speaker_test）。
+    pub fn with_speaker_test_runtime(mut self, runtime: speaker_test::SpeakerTestRuntime) -> Self {
+        self.speaker_test = runtime;
+        self
     }
 
     /// 注入校准 job 服务（替换默认未接线实现；daemon 会把事件汇注入给它）。
@@ -486,6 +522,10 @@ pub fn router(state: Arc<DaemonState>) -> Router {
         .merge(plan_api::routes())
         // T57 MOTU 控制面（/api/motu 检测 + /api/motu/volume 两阶段）。
         .merge(motu::routes())
+        // T71 音频通道 profile（§12：profile 两阶段 + 方案生成 + 声卡输入能力只读探测）。
+        .merge(audio_profile::routes())
+        // T71 通道识别测试音代理（§12.2/§12.6：daemon 安全门 + rt-host test_tone 转发）。
+        .merge(speaker_test::routes())
         // 非 /api 的 GET/HEAD 走内嵌静态资源 + SPA 回退；未知 /api/* 返回结构化 JSON 404。
         .fallback(webui::fallback)
         // 认证守卫包住全部路由（含 fallback）：只对 /api 生效，并给 /api 响应补版本/缓存头。

@@ -25,6 +25,7 @@ use khaen_daemon::auth::{AuthConfig, SESSION_COOKIE};
 use khaen_daemon::calibration::service::CalibrationService;
 use khaen_daemon::host_link::{HostLink, HostLinkConfig, Transport};
 use khaen_daemon::motu::MotuControl;
+use khaen_daemon::speaker_test::SpeakerTestRuntime;
 use khaen_daemon::system::{BuildInfo, RestartPolicy, SystemProbe};
 use khaen_daemon::{router, DaemonState};
 use khaen_host::EngineConfig;
@@ -303,6 +304,48 @@ pub async fn spawn_at_with_motu(state_dir: &Path, motu: Arc<dyn MotuControl>) ->
     .await
 }
 
+/// 用临时状态目录 + 注入控制通道 + 测试音运行时启动服务（T71；自动 setup/login）。
+pub async fn spawn_with_speaker_test(
+    link: Arc<HostLink>,
+    runtime: SpeakerTestRuntime,
+) -> TestServer {
+    let dir = Arc::new(TempStateDir::new("speaker-test"));
+    let mut server = spawn_custom_with_speaker_test(
+        dir.path(),
+        AuthConfig::for_tests(dir.path().to_path_buf()),
+        None,
+        None,
+        Some(link),
+        None,
+        Some(runtime),
+    )
+    .await;
+    server.owned_dir = Some(Arc::clone(&dir));
+    server.session = Some(bootstrap_session(&server).await);
+    server
+}
+
+/// 同 spawn_with_speaker_test，但注入校准服务（测试 daemon 侧"校准中 busy"门禁）。
+pub async fn spawn_with_speaker_test_and_calibration(
+    service: Arc<dyn CalibrationService>,
+    runtime: SpeakerTestRuntime,
+) -> TestServer {
+    let dir = Arc::new(TempStateDir::new("speaker-test-cal"));
+    let mut server = spawn_custom_with_speaker_test(
+        dir.path(),
+        AuthConfig::for_tests(dir.path().to_path_buf()),
+        None,
+        Some(service),
+        None,
+        None,
+        Some(runtime),
+    )
+    .await;
+    server.owned_dir = Some(Arc::clone(&dir));
+    server.session = Some(bootstrap_session(&server).await);
+    server
+}
+
 /// 真实监听随机端口；启动时解析的监听地址注入 DaemonState（/api/status 的 daemon.bind 用它）。
 ///
 /// `link` 为 None 时用 [`process_link`]（旧测试语义）；转发语义测试显式注入 rt-host 链路。
@@ -313,6 +356,29 @@ async fn spawn_custom(
     calibration: Option<Arc<dyn CalibrationService>>,
     link: Option<Arc<HostLink>>,
     motu: Option<Arc<dyn MotuControl>>,
+) -> TestServer {
+    spawn_custom_with_speaker_test(
+        state_dir,
+        config,
+        rt_status_file,
+        calibration,
+        link,
+        motu,
+        None,
+    )
+    .await
+}
+
+/// 同 spawn_custom，但可注入测试音运行时（T71：KHAEN_SPEAKER_TEST 配置 + 假墙钟）。
+#[allow(clippy::too_many_arguments)]
+async fn spawn_custom_with_speaker_test(
+    state_dir: &Path,
+    config: AuthConfig,
+    rt_status_file: Option<PathBuf>,
+    calibration: Option<Arc<dyn CalibrationService>>,
+    link: Option<Arc<HostLink>>,
+    motu: Option<Arc<dyn MotuControl>>,
+    speaker_test: Option<SpeakerTestRuntime>,
 ) -> TestServer {
     // 先绑定端口，再构造 state：daemon.bind 必须是启动时解析的真实监听地址。
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
@@ -328,6 +394,9 @@ async fn spawn_custom(
     }
     state = state.with_host_link(link.unwrap_or_else(process_link));
     state = state.with_motu(motu.unwrap_or_else(default_test_motu));
+    if let Some(runtime) = speaker_test {
+        state = state.with_speaker_test_runtime(runtime);
+    }
     let state = Arc::new(state);
     let app = router(Arc::clone(&state)).into_make_service_with_connect_info::<SocketAddr>();
     let handle = tokio::spawn(async move {

@@ -79,6 +79,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 系统页重启能力（T46）：只有 KHAEN_ALLOW_RESTART=1 才允许 POST /api/system/restart
     // 重启 khaen-rt-host；handler 不读环境，解析后注入 DaemonState。
     let restart_policy = khaen_daemon::system::RestartPolicy::from_env();
+    // 通道识别测试音（T71）：KHAEN_SPEAKER_TEST=on 才启用；KHAEN_SOUND_WINDOW 配置声音窗口。
+    // 非法值启动即失败（与本文件其它配置同样的 fail-closed 策略）；handler 不读环境。
+    let speaker_test = match khaen_daemon::speaker_test::SpeakerTestConfig::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("khaen-daemon: {error}");
+            std::process::exit(2);
+        }
+    };
     // MOTU 控制面（T57）：默认跟随 crate 默认检测（/proc/asound/cards + 169.254.111.126:1280）；
     // KHAEN_MOTU_* 覆盖地址/密码/超时或显式关闭，非法值启动即失败（与 bind 同样的 fail-closed）。
     let motu_config = match MotuConfig::from_env() {
@@ -95,7 +104,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_rt_status_file(rt_status_file)
         .with_restart_policy(restart_policy.clone())
         .with_host_link(host_link)
-        .with_motu(Arc::clone(&motu_control));
+        .with_motu(Arc::clone(&motu_control))
+        .with_speaker_test(speaker_test);
     // 校准 job 生产后端（T70h-b）：默认在 daemon 状态目录下接线 JobManager + 离线 backend。
     // 初始化失败（目录不可写/索引损坏）时如实降级为 not_wired + 真实原因，不静默吞掉；
     // KHAEN_CAL_BACKEND=off 显式关闭（保留上传/向导，job 写操作 503 not_wired）。
@@ -163,6 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         motu_detection.model.as_deref().unwrap_or("-"),
         motu_detection.reason,
         motu_config.disabled,
+    );
+    println!(
+        "khaen-daemon {}",
+        khaen_daemon::speaker_test::startup_line(state.speaker_test())
     );
     let device = state.device_json();
     println!(

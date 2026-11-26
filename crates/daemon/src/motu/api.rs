@@ -237,7 +237,9 @@ fn reasons_json(reasons: &BTreeMap<String, String>) -> Value {
 }
 
 /// 检测原因的稳定文案（检测本身只给稳定码，这里补人类可读解释）。
-fn detection_reason_text(reason: &str) -> String {
+///
+/// T71 起 /api/audio-profile 的 device_inputs 能力探测复用同一份文案。
+pub(crate) fn detection_reason_text(reason: &str) -> String {
     match reason {
         REASON_DETECTED => {
             "MOTU control is available: a MOTU card is present and the USB-CDC control network answered the TCP probe"
