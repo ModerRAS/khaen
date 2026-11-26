@@ -958,8 +958,11 @@ fn reset_history<T: KernelSample>(layout: &PartitionedLayout, state: &mut [T]) {
 }
 
 /// [RT] 入口参数校验（只读标量/长度，不写缓冲）；任一不符返回固定错误码。
+///
+/// 标量入口与 SIMD 入口（`super::partitioned_simd`）共用同一套校验：SIMD 入口在校验失败时
+/// 返回与标量入口完全相同的固定错误码，且失败前不写任何缓冲。
 #[allow(clippy::too_many_arguments)]
-fn validate_call(
+pub(crate) fn validate_call(
     topo: &DirectTopology,
     plan: &PartitionedPlan,
     plan_data_len: usize,

@@ -243,7 +243,12 @@ impl DirectTopology {
 ///
 /// 缓冲分区全部在一条 state 切片内：`x_past`（每源 L_A-1 历史）、`u_past`（每角色 L_G-1）、
 /// `v_past`（每角色 L_P-1），以及 block 容量为 `DIRECT_MAX_BLOCK` 的 `x_cur/u_cur/v_cur`
-/// 当前块中间量。历史约定：`x_past[i][t] = x_i[block_start-1-t]`。
+/// 当前块中间量。历史约定（仅标量参考内核）：`x_past[i][t] = x_i[block_start-1-t]`。
+///
+/// 注意：`direct_block_f32_optimized`（SIMD 派发）在同一批分区里按**时序方向**存储历史
+/// （`x_past[i][j] = x_i[block_start-(L_A-1)+j]`，见 `direct_simd` 模块文档），分區大小与
+/// 偏移完全相同；标量与 SIMD 内核**不得共用同一条 state**（同一 epoch 内混用会读到对方
+/// 的镜像历史）。两条路径都从清零 state 开始、对外输出同语义。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirectLayout {
     /// 源通道数（= `DirectTopology.n_src`）。
@@ -778,10 +783,13 @@ fn direct_block_scalar<T: DirectSample>(
 
 /// [RT] 入口参数校验（只读标量/长度，不写缓冲）；任一不符返回固定错误码。
 ///
+/// 标量入口与 SIMD 入口（`super::direct_simd`）共用同一套校验：SIMD 入口在校验失败时
+/// 返回与标量入口完全相同的固定错误码，且失败前不写任何缓冲。
+///
 // NOTE(legacy-defect): 旧实现每个 block 在 RT 路径重跑一次完整拓扑校验 + 布局重算
 // （O(taps) 的循环），保留旧行为（不引入缓存/一致性状态），仅记录 RT 时间开销。
 #[allow(clippy::too_many_arguments)]
-fn validate_call(
+pub(crate) fn validate_call(
     topo: &DirectTopology,
     layout: &DirectLayout,
     coeffs_a_len: usize,

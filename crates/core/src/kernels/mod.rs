@@ -1,7 +1,9 @@
 //! 实时卷积内核：全采样率 direct 卷积、共享 FFT 分区卷积与有理数多相重采样。
 //!
 //! RT-MODULE: [`direct::direct_block_f32`] 与 [`partitioned::partitioned_block_f32`] 是 RT 路径
-//! 生产入口：只读写调用方预分配的切片，不分配、不加锁、不做 IO、无显式 `panic!`/`unwrap`
+//! 生产入口（同语义的 SIMD 入口在 [`direct_simd`] / [`partitioned_simd`]，同为 RT 纯模块，
+//! 由 [`dispatch`] 运行期选择；见下文"显式 SIMD 与运行期派发"）：只读写调用方预分配的切片，
+//! 不分配、不加锁、不做 IO、无显式 `panic!`/`unwrap`
 //! 分支（越界由各入口的 `validate_call` 在写入任何缓冲之前排除）。状态与 plan 的容量/构建
 //! 全部在 NONRT：调用方按 `DirectLayout::state_samples()` / `PartitionedLayout::state_samples()`
 //! 预分配并清零，plan 用 `PartitionedLayout::plan_samples()` / `build_scratch_samples()` 预分配。
@@ -19,6 +21,37 @@
 //! f32 是生产精度，f64 只作 offline oracle（与旧实现一致）。迁移未改动任何数值行为；旧实现
 //! 遗留的文档/防御缺口以 `// NOTE(legacy-defect):` 原位标注，最终清单见迁移报告。
 //!
+//! # 显式 SIMD 与运行期派发（T39a）
+//!
+//! 标量入口 [`direct::direct_block_f32`] / [`partitioned::partitioned_block_f32`] 是**参考实现**：
+//! 行为逐位固定、既有测试继续用它。同语义的显式 SIMD 实现位于 [`direct_simd`] /
+//! [`partitioned_simd`]（[RT] 纯模块），由 [`dispatch`] 按本机能力在运行期选择：
+//!
+//! - x86_64：`is_x86_feature_detected!("avx2")` 且 `"fma"` → AVX2+FMA 内核（8 x f32/指令）；
+//! - aarch64：NEON 是 ARMv8-A 基线 → 直接 NEON 内核（4 x f32/指令）；
+//! - 其它架构 / 无所需指令集：回退标量参考入口。
+//!
+//! 目标 CPU（N150 Gracemont、RK3576 Cortex-A72+A53）都**不需要**全局 `-C target-cpu` /
+//! `-C target-feature`：SIMD 内层函数带 `#[target_feature(enable = "avx2,fma")]`，运行期
+//! 未探测到指令集时不会被执行；发布构建保持通用指令集即可（运行时派发，见
+//! [`dispatch::SimdBackend`]）。可用的优化入口：
+//!
+//! - [`dispatch::direct_block_f32_optimized`]：direct 卷积的 SIMD 版（partial/flush/V=0 契约
+//!   与标量入口相同）；
+//! - [`dispatch::partitioned_block_f32_optimized`]：分区卷积的 SIMD 版（state 布局与标量
+//!   完全相同，可在同一 epoch 内交替调用）；
+//! - [`dispatch::SimdBackend::detect`] / `name()`：报告本机实际后端（scalar / avx2+fma / neon）。
+//!
+//! 数值契约（SIMD vs 标量参考）：**非逐位一致**（FMA 融合 + 部分累加顺序重排），f32 生产精度
+//! 不变。direct：random 输入下每块相对 L2 <= 1e-6、单样本绝对 <= 1e-6（taps 1/8/64/2048/4096、
+//! block 64/128，见 tests/kernels_simd.rs 断言；实测 max_abs <= 2e-7）。partitioned：沿用
+//! T08 的 f32 门（相对 L2 <= 1e-5；实测 <= 4e-7）；f64 oracle 入口不受影响。
+//!
+//! state 契约：direct 的 SIMD 路径在同一批分区里按**时序方向**存历史（见 [`direct_simd`]
+//! 模块文档），与标量参考的倒序环形约定不同，**同一 epoch 内不得混用**（换内核要重新清零
+//! state 或换新 state）；partitioned 的 SIMD 与标量 state 表示完全相同，可交替调用。容量/
+//! 偏移/清零要求两条路径一致，布局结构与分配器不受影响。
+//!
 //! 上限常量的来源约定：`crate::rt` 已收录的（[`crate::rt::MAX_OUTPUT_CHANNELS`]、
 //! [`crate::rt::MAX_LOW_BAND_PARTICIPANTS`]、[`crate::rt::TAPS_NORMAL_MAX`]、
 //! [`crate::rt::BLOCK_SIZES`]）直接引用，本模块不再镜像一份；`crate::rt` 尚未收录的
@@ -26,7 +59,10 @@
 //! 后迁走（迁移报告已登记）。
 
 pub mod direct;
+pub mod direct_simd;
+pub mod dispatch;
 pub mod partitioned;
+pub mod partitioned_simd;
 pub mod resample;
 
 // ---------------------------------------------------------------------------
