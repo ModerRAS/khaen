@@ -8,43 +8,95 @@ on:
 permissions:
   contents: write
 
+# 直接用 Rust 交叉编译：ubuntu-latest（x86_64 主机）一次构建 x86_64 + aarch64 两个目标。
+# CPU 口径见 deploy/build-release.sh（x86-64-v2 / aarch64 generic，均为通用基线；
+# AVX2/FMA/NEON 热点由 crates/core 运行期内核派发，不依赖编译 flag，也不针对具体芯片）。
 jobs:
-  build-linux-x86_64:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
-      - name: System deps (ALSA dev headers)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
-      - name: Build daemon, real-time host and calibration tools
-        run: cargo build --release --locked -p khaen-daemon -p khaen-rt-host -p khaen-cal-tools
-      - name: Package and describe
+        with:
+          key: release-cross-two-arch
+
+      - name: System deps (x86_64 + arm64 multiarch)
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture arm64
+          # Ubuntu 24.04 用 deb822 sources：现有 stanza 限定 amd64，arm64 从 ports 拉
+          sudo sed -i '/^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports/
+          Suites: noble noble-updates noble-backports noble-security
+          Components: main restricted universe multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev:amd64 libasound2-dev:arm64 \
+            pkg-config gcc-aarch64-linux-gnu
+
+      # 版本唯一事实源 = git tag。Cargo.toml 版本必须与 tag 完全一致，否则不发布。
+      # 版本/commit 通过环境变量在编译期注入二进制（build.rs option_env!），
+      # 因此二进制里没有“crate 版本 vs release 版本”两个真相。
+      - name: Verify tag matches workspace version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION="$(python3 -c 'import re; t=open("Cargo.toml").read(); m=re.search(r"\[workspace\.package\][^\[]*?version\s*=\s*\"([^\"]+)\"", t, re.S); print(m.group(1) if m else "")')"
+          echo "tag=${VERSION} cargo=${CARGO_VERSION}"
+          if [[ "${CARGO_VERSION}" != "${VERSION}" ]]; then
+            echo "::error::tag v${VERSION} != Cargo.toml workspace version ${CARGO_VERSION}; bump Cargo.toml (and commit) before tagging" >&2
+            exit 1
+          fi
+
+      - name: Build both targets (cpu-tuned release)
+        run: |
+          set -euo pipefail
+          export KHAEN_BUILD_VERSION="${GITHUB_REF_NAME#v}"
+          export KHAEN_BUILD_COMMIT="$(git rev-parse HEAD)"
+          bash deploy/build-release.sh x86_64-unknown-linux-gnu
+          bash deploy/build-release.sh aarch64-unknown-linux-gnu
+
+      - name: Package both targets
         run: |
           set -euo pipefail
           COMMIT="$(git rev-parse HEAD)"
           VERSION="${GITHUB_REF_NAME#v}"
-          STAGE="khaen-${VERSION}-linux-x86_64"
-          mkdir -p "dist/${STAGE}/bin" "dist/${STAGE}/deploy" "dist/${STAGE}/docs"
-          cp target/release/khaen-daemon target/release/khaen-rt-host "dist/${STAGE}/bin/"
-          cp target/release/khaen-single-point target/release/khaen-fir-plan \
-             target/release/khaen-scene-plan \
-             target/release/khaen-plan-levels target/release/khaen-band-levels \
-             target/release/khaen-closed-loop target/release/khaen-closed-loop-run \
-             "dist/${STAGE}/bin/"
-          cp deploy/install.sh deploy/rollback.sh deploy/closed-loop-verdict.sh \
-             deploy/khaen-daemon.service deploy/khaen-rt-host.service \
-             deploy/daemon.env.example deploy/rt-host.env.example \
-             "dist/${STAGE}/deploy/"
-          cp docs/CLOSED-LOOP.md "dist/${STAGE}/docs/"
-          cp crates/cal-tools/README.md "dist/${STAGE}/docs/calibration-cli.md"
-          ( cd "dist/${STAGE}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
-          ( cd "dist/${STAGE}" && sha256sum -c SHA256SUMS > /dev/null )
-          python3 - "${STAGE}" "${VERSION}" "${COMMIT}" <<'PY'
+
+          package() {
+            local target="$1" arch="$2" cpu_flags="$3"
+            local stage="khaen-${VERSION}-linux-${arch}"
+            local bin_dir="target/${target}/release"
+            mkdir -p "dist/${stage}/bin" "dist/${stage}/deploy" "dist/${stage}/docs"
+            find "${bin_dir}" -maxdepth 1 -type f -name 'khaen-*' -perm -u+x -exec cp {} "dist/${stage}/bin/" +
+            cp deploy/install.sh deploy/rollback.sh deploy/closed-loop-verdict.sh deploy/smoke-test.sh deploy/build-release.sh deploy/khaen-daemon.service deploy/khaen-rt-host.service deploy/daemon.env.example deploy/rt-host.env.example "dist/${stage}/deploy/"
+            cp docs/CLOSED-LOOP.md "dist/${stage}/docs/"
+            cp crates/cal-tools/README.md "dist/${stage}/docs/calibration-cli.md"
+            cat > "dist/${stage}/BUILD" <<EOF
+          schema: khaen-build/v1
+          version: ${VERSION}
+          commit: ${COMMIT}
+          target: ${target}
+          built_on: ubuntu-latest (x86_64 host, native + cross)
+          rustc: $(rustc -V)
+          cpu_flags: ${cpu_flags}
+          profile: release (LTO thin, codegen-units=1)
+          EOF
+            ( cd "dist/${stage}" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )
+            ( cd "dist/${stage}" && sha256sum -c SHA256SUMS > /dev/null )
+            python3 - "${stage}" "${VERSION}" "${COMMIT}" "${target}" <<'PY'
           import hashlib, json, pathlib, sys
-          stage, version, commit = sys.argv[1:4]
+          stage, version, commit, target = sys.argv[1:5]
           root = pathlib.Path("dist") / stage
           files = []
           for item in sorted(root.rglob("*")):
@@ -55,18 +107,25 @@ jobs:
               "schema": "khaen-release/v1",
               "version": version,
               "commit": commit,
-              "target": "x86_64-unknown-linux-gnu",
+              "target": target,
               "files": files,
           }
           (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           PY
-          ( cd dist && tar -czf "${STAGE}.tar.gz" "${STAGE}" )
-          ( cd dist && sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256" )
+            ( cd dist && tar -czf "${stage}.tar.gz" "${stage}" )
+            ( cd dist && sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256" )
+          }
+
+          package x86_64-unknown-linux-gnu x86_64 "-C target-cpu=x86-64-v2"
+          package aarch64-unknown-linux-gnu aarch64 "-C target-cpu=generic"
+          ls -l dist
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: khaen-linux-x86_64
+          name: khaen-linux-both-arch
           path: dist/*
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

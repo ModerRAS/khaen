@@ -20,6 +20,10 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+# ProtectSystem=strict 会把整个文件系统挂成只读；rt-host 需要写状态文件（/api/status 的数据源）
+# 与控制 socket，必须显式放行（2026-11-26 N150 实测：缺这两行时 "cannot write status file ... Read-only file system"，
+# UI 因此一直显示 host_link 未连接）。
+ReadWritePaths=/var/lib/khaen /run/khaen
 
 [Install]
 WantedBy=multi-user.target

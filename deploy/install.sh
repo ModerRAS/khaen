@@ -58,6 +58,35 @@ for entry in manifest["files"]:
 print("manifest ok: version=%s commit=%s files=%d" % (manifest["version"], manifest["commit"][:12], len(manifest["files"])))
 PY
 
+echo "==> verify version consistency (package dir / manifest / BUILD)"
+python3 - "${STAGE}" <<'PY'
+import json, pathlib, re, sys
+stage = pathlib.Path(sys.argv[1])
+manifest = json.loads((stage / "manifest.json").read_text())
+version = manifest["version"]
+commit = manifest["commit"]
+m = re.match(r"^khaen-(?P<version>.+)-linux-(?P<arch>x86_64|aarch64)$", stage.name)
+if not m:
+    sys.exit("unexpected package directory name: %s" % stage.name)
+if m.group("version") != version:
+    sys.exit("manifest version %r != package dir version %r" % (version, m.group("version")))
+build = stage / "BUILD"
+if not build.is_file():
+    sys.exit("missing BUILD file (build provenance)")
+fields = {}
+for line in build.read_text().splitlines():
+    if ":" in line:
+        key, value = line.split(":", 1)
+        fields[key.strip()] = value.strip()
+if fields.get("version") != version:
+    sys.exit("BUILD version %r != manifest version %r" % (fields.get("version"), version))
+if fields.get("commit") != commit:
+    sys.exit("BUILD commit %r != manifest commit %r" % (fields.get("commit"), commit))
+if fields.get("target") != manifest.get("target"):
+    sys.exit("BUILD target %r != manifest target %r" % (fields.get("target"), manifest.get("target")))
+print("version consistency ok: %s (%s)" % (version, commit[:12]))
+PY
+
 VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "${STAGE}/manifest.json")"
 TARGET_DIR="${RELEASES}/${VERSION}"
 if [[ -e "${TARGET_DIR}" ]]; then
