@@ -166,6 +166,15 @@ fn loopback_unicast_sine_end_to_end() {
     }
     let sender = sender_thread.join().expect("sender thread");
     assert!(sender.packets_sent() >= 200);
+    // 发送线程 200 包已全部发出，但接收线程可能还没把 socket 里剩余包交给 jitter：
+    // 先等统计到 ≥100 包再 stop，避免慢 runner 上 stop 抢先丢掉未处理包（CI flake：
+    // 曾在 GitHub runner 上只统计到 85 包而失败）。
+    assert!(
+        wait_until(Duration::from_secs(2), || source.jitter_stats().packets
+            >= 100),
+        "jitter stats should count at least 100 packets after 200 were sent: {:?}",
+        source.jitter_stats()
+    );
     receiver.stop();
     // 证据真实性：reader 已交给 capture（source），receiver.report_json 的 jitter 统计
     // 必须是真实计数（不是零）。
