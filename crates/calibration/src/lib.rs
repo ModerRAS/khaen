@@ -60,6 +60,7 @@ pub mod ir_extract;
 pub mod job;
 pub mod microfft;
 pub mod noise_est;
+pub mod offline_job;
 pub mod peq_fit;
 pub mod phase_fit;
 pub mod plan_compile;

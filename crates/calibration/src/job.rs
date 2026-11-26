@@ -93,11 +93,18 @@ impl fmt::Display for JobId {
     }
 }
 
-/// job 类型：Full=完整校准（扫频/拟合/编译/应用/复测/holdout）；Retest=对已应用系数只做复测+holdout。
+/// job 类型。
+///
+/// - `Full`：完整校准（扫频/拟合/编译/应用/复测/holdout）；
+/// - `Retest`：对已应用系数只做复测+holdout；
+/// - `SinglePointOffline`（T70h-b）：离线闭环证据 job（PLAN §4.7）。输入是已上传的方案 +
+///   两段 WAV（基线/施加），步骤 `validate -> compile -> levels -> closed_loop -> bundle`，
+///   不打开设备、不跑 RT 图（真实测量采集属 T70f-c）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobKind {
     Full,
     Retest,
+    SinglePointOffline,
 }
 
 /// Full 的 stage 顺序（DEC §2.6 冻结）。
@@ -121,12 +128,23 @@ const RETEST_PLAN: [JobStage; 3] = [
     JobStage::IndependentHoldout,
 ];
 
+/// SinglePointOffline 的 stage 顺序（PLAN §4.7：编译 -> 电平 -> 闭环判定 -> 证据包；
+/// validate 是前面的输入校验步，不跳步）。
+pub const SINGLE_POINT_OFFLINE_PLAN: [JobStage; 5] = [
+    JobStage::Validate,
+    JobStage::Compile,
+    JobStage::Levels,
+    JobStage::ClosedLoop,
+    JobStage::Bundle,
+];
+
 impl JobKind {
     /// 机器名（REST 字段值）。
     pub const fn as_str(self) -> &'static str {
         match self {
             JobKind::Full => "full",
             JobKind::Retest => "retest",
+            JobKind::SinglePointOffline => "single_point_offline",
         }
     }
 
@@ -135,6 +153,7 @@ impl JobKind {
         match value {
             "full" => Some(JobKind::Full),
             "retest" => Some(JobKind::Retest),
+            "single_point_offline" => Some(JobKind::SinglePointOffline),
             _ => None,
         }
     }
@@ -144,6 +163,7 @@ impl JobKind {
         match self {
             JobKind::Full => &FULL_PLAN,
             JobKind::Retest => &RETEST_PLAN,
+            JobKind::SinglePointOffline => &SINGLE_POINT_OFFLINE_PLAN,
         }
     }
 }
@@ -161,6 +181,14 @@ pub enum JobStage {
     Apply,
     Remeasure,
     IndependentHoldout,
+    /// 离线闭环 job：校验输入（方案/WAV/参数）。
+    Validate,
+    /// 离线闭环 job：电平→闭环判定之后无；本 stage 不用于 FULL/RETEST。
+    Levels,
+    /// 离线闭环 job：预测 vs 实测三态判定。
+    ClosedLoop,
+    /// 离线闭环 job：确定性证据包（predicted/observed/report/manifest）。
+    Bundle,
 }
 
 impl JobStage {
@@ -180,6 +208,10 @@ impl JobStage {
             JobStage::Apply => "apply",
             JobStage::Remeasure => "remeasure",
             JobStage::IndependentHoldout => "independent_holdout",
+            JobStage::Validate => "validate",
+            JobStage::Levels => "levels",
+            JobStage::ClosedLoop => "closed_loop",
+            JobStage::Bundle => "bundle",
         }
     }
 
@@ -196,12 +228,24 @@ impl JobStage {
             JobStage::Apply => 7,
             JobStage::Remeasure => 8,
             JobStage::IndependentHoldout => 9,
+            // 以下四个 stage 只属于 SinglePointOffline 计划，不在 FULL_PLAN 内；
+            // 调度用 plan 位置（stage_pos），本函数仅 Full/Retest 的 DEC 语义，故给 0。
+            JobStage::Validate | JobStage::Levels | JobStage::ClosedLoop | JobStage::Bundle => 0,
         }
     }
 
-    /// 解析机器名；未知值拒绝。
+    /// 解析机器名；未知值拒绝（含 SinglePointOffline 专属 stage 名）。
     pub fn parse(value: &str) -> Option<Self> {
-        JobStage::ALL.iter().copied().find(|s| s.as_str() == value)
+        if let Some(stage) = JobStage::ALL.iter().copied().find(|s| s.as_str() == value) {
+            return Some(stage);
+        }
+        match value {
+            "validate" => Some(JobStage::Validate),
+            "levels" => Some(JobStage::Levels),
+            "closed_loop" => Some(JobStage::ClosedLoop),
+            "bundle" => Some(JobStage::Bundle),
+            _ => None,
+        }
     }
 
     /// 该 stage 是否需要独占音频设备（core-v1 §5.4 OwnerCalibration）。
@@ -572,7 +616,7 @@ impl JobRequest {
             return Err("audible_sweep_authorized must be true (P08)".to_string());
         }
         match self.kind {
-            JobKind::Full => {
+            JobKind::Full | JobKind::SinglePointOffline => {
                 if self.expected_applied_version.is_some() {
                     return Err("expected_applied_version is only valid for retest".to_string());
                 }
