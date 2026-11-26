@@ -165,7 +165,7 @@
 - **H（v1.2，校准 §7 字段）**：以**后端实际形状**为准修正 §7——job 对象 canonical=`id`/`status`（backend tests 已锁定，不改后端加别名）；创建响应=`{ok, job_id, state, location}`、cancel=`{ok, job_id, status, state}`（status/state 同源别名）；job 详情顶层 result/artifacts/error；uploads 返回 `{upload_id,sha256,bytes,created}`（无 schema）；wizard/apply 返回 apply 回执（无 location）。前端解析保持宽容（job_id|id、state|status）但契约测试断言实际 canonical 形状；本修正不改任何实际行为，不升 api_version。
 
 ## 12. 音频通道 profile（输入/输出映射与布局）——v1.2 新增
-状态：设计定稿见 `docs/SPEAKER-MAPPING.md`；后端尚未实现。未实现前 GET 返回 null + reasons，写端点返回 503 `not_wired` + reason（不假成功）。新增端点一律 M1 错误体、成功带 `ok:true`。
+状态（v1.2，2026-11-27）：**daemon 后端已实现并有测试锁定**（`crates/daemon/src/audio_profile/`、`speaker_test.rs`）——GET `/api/audio-profile` 200（默认 2.0 布局 + `schema`/`validation`）；PUT 两阶段 prepare→commit/abort（一次性 token，120 s TTL）；POST `/api/audio-profile/plan` 生成 22 通道 ABI v3 方案（滤波器来源 identity，inspect 的 compile 结果如实返回，不假成功）；`GET /api/device/inputs` 返回 `available:false` + 真实 reason（ALSA capture 枚举尚未实现，不编列表）。`POST /api/speaker-test` 由 `KHAEN_SPEAKER_TEST` 控制：off → 503 `not_wired`+reason、窗口外 → 403 `sound_window_closed`、正常时转发 rt-host `test_tone`（默认 -30 dBFS、500..=10000 ms、必须 `audible`+`confirm`）；`POST /api/speaker-test/stop` 不按开关/窗口拦截，但 process 目标如实 503。新增端点一律 M1 错误体、成功带 `ok:true`。
 
 ### 12.1 数据模型（`khaen-audio-profile/v1`，保存在 daemon 状态目录）
 ```json
