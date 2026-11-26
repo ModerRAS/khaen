@@ -1,0 +1,1025 @@
+{
+  "schema": "khaen-real-daemon-fixture/v1",
+  "note": "Bodies captured from a real khaen-daemon v0.1.11 (process target, Windows, no audio devices); no cookies/CSRF/tokens. Used by webui/tests/real-daemon-fixture.test.ts to lock frontend parsers to real backend shapes.",
+  "captured_with": {
+    "version": "0.1.11",
+    "target": "process",
+    "platform": "Windows",
+    "audio_devices": false
+  },
+  "responses": {
+    "meta": {
+      "path": "/api/meta",
+      "status": 200,
+      "body": {
+        "api_version": 1,
+        "calibration": {
+          "reason": null,
+          "wired": true
+        },
+        "host_link": {
+          "connected": false,
+          "error": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded",
+          "mode": "none",
+          "socket": null,
+          "target": "daemon-process"
+        },
+        "not_wired": [
+          {
+            "op": "speaker_test",
+            "reason": "the speaker test output is disabled by configuration (KHAEN_SPEAKER_TEST=off): set KHAEN_SPEAKER_TEST=on to allow audible speaker test tones (the server-side gate is mandatory, so nothing is played now)"
+          }
+        ],
+        "ok": true,
+        "ops": [
+          "status",
+          "mute",
+          "prepare",
+          "commit",
+          "abort",
+          "coeff",
+          "surface",
+          "inspect",
+          "rollback",
+          "format"
+        ],
+        "speaker_test": {
+          "code": "not_wired",
+          "configured": false,
+          "reason": "the speaker test output is disabled by configuration (KHAEN_SPEAKER_TEST=off): set KHAEN_SPEAKER_TEST=on to allow audible speaker test tones (the server-side gate is mandatory, so nothing is played now)",
+          "window": {
+            "configured": false,
+            "spec": null
+          },
+          "wired": false
+        },
+        "surfaces": [
+          "volume",
+          "routing",
+          "layout",
+          "format",
+          "mode"
+        ],
+        "web_version": "0.3.0"
+      }
+    },
+    "status": {
+      "path": "/api/status",
+      "status": 200,
+      "body": {
+        "calibration": {
+          "active_job": null,
+          "last_job_id": null,
+          "last_verdict": null
+        },
+        "daemon": {
+          "bind": "127.0.0.1:<port>",
+          "uptime_s": 9,
+          "version": "0.1.11"
+        },
+        "device": {
+          "card": null,
+          "id": null,
+          "rate_readback": null,
+          "state": null
+        },
+        "format": {
+          "aes67": {
+            "channels": null,
+            "group": null,
+            "map": null,
+            "port": null,
+            "pt": null
+          },
+          "block_frames": 128,
+          "channels": 2,
+          "device_rate": null,
+          "encoding": null,
+          "plan_rate": null,
+          "rate_asserted": null
+        },
+        "host_link": {
+          "age_ms": null,
+          "connected": false,
+          "mode": "none",
+          "since": null,
+          "socket": null,
+          "status_age_ms": null,
+          "target": "daemon-process"
+        },
+        "input": {
+          "jitter_fill": null,
+          "packets": null,
+          "queue_full_drops": null,
+          "recv_errors": null,
+          "ssrc": null,
+          "underruns": null
+        },
+        "mode": null,
+        "muted": null,
+        "not_wired": [
+          {
+            "path": "host_link.control",
+            "reason": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded"
+          }
+        ],
+        "ok": true,
+        "output": {
+          "blocks": null,
+          "bytes_written": null,
+          "out_errors": null,
+          "xruns": null
+        },
+        "plan": {
+          "applied_at": null,
+          "graph_id": null,
+          "latency_samples": null,
+          "sha256": null,
+          "source": null,
+          "version": null
+        },
+        "reasons": {
+          "calibration.active_job": "no calibration job is active",
+          "calibration.last_job_id": "no calibration job has been started yet",
+          "calibration.last_verdict": "no calibration verdict has been reported yet",
+          "device.card": "the ALSA PCM name (hw:CARD=...,DEV=...) is not configured in the daemon and is not reported by the rt-host control status",
+          "device.id": "daemon does not expose a configured device id: KHAEN_DEVICE_ID is only consumed by the device supervisor probe",
+          "device.rate_readback": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "device.state": "rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3); KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; daemon device monitor is not wired: KHAEN_DEVICE_ID is not set: device supervisor disabled (no probe)",
+          "format.aes67.channels": "AES67 receive parameters are rt-host process inputs: neither the rt-host control status (op status) nor the status file reports them",
+          "format.aes67.group": "AES67 receive parameters are rt-host process inputs: neither the rt-host control status (op status) nor the status file reports them",
+          "format.aes67.map": "AES67 receive parameters are rt-host process inputs: neither the rt-host control status (op status) nor the status file reports them",
+          "format.aes67.port": "AES67 receive parameters are rt-host process inputs: neither the rt-host control status (op status) nor the status file reports them",
+          "format.aes67.pt": "AES67 receive parameters are rt-host process inputs: neither the rt-host control status (op status) nor the status file reports them",
+          "format.device_rate": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "format.encoding": "encoding is not reported by the daemon EngineConfig nor by the rt-host control status (no ALSA sample format source in this process)",
+          "format.plan_rate": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "format.rate_asserted": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "host_link.age_ms": "rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "host_link.connected": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "host_link.since": "rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "host_link.socket": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded",
+          "host_link.status_age_ms": "rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "input.jitter_fill": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "input.packets": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "input.queue_full_drops": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "input.recv_errors": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "input.ssrc": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "input.underruns": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "mode": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded",
+          "output.blocks": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "output.bytes_written": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "output.out_errors": "rt-host status file (khaen-rt-status/v1) does not report output errors: write_status_file omits RuntimeStatus.output_errors",
+          "output.xruns": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "plan.applied_at": "rt-host status is not available via the control channel (host_link.mode=none); the status file (khaen-rt-status/v1) only carries graph_id, not the applied plan applied_at (RFC3339)",
+          "plan.graph_id": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "plan.latency_samples": "rt-host status is not available via the control channel (host_link.mode=none); the status file (khaen-rt-status/v1) only carries graph_id, not the applied plan latency_samples",
+          "plan.sha256": "rt-host status is not available via the control channel (host_link.mode=none); the status file (khaen-rt-status/v1) only carries graph_id, not the applied plan sha256",
+          "plan.source": "rt-host status is not available via the control channel (host_link.mode=none); the status file (khaen-rt-status/v1) only carries graph_id, not the applied plan source (upload|calibration)",
+          "plan.version": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "reconfigure": "the current rt-host status source does not expose reconfigure (generation/last_gap_ms/last_result); only M3b rt-host builds report it",
+          "speaker_test": "the speaker test state is unavailable: KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded",
+          "state.last_error": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "state.muted": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "state.safe": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "state.value": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)"
+        },
+        "reconfigure": null,
+        "safe": null,
+        "schema": "khaen-status/v1",
+        "speaker_test": {
+          "active": null,
+          "dac": null,
+          "kind": null,
+          "remaining_ms": null
+        },
+        "state": {
+          "last_error": null,
+          "muted": null,
+          "safe": null,
+          "value": null
+        }
+      }
+    },
+    "channels": {
+      "path": "/api/channels",
+      "status": 200,
+      "body": {
+        "applied": null,
+        "busy": null,
+        "current": null,
+        "device": null,
+        "format": {
+          "block_frames": 128,
+          "channels": 2,
+          "device": null,
+          "plan_rate": null,
+          "sample_rate": 48000,
+          "source": "rt-host-control-status"
+        },
+        "generation": null,
+        "hot_reconfigure": {
+          "reason": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine, which has no data-plane hot reconfiguration (no ALSA device / AES67 receiver); no channels draft is created and no token is issued, so a commit cannot pretend to succeed",
+          "wired": false
+        },
+        "input": {
+          "channels": null,
+          "map": null,
+          "sdp_sha256": null,
+          "source": null
+        },
+        "input_roles": [
+          {
+            "channel": 0,
+            "role": "L",
+            "source": "aes67"
+          },
+          {
+            "channel": 1,
+            "role": "R",
+            "source": "aes67"
+          }
+        ],
+        "last_gap_ms": null,
+        "last_result": null,
+        "mapping": null,
+        "not_wired": [
+          {
+            "path": "channels.hot_reconfigure",
+            "reason": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine, which has no data-plane hot reconfiguration (no ALSA device / AES67 receiver); no channels draft is created and no token is issued, so a commit cannot pretend to succeed"
+          }
+        ],
+        "ok": true,
+        "output": {
+          "channels": 2,
+          "channels_source": "rt-host-control-status",
+          "dac_map": null
+        },
+        "pending": null,
+        "plan": {
+          "graph_id": null,
+          "routing_invalidated": null,
+          "routing_known": false,
+          "source": "daemon-process",
+          "version": null
+        },
+        "reasons": {
+          "applied": "no channels configuration has been committed through this daemon since it started (the local mirror is empty; the live data plane is still reported from channels_status)",
+          "channels.hot_reconfigure": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine, which has no data-plane hot reconfiguration (no ALSA device / AES67 receiver); no channels draft is created and no token is issued, so a commit cannot pretend to succeed",
+          "channels_status": "rt-host channels_status is unavailable: KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine, which has no data-plane hot reconfiguration (no ALSA device / AES67 receiver); no channels draft is created and no token is issued, so a commit cannot pretend to succeed",
+          "device": "the rt-host channels status does not report the output device/probe",
+          "generation": "neither the rt-host channels status nor the control status reports a reconfiguration generation",
+          "input.channels": "the rt-host channels status is unavailable: AES67 input parameters (KHAEN_AES67_*) are rt-host process inputs and the contract-B status op does not report them",
+          "input.map": "the rt-host channels status is unavailable: AES67 input parameters (KHAEN_AES67_*) are rt-host process inputs and the contract-B status op does not report them",
+          "input.sdp_sha256": "the rt-host channels status reports the AES67 input configuration but not its SDP descriptor; sdp_sha256 is not fabricated",
+          "input.source": "the rt-host control channel reports the AES67 receive parameters but not whether they came from an SDP descriptor or a manual configuration; source is not fabricated",
+          "mapping": "no applied plan is known: the rt-host control status reports no graph_id and the daemon has no prepared plan",
+          "output.dac_map": "no applied plan is known: the rt-host control status reports no graph_id and the daemon has no prepared plan"
+        },
+        "runtime_mode": "aes67",
+        "schema": "khaen-channels/v1",
+        "speaker_roles": [
+          {
+            "dac": 0,
+            "enabled": true,
+            "role": "L"
+          },
+          {
+            "dac": 1,
+            "enabled": true,
+            "role": "R"
+          },
+          {
+            "dac": 2,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 3,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 4,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 5,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 6,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 7,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 8,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 9,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 10,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 11,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 12,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 13,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 14,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 15,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 16,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 17,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 18,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 19,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 20,
+            "enabled": false,
+            "role": "None"
+          },
+          {
+            "dac": 21,
+            "enabled": false,
+            "role": "None"
+          }
+        ],
+        "target": "daemon-process"
+      }
+    },
+    "audioProfile": {
+      "path": "/api/audio-profile",
+      "status": 200,
+      "body": {
+        "capability": {
+          "aes67": {
+            "channel_order": null,
+            "channel_order_source": null,
+            "channels": null,
+            "map": null
+          },
+          "device_inputs": {
+            "available": false,
+            "channels": null,
+            "optical_mode": null,
+            "reason": "the daemon has no sound-card capture-channel enumeration (ALSA capture probing is not implemented); the device input channel list (analog + optical) is not reported and is not fabricated. the MOTU control surface is not available: the ALSA cards file (/proc/asound/cards) is not readable (e.g. Windows or no ALSA devices): MOTU control is unavailable, which is not an error",
+            "sample_rate": null,
+            "source": "motu-alsa"
+          }
+        },
+        "ok": true,
+        "plan": {
+          "dac_channels": 22,
+          "enabled_outputs": 2,
+          "graph_id": null,
+          "lanes": 2
+        },
+        "profile": {
+          "device": {
+            "channels": 22
+          },
+          "downmix": {
+            "center": {
+              "gain_db": -3,
+              "mode": "auto"
+            },
+            "lfe": {
+              "gain_db": -3,
+              "include_heights": false,
+              "mode": "auto"
+            }
+          },
+          "fanout": {
+            "mode": "unity"
+          },
+          "inputs": {
+            "sources": [
+              {
+                "channels": [
+                  {
+                    "channel": 0,
+                    "role": "L"
+                  },
+                  {
+                    "channel": 1,
+                    "role": "R"
+                  }
+                ],
+                "enabled": true,
+                "gain_db": 0,
+                "kind": "aes67",
+                "preset": "stereo"
+              },
+              {
+                "channels": [
+                  {
+                    "channel": 0,
+                    "role": "None"
+                  },
+                  {
+                    "channel": 1,
+                    "role": "None"
+                  },
+                  {
+                    "channel": 2,
+                    "role": "None"
+                  },
+                  {
+                    "channel": 3,
+                    "role": "None"
+                  }
+                ],
+                "enabled": false,
+                "gain_db": 0,
+                "kind": "device",
+                "preset": null
+              }
+            ]
+          },
+          "outputs": [
+            {
+              "custom_label": null,
+              "dac": 0,
+              "enabled": true,
+              "gain_db": 0,
+              "role": "L"
+            },
+            {
+              "custom_label": null,
+              "dac": 1,
+              "enabled": true,
+              "gain_db": 0,
+              "role": "R"
+            },
+            {
+              "custom_label": null,
+              "dac": 2,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 3,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 4,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 5,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 6,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 7,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 8,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 9,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 10,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 11,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 12,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 13,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 14,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 15,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 16,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 17,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 18,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 19,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 20,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            },
+            {
+              "custom_label": null,
+              "dac": 21,
+              "enabled": false,
+              "gain_db": 0,
+              "role": "None"
+            }
+          ],
+          "schema": "khaen-audio-profile/v1"
+        },
+        "reasons": {
+          "capability.aes67": "KHAEN_RT_TARGET=process: the daemon process-internal engine has no AES67 receiver; AES67 capability is not reported",
+          "plan.graph_id": "KHAEN_RT_TARGET=process: the daemon process-internal engine is not the rt-host data plane; the applied plan graph_id is not reported"
+        },
+        "revision": 0,
+        "saved": false,
+        "schema": "khaen-audio-profile/v1",
+        "validation": {
+          "errors": [],
+          "ok": true,
+          "warnings": []
+        }
+      }
+    },
+    "deviceInputs": {
+      "path": "/api/device/inputs",
+      "status": 200,
+      "body": {
+        "available": false,
+        "channels": null,
+        "ok": true,
+        "optical_mode": null,
+        "reason": "the daemon has no sound-card capture-channel enumeration (ALSA capture probing is not implemented); the device input channel list (analog + optical) is not reported and is not fabricated. the MOTU control surface is not available: the ALSA cards file (/proc/asound/cards) is not readable (e.g. Windows or no ALSA devices): MOTU control is unavailable, which is not an error",
+        "sample_rate": null,
+        "source": "motu-alsa"
+      }
+    },
+    "calibrationJobs": {
+      "path": "/api/calibration/jobs",
+      "status": 200,
+      "body": {
+        "active_job_id": null,
+        "available": true,
+        "engine": "offline single-point calibration (khaen-calibration JobManager)",
+        "jobs": [],
+        "limit": 20,
+        "offset": 0,
+        "ok": true,
+        "reason": null,
+        "reasons": {
+          "active_job_id": "no calibration job is active"
+        },
+        "schema": "khaen-calibration-jobs/v1",
+        "total": 0
+      }
+    },
+    "calibrationWizard": {
+      "path": "/api/calibration/wizard",
+      "status": 200,
+      "body": {
+        "config": {
+          "mic_cal_filename": null,
+          "mic_cal_sha256": null,
+          "orientation": null,
+          "single_point": {
+            "centers_hz": [
+              25,
+              31.5,
+              40,
+              50,
+              63,
+              80,
+              100,
+              125,
+              160,
+              200,
+              250,
+              315,
+              400,
+              500,
+              630,
+              800,
+              1000,
+              1250,
+              1600,
+              2000,
+              2500,
+              3150,
+              4000,
+              5000,
+              6300,
+              8000,
+              10000,
+              12500,
+              16000,
+              20000
+            ],
+            "min_bands": 3,
+            "tolerance_db": 2
+          },
+          "target_mode": "flat"
+        },
+        "defaults": {
+          "mic_cal_filename": null,
+          "mic_cal_sha256": null,
+          "orientation": null,
+          "single_point": {
+            "centers_hz": [
+              25,
+              31.5,
+              40,
+              50,
+              63,
+              80,
+              100,
+              125,
+              160,
+              200,
+              250,
+              315,
+              400,
+              500,
+              630,
+              800,
+              1000,
+              1250,
+              1600,
+              2000,
+              2500,
+              3150,
+              4000,
+              5000,
+              6300,
+              8000,
+              10000,
+              12500,
+              16000,
+              20000
+            ],
+            "min_bands": 3,
+            "tolerance_db": 2
+          },
+          "target_mode": "flat"
+        },
+        "ok": true,
+        "reasons": {
+          "mic_cal_sha256": "microphone calibration file is not configured: upload it with POST /api/calibration/uploads and PUT its sha256 here",
+          "orientation": "microphone orientation is not configured: expected one of 0deg/90deg (UMIK convention)",
+          "single_point": "single point parameters are not configured; the effective values are the offline closed-loop defaults (25 Hz - 20 kHz 1/3-oct centers, tolerance 2.0 dB, min_bands 3)",
+          "target_mode": "target_mode is not configured; the effective value is the daemon default \"flat\" (designer BuiltinTarget)"
+        },
+        "saved": false,
+        "schema": "khaen-calibration-wizard/v1",
+        "updated_at": null
+      }
+    },
+    "calibrationWizardState": {
+      "path": "/api/calibration/wizard/state",
+      "status": 200,
+      "body": {
+        "active_job_id": null,
+        "current_step": 1,
+        "last_job_id": null,
+        "measurement": {
+          "applied_sha256": null,
+          "applied_upload_id": null,
+          "baseline_sha256": null,
+          "baseline_upload_id": null
+        },
+        "ok": true,
+        "reasons": {
+          "measurement": "no offline measurement uploads recorded yet: upload the baseline and applied WAV files, then PUT /api/calibration/wizard with measurement (or start a job)",
+          "snapshot": "no plan applied yet: the control plane reports no actual_version",
+          "wizard": "wizard settings have not been saved yet: PUT /api/calibration/wizard persists them to the state directory"
+        },
+        "schema": "khaen-calibration-wizard-state/v1",
+        "snapshot": null,
+        "steps": [
+          {
+            "key": "device_check",
+            "reason": "device check not satisfied: device.state is not \"present\"; format.rate_asserted is not true (device rate is not asserted); host_link.connected is false (rt-host status is unavailable or stale)",
+            "status": "blocked",
+            "step": 1,
+            "task": null
+          },
+          {
+            "key": "layout_channels",
+            "reason": "channel layout API (/api/channels) is not implemented in the daemon yet: output channels / AES67 mapping / lane labels are not readable from the control plane",
+            "status": "not_available",
+            "step": 2,
+            "task": "M4"
+          },
+          {
+            "key": "mic_settings",
+            "reason": "wizard settings are incomplete: mic_cal_sha256, orientation not configured",
+            "status": "blocked",
+            "step": 3,
+            "task": null
+          },
+          {
+            "key": "positions",
+            "reason": "single listening position (sweet spot) only: multi-point / ART measurement is NOT_AVAILABLE in khaen",
+            "status": "passed",
+            "step": 4,
+            "task": "P3"
+          },
+          {
+            "key": "measurement",
+            "reason": "offline measurement needs two uploaded WAV files; missing: baseline_upload_id, applied_upload_id",
+            "status": "blocked",
+            "step": 5,
+            "task": null
+          },
+          {
+            "key": "analysis",
+            "reason": "no calibration job yet: run a job before reviewing the analysis",
+            "status": "blocked",
+            "step": 6,
+            "task": null
+          },
+          {
+            "key": "design",
+            "reason": "no calibration job yet: the design is produced by the closed-loop stage of a job",
+            "status": "blocked",
+            "step": 7,
+            "task": null
+          },
+          {
+            "key": "review_apply",
+            "reason": "no calibration job yet: nothing to review or apply",
+            "status": "blocked",
+            "step": 8,
+            "task": null
+          }
+        ],
+        "updated_at": "2026-11-26T18:12:42Z"
+      }
+    },
+    "motu": {
+      "path": "/api/motu",
+      "status": 200,
+      "body": {
+        "card_id": null,
+        "card_index": null,
+        "channel_count": 2,
+        "channels": [
+          {
+            "channel": 1,
+            "datastore": {
+              "index": 0,
+              "key": "koBusFader"
+            },
+            "name": "Main 1"
+          },
+          {
+            "channel": 2,
+            "datastore": {
+              "index": 1,
+              "key": "koBusFader"
+            },
+            "name": "Main 2"
+          }
+        ],
+        "control_reachable": false,
+        "detected": false,
+        "model": null,
+        "mute": null,
+        "not_wired": [],
+        "read_error": null,
+        "reason": "cards_unavailable",
+        "reason_detail": "the ALSA cards file (/proc/asound/cards) is not readable (e.g. Windows or no ALSA devices): MOTU control is unavailable, which is not an error",
+        "reasons": {
+          "mute": "the ALSA cards file (/proc/asound/cards) is not readable (e.g. Windows or no ALSA devices): MOTU control is unavailable, which is not an error",
+          "state": "the ALSA cards file (/proc/asound/cards) is not readable (e.g. Windows or no ALSA devices): MOTU control is unavailable, which is not an error",
+          "vol": "the ALSA cards file (/proc/asound/cards) is not readable (e.g. Windows or no ALSA devices): MOTU control is unavailable, which is not an error"
+        },
+        "schema": "khaen-motu/v1",
+        "state": null,
+        "vol": null,
+        "write": {
+          "batch": false,
+          "max_channels_per_request": 2,
+          "readback": true,
+          "reason": "the ALSA cards file (/proc/asound/cards) is not readable (e.g. Windows or no ALSA devices): MOTU control is unavailable, which is not an error",
+          "single_key": true,
+          "status": "not_detected",
+          "two_phase": true
+        }
+      }
+    },
+    "planHistory": {
+      "path": "/api/plan/history",
+      "status": 200,
+      "body": {
+        "current": {
+          "graph_id": null,
+          "version": null
+        },
+        "entries": [],
+        "ok": true,
+        "pagination": {
+          "has_more": false,
+          "limit": 20,
+          "offset": 0,
+          "total": 0
+        },
+        "reasons": {
+          "history.current": "the live control plane does not report an applied plan version"
+        },
+        "schema": "khaen-plan-history/v1",
+        "source": "daemon-process",
+        "versions": []
+      }
+    },
+    "systemInfo": {
+      "path": "/api/system/info",
+      "status": 200,
+      "body": {
+        "bind": "127.0.0.1:<port>",
+        "build_profile": "debug",
+        "commit": "52643207a69c1eb5d1a31994a12e592ce6b22997",
+        "crate_version": "0.1.11",
+        "devices": [],
+        "host": null,
+        "host_link": {
+          "connected": false,
+          "since": null,
+          "socket": null,
+          "status_age_ms": null
+        },
+        "hostname": null,
+        "kernel": null,
+        "ok": true,
+        "os": null,
+        "reasons": {
+          "devices": "/proc\\asound/cards is not readable: 系统找不到指定的路径。 (os error 3)",
+          "host_link.connected": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded; no usable rt-host status file fallback: rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "host_link.since": "rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "host_link.socket": "KHAEN_RT_TARGET=process: control ops act on the daemon process-internal engine (test/offline mode); the rt-host data plane is NOT commanded",
+          "host_link.status_age_ms": "rt-host status file /var/lib/khaen/rt-host-status.json is not available: 系统找不到指定的路径。 (os error 3)",
+          "hostname": "/proc\\sys/kernel/hostname is not readable: 系统找不到指定的路径。 (os error 3)",
+          "kernel": "/proc\\version is not readable: 系统找不到指定的文件。 (os error 2)",
+          "os": "/etc\\os-release is not readable: 系统找不到指定的路径。 (os error 3)",
+          "release_version": "KHAEN_BUILD_VERSION is not set at build time: this is an unversioned build (crate version 0.1.11)",
+          "restart": "KHAEN_ALLOW_RESTART is not set: restarting rt-host is disabled (set KHAEN_ALLOW_RESTART=1 to enable)",
+          "services.daemon.active": "systemctl is-active khaen-daemon is unavailable: cannot spawn systemctl: program not found (unit khaen-daemon)",
+          "services.daemon.enabled": "systemctl is-enabled khaen-daemon is unavailable: cannot spawn systemctl: program not found (unit khaen-daemon)",
+          "services.daemon.pid": "systemctl show -p MainPID --value khaen-daemon is unavailable: cannot spawn systemctl: program not found (unit khaen-daemon)",
+          "services.rt_host.active": "systemctl is-active khaen-rt-host is unavailable: cannot spawn systemctl: program not found (unit khaen-rt-host)",
+          "services.rt_host.enabled": "systemctl is-enabled khaen-rt-host is unavailable: cannot spawn systemctl: program not found (unit khaen-rt-host)",
+          "services.rt_host.pid": "systemctl show -p MainPID --value khaen-rt-host is unavailable: cannot spawn systemctl: program not found (unit khaen-rt-host)"
+        },
+        "release_version": null,
+        "restart": {
+          "allowed": false,
+          "last_restarted_at": null,
+          "reason": "KHAEN_ALLOW_RESTART is not set: restarting rt-host is disabled (set KHAEN_ALLOW_RESTART=1 to enable)",
+          "target": "rt-host"
+        },
+        "rt_status_file": "/var/lib/khaen/rt-host-status.json",
+        "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+        "schema": "khaen-system-info/v1",
+        "services": {
+          "daemon": {
+            "active": null,
+            "enabled": null,
+            "pid": null,
+            "reason": "active: systemctl is-active khaen-daemon is unavailable: cannot spawn systemctl: program not found (unit khaen-daemon); enabled: systemctl is-enabled khaen-daemon is unavailable: cannot spawn systemctl: program not found (unit khaen-daemon); pid: systemctl show -p MainPID --value khaen-daemon is unavailable: cannot spawn systemctl: program not found (unit khaen-daemon)"
+          },
+          "rt_host": {
+            "active": null,
+            "enabled": null,
+            "pid": null,
+            "reason": "active: systemctl is-active khaen-rt-host is unavailable: cannot spawn systemctl: program not found (unit khaen-rt-host); enabled: systemctl is-enabled khaen-rt-host is unavailable: cannot spawn systemctl: program not found (unit khaen-rt-host); pid: systemctl show -p MainPID --value khaen-rt-host is unavailable: cannot spawn systemctl: program not found (unit khaen-rt-host)"
+          }
+        },
+        "state_dir": "<state_dir>",
+        "target": "x86_64-pc-windows-gnu",
+        "uptime_s": 9,
+        "version": "0.1.11"
+      }
+    },
+    "healthz": {
+      "path": "/healthz",
+      "status": 200,
+      "body": {
+        "ok": true,
+        "uptime_s": 9,
+        "version": "0.1.11"
+      }
+    }
+  }
+}
