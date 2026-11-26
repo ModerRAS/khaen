@@ -72,7 +72,7 @@
   1. `aes67`：网络 AES67 RTP 输入（当前 2ch；以后可多流）；
   2. `device`（声卡输入）：声卡自己的采集通道（MOTU 模拟输入 + 光口；光口 S/PDIF/Toslink 模式 2ch，ADAT 模式 48k 8ch、96k 4ch；实际通道列表由设备能力只读探测给出）。
 - 每个输入通道用**同一套角色标签**标注（L/R/C/…/Tfl…，或 None）；引擎按"输入通道角色 → 该角色的所有输出 lane"自动 fan-out（content.folds）——这就是"写上标签，引擎自动映射"。
-- **AES67 预设**：选择 AES67 时可一键带入标准通道顺序（Stereo / 5.1 / 7.1 / 7.1.4 / 9.1.6；ITU 与 SMPTE 两种顺序都提供），预设只填角色，之后仍可逐个改。
+- **AES67 预设与真实顺序**：预设按布局一键填角色（Stereo / 5.1 / 7.1 / 7.1.4 / 9.1.6）。顺序**优先信源端 SDP**：解析 `a=fmtp ... channel-order=SMPTE2110.(...)`（NSP 已按 ST 2110-30 发 M/ST/51/71/Uxx 分组），解析到就以 SDP 为准并显示来源；解析不到才用共同默认顺序（5.1/7.1 在 ST 2110-30 与 ITU/WAV 中都是 L,R,C,LFE,Ls,Rs[,Lb,Rb]，天空按前→中→后：Tfl,Tfr,Tml,Tmr,Trl,Trr）。UI 始终显示"顺序来源：SDP / 手动预设"。
 - 输入源可分别启用；同一角色若被多个已启用输入通道标注，按**和（sum）**进入该角色组（页面明示）。至少启用一个输入源。
 - **缺失角色的自动下混（两个例外）**：输出布局缺少某角色时，对应输入内容不能丢——
   1. 没有中置（C）：C 输入自动下混到 L、R（默认各 -3 dB，等功率）；
@@ -105,7 +105,7 @@ CueMix/控制面写入**只有 4 类用途**：
 ## 5. API 增量（加到 docs/API.md，均为加法）
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/audio-profile` | `{schema:"khaen-audio-profile/v2", profile, validation:{ok, errors[], warnings[]}, capability:{aes67:{channels,map}, device_inputs:{available, optical_mode, sample_rate, channels[]}}, plan:{lanes, enabled_outputs, dac_channels}}`（read-only） |
+| GET | `/api/audio-profile` | `{schema:"khaen-audio-profile/v2", profile, validation:{ok, errors[], warnings[]}, capability:{aes67:{channels,map,channel_order?:string,channel_order_source:"sdp"\|"manual"\|"none"}, device_inputs:{available, optical_mode, sample_rate, channels[]}}, plan:{lanes, enabled_outputs, dac_channels}}`（read-only） |
 | PUT | `/api/audio-profile` | 两阶段：`{stage:"prepare", profile}` → `{ok, profile, diff, validation, token}`（不碰引擎）；`{stage:"commit", token}` 保存；`{stage:"abort", token}` 丢弃 |
 | POST | `/api/audio-profile/plan` | `{}` → 用已保存 profile + 当前滤波器状态生成方案 `{ok, plan_path, sha256, lane_count, inspect}`；之后走现有 `/api/prepare`+`/api/commit` |
 | GET | `/api/device/inputs` | 声卡输入能力（只读）：`{available, optical_mode:"spdif"|"adat"|null, sample_rate, channels:[{index, label?}], source:"motu-alsa", reason?}`；取不到给 `available:false` + 原因，不编数值 |
@@ -145,7 +145,7 @@ CueMix/控制面写入**只有 4 类用途**：
 2. 应用方式：保存 profile 后必须手动"应用"才重建方案（建议）；还是保存自动重建？
 3. 输入源：能否同时启用 AES67 + 声卡输入（同角色求和），还是同一时刻只允许一个？（建议都可启用、默认只开 AES67）
 4. 声卡输入通道范围：包含模拟输入 2ch + 光口（Toslink 2 / ADAT 8@48k、4@96k）全部列出声卡采集通道，还是只列光口的 2/8/4？（建议：按设备实际采集通道全列，只读探测）
-5. AES67 预设顺序：ITU（L,R,C,LFE,Ls,Rs…）和 SMPTE（C,L,R,Ls,Rs,LFE…）都提供，默认用哪个？
+5. ~~AES67 预设顺序 ITU/SMPTE~~ → **不需要二选一**：优先用 SDP `channel-order=SMPTE2110.(...)`（NSP 会发）；5.1/7.1 的 ST 2110-30 顺序与 ITU/WAV 相同（L,R,C,LFE,Ls,Rs[,Lb,Rb]），仅命名习惯不同（Lss/Rss、Lrs/Rrs）；天空/宽声道顺序无统一标准，按前→中→后默认，用户可改。
 6. ~~通道识别测试音是否纳入首版~~ → **已确认纳入首版**（受 `KHAEN_SPEAKER_TEST`/出声窗口/≤10 s 约束，真机出声验证留窗口）。
 7. 同角色 fan-out 的默认电平：每条 lane 都拿满电平（1.0，靠 gain_db 微调，适合 MIMO 单独驱动），还是按组做 1/√N 归一化（适合被动并联音箱）？（建议默认 1.0，保留 group 归一化作为可选项）
 8. 测试音默认参数：带限粉噪 1 s、**-30 dBFS**（三档 -40/-30/-20，硬上限 -12，20 ms 淡入淡出）是否合适？
