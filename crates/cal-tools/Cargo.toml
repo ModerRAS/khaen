@@ -33,6 +33,10 @@ path = "src/bin/fir_plan.rs"
 name = "khaen-scene-plan"
 path = "src/bin/scene_plan.rs"
 
+[[bin]]
+name = "khaen-sweep"
+path = "src/bin/sweep.rs"
+
 [dependencies]
 khaen-calibration = { path = "../calibration" }
 khaen-core = { path = "../core" }

@@ -31,7 +31,7 @@
 
 清单 schema：`khaen-closed-loop-run-manifest/v1`；报告 schema：`khaen-closed-loop-report/v1`；电平集合 schema：`khaen-closed-loop-levels/v1`。字段细节见 `docs/CONTRACTS.md` 的 D 节。
 
-## 3. 七个离线命令行工具
+## 3. 八个离线命令行工具
 
 | 工具 | 作用 | 退出码 |
 | --- | --- | --- |
@@ -42,6 +42,7 @@
 | `khaen-band-levels` | 两段 WAV → 实测相对电平（observed 侧） | 0 / 2 输入 / 1 写失败 |
 | `khaen-closed-loop` | 两份电平集合 → 三态报告 | 0 PASS / 3 FAIL / 4 INCOMPLETE / 2 输入 / 1 写失败 |
 | `khaen-closed-loop-run` | 方案 + 两段 WAV → 四文件证据包 | 同上三态 + 2 输入 + 1 写失败 |
+| `khaen-sweep` | 生成确定性测量扫频 WAV（多段、可加低频专用段） | 0 成功 / 2 输入 / 1 写失败 |
 
 `deploy/closed-loop-verdict.sh` 是设备侧薄包装：检查文件与输出目录后调用 `khaen-closed-loop-run`，退出码透传。语法经 `bash -n` 检查，真机行为 NOT_RUN。
 
@@ -110,6 +111,21 @@ export KHAEN_STATS_EVERY_BLOCKS=4000
 同 4.2 参数，`KHAEN_RUN_SECONDS=28800`；结束后把状态文件与日志归档到证据目录，并检查 xrun/错误计数。
 
 ### 4.4 基线录音（状态：NOT_RUN）
+
+测量信号用仓库内工具生成（纯 Rust，确定性，不依赖 numpy）：
+
+```bash
+# 默认：整段 9 s 指数扫频 20 Hz–20 kHz
+khaen-sweep --out sweep.wav --rate 48000 --channels 2 --lead 1.5 --tail 1.5 \
+    --segment 9:20:20000
+
+# 低频受限时的备选：全频 9 s + 低频专用 9 s（25–63 Hz 积分时间 ×8，用于压低低频噪声影响）
+khaen-sweep --out sweep-full-lf.wav --lead 1.5 --gap 2 --tail 1.5 \
+    --segment 9:20:20000 --segment 9:20:200
+```
+
+`khaen-sweep` 输出一行 JSON（含 sha256、frames、segments），同参数逐字节可复现；
+播放前用 sha256 核对信号，基线/施加两段必须用同一个文件。
 
 播放测量信号、用测量麦克风录基线（**不加校准滤波**）：
 
