@@ -85,6 +85,10 @@
 
 - 该端点只有 prepare/commit 两阶段，**没有 abort**；未提交草稿由后端 TTL 过期（UI 用本地“取消”丢弃即可，不假定服务端草稿已删）。
 - `writes_device` 必须如实：prepare=false、commit 成功=true；失败时不得显示成已写入。
+- **`/api/mute` 的 MOTU 副作用（target=process 且检测到 MOTU；实际形状）**：
+  - 成功 200：原引擎回执 + `muted` 别名 + 【加法】`motu:{detected, model, control_reachable, reason, reason_detail, side_effect:true, applied, write}`；设备不可用时 `applied:false` + reason（**仍是 200，不报错**，Windows/无设备是常态）；写入并回读成功 `applied:true` + `write:{key,index,before,wrote,readback,changed,frame_sent,verified}`。
+  - 设备写入/回读失败：502（内部错误 500）+ **非 M1 外壳** `{ok:false, error:{code, message, details:{phase:"motu_mute", motu:{detected,model,card_id,card_index,control_reachable,reason,reason_detail}, motu_error:{code,message,retryable}}}, control:<引擎静音回执>}`——"引擎已静音"与"设备静音失败"分开上报，不假成功；前端必须展示 `details.motu_error` 且提示引擎侧已生效。
+  - target=rt-host：行为完全不变（无 `motu` 字段）。
 
 ## 5. /api/channels（数据面热重配，两阶段）
 - GET `/api/channels`：恒 200；`{ok, schema:"khaen-channels/v1", current:{channels,sample_rate,block_frames,aes67_group,aes67_port,aes67_payload_type,aes67_channels,aes67_map,jitter_frames,device}, device:{name,probe,state}, format:{...}, generation, busy, pending, last_gap_ms, last_result, input:{channels,map}, output:{channels,dac_map,channels_source}, mapping, plan:{graph_id,...}, hot_reconfigure:{wired,reason}, not_wired, reasons}`。
