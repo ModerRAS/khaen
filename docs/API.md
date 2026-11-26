@@ -206,8 +206,8 @@
 | POST | `/api/audio-profile/plan` | `{}` | `{ok, plan_path, sha256, lane_count, inspect, folds_preview:[{source, channel, role, lane}], downmix_applied:[{kind:"center"|"lfe", gain_db, lanes:[...]}]}`；之后走现有 `/api/prepare` + `/api/commit`（不自动提交） |
 | GET | `/api/device/inputs` | — | `{ok, available, optical_mode, sample_rate, channels:[{index,label?,kind:"analog"|"optical"}], source:"motu-alsa", reason?}`（模拟 + 光口全部算声卡输入通道）；拿不到 available:false + reason，不编数值 |
 | GET | `/api/channels` | — | 加法字段 `speaker_roles:[{dac, role, enabled}]`、`input_roles:[{source, channel, role}]` |
-| POST | `/api/speaker-test` | `{dac:0..21, ms:500..10000, kind:"noise"|"sine", db?:number, audible:true, confirm:true}` | `{ok, dac, ms, kind, level_db, remaining_ms}`；默认 db=-30，范围 -60..-12 |
-| POST | `/api/speaker-test/stop` | `{}` | `{ok, stopped:boolean}`（幂等） |
+| POST | `/api/speaker-test` | `{dac:0..21, ms:500..10000, kind:"noise"|"sine", db?:number, freq_hz?:number, audible:true, confirm:true}` | `{ok, dac, ms, kind, freq_hz, level_db, total_blocks, remaining_ms}`（rt-host 实际回执，透传）；默认 db=-30，范围 -60..-12 |
+| POST | `/api/speaker-test/stop` | `{}` | `{ok, stopped:boolean}`（幂等）；无测试音时另带 `reason`，有测试音时另带 `was_active` |
 | GET | `/api/status` | — | 加法字段 `speaker_test:{active, dac, remaining_ms, kind}` |
 
 - 错误语义：`bad_request` 400（结构错误/参数越界/未带 `audible`+`confirm`）、`busy` 409（校准或热重配中）、`sound_window_closed` 403（配置了 `KHAEN_SOUND_WINDOW` 且在窗口外）、`not_wired` 503（后端/rt-host 未接线）。
