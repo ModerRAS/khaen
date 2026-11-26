@@ -54,7 +54,7 @@
 | GET | `/api/calibration/wizard` | `{ok, config, ...}` |
 | GET | `/api/calibration/wizard/state` | `{ok, state}` |
 | GET | `/api/system/info` | `{ok, version, uptime_s, host, os, ...}` |
-| GET | `/api/system/logs?unit=&lines=` | `{ok, unit, lines, ...}`；不可用给 null+reason（不展示假数据） |
+| GET | `/api/system/logs?unit=&lines=` | `unit` ∈ `daemon`/`rt-host`（也接受 `rt_host`；其它值 400 `invalid_request`，details 给 `allowed`）；`lines` ∈ 1..=500（默认 200）。200 → `{ok, schema:"khaen-system-logs/v1", unit, unit_name, requested_lines, lines:[...], truncated, source:"journalctl", reason:null}`；journalctl 不可用 → 503 `logs_unavailable` + details{reason,unit}（不展示假数据） |
 | GET | `/api/system/diagnostics` | **附件下载**：`Content-Disposition: attachment; filename=...`，正文为诊断包（非内联 JSON）；前端用带认证的 blob 下载，不走 JSON 解析 |
 
 ## 4. 控制面（两阶段）
