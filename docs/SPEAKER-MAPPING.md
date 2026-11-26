@@ -82,6 +82,9 @@
 | PUT | `/api/output-profile` | 两阶段：`{stage:"prepare", profile}` → `{ok, profile, diff, validation, token}`（不碰引擎）；`{stage:"commit", token}` 保存；`{stage:"abort", token}` 丢弃 |
 | POST | `/api/output-profile/plan` | `{}` → 用已保存 profile + 当前滤波器状态生成方案 `{ok, plan_path, sha256, lane_count, inspect}`；之后走现有 `/api/prepare`+`/api/commit` |
 | GET | `/api/channels` | 加法字段 `speaker_roles:[{dac, role, enabled}]`（给 routing/channels 页显示角色名） |
+| POST | `/api/speaker-test` | 通道识别测试音：`{dac:0..21, ms:500..10000, kind:"noise"\|"sine", freq_hz?:number, db?:-60..-6, audible:true, confirm:true}` → `{ok, dac, ms, kind, level_db, remaining_ms}`；经 daemon 校验后转发 rt-host 新控制 op `test_tone` |
+| POST | `/api/speaker-test/stop` | 立即停止当前测试音（幂等） |
+| GET | `/api/status` | 加法字段 `speaker_test:{active, dac, remaining_ms, kind}` |
 - 错误体沿用 M1；保存 profile 不改数据面，只有"应用"才 prepare/commit 方案。
 
 ## 6. UI 设计（新页面"输出映射 / Speaker Layout"）
@@ -92,18 +95,22 @@
 - 角色分组视图：按角色汇总（L、R、LFE…）列出各组的物理输出号与数量，方便确认「8 只左主箱都标成 L」这类配置。
 - 底部：保存草稿（PUT prepare → 展示 diff/校验）→ 应用（POST output-profile/plan → inspect 预览 → prepare/commit/abort）；取消/丢弃。
 - routing 页：显示角色名（如"左环绕 → MOTU 输出 5"），并标注当前值来源（plan mirror/未知）。
-- 未来：通道识别测试音（需出声窗口，≤10 s/次、结束静音）。
+- **通道识别测试音（首版做）**：表格每行一个「识别」按钮；点击后弹确认框（显示将出声的物理通道、时长、电平），确认后 POST `/api/speaker-test`，运行时显示「正在出声 1.0 s（第 3 号输出）」，按钮可「立即停止」。
+- 测试音语义：**直接写 rt-host 的 ALSA 输出通道（原始 DAC 号），不经过 plan routing**——目的是识别"物理输出号线 ↔ 实际音箱"，与当前方案路由无关；测试期间输出只在该通道放测试音、其余静音，结束后自动恢复方案输出，plan/图/状态不变。
+- 安全约束（服务端强制）：每次 ≤10 s（默认 1 s，UI 上限 3 s）、`audible:true`+`confirm:true` 必须同时给、同一时刻只允许一个测试音、`/api/speaker-test/stop` 与 `/api/mute` 都能立即打断、结束自动静音；忙（校准/热重配）时拒绝 409。
+- 出声窗口：daemon 配置 `KHAEN_SPEAKER_TEST=on` 才启用；可选 `KHAEN_SOUND_WINDOW=08:30-12:00,14:30-18:00` 服务端校验，窗口外 403 `sound_window_closed`（与工作区出声规则一致，需用户明确授权）。
 
 ## 7. 分阶段
 - P0 设计定稿（本文）+ API 合同（docs/API.md 增量）
 - P1 后端：profile store/校验/GET/PUT（两阶段）+ 生成方案接口 + 合同测试（全离线）
 - P2 前端：页面/预设/校验/两阶段保存 + routing 显示角色 + i18n/契约测试
 - P3 方案生成接线：profile → content/routing（复用 plan-builder）；inspect→prepare→commit；真机验证需窗口（NOT_RUN 到窗口）
-- P4 通道识别测试音（窗口内）
+- P3.5 通道识别测试音：rt-host `test_tone` 控制 op（块边界覆盖原始 DAC，自动停止/状态上报）+ daemon `/api/speaker-test` 代理+安全校验 + UI 按钮/确认/停止；本地用 fake 输出测试，真机出声验证留给窗口（NOT_RUN 到窗口）
 
 ## 8. 待确认
 1. 预设集合是否就是：2.0 / 5.1 / 7.1 / 5.1.2 / 5.1.4 / 7.1.4 / custom（首次默认 2.0）？以后可加法扩 9.1.6 等。
 2. 应用方式：保存 profile 后必须手动"应用"才重建方案（建议）；还是保存自动重建？
 3. 输入映射（AES67 2ch→L/R）是否同页（建议是）？
-4. 通道识别测试音是否纳入首版（需窗口）？
+4. ~~通道识别测试音是否纳入首版~~ → **已确认纳入首版**（受 `KHAEN_SPEAKER_TEST`/出声窗口/≤10 s 约束，真机出声验证留窗口）。
 5. 同角色 fan-out 的默认电平：每条 lane 都拿满电平（1.0，靠 gain_db 微调，适合 MIMO 单独驱动），还是按组做 1/√N 归一化（适合被动并联音箱）？（建议默认 1.0，保留 group 归一化作为可选项）
+6. 测试音默认参数：噪声 1 s、-20 dBFS（上限 3 s/次）是否合适？
