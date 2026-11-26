@@ -99,7 +99,9 @@
 - **当前值来源**：`mapping` 是 daemon 在 prepare/upload 时记录的方案 routing 镜像（lane->DAC），不是数据面实时回读；方案图被 channels_commit 丢弃或 mirror 未记录时 `mapping=null`，UI 必须显示“当前值未知”并给原因，禁止用旧值冒充当前值。
 
 ## 6. 方案文件上传
-- POST `/api/plan/upload`：请求体为二进制 plan 与 sha 校验头（见 daemon 实现）；201 首次、200 已存在（dedup）、400 sha 不符。响应 `{ok, stored_path, sha256, dedup}`。
+| 方法 | 路径 | 请求 | 成功响应 |
+|---|---|---|---|
+| POST | `/api/plan/upload` | 二进制 plan 与 sha 校验头（见 daemon 实现） | 201 首次、200 已存在（dedup）、400 sha 不符；响应 `{ok, stored_path, sha256, dedup}` |
 
 ## 7. 校准（calibration）——实际形状（backend 已实现并被测试锁定，本表即 canonical）
 现状：uploads/wizard/jobs/artifacts 已可用；生产后端为 JobManager + OfflineJobBackend（`KHAEN_CAL_BACKEND=off` 可关；初始化失败 → not_wired + 真实 reason）。**下表是前端必须适配的实际形状**；标【加法】的字段是已落地的增量。
