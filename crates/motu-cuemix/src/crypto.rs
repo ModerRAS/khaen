@@ -354,7 +354,7 @@ pub fn hex(data: &[u8]) -> String {
 #[cfg(test)]
 pub fn hex_decode(text: &str) -> Option<Vec<u8>> {
     let compact: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-    if compact.len() % 2 != 0 {
+    if !compact.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(compact.len() / 2);
@@ -518,9 +518,9 @@ impl Montgomery {
         for i in 0..k {
             let factor = t[i].wrapping_mul(self.n0_inv);
             let mut carry = 0u128;
-            for j in 0..k {
+            for (j, &n_j) in self.n.iter().take(k).enumerate() {
                 let index = i + j;
-                let sum = (t[index] as u128) + (factor as u128) * (self.n[j] as u128) + carry;
+                let sum = (t[index] as u128) + (factor as u128) * (n_j as u128) + carry;
                 t[index] = sum as u64;
                 carry = sum >> 64;
             }
@@ -758,7 +758,7 @@ pub fn oaep_sha1_encrypt_with_key(
     let label_hash = sha1(b"");
     let mut db = Vec::with_capacity(k - hlen - 1);
     db.extend_from_slice(&label_hash);
-    db.extend(std::iter::repeat(0u8).take(max_message - message.len()));
+    db.extend(std::iter::repeat_n(0u8, max_message - message.len()));
     db.push(0x01);
     db.extend_from_slice(message);
     let masked_db = xor_bytes(&db, &mgf1_sha1(seed, k - hlen - 1));
