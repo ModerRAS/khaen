@@ -210,6 +210,29 @@ khaen-analyze envelope --wav FILE --out FILE [--window-ms 50] [--dropout-db -20]
 - 若掉音紧贴扫频起点/终点、与头尾静音连成一片，会落进边界静音区而**漏检**；用 `signal_start_s` /
   `signal_end_s` 与 `levels_dbfs` 人工核对。
 
+### 5.2 `band-snr`：逐带 SNR（可测性门，2026-11-26 真机 30 带失败后新增）
+
+```
+khaen-analyze band-snr --wav FILE --out FILE [--window 4096] [--centers ...] [--window-ms 50] [--min-snr-db 10]
+```
+
+把一段录音切成「噪声段 / 信号段」，分别算 1/3 oct 带电平，输出每带 `signal_dbfs`、`noise_dbfs`、`snr_db`、
+`measurable`（SNR ≥ `--min-snr-db`）。噪声段取活动区之前 `[0.1, signal_start-0.1]`（≥0.3 s），
+活动区从录音开头开始时退回活动区之后；两段都不够则 `E_ANALYZE_INPUT`（不猜噪声）。
+
+**为什么需要它**：2026-11-26 真机 20 带 PASS、默认 30 带 FAIL（25/31.5/50/63 Hz）。复核发现
+baseline 录音在 25/31.5 Hz 的 SNR 只有 0.36/4.55 dB —— 这两带里没有可测信号，拿它和 applied 相除得到的
+“delta”不是传递函数。`khaen-closed-loop-run` 只有「带功率为 0 记 missing」的机制，没有逐带 SNR 门，
+所以会把不可测带当可比较带判。`band-snr` 把「哪一带可测」变成显式证据，供复测报告与交接使用；
+**它不改 closed-loop 判定口径**（改判定契约需单独评审）。
+
+真机录音实测（2026-11-26，同 §5.1 的两段；默认 30 带、门限 10 dB）：
+
+| 录音 | 可比带 | 可测带 | 不可测带（SNR） |
+|---|---|---|---|
+| baseline2.wav | 29 | 26 | 25 Hz (0.36)、31.5 Hz (4.55)、20 kHz (0.25) |
+| applied.wav | 29 | 27 | 25 Hz (6.25)、20 kHz (−0.34) |
+
 ## 6. `compare`：两段录音的相对频带电平与 Δ
 
 ```
@@ -280,7 +303,7 @@ khaen-closed-loop-run --plan plan.bin --baseline baseline.wav --applied applied.
 - 浮点用 serde_json 的最短往返十进制（ryu）：同一个 f64 永远同一字节；
 - stdout 摘要里的 `levels_sha256` = 输出文件字节的 sha256，可写进交接/证据清单；
 - `--out` 已存在直接拒绝（`E_WRITE`，退出码 1），防止覆盖上一次的证据；
-- 集成测试 `*_output_is_deterministic` 对三个子命令断言「同输入两次运行：文件逐字节相同 + stdout 相同」。
+- 集成测试 `*_output_is_deterministic` 对各子命令断言「同输入两次运行：文件逐字节相同 + stdout 相同」。
 
 ## 9. 性能（实测，非预测）
 
@@ -324,7 +347,7 @@ WAV 与带电平错误码与 `khaen-band-levels` **完全同名**（同一份 kh
 
 ## 11. 测试覆盖与未验证项
 
-53 个测试（Windows 本机全绿）：
+57 个测试（Windows 本机全绿）：
 
 - 15 个库单元测试：PSD 积分 = calibration 带功率（4 种窗长）、满幅正弦 −3.01 dBFS、窗长/采样率校验码、
   活动区检测（静音过半仍取活动区参考 / 连续信号全部活动 / 全静音）、中位数、gap 位置/深度、config
@@ -337,7 +360,8 @@ WAV 与带电平错误码与 `khaen-band-levels` **完全同名**（同一份 kh
     全静音、**2026-11-26 事故等价件（有/无掉音）**、**静音过半（55.6% 本底噪声）有/无掉音（T63 回归，
     9 s / 48 kHz / 24-bit / 2ch）**、非法配置；
   - `tests/compare.rs`（5）：−6.02 dB 增益、与 calibration 逐位一致、同文件 0 dB、全零侧 missing、采样率不匹配；
-  - `tests/cli.rs`（7）：三子命令确定性、摘要 sha = 文件 sha、用法/输入错误码、`--out` 已存在退出码 1、`--help`。
+  - `tests/snr.rs`（4）：1 kHz 音可测/100 Hz 噪声带低于门限、两次运行逐字节相同、全静音与无静音段录音的 `E_ANALYZE_INPUT`；
+- `tests/cli.rs`（7）：子命令确定性、摘要 sha = 文件 sha、用法/输入错误码、`--out` 已存在退出码 1、`--help`。
 
 **NOT_RUN**（本机做不了，不能写成实测）：
 

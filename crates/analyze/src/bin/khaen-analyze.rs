@@ -15,6 +15,7 @@ use std::process::ExitCode;
 use khaen_analyze::compare;
 use khaen_analyze::envelope::{self, EnvelopeConfig};
 use khaen_analyze::json;
+use khaen_analyze::snr::{self, BandSnrConfig};
 use khaen_analyze::spectrum::{self, SpectrumConfig, DEFAULT_CENTERS_HZ, DEFAULT_WINDOW_LEN};
 use khaen_analyze::wav::{read_wav_file, Wav};
 use khaen_analyze::{codes, AnalyzeError, TOOL_NAME};
@@ -31,6 +32,7 @@ khaen-analyze：离线分析工具链（纯 Rust；只读 WAV、只写 JSON）
   khaen-analyze spectrum --wav FILE --out FILE [--window 4096] [--centers 25,31.5,...] [--psd 0|1]
   khaen-analyze envelope --wav FILE --out FILE [--window-ms 50] [--dropout-db -20] [--min-windows 3]
   khaen-analyze compare --reference FILE --measured FILE --out FILE [--window 4096] [--centers ...]
+  khaen-analyze band-snr --wav FILE --out FILE [--window 4096] [--centers ...] [--min-snr-db 10]
 
 退出码: 0 成功 | 2 输入/用法错误 | 1 写输出失败
 stdout: 一行 JSON 摘要（含输出文件 sha256）；错误: stderr 一行 <CODE>: <message>
@@ -57,19 +59,22 @@ fn exit_code(code: &str) -> u8 {
 
 fn run(args: &[String]) -> Result<(), AnalyzeError> {
     let Some(command) = args.first().map(String::as_str) else {
-        return Err(usage("missing subcommand (spectrum | envelope | compare)"));
+        return Err(usage(
+            "missing subcommand (spectrum | envelope | compare | band-snr)",
+        ));
     };
     let rest = &args[1..];
     match command {
         "spectrum" => run_spectrum(rest),
         "envelope" => run_envelope(rest),
         "compare" => run_compare(rest),
+        "band-snr" => run_band_snr(rest),
         "-h" | "--help" | "help" => {
             print!("{USAGE}");
             Ok(())
         }
         other => Err(usage(format!(
-            "unknown subcommand {other:?} (spectrum | envelope | compare)"
+            "unknown subcommand {other:?} (spectrum | envelope | compare | band-snr)"
         ))),
     }
 }
@@ -240,6 +245,78 @@ fn run_compare(args: &[String]) -> Result<(), AnalyzeError> {
             "max_abs_delta_db",
             json::opt_number(report.max_abs_delta_db),
         ),
+        ("levels_sha256", Value::from(sha256_hex(&bytes))),
+        ("out", Value::from(path_text(&out_path))),
+    ]);
+    println!("{}", json::to_line(&summary)?);
+    Ok(())
+}
+
+fn run_band_snr(args: &[String]) -> Result<(), AnalyzeError> {
+    let mut wav = None;
+    let mut out = None;
+    let mut window = None;
+    let mut centers = None;
+    let mut window_ms = None;
+    let mut min_snr_db = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--wav" => wav = Some(next_path(&mut iter, "--wav")?),
+            "--out" => out = Some(next_path(&mut iter, "--out")?),
+            "--window" => {
+                window = Some(parse_usize(next_value(&mut iter, "--window")?, "--window")?)
+            }
+            "--centers" => centers = Some(parse_centers(next_value(&mut iter, "--centers")?)?),
+            "--window-ms" => {
+                window_ms = Some(parse_f64(
+                    next_value(&mut iter, "--window-ms")?,
+                    "--window-ms",
+                )?)
+            }
+            "--min-snr-db" => {
+                min_snr_db = Some(parse_f64(
+                    next_value(&mut iter, "--min-snr-db")?,
+                    "--min-snr-db",
+                )?)
+            }
+            other => return Err(usage(format!("unknown argument {other:?} for band-snr"))),
+        }
+    }
+    let wav_path = wav.ok_or_else(|| {
+        usage("band-snr --wav FILE --out FILE [--window 4096] [--centers ...] [--min-snr-db 10]")
+    })?;
+    let out_path = out.ok_or_else(|| usage("band-snr needs --out FILE"))?;
+    let defaults = BandSnrConfig::default();
+    let config = BandSnrConfig {
+        window_len: window.unwrap_or(defaults.window_len),
+        centers_hz: centers.unwrap_or(defaults.centers_hz),
+        envelope_window_ms: window_ms.unwrap_or(defaults.envelope_window_ms),
+        min_snr_db: min_snr_db.unwrap_or(defaults.min_snr_db),
+        ..defaults
+    };
+    let wav = read_wav(&wav_path)?;
+    let report = snr::analyze_wav(&wav, &config)?;
+    let document = snr::document(&path_text(&wav_path), &report);
+    let bytes = json::write_document(&out_path, &document)?;
+    let summary = json::object([
+        ("ok", Value::from(true)),
+        ("tool", Value::from(TOOL_NAME)),
+        ("tool_version", Value::from(env!("CARGO_PKG_VERSION"))),
+        ("command", Value::from("band-snr")),
+        ("bands", json::count(report.bands.len() as u64)),
+        ("comparable", json::count(report.comparable_bands() as u64)),
+        ("measurable", json::count(report.measurable_bands() as u64)),
+        (
+            "unmeasurable",
+            json::count(report.unmeasurable_bands() as u64),
+        ),
+        ("missing", json::count(report.missing_bands() as u64)),
+        ("min_snr_db", json::number(report.min_snr_db)),
+        ("signal_start_s", json::number(report.signal_start_s)),
+        ("signal_end_s", json::number(report.signal_end_s)),
+        ("noise_start_s", json::number(report.noise_start_s)),
+        ("noise_end_s", json::number(report.noise_end_s)),
         ("levels_sha256", Value::from(sha256_hex(&bytes))),
         ("out", Value::from(path_text(&out_path))),
     ]);

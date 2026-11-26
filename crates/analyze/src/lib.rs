@@ -31,6 +31,7 @@
 pub mod compare;
 pub mod envelope;
 pub mod json;
+pub mod snr;
 pub mod spectrum;
 pub mod wav;
 
@@ -42,6 +43,8 @@ pub const SPECTRUM_SCHEMA: &str = "khaen-analyze-spectrum/v1";
 pub const ENVELOPE_SCHEMA: &str = "khaen-analyze-envelope/v1";
 /// compare 输出 schema。
 pub const COMPARE_SCHEMA: &str = "khaen-analyze-compare/v1";
+/// band-snr 输出 schema。
+pub const BAND_SNR_SCHEMA: &str = "khaen-analyze-band-snr/v1";
 
 /// 稳定错误码（CLI stderr / 报告可直接匹配；**不要改字符串**）。
 pub mod codes {
