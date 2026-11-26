@@ -36,6 +36,24 @@
 //! 必须等于 Aes67InputConfig::output_channels（未映射的输出声道恒 0）；块序由调用方音频时钟
 //! 驱动，把 fill_block 写好的切片喂给 BlockEngine::run_block 的 input 即可。
 //!
+//! # ASRC（T41：`KHAEN_ASRC=off|poly|sinc`，默认 off）
+//!
+//! 可选地在抖动环与引擎块之间插入异步重采样（crate `khaen-asrc`）：抖动环仍以媒体帧
+//! 写入（RTP 时间戳域），但消费端不再"每块硬取 block_frames 帧"，而是按重采样器需要的
+//! `input_frames_next()` 取帧、固定输出 block_frames 帧；[Aes67InputStats::jitter_fill]
+//! 作为漂移控制器的反馈量，把水位稳定在目标值（默认 2 × block_frames，且 ≤ 环容量一半）。
+//!
+//! - `KHAEN_ASRC=off`（默认）：原路径逐字节不变；
+//! - `poly`：rubato Async + Cubic 多项式插值（默认推荐，±500 ppm 近 1:1 足够）；
+//! - `sinc`：rubato Async + sinc 抗混叠插值（更高成本/延迟的备用）；
+//! - 非法值按配置错误处理（不静默回退）；
+//! - ASRC 处理失败时本块自动回退到原输入路径并累计 [Aes67InputStats::asrc_bypasses]，
+//!   fail-closed 语义不变（欠载仍整块静音、不输出半块）；换流（SSRC/时间戳跳变）会 reset
+//!   重采样器与控制环路并重新尝试启用。
+//!
+//! 启用且未 bypass 时 [Aes67InputStats::asrc] 暴露 `input.asrc` 快照（enabled/ratio_ppm/
+//! ppm_estimate/fill_frames/last_error）；rt-host 的 status 写盘函数负责把它序列化。
+//!
 //! # 待与 aoip crate 统一
 //!
 //! host 目前不依赖 khaen-aoip-aes67（Cargo.toml 不在本任务写范围），因此本模块内的
@@ -58,6 +76,9 @@
 use core::fmt;
 use std::net::Ipv4Addr;
 
+pub use khaen_asrc::Interpolation;
+use khaen_asrc::{Asrc, AsrcConfig, AsrcError, AsrcStatus};
+
 use crate::engine::MAX_BLOCK_FRAMES;
 
 /// RTP 版本号（RFC 3550 v=2）。
@@ -74,6 +95,10 @@ pub const MAX_RTP_CHANNELS: usize = 8;
 pub const MAX_OUTPUT_CHANNELS: usize = 64;
 /// 时间戳跳变阈值（秒）：与上一包时间戳偏离超过该值视为新流并重置。
 pub const TS_JUMP_RESET_SEC: u32 = 10;
+/// ASRC 开关环境变量：`off`（默认）|`poly`|`sinc`，大小写不敏感。
+pub const ASRC_ENV: &str = "KHAEN_ASRC";
+/// ASRC 默认目标水位（块数）：2 块 ≈ 5.3 ms @128 帧；host 实际取 min(该值, 环容量/2)。
+const ASRC_TARGET_BLOCKS: usize = 2;
 
 /// 抖动环容量下限（帧）。
 const MIN_CAPACITY_FRAMES: usize = 512;
@@ -343,7 +368,36 @@ pub struct BlockOutcome {
     pub stats: Aes67InputStats,
 }
 
-/// AES67 输入累积统计（Copy 快照；jitter_fill/ssrc 是快照值，其余为累计值）。
+/// ASRC 状态快照（Copy/Eq；ppm 取整到 i32，方便作为立即数进 JSON/日志）。
+///
+/// 与 `khaen_asrc::AsrcStatus` 一一对应，但用整数 ppm 保持 [Aes67InputStats] 的 `Eq`。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AsrcInputStats {
+    /// ASRC 是否有效启用（配置启用且未被 bypass）。
+    pub enabled: bool,
+    /// 当前施加的比率修正（ppm，整数化）。
+    pub ratio_ppm: i32,
+    /// 估计的稳态时钟偏差修正（ppm，= 控制器积分项，整数化）。
+    pub ppm_estimate: i32,
+    /// 抖动环 fill 快照（帧）。
+    pub fill_frames: usize,
+    /// 最近一次失败的错误名（无失败为 None）。
+    pub last_error: Option<&'static str>,
+}
+
+impl From<AsrcStatus> for AsrcInputStats {
+    fn from(status: AsrcStatus) -> Self {
+        Self {
+            enabled: status.enabled,
+            ratio_ppm: status.ratio_ppm.round() as i32,
+            ppm_estimate: status.ppm_estimate.round() as i32,
+            fill_frames: status.fill_frames,
+            last_error: status.last_error,
+        }
+    }
+}
+
+/// AES67 输入累积统计（Copy 快照；jitter_fill/ssrc/asrc 是快照值，其余为累计值）。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Aes67InputStats {
     /// 收到并通过 RTP 头解析的包数（含 foreign/duplicate/late/overflow；不含解析失败）。
@@ -376,6 +430,19 @@ pub struct Aes67InputStats {
     pub jitter_fill: usize,
     /// 快照：当前流 SSRC（尚未锚定时为 None）。
     pub ssrc: Option<u32>,
+    /// 快照：ASRC 状态（未启用 ASRC 时为 None）。
+    pub asrc: Option<AsrcInputStats>,
+    /// ASRC 因失败自动 bypass 的次数（每次失败当块回退到原输入路径；fail-closed）。
+    pub asrc_bypasses: u64,
+}
+
+/// host 侧 ASRC 运行状态（构造期固定配置，运行期只更新内部状态）。
+#[derive(Debug)]
+struct AsrcState {
+    /// 重采样器 + 控制器（crate khaen-asrc）。
+    asrc: Asrc,
+    /// 抖动环目标水位（帧）：prefill 门槛与控制器目标一致（构造期确定）。
+    target_fill_frames: usize,
 }
 
 /// AES67 定长块输入：RTP/L24 → 抖动环 → 按声道映射输出帧交错 f32 块。
@@ -410,8 +477,13 @@ pub struct Aes67Input {
     missing: [u16; MISSING_TRACK_PACKETS],
     /// 缺口表当前条目数。
     missing_len: usize,
-    /// 累积统计（jitter_fill/ssrc 在快照时填）。
+    /// 累积统计（jitter_fill/ssrc/asrc 在快照时填）。
     stats: Aes67InputStats,
+    /// 可选 ASRC：None = KHAEN_ASRC=off；Some 时 fill_block 走重采样路径。
+    asrc: Option<AsrcState>,
+    /// 测试用：下一次 fill_block 强制 ASRC 失败（验证自动 bypass 路径）。
+    #[cfg(test)]
+    asrc_fail_next: bool,
 }
 
 impl fmt::Debug for Aes67Input {
@@ -423,16 +495,43 @@ impl fmt::Debug for Aes67Input {
             .field("read_frame", &self.read_frame)
             .field("written_upto", &self.written_upto)
             .field("prefill_done", &self.prefill_done)
+            .field("asrc", &self.asrc)
             .field("stats", &self.stats)
             .finish_non_exhaustive()
     }
 }
 
 impl Aes67Input {
-    /// 新建输入：校验配置并一次性分配抖动环/位图（之后运行期不再分配）。
+    /// 新建输入：读 `KHAEN_ASRC=off|poly|sinc`（默认 off），校验配置并一次性分配
+    /// 抖动环/位图/ASRC 缓冲（之后运行期不再分配）。
     pub fn new(config: Aes67InputConfig) -> Result<Self, InputError> {
+        Self::new_with_asrc(config, asrc_interp_from_env()?)
+    }
+
+    /// 显式指定插值方式的新建（测试与需要绕过环境变量的接线用）。
+    ///
+    /// `interp = None` 等价于 `KHAEN_ASRC=off`（原路径，逐字节不变）。
+    pub fn new_with_asrc(
+        config: Aes67InputConfig,
+        interp: Option<Interpolation>,
+    ) -> Result<Self, InputError> {
         config.validate()?;
         let capacity = config.capacity_frames()?;
+        let asrc = match interp {
+            None => None,
+            Some(interp) => {
+                let target_fill_frames = asrc_target_fill(&config, capacity);
+                let mut asrc_config =
+                    AsrcConfig::new(config.channels, config.block_frames, config.sample_rate);
+                asrc_config.interp = interp;
+                asrc_config.target_fill_frames = target_fill_frames;
+                let asrc = Asrc::new(asrc_config).map_err(map_asrc_error)?;
+                Some(AsrcState {
+                    asrc,
+                    target_fill_frames,
+                })
+            }
+        };
         let channels = config.channels;
         let samples = vec![0.0f32; capacity * channels];
         let valid = vec![0u64; capacity / 64];
@@ -452,7 +551,34 @@ impl Aes67Input {
             missing: [0u16; MISSING_TRACK_PACKETS],
             missing_len: 0,
             stats: Aes67InputStats::default(),
+            asrc,
+            #[cfg(test)]
+            asrc_fail_next: false,
         })
+    }
+
+    /// 当前是否有效启用 ASRC（已构造且未被 bypass）。
+    pub fn asrc_enabled(&self) -> bool {
+        self.asrc
+            .as_ref()
+            .is_some_and(|state| !state.asrc.is_bypassed())
+    }
+
+    /// ASRC 目标水位（帧）；未启用 ASRC 时为 None。
+    pub fn asrc_target_fill_frames(&self) -> Option<usize> {
+        self.asrc.as_ref().map(|state| state.target_fill_frames)
+    }
+
+    /// ASRC 的插值方式；未启用 ASRC 时为 None。
+    pub fn asrc_interpolation(&self) -> Option<Interpolation> {
+        self.asrc.as_ref().map(|state| state.asrc.config().interp)
+    }
+
+    /// ASRC 状态快照（未启用时为 None）。
+    pub fn asrc_status(&self) -> Option<AsrcStatus> {
+        self.asrc
+            .as_ref()
+            .map(|state| state.asrc.status(self.jitter_fill()))
     }
 
     /// 配置视图。
@@ -477,11 +603,16 @@ impl Aes67Input {
             .min(self.capacity as u64) as usize
     }
 
-    /// 累积统计快照（含当前 jitter_fill/ssrc；不分配、不阻塞）。
+    /// 累积统计快照（含当前 jitter_fill/ssrc/asrc；不分配、不阻塞）。
     pub fn stats(&self) -> Aes67InputStats {
         let mut stats = self.stats;
-        stats.jitter_fill = self.jitter_fill();
+        let fill = self.jitter_fill();
+        stats.jitter_fill = fill;
         stats.ssrc = self.ssrc;
+        stats.asrc = self
+            .asrc
+            .as_ref()
+            .map(|state| AsrcInputStats::from(state.asrc.status(fill)));
         stats
     }
 
@@ -611,6 +742,9 @@ impl Aes67Input {
     /// 按 channels_map 把 RTP 声道放到输出位置，未映射位置写 0。数据不足（预热/欠载）
     /// 时整块写静音并递增 underruns，不 panic；欠载时播放游标照常前进（媒体时间不倒退）。
     ///
+    /// 启用 ASRC 时走重采样路径（固定输出 block_frames 帧、输入帧数随比率变化）；
+    /// ASRC 处理失败时本块自动回退原路径并累计 asrc_bypasses（fail-closed 语义不变）。
+    ///
     /// 实时约束：不分配、不加锁、不做 IO、不 panic。
     pub fn fill_block(&mut self, out: &mut [f32]) -> BlockOutcome {
         let expected = self.samples_per_block();
@@ -637,7 +771,11 @@ impl Aes67Input {
         let block = self.config.block_frames as u64;
         let available = self.written_upto.saturating_sub(self.read_frame);
         if !self.prefill_done {
-            let gate = block.max(self.config.jitter_target_frames as u64);
+            // ASRC 启用时预填到它自己的目标水位（控制器目标），否则沿用原 jitter_target 语义。
+            let gate = match &self.asrc {
+                Some(state) => state.target_fill_frames as u64,
+                None => block.max(self.config.jitter_target_frames as u64),
+            };
             if available < gate {
                 self.stats.underruns = self.stats.underruns.saturating_add(1);
                 return BlockOutcome {
@@ -648,6 +786,109 @@ impl Aes67Input {
             }
             self.prefill_done = true;
         }
+        if let Some(mut state) = self.asrc.take() {
+            if !state.asrc.is_bypassed() {
+                if self.asrc_injected_failure() {
+                    self.stats.asrc_bypasses = self.stats.asrc_bypasses.saturating_add(1);
+                    state
+                        .asrc
+                        .note_bypass(AsrcError::Process("injected failure"));
+                } else {
+                    match self.fill_block_asrc(&mut state, out) {
+                        Ok(mut outcome) => {
+                            self.asrc = Some(state);
+                            // fill_block_asrc 期间 asrc 被 take 出 self，这里补上含 asrc 的快照。
+                            outcome.stats = self.stats();
+                            return outcome;
+                        }
+                        Err(error) => {
+                            self.stats.asrc_bypasses = self.stats.asrc_bypasses.saturating_add(1);
+                            state.asrc.note_bypass(error);
+                        }
+                    }
+                }
+            }
+            self.asrc = Some(state);
+        }
+        self.fill_block_legacy(out)
+    }
+
+    /// ASRC 路径：从抖动环取 `input_frames_next()` 帧（缺帧补 0），固定输出一块。
+    ///
+    /// 欠载（环内连续帧不足）时仍推进重采样器（缺帧按静音），但整块输出静音并计 underruns，
+    /// 与原有"不输出半块"的欠载语义一致；返回 Err 表示 ASRC 自身失败（调用方回退原路径）。
+    fn fill_block_asrc(
+        &mut self,
+        state: &mut AsrcState,
+        out: &mut [f32],
+    ) -> Result<BlockOutcome, AsrcError> {
+        let need = state.asrc.input_frames_next();
+        let capacity = self.capacity;
+        if need > capacity {
+            return Err(AsrcError::Process("input chunk exceeds jitter ring"));
+        }
+        let channels = self.config.channels;
+        let available = self
+            .written_upto
+            .saturating_sub(self.read_frame)
+            .min(capacity as u64) as usize;
+        let frames_in_ring = available.min(need);
+        {
+            let input = state.asrc.input_mut();
+            for frame in 0..frames_in_ring {
+                let position = ((self.read_frame + frame as u64) & self.mask as u64) as usize;
+                let source = position * channels;
+                for channel in 0..channels {
+                    input.channel_mut(channel)[frame] = self.samples[source + channel];
+                }
+            }
+            for channel in 0..channels {
+                input.clear_range(channel, frames_in_ring, need);
+            }
+        }
+        let outcome = state.asrc.process()?;
+        if outcome.output_frames != self.config.block_frames {
+            return Err(AsrcError::Process("resampler output size mismatch"));
+        }
+        // 媒体时间前进 need 帧（缺帧按静音补；游标照常前进，不倒退）。
+        self.advance_read(need as u64);
+        let fill = self
+            .written_upto
+            .saturating_sub(self.read_frame)
+            .min(capacity as u64) as usize;
+        state.asrc.update_fill(fill)?;
+        if frames_in_ring < need {
+            // 欠载：out 已预先清零，整块静音（不输出半块）。
+            self.stats.underruns = self.stats.underruns.saturating_add(1);
+            return Ok(BlockOutcome {
+                status: BlockStatus::Underrun,
+                frames: 0,
+                stats: self.stats(),
+            });
+        }
+        let output = state.asrc.output();
+        let out_channels = self.config.output_channels;
+        for frame in 0..self.config.block_frames {
+            let destination = frame * out_channels;
+            for (rtp_channel, &slot) in self.config.channels_map.iter().enumerate() {
+                out[destination + usize::from(slot)] = output.channel(rtp_channel)[frame];
+            }
+        }
+        self.stats.frames_filled = self
+            .stats
+            .frames_filled
+            .saturating_add(self.config.block_frames as u64);
+        Ok(BlockOutcome {
+            status: BlockStatus::Filled,
+            frames: self.config.block_frames,
+            stats: self.stats(),
+        })
+    }
+
+    /// 原路径（无 ASRC / ASRC 失败回退）：每块硬消费 block_frames 帧。
+    fn fill_block_legacy(&mut self, out: &mut [f32]) -> BlockOutcome {
+        let block = self.config.block_frames as u64;
+        let available = self.written_upto.saturating_sub(self.read_frame);
         if available < block {
             // 欠载：整块静音 + 播放游标前进；缺口内的已到帧丢弃（与 aoip 语义一致）。
             self.stats.underruns = self.stats.underruns.saturating_add(1);
@@ -683,6 +924,17 @@ impl Aes67Input {
         }
     }
 
+    /// 测试专用：本次 fill_block 是否强制 ASRC 失败（生产构建恒为 false）。
+    #[cfg(test)]
+    fn asrc_injected_failure(&mut self) -> bool {
+        std::mem::take(&mut self.asrc_fail_next)
+    }
+
+    /// 生产构建：没有失败注入。
+    #[cfg(not(test))]
+    fn asrc_injected_failure(&mut self) -> bool {
+        false
+    }
     /// 重置为新流：清空抖动环与锚点，统计计数保持累计（调用方自行计 ssrc_changes）。
     fn restart_stream(&mut self, ssrc: u32, timestamp: u32) {
         self.ssrc = Some(ssrc);
@@ -693,6 +945,10 @@ impl Aes67Input {
         self.read_frame = 0;
         self.written_upto = 0;
         self.prefill_done = false;
+        // 换流后 ASRC 复位（清重采样器状态/控制器积分/bypass 标记），新流重新尝试启用。
+        if let Some(state) = &mut self.asrc {
+            state.asrc.reset();
+        }
         // 样本区不清零：有效位图已清，新流写入前不会被读到（避免换流时 O(capacity) memset，
         // 也保证不会把旧流样本当新流输出）。
         self.valid.fill(0);
@@ -864,4 +1120,179 @@ fn decode_l24_sample(payload: &[u8], offset: usize) -> f32 {
         | (i32::from(payload[offset + 1]) << 8)
         | i32::from(payload[offset + 2]);
     (raw << 8) as f32 / FULL_SCALE_DIVISOR
+}
+/// 解析 `KHAEN_ASRC` 取值（`off`|`poly`|`sinc`，大小写不敏感/允许首尾空白）。
+///
+/// None（未设置）与 off 都返回 None；其它值返回 BadConfig（不静默回退）。
+fn parse_asrc_interp(value: Option<&str>) -> Result<Option<Interpolation>, InputError> {
+    match value {
+        None => Ok(None),
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.eq_ignore_ascii_case("off") {
+                return Ok(None);
+            }
+            match Interpolation::parse(trimmed) {
+                Some(interp) => Ok(Some(interp)),
+                None => Err(InputError::BadConfig("KHAEN_ASRC must be off|poly|sinc")),
+            }
+        }
+    }
+}
+
+/// 读环境变量 `KHAEN_ASRC`（未设置 = off；非 Unicode/非法值 = 配置错误）。
+fn asrc_interp_from_env() -> Result<Option<Interpolation>, InputError> {
+    match std::env::var(ASRC_ENV) {
+        Ok(value) => parse_asrc_interp(Some(&value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(InputError::BadConfig("KHAEN_ASRC must be valid UTF-8"))
+        }
+    }
+}
+
+/// 由输入配置与抖动环容量推导 ASRC 目标水位（帧）。
+///
+/// - `jitter_target_frames > 0` 时尊重用户配置，否则默认 `2 × block_frames`；
+/// - 上限 `capacity / 2`：给"写到读游标 + 容量"之前的突发包留 headroom，避免 ASRC
+///   把 fill 稳在环的悬崖边；
+/// - 下限 `block_frames`：至少留一块可消费数据（capacity ≥ 4 × block 时成立）。
+fn asrc_target_fill(config: &Aes67InputConfig, capacity_frames: usize) -> usize {
+    let desired = if config.jitter_target_frames > 0 {
+        config.jitter_target_frames
+    } else {
+        ASRC_TARGET_BLOCKS * config.block_frames
+    };
+    desired.min(capacity_frames / 2).max(config.block_frames)
+}
+
+/// ASRC 构造错误 → 输入配置错误（保留点名原因；其余归为通用构造失败）。
+fn map_asrc_error(error: AsrcError) -> InputError {
+    match error {
+        AsrcError::BadConfig(reason) => InputError::BadConfig(reason),
+        _ => InputError::BadConfig("ASRC construction failed"),
+    }
+}
+
+#[cfg(test)]
+mod asrc_unit_tests {
+    use super::*;
+
+    fn config() -> Aes67InputConfig {
+        Aes67InputConfig {
+            multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
+            port: 5004,
+            payload_type: 96,
+            sample_rate: 48_000,
+            channels: 2,
+            channels_map: vec![0, 1],
+            output_channels: 2,
+            block_frames: crate::engine::DEFAULT_BLOCK_FRAMES,
+            jitter_target_frames: 0,
+        }
+    }
+
+    #[test]
+    fn asrc_env_parsing_is_strict() {
+        assert_eq!(parse_asrc_interp(None), Ok(None));
+        assert_eq!(parse_asrc_interp(Some("off")), Ok(None));
+        assert_eq!(parse_asrc_interp(Some("OFF")), Ok(None));
+        assert_eq!(parse_asrc_interp(Some(" off ")), Ok(None));
+        assert_eq!(
+            parse_asrc_interp(Some("poly")),
+            Ok(Some(Interpolation::Poly))
+        );
+        assert_eq!(
+            parse_asrc_interp(Some("Sinc")),
+            Ok(Some(Interpolation::Sinc))
+        );
+        assert_eq!(
+            parse_asrc_interp(Some("bogus")),
+            Err(InputError::BadConfig("KHAEN_ASRC must be off|poly|sinc"))
+        );
+        assert!(parse_asrc_interp(Some("")).is_err());
+    }
+
+    #[test]
+    fn asrc_target_fill_respects_ring_headroom() {
+        let config = config();
+        let capacity = config.capacity_frames().expect("capacity");
+        let target = asrc_target_fill(&config, capacity);
+        assert_eq!(target, 2 * config.block_frames);
+        assert!(target <= capacity / 2);
+        // jitter_target 大于容量一半时被夹住（不让 fill 稳在悬崖边）。
+        let mut large = config;
+        large.jitter_target_frames = 4096;
+        let capacity = large.capacity_frames().expect("capacity");
+        assert_eq!(asrc_target_fill(&large, capacity), capacity / 2);
+    }
+
+    #[test]
+    fn new_with_asrc_exposes_status_and_interpolation() {
+        let input = Aes67Input::new_with_asrc(config(), Some(Interpolation::Sinc)).expect("input");
+        assert!(input.asrc_enabled());
+        assert_eq!(input.asrc_interpolation(), Some(Interpolation::Sinc));
+        let target = input.asrc_target_fill_frames().expect("target");
+        let status = input.asrc_status().expect("status");
+        assert!(status.enabled);
+        assert_eq!(status.fill_frames, 0);
+        assert_eq!(status.ratio_ppm, 0.0);
+        assert!(status.last_error.is_none());
+        assert!(target > 0);
+        // off = 完全走原路径。
+        let plain = Aes67Input::new_with_asrc(config(), None).expect("input");
+        assert!(!plain.asrc_enabled());
+        assert!(plain.asrc_status().is_none());
+        assert!(plain.stats().asrc.is_none());
+        assert_eq!(plain.stats().asrc_bypasses, 0);
+    }
+
+    #[test]
+    fn asrc_failure_bypasses_and_counts() {
+        let mut input =
+            Aes67Input::new_with_asrc(config(), Some(Interpolation::Poly)).expect("input");
+        // 喂若干 128 帧静音包（每包都在抖动环窗口内），让预填水位达标。
+        let target = input.asrc_target_fill_frames().expect("target");
+        let packet_frames = 128usize;
+        let samples = vec![0i32; packet_frames * input.config().channels];
+        let packets = (target + 256).div_ceil(packet_frames);
+        for index in 0..packets {
+            let timestamp = (index * packet_frames) as u32;
+            let packet = tests_packet(index as u16, timestamp, &samples);
+            input.feed_packet(&packet).expect("feed");
+        }
+        let mut out = vec![0.0f32; input.samples_per_block()];
+        assert_eq!(input.fill_block(&mut out).status, BlockStatus::Filled);
+        assert_eq!(input.stats().asrc_bypasses, 0);
+        // 注入一次失败：本块回退原路径，计数 +1、bypass 置位。
+        input.asrc_fail_next = true;
+        assert_eq!(input.fill_block(&mut out).status, BlockStatus::Filled);
+        let stats = input.stats();
+        assert_eq!(stats.asrc_bypasses, 1);
+        assert!(!input.asrc_enabled());
+        let report = stats.asrc.expect("asrc report");
+        assert!(!report.enabled);
+        assert_eq!(report.last_error, Some("ERR_ASRC_PROCESS"));
+        // bypass 后继续按原路径输出，不再重复计数。
+        assert_eq!(input.fill_block(&mut out).status, BlockStatus::Filled);
+        assert_eq!(input.stats().asrc_bypasses, 1);
+    }
+
+    /// 组一个最小 RTP 包（测试用；与 integration test 的构造保持同一格式）。
+    fn tests_packet(sequence: u16, timestamp: u32, samples: &[i32]) -> Vec<u8> {
+        let mut bytes = vec![0u8; RTP_HEADER_LEN + samples.len() * L24_SAMPLE_BYTES];
+        bytes[0] = 0x80;
+        bytes[1] = 96;
+        bytes[2..4].copy_from_slice(&sequence.to_be_bytes());
+        bytes[4..8].copy_from_slice(&timestamp.to_be_bytes());
+        bytes[8..12].copy_from_slice(&0x0bad_cafeu32.to_be_bytes());
+        for (index, &sample) in samples.iter().enumerate() {
+            let raw = (sample as u32) & 0x00ff_ffff;
+            let offset = RTP_HEADER_LEN + index * L24_SAMPLE_BYTES;
+            bytes[offset] = (raw >> 16) as u8;
+            bytes[offset + 1] = (raw >> 8) as u8;
+            bytes[offset + 2] = raw as u8;
+        }
+        bytes
+    }
 }

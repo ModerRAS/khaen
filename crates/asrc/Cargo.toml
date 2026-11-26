@@ -1,0 +1,12 @@
+[package]
+name = "khaen-asrc"
+description = "AES67 输入 ASRC：rubato 异步重采样 + 抖动环漂移控制器（独立 crate，不污染 core 零依赖内核层）"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# MIT OR Apache-2.0，rust-version 1.87；workspace rust-version 由 lead 集成时 1.80 → 1.87。
+rubato = "5.1"
+# rubato 5 的缓冲抽象（Adapter/AdapterMut trait）；与 rubato 同一分发版本。
+audioadapter = "5.0"

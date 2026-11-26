@@ -1,0 +1,10 @@
+[package]
+name = "khaen-bench"
+description = "Performance baseline bench: 3 kHz matrix domain and scalar direct crossover FIR cost per 128-frame block"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+khaen-core = { path = "../core" }
+khaen-host = { path = "../host" }

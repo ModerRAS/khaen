@@ -1,0 +1,20 @@
+# MOTU UltraLite-mk5 / CueMix 5 控制库 + CLI（T40）。
+# 纯 std、零外部依赖：手写最小 RFC6455 客户端与 datastore 编解码，可在任意控制区/CI 运行。
+# 不参与 RT 路径；所有写操作都是「单键写 + 立即回读」，绝不批量写。
+[package]
+name = "khaen-motu-cuemix"
+description = "MOTU UltraLite-mk5 CueMix 5 control client: WS datastore, single-key writes with readback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "khaen_motu_cuemix"
+path = "src/lib.rs"
+
+[[bin]]
+name = "khaen-motu"
+path = "src/bin/khaen-motu.rs"
+
+[dependencies]
