@@ -14,6 +14,7 @@
  *   onVersionMismatch（不阻断请求；是否提示由上层决定）。
  *
  * 该模块不依赖 Vue / DOM 全局（除 fetch/Response 标准类型），可在 Node 单测中直接使用。
+ * getRaw 用于诊断 JSON 下载这类非统一 JSON 端点：同一套认证/401/版本/错误处理，成功时返回原始文本与响应头。
  */
 
 /** 当前前端对应的 API 版本（PLAN §4.1：破坏性变更升版本，SPA 检测到不匹配提示刷新）。 */
@@ -112,6 +113,10 @@ export interface ApiClientOptions {
 export interface RequestOptions {
   /** JSON 请求体；GET 忽略。 */
   body?: unknown
+  /** 原始请求体（WAV 等二进制上传，PLAN §4.7 uploads）；与 body 互斥。 */
+  rawBody?: BodyInit
+  /** rawBody 的 Content-Type；缺省 application/octet-stream。 */
+  contentType?: string
   /** 查询参数（自动 URL 编码）。 */
   query?: QueryParams
   /** 附加/覆盖请求头。 */
@@ -127,6 +132,13 @@ export interface RequestOptions {
   signal?: AbortSignal
   /** 覆盖本次请求超时（毫秒，0 = 不超时）。 */
   timeoutMs?: number
+}
+
+/** getRaw 的返回：保留状态码/响应头/原始文本（下载端点需要文件名与字节原文）。 */
+export interface RawResponse {
+  status: number
+  headers: Headers
+  body: string
 }
 
 /** 同源 REST 客户端。 */
@@ -167,11 +179,35 @@ export class ApiClient {
   }
 
   async request<T>(method: HttpMethod, path: string, options: RequestOptions = {}): Promise<T> {
+    const response = await this.send(method, path, options)
+    return await this.parseSuccess<T>(response)
+  }
+
+  /**
+   * 原始文本 GET（诊断 JSON 下载等非统一 JSON 端点）：
+   * 走同一套 URL/认证/超时/错误体/401/版本头处理，成功时返回状态、响应头与原始文本，
+   * 由调用方解释（下载需要 Content-Disposition 文件名与字节原文）。
+   */
+  async getRaw(path: string, options: RequestOptions = {}): Promise<RawResponse> {
+    const response = await this.send('GET', path, options)
+    let body = ''
+    try {
+      body = await response.text()
+    } catch {
+      body = ''
+    }
+    return { status: response.status, headers: response.headers, body }
+  }
+
+  /** 构造并发送一次请求：认证头、超时、401 回调、API 版本校验、错误体解析都在这里。 */
+  private async send(method: HttpMethod, path: string, options: RequestOptions): Promise<Response> {
     const upper = method.toUpperCase() as HttpMethod
     const url = this.buildUrl(path, options.query)
     const headers: Record<string, string> = { Accept: 'application/json' }
 
-    if (options.body !== undefined) {
+    if (options.rawBody !== undefined) {
+      headers['Content-Type'] = options.contentType ?? 'application/octet-stream'
+    } else if (options.body !== undefined) {
       headers['Content-Type'] = 'application/json'
     }
     if (WRITE_METHODS.has(upper) && options.csrf !== 'omit' && this.csrfToken !== null) {
@@ -189,7 +225,9 @@ export class ApiClient {
       headers,
       credentials: 'include'
     }
-    if (options.body !== undefined) {
+    if (options.rawBody !== undefined) {
+      init.body = options.rawBody
+    } else if (options.body !== undefined) {
       init.body = JSON.stringify(options.body)
     }
 
@@ -214,7 +252,7 @@ export class ApiClient {
       throw apiError
     }
 
-    return await this.parseSuccess<T>(response)
+    return response
   }
 
   get<T>(path: string, options: Omit<RequestOptions, 'body'> = {}): Promise<T> {
@@ -223,6 +261,14 @@ export class ApiClient {
 
   post<T>(path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
     return this.request<T>('POST', path, { ...options, body })
+  }
+
+  /**
+   * 原始字节 POST（WAV / 校准文件上传）：不 JSON 序列化，Content-Type 由调用方指定，
+   * 写请求照常自动附加 X-KHAEN-CSRF。成功响应仍按 JSON 解析（上传端点返回 JSON）。
+   */
+  postRaw<T>(path: string, rawBody: BodyInit, options: RequestOptions = {}): Promise<T> {
+    return this.request<T>('POST', path, { ...options, rawBody })
   }
 
   put<T>(path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {

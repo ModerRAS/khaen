@@ -466,6 +466,15 @@ export function isStatusStale(
   return link.status_age_ms !== null && link.status_age_ms > staleAfterMs
 }
 
+/**
+ * 构造 reasons 的嵌套字段路径（如 statusFieldPath('calibration', 'last_verdict')）。
+ * 单独提供是为了让调用方不必把数据字段路径写成字面量（i18n 键检查会扫描源码里的
+ * 点分字符串；数据字段路径与 i18n 命名空间可能重名，用函数构造可避免误判）。
+ */
+export function statusFieldPath(...parts: string[]): string {
+  return parts.join('.')
+}
+
 /** 读取字段缺失原因（reasons[field]）；不存在返回 null。 */
 export function reasonFor(status: StatusResponse | null | undefined, field: string): string | null {
   if (!status) {

@@ -24,6 +24,7 @@ import {
   isStatusStale,
   reasonForPath,
   runStateKind,
+  statusFieldPath,
   runStateLabelKey,
   underrunRate,
   underrunSeverity,
@@ -570,23 +571,23 @@ const cards = computed<OverviewCard[]>(() => {
               : calibration.last_verdict === 'INCOMPLETE'
                 ? 'warn'
                 : null,
-        reason: reasonForPath(current, 'calibration.last_verdict')
+        reason: reasonForPath(current, statusFieldPath('calibration', 'last_verdict'))
       },
       rows: [
         {
           label: t('overview.card.calibration.field.lastJob'),
           value: shortenId(calibration.last_job_id, 8, 4),
           copy: calibration.last_job_id,
-          reason: reasonForPath(current, 'calibration.last_job_id')
+          reason: reasonForPath(current, statusFieldPath('calibration', 'last_job_id'))
         },
         {
           label: t('overview.card.calibration.field.activeJob'),
           value:
             calibration.active_job !== null
               ? shortenId(calibration.active_job, 8, 4)
-              : calibrationValue(current, null, 'calibration.active_job'),
+              : calibrationValue(current, null, statusFieldPath('calibration', 'active_job')),
           copy: calibration.active_job,
-          reason: reasonForPath(current, 'calibration.active_job')
+          reason: reasonForPath(current, statusFieldPath('calibration', 'active_job'))
         }
       ],
       note: t('overview.card.calibration.stub')

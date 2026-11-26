@@ -36,8 +36,8 @@ import { setLocale } from '@/i18n'
 import { logout } from '@/stores/session'
 import { refreshStatus, statusState } from '@/stores/status'
 import { isStatusStale, runStateKind, runStateLabelKey } from '@/api/status'
+import { loadReleaseVersion, releaseVersionState } from '@/stores/version'
 import { formatDecimal, toRateUnit } from '@/utils/format'
-import { APP_VERSION } from '@/config'
 import StatusBadge from './StatusBadge.vue'
 import type { StatusKind } from '@/types/ui'
 
@@ -196,6 +196,10 @@ function onMenuCommand(command: unknown): void {
   if (command === 'locale:en-US') {
     setLocale('en-US')
   }
+  if (command === 'system:password') {
+    drawerOpen.value = false
+    void router.push({ name: 'system', hash: '#system-password' })
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -211,7 +215,11 @@ watch(
   }
 )
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  // 顶栏/侧栏版本号 = release 版本（来自匿名 /healthz；失败保持「—」，绝不拿 webui 版本冒充）。
+  void loadReleaseVersion()
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
@@ -245,6 +253,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       </el-button>
 
       <span class="topbar__title">{{ pageTitle }}</span>
+      <span
+        class="topbar__version mono"
+        :title="t('topbar.versionHint')"
+        :aria-label="t('topbar.version') + ' ' + (releaseVersionState.label ?? t('common.dash'))"
+      >
+        <span class="topbar__version-label">{{ t('topbar.version') }}</span>
+        <span>{{ releaseVersionState.label ?? t('common.dash') }}</span>
+      </span>
       <span class="topbar__spacer" />
 
       <div class="topbar__badges">
@@ -312,10 +328,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   <span>{{ t('locale.enUS') }}</span>
                 </span>
               </el-dropdown-item>
-              <el-dropdown-item divided disabled>
+              <el-dropdown-item divided command="system:password">
                 <span class="menu-line">
                   <span>{{ t('topbar.changePassword') }}</span>
-                  <span class="menu-line__flag">{{ t('topbar.comingSoon', { milestone: 'M6' }) }}</span>
                 </span>
               </el-dropdown-item>
               <el-dropdown-item divided command="auth:logout" :disabled="signingOut">
@@ -335,7 +350,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         <span class="brand__mark" aria-hidden="true">KH</span>
         <div v-if="!collapsed" class="brand__text">
           <div class="brand__name">{{ t('app.name') }}</div>
-          <div class="brand__version">{{ t('app.version', { version: APP_VERSION }) }}</div>
+          <div class="brand__version">{{ t('app.version', { version: releaseVersionState.label ?? t('common.dash') }) }}</div>
         </div>
       </div>
 
@@ -382,6 +397,25 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </template>
 
 <style scoped>
+.topbar__version {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--khaen-space-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--khaen-text-muted);
+  font-size: var(--khaen-font-aux);
+}
+
+/* 窄屏只留版本值（v0.1.2），避免「版本 v0…」被截断 */
+@media (max-width: 767px) {
+  .topbar__version-label {
+    display: none;
+  }
+}
+
 .menu-line {
   display: inline-flex;
   align-items: center;

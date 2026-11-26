@@ -1,9 +1,11 @@
 /**
  * 路由表与全局守卫（PLAN §5.1 / §5.2）。
  *
- * 本轮只落地两条路由：/login（登录/初始化，公开）与 /（概览占位壳，需要会话）。
- * 其余页面（volume / channels / routing / format / calibration / system / logs）在菜单里灰显并标注计划里程碑，
- * 尚未注册路由——深链由 catch-all 重定向回 /（M3+ 逐个接入时再补 route record）。
+ * 已落地：/login（登录/初始化，公开）、/（概览）、/volume（音量与静音，M3）、/format（音频格式，M3）、
+ * /channels（方案与声道，M4）、/calibration（校准列表）、/calibration/wizard（8 步向导）、
+ * /calibration/jobs/:id（job 详情）、/system（系统信息）、/system/logs（日志）。
+ * 其余页面（routing M3）在菜单里灰显并标注计划里程碑，
+ * 尚未注册路由——深链由 catch-all 重定向回 /（后续里程碑逐个接入时再补 route record）。
  *
  * 守卫（M1 起真实生效）：
  * - 每次导航先 ensureSession()（结果缓存，401 由 store 清态）；
@@ -15,6 +17,14 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppShell from '@/components/AppShell.vue'
 import LoginView from '@/views/LoginView.vue'
 import OverviewView from '@/views/OverviewView.vue'
+import VolumeView from '@/views/VolumeView.vue'
+import FormatView from '@/views/FormatView.vue'
+import ChannelsView from '@/views/ChannelsView.vue'
+import CalibrationView from '@/views/CalibrationView.vue'
+import CalibrationWizardView from '@/views/CalibrationWizardView.vue'
+import CalibrationJobView from '@/views/CalibrationJobView.vue'
+import SystemView from '@/views/SystemView.vue'
+import SystemLogsView from '@/views/SystemLogsView.vue'
 import { ensureSession, setUnauthorizedHandler } from '@/stores/session'
 import { resolveNavigation } from './guard'
 
@@ -48,13 +58,13 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { name: 'overview', path: '/', titleKey: 'nav.overview', icon: 'Odometer', group: 'main', implemented: true },
-  { name: 'volume', path: '/volume', titleKey: 'nav.volume', icon: 'Headset', group: 'main', implemented: false, milestone: 'M3' },
-  { name: 'channels', path: '/channels', titleKey: 'nav.channels', icon: 'Files', group: 'main', implemented: false, milestone: 'M4' },
+  { name: 'volume', path: '/volume', titleKey: 'nav.volume', icon: 'Headset', group: 'main', implemented: true },
+  { name: 'channels', path: '/channels', titleKey: 'nav.channels', icon: 'Files', group: 'main', implemented: true },
   { name: 'routing', path: '/routing', titleKey: 'nav.routing', icon: 'Share', group: 'main', implemented: false, milestone: 'M3' },
-  { name: 'format', path: '/format', titleKey: 'nav.format', icon: 'DataLine', group: 'main', implemented: false, milestone: 'M3' },
-  { name: 'calibration', path: '/calibration', titleKey: 'nav.calibration', icon: 'Timer', group: 'main', implemented: false, milestone: 'M5' },
-  { name: 'system', path: '/system', titleKey: 'nav.system', icon: 'Monitor', group: 'system', implemented: false, milestone: 'M6' },
-  { name: 'logs', path: '/system/logs', titleKey: 'nav.logs', icon: 'Document', group: 'system', implemented: false, milestone: 'M6' }
+  { name: 'format', path: '/format', titleKey: 'nav.format', icon: 'DataLine', group: 'main', implemented: true },
+  { name: 'calibration', path: '/calibration', titleKey: 'nav.calibration', icon: 'Timer', group: 'main', implemented: true },
+  { name: 'system', path: '/system', titleKey: 'nav.system', icon: 'Monitor', group: 'system', implemented: true },
+  { name: 'logs', path: '/system/logs', titleKey: 'nav.logs', icon: 'Document', group: 'system', implemented: true }
 ]
 
 /** 侧栏分组（与 PLAN §11.2 一致：主功能 / 系统）。 */
@@ -79,6 +89,54 @@ const routes: RouteRecordRaw[] = [
         name: 'overview',
         component: OverviewView,
         meta: { requiresAuth: true, titleKey: 'nav.overview' }
+      },
+      {
+        path: 'volume',
+        name: 'volume',
+        component: VolumeView,
+        meta: { requiresAuth: true, titleKey: 'nav.volume' }
+      },
+      {
+        path: 'format',
+        name: 'format',
+        component: FormatView,
+        meta: { requiresAuth: true, titleKey: 'nav.format' }
+      },
+      {
+        path: 'channels',
+        name: 'channels',
+        component: ChannelsView,
+        meta: { requiresAuth: true, titleKey: 'nav.channels' }
+      },
+      {
+        path: 'calibration',
+        name: 'calibration',
+        component: CalibrationView,
+        meta: { requiresAuth: true, titleKey: 'nav.calibration' }
+      },
+      {
+        path: 'calibration/wizard',
+        name: 'calibration-wizard',
+        component: CalibrationWizardView,
+        meta: { requiresAuth: true, titleKey: 'calibration.wizard.pageTitle' }
+      },
+      {
+        path: 'calibration/jobs/:id',
+        name: 'calibration-job',
+        component: CalibrationJobView,
+        meta: { requiresAuth: true, titleKey: 'calibration.job.pageTitle' }
+      },
+      {
+        path: 'system',
+        name: 'system',
+        component: SystemView,
+        meta: { requiresAuth: true, titleKey: 'nav.system' }
+      },
+      {
+        path: 'system/logs',
+        name: 'logs',
+        component: SystemLogsView,
+        meta: { requiresAuth: true, titleKey: 'nav.logs' }
       }
     ]
   },

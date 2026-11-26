@@ -32,6 +32,11 @@ export default defineConfig({
       '/__mock': {
         target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
         changeOrigin: false
+      },
+      // 匿名 /healthz（release 版本来源）；daemon 同源时由真实后端返回，dev/preview 代理到后端或 mock。
+      '/healthz': {
+        target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
+        changeOrigin: false
       }
     }
   },
@@ -45,6 +50,10 @@ export default defineConfig({
         changeOrigin: false
       },
       '/__mock': {
+        target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
+        changeOrigin: false
+      },
+      '/healthz': {
         target: process.env.KHAEN_DEV_API || 'http://127.0.0.1:8730',
         changeOrigin: false
       }

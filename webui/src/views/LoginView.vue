@@ -10,17 +10,19 @@
  *
  * 交互：回车提交；提交中按钮 loading 且表单禁用；错误走 role=alert/aria-live；
  * 401 密码错误、429 限速、409 已初始化（切到登录态并提示）按 PLAN §6.1 映射成本地化文案。
- * 底部固定展示前端版本 + 构建设识（构建标识来自 KHAEN_WEBUI_BUILD_ID，无时间戳）。
+ * 底部固定展示 **release 版本** + 前端构建标识（release 版本来自匿名 /healthz，未知显示「—」；
+ * 构建标识来自 KHAEN_WEBUI_BUILD_ID，无时间戳）。
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { Loading } from '@element-plus/icons-vue'
-import { APP_BUILD_ID, APP_VERSION, MIN_PASSWORD_LENGTH } from '@/config'
+import { APP_BUILD_ID, MIN_PASSWORD_LENGTH } from '@/config'
 import { setLocale } from '@/i18n'
 import { validateCredentials } from '@/auth/validation'
 import { classifyAuthError } from '@/api/errors'
 import { ensureSession, login, sessionState, setup } from '@/stores/session'
+import { loadReleaseVersion, releaseVersionState } from '@/stores/version'
 import { postLoginPath } from '@/router/guard'
 
 type Phase = 'checking' | 'setup' | 'signin' | 'unavailable'
@@ -65,6 +67,8 @@ const submitLabel = computed(() => t(isSetup.value ? 'login.action.submitSetup' 
 const errorText = computed(() => (errorKey.value !== null ? t(errorKey.value, { min: MIN_PASSWORD_LENGTH }) : ''))
 const noticeText = computed(() => (noticeKey.value !== null ? t(noticeKey.value) : ''))
 const localeLabel = computed(() => (locale.value === 'en-US' ? t('locale.enUS') : t('locale.zhCN')))
+/** 页脚版本 = release 版本（来自 /healthz；未知显示「—」，不拿 webui 版本冒充）。 */
+const releaseVersionText = computed(() => releaseVersionState.label ?? t('common.dash'))
 
 function toggleLocale(): void {
   setLocale(locale.value === 'en-US' ? 'zh-CN' : 'en-US')
@@ -155,9 +159,12 @@ async function submit(): Promise<void> {
 }
 
 onMounted(() => {
-  if (route.query.expired === '1') {
+  if (route.query.changed === '1') {
+    noticeKey.value = 'login.notice.passwordChanged'
+  } else if (route.query.expired === '1') {
     noticeKey.value = 'login.notice.sessionExpired'
   }
+  void loadReleaseVersion()
   void bootstrap()
 })
 </script>
@@ -229,7 +236,7 @@ onMounted(() => {
       </el-form>
 
       <div class="login-card__footer">
-        <span>{{ t('login.footer.version', { version: APP_VERSION }) }}</span>
+        <span>{{ t('login.footer.version', { version: releaseVersionText }) }}</span>
         <span>{{ t('login.footer.build', { id: APP_BUILD_ID }) }}</span>
         <button type="button" class="login-card__locale" @click="toggleLocale">{{ localeLabel }}</button>
       </div>
