@@ -79,6 +79,54 @@ jobs:
           sudo test -x "${current}/bin/khaen-daemon"
           sudo test -x "${current}/bin/khaen-analyze"
           sudo grep -E '^(version|commit):' "${current}/BUILD"
+      # 发布包验收：直接用刚安装的最新 release 的 daemon + release 自带的 smoke-test.sh，
+      # 在 process 目标（无设备/无声）上建会话并跑只读冒烟；验证“包内二进制 + 包内脚本”组合可用，
+      # 而不只是 main 构建的 debug daemon。端口用 18757，避免与前面的 18755 冲突。
+      - name: Validate release package smoke-test (daemon + script from latest release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="$(readlink -f /opt/khaen/current)"
+          echo "release current: ${current}"
+          state_dir="$(mktemp -d)"
+          daemon_log="/tmp/khaen-release-smoke-daemon.log"
+          KHAEN_BIND=127.0.0.1:18757 \
+          KHAEN_STATE_DIR="${state_dir}" \
+          KHAEN_RT_TARGET=process \
+          KHAEN_CAL_BACKEND=off \
+          KHAEN_SPEAKER_TEST=off \
+            "${current}/bin/khaen-daemon" >"${daemon_log}" 2>&1 &
+          daemon_pid=$!
+          cleanup() {
+            kill "${daemon_pid}" 2>/dev/null || true
+            wait "${daemon_pid}" 2>/dev/null || true
+            rm -rf "${state_dir}"
+          }
+          trap cleanup EXIT
+          ready=0
+          for _ in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:18757/healthz >/dev/null 2>&1; then ready=1; break; fi
+            sleep 0.2
+          done
+          if [ "${ready}" != "1" ]; then
+            echo "release daemon did not become ready" >&2
+            cat "${daemon_log}" >&2
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:18757/healthz
+          setup_code="$(curl -sS -o /tmp/khaen-release-smoke-setup.json -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"password":"release-smoke-password","confirm":"release-smoke-password"}' \
+            http://127.0.0.1:18757/api/auth/setup)"
+          echo "auth setup: HTTP ${setup_code}"
+          test "${setup_code}" = "201"
+          KHAEN_SMOKE_PASSWORD=release-smoke-password \
+            bash "${current}/deploy/smoke-test.sh" http://127.0.0.1:18757 1
+          kill "${daemon_pid}" 2>/dev/null || true
+          wait "${daemon_pid}" 2>/dev/null || true
+          trap - EXIT
+          rm -rf "${state_dir}"
       # 回滚脚本也是部署安全路径：在临时 runner 上装“上一个 release + 最新 release”，
       # 写 sentinel 验证 install.sh 不覆盖已有 /etc/khaen/daemon.env，再执行 rollback.sh，
       # 断言 current 回到上一个版本（rollback 会重启 khaen-daemon；runner 是一次性的）。
