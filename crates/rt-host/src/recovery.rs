@@ -287,12 +287,14 @@ fn persist_status<P: PcmOutput>(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
+    let test_tone = bridge.test_tone().map(|slot| slot.as_ref());
     if let Err(error) = write_status_file_ext(
         path,
         &status,
         lifecycle,
         Some(&runtime.config().engine),
         Some(&tracker),
+        test_tone,
     ) {
         eprintln!(
             "khaen-rt-host: cannot write status file {}: {error}",
@@ -510,7 +512,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::io;
     use std::net::Ipv4Addr;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
 
     use khaen_host::aes67_input::Aes67InputConfig;
@@ -542,6 +544,8 @@ mod tests {
         write_ok: Arc<AtomicU32>,
         closed: Arc<AtomicU32>,
         connected: Arc<AtomicBool>,
+        /// 每次写块的模拟耗时（微秒；默认 0，只有需要真实时间进程的测试才设置）。
+        write_sleep_micros: Arc<AtomicU64>,
     }
 
     static REGISTRY: OnceLock<Mutex<Vec<(String, ScriptState)>>> = OnceLock::new();
@@ -617,6 +621,11 @@ mod tests {
             if should_fail {
                 self.state.connected.store(false, Ordering::SeqCst);
                 return Err(PcmError::Fatal("alsa pcm disconnected"));
+            }
+            // 测试专用：让块循环按真实时间推进（看门狗按墙钟轮询 progress 的用例需要）。
+            let sleep_micros = self.state.write_sleep_micros.load(Ordering::SeqCst);
+            if sleep_micros != 0 {
+                std::thread::sleep(Duration::from_micros(sleep_micros));
             }
             self.state.write_ok.fetch_add(1, Ordering::SeqCst);
             Ok(config.block_frames)
@@ -1096,5 +1105,104 @@ mod tests {
             .clone()
             .expect("block loop published a snapshot");
         assert!(snapshot.status.blocks > 375);
+    }
+
+    /// T73 / SPEAKER-MAPPING P3.5：test_tone 经控制核心 -> 块边界命令 -> host 校准播放 seam，
+    /// 在真实 Runtime 块循环里写满整段（只有目标 DAC），播完由看门狗自动 CalPlaybackEnd，
+    /// 数据面回到节目路径（不是靠 stop，也不是留在收尾静音）。
+    #[test]
+    fn control_test_tone_plays_once_and_auto_ends_back_to_program_output() {
+        use std::sync::Mutex as StdMutex;
+
+        use khaen_host::admission::AdmissionLimits;
+        use khaen_host::control::RuntimeMode;
+
+        use crate::control::{ControlCore, ControlCoreConfig};
+
+        let device = format!("rt-host-test-tone-{}", std::process::id());
+        let state = ScriptState::default();
+        // 每块模拟 2 ms 设备写：1 s 块循环约 750 ms 真实时间，看门狗（5 ms 轮询）能在循环
+        // 停止前看到 progress.finished 并自动收尾；真实声卡也是按块阻塞写的。
+        state.write_sleep_micros.store(2_000, Ordering::SeqCst);
+        register_scripted_pcm(&device, &state);
+        let (source, handle) = test_source();
+        for index in 0..256u16 {
+            handle.send(packet(index, u32::from(index) * BLOCK_FRAMES as u32));
+        }
+        let mut runtime =
+            Runtime::<ScriptedPcm>::with_source_deferred(runtime_config(&device), source)
+                .expect("deferred runtime");
+        let engine = runtime.config().engine.clone();
+        let (command_tx, command_rx) = std::sync::mpsc::channel();
+        let snapshot: std::sync::Arc<StdMutex<Option<crate::control::snapshot::RuntimeSnapshot>>> =
+            std::sync::Arc::new(StdMutex::new(None));
+        let mut bridge =
+            crate::control::ControlBridge::new(command_rx, std::sync::Arc::clone(&snapshot), 0);
+        let mut core = ControlCore::new(ControlCoreConfig {
+            data_plane_format: engine.clone(),
+            limits: AdmissionLimits::default(),
+            commands: command_tx,
+            snapshot: std::sync::Arc::clone(&snapshot),
+            mode: RuntimeMode::Aes67,
+            initial_plan: None,
+            initial_version: 0,
+            command_timeout: std::time::Duration::from_secs(2),
+            calibration: None,
+            channels: None,
+            reconfigure: None,
+        });
+        let mut options = LoopOptions {
+            alsa_device: "hw:99".to_string(),
+            proc_asound: std::env::temp_dir().join("khaen-rt-host-tests-no-asound"),
+            status_file: None,
+            run_seconds: 1,
+            stats_every: 0,
+        };
+        // 这段测试音要真实经过时间（看门狗按墙钟 5 ms 轮询 progress）：用真实节拍器跑 1 s，
+        // 逻辑节拍器会让 375 块在几毫秒内跑完，看门狗来不及在块循环停止前收尾。
+        let mut pacer = RealPacer::new();
+        let expected_blocks =
+            (500 * u64::from(engine.sample_rate) / 1000).div_ceil(engine.block_frames as u64);
+
+        let (started, exit, lifecycle) = std::thread::scope(|scope| {
+            let runner = scope
+                .spawn(|| drive_loop_with_control(&mut runtime, &options, &mut pacer, &mut bridge));
+            let started: serde_json::Value = serde_json::from_str(&core.handle_line(
+                r#"{"op":"test_tone","dac":0,"ms":500,"kind":"sine","freq_hz":1000,"audible":true,"confirm":true}"#,
+            ))
+            .expect("test_tone json");
+            let result = runner.join().expect("block loop thread");
+            (started, result.0, result.1)
+        });
+        assert_eq!(
+            started["ok"],
+            serde_json::json!(true),
+            "test_tone rejected: {started}"
+        );
+        assert_eq!(started["total_blocks"], serde_json::json!(expected_blocks));
+        assert_eq!(exit, ExitCode::SUCCESS);
+        assert!(!lifecycle.is_absent());
+        // 播完自动收尾：块循环已回到节目路径（若看门狗没发 end，这里仍会是 active）。
+        assert!(
+            !runtime.calibration_playback_active(),
+            "the speaker test tone must auto-end after it finishes"
+        );
+        assert_eq!(runtime.calibration_playback_progress(), None);
+        let status: serde_json::Value =
+            serde_json::from_str(&core.handle_line(r#"{"op":"status"}"#)).expect("status json");
+        assert_eq!(status["speaker_test"]["active"], serde_json::json!(false));
+        let writes_after_tone = state.write_ok.load(Ordering::SeqCst);
+        assert!(
+            writes_after_tone >= 1,
+            "the block loop must keep writing the device (got {writes_after_tone})"
+        );
+        // 再跑一轮：节目路径确实恢复（块循环继续写设备）。
+        options.run_seconds = 1;
+        let (exit, _) = drive_loop_with_control(&mut runtime, &options, &mut pacer, &mut bridge);
+        assert_eq!(exit, ExitCode::SUCCESS);
+        assert!(
+            state.write_ok.load(Ordering::SeqCst) > writes_after_tone,
+            "program blocks must resume after the speaker test tone auto-ends"
+        );
     }
 }

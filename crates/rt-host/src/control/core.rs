@@ -43,6 +43,7 @@ use super::reconfigure::{
     SharedReconfigure, CHANNELS_OPS,
 };
 use super::snapshot::SharedSnapshot;
+use super::test_tone::{self, TestToneRequest, TestToneSlot};
 
 /// commit/mute 等块边界动作等一次 ack 的上限。
 ///
@@ -150,6 +151,8 @@ pub struct ControlCore {
     gate: Arc<ReconfigGate>,
     /// 热重配追踪器（状态/状态文件同一份）。
     reconfigure: SharedReconfigure,
+    /// 通道识别测试音会话（SPEAKER-MAPPING P3.5）：块线程只拥有 playback；这里只做会话/状态。
+    test_tone: Arc<TestToneSlot>,
 }
 
 impl std::fmt::Debug for ControlCore {
@@ -170,6 +173,7 @@ impl std::fmt::Debug for ControlCore {
             )
             .field("channels", &self.channels)
             .field("gate_busy", &self.gate.is_busy())
+            .field("speaker_test_active", &self.test_tone.active())
             .finish_non_exhaustive()
     }
 }
@@ -189,6 +193,11 @@ fn not_applied(message: impl Into<String>) -> ControlError {
 
 fn admission_rejected(message: impl Into<String>) -> ControlError {
     ControlError::new(error::ADMISSION_REJECTED, message)
+}
+
+/// 测试音忙（稳定码 busy；daemon 映射 HTTP 409）。
+fn test_tone_busy(message: impl Into<String>) -> ControlError {
+    ControlError::new(test_tone::BUSY, message)
 }
 
 /// 草稿编译错误 -> 契约 B 错误码（与 host ControlState 同一映射）。
@@ -255,7 +264,13 @@ impl ControlCore {
             channels,
             gate,
             reconfigure,
+            test_tone: TestToneSlot::shared(),
         }
+    }
+
+    /// 测试音会话槽句柄（main 装配状态文件用；与 status.speaker_test 同一份）。
+    pub fn test_tone_shared(&self) -> Arc<TestToneSlot> {
+        Arc::clone(&self.test_tone)
     }
 
     /// 重配/校准互斥门句柄（测试/诊断用；提交执行期间被占用）。
@@ -412,6 +427,9 @@ impl ControlCore {
             "channels_prepare" => self.channels_prepare(object),
             "channels_commit" => self.channels_commit_json(object),
             "channels_abort" => self.channels_abort_json(object),
+            // 通道识别测试音（SPEAKER-MAPPING P3.5 / API v1.2 §12.2）：复用校准播放 seam。
+            "test_tone" => self.test_tone_start(object),
+            "test_tone_stop" => self.test_tone_stop(),
             other => {
                 if let Some((_, reason)) = NOT_WIRED_OPS.iter().find(|(name, _)| *name == other) {
                     Err(ControlError::new(
@@ -455,6 +473,11 @@ impl ControlCore {
     }
 
     fn cal_enter(&mut self, object: &Map<String, Value>) -> Result<Value, ControlError> {
+        if self.test_tone.active() {
+            return Err(test_tone_busy(
+                "a speaker test tone is playing (busy): cal_enter would start a measurement while the output is playing a test tone; call test_tone_stop first",
+            ));
+        }
         self.calibration_mut()?.enter(object)
     }
 
@@ -475,6 +498,116 @@ impl ControlCore {
         let plan = self.base_plan.clone();
         self.calibration_mut()?.solve(object, plan.as_ref())
     }
+    // ---------------------------------------------------------------
+    // 通道识别测试音（SPEAKER-MAPPING P3.5 / API v1.2 §12.2）
+    // ---------------------------------------------------------------
+
+    /// 忙检查（已有测试音/校准模式/热重配在飞都拒绝；不排队、不叠加）。
+    fn test_tone_busy_now(&self) -> Option<ControlError> {
+        if self.test_tone.active() {
+            return Some(test_tone_busy(
+                "a speaker test tone is already playing (busy): wait for it to finish or call test_tone_stop first",
+            ));
+        }
+        if self.calibration.as_ref().map(CalibrationCore::mode) == Some(CalMode::Calibration) {
+            return Some(test_tone_busy(
+                "in-process calibration mode is active (cal_busy): a speaker test tone would play into a running measurement; call cal_leave first",
+            ));
+        }
+        if self.gate.is_busy() {
+            return Some(test_tone_busy(
+                "a reconfiguration/calibration transition is already in progress (busy): retry after it finishes",
+            ));
+        }
+        let tracker = super::reconfigure::lock_tracker(&self.reconfigure);
+        if tracker.in_flight_token.is_some() {
+            return Some(test_tone_busy(
+                "a hot reconfiguration is in flight (busy): the output device may be reconfigured under the test tone; retry after channels_status shows the result",
+            ));
+        }
+        None
+    }
+
+    /// test_tone：预渲染整段测试音（只有目标 DAC 非零）经块边界交给块线程，登记成功即返回；
+    /// 看门狗在播完后自动 CalPlaybackEnd 恢复节目输出（契约：不得留在播放路径）。
+    fn test_tone_start(&mut self, object: &Map<String, Value>) -> Result<Value, ControlError> {
+        let request = TestToneRequest::parse(object, &self.data_plane_format)?;
+        if let Some(error) = self.test_tone_busy_now() {
+            return Err(error);
+        }
+        let rendered = test_tone::render(&self.data_plane_format, &request)?;
+        let total_blocks = match self.send(|ack| ControlCommand::CalPlaybackBegin {
+            playback: rendered.playback,
+            ack,
+        })? {
+            CommandReply::CalPlaybackStarted { total_blocks } => total_blocks,
+            CommandReply::Rejected { code, message } => {
+                return Err(ControlError::new(code, message))
+            }
+            other => {
+                return Err(not_applied(format!(
+                    "the speaker test tone was not started: the block loop replied with an unexpected receipt: {other:?}"
+                )))
+            }
+        };
+        let (id, progress, cancelled) = self.test_tone.install(
+            &request,
+            rendered.progress,
+            total_blocks,
+            self.data_plane_format.block_frames as u64,
+            self.data_plane_format.sample_rate,
+        );
+        test_tone::spawn_auto_stop(
+            Arc::clone(&self.test_tone),
+            id,
+            progress,
+            cancelled,
+            self.commands.clone(),
+            test_tone::auto_stop_timeout(request.ms),
+        );
+        Ok(json!({
+            "ok": true,
+            "dac": request.dac,
+            "ms": request.ms,
+            "kind": request.kind.as_str(),
+            "freq_hz": request.freq_hz,
+            "level_db": request.level_db,
+            "total_blocks": total_blocks,
+            "remaining_ms": request.ms,
+        }))
+    }
+
+    /// test_tone_stop：幂等；有测试音才发块边界 end，没有就如实回 stopped=false。
+    fn test_tone_stop(&mut self) -> Result<Value, ControlError> {
+        if !self.test_tone.active() {
+            return Ok(json!({
+                "ok": true,
+                "stopped": false,
+                "reason": "no speaker test tone is playing (stop is idempotent)",
+            }));
+        }
+        let reply = self.send(|ack| ControlCommand::CalPlaybackEnd { ack });
+        self.test_tone.cancel_active();
+        match reply {
+            Ok(CommandReply::CalPlaybackEnded { was_active }) => Ok(json!({
+                "ok": true,
+                "stopped": true,
+                "was_active": was_active,
+            })),
+            Ok(CommandReply::Rejected { code, message }) => Err(ControlError::new(code, message)),
+            Ok(other) => Err(not_applied(format!(
+                "the speaker test tone state was cleared, but the block loop replied with an unexpected receipt: {other:?}"
+            ))),
+            Err(error) => Err(ControlError::new(
+                error::NOT_APPLIED,
+                format!(
+                    "the speaker test tone state was cleared, but the block loop did not acknowledge the stop ({}); the block loop may keep writing the tail-silence path until the next accepted block-boundary command",
+                    error.message
+                ),
+            )),
+        }
+    }
+
     // ---------------------------------------------------------------
     // 热重配（M3b）
     // ---------------------------------------------------------------
@@ -572,6 +705,12 @@ impl ControlCore {
             return Err(ControlError::new(
                 super::cal::error::BUSY,
                 "in-process calibration mode is active (cal_busy): channels_commit would reconfigure the output device under a calibration session; call cal_leave first",
+            ));
+        }
+        // 与测试音互斥（SPEAKER-MAPPING P3.5）：测试音在播时换设备会打断/爆音。
+        if self.test_tone.active() {
+            return Err(test_tone_busy(
+                "a speaker test tone is playing (busy): channels_commit would reconfigure the output device under it; call test_tone_stop first",
             ));
         }
         // 幂等重放 / 单活动。
@@ -683,6 +822,7 @@ impl ControlCore {
         if self.channels.is_some() {
             wired.extend_from_slice(CHANNELS_OPS);
         }
+        wired.extend_from_slice(test_tone::TEST_TONE_OPS);
         wired
     }
 
@@ -782,6 +922,7 @@ impl ControlCore {
                 "not_wired": self.not_wired_json(),
                 "calibration": self.calibration_json(),
                 "reconfigure": self.reconfigure_json(),
+                "speaker_test": self.test_tone.status_json(),
                 "surfaces": surfaces_json(),
                 "surface_reasons": surface_reasons_json(),
                 "age_ms": Value::Null,
@@ -901,6 +1042,7 @@ impl ControlCore {
             "not_wired": self.not_wired_json(),
             "calibration": self.calibration_json(),
             "reconfigure": self.reconfigure_json(),
+            "speaker_test": self.test_tone.status_json(),
             "surfaces": surfaces_json(),
             "surface_reasons": surface_reasons_json(),
             "age_ms": snapshot.age_ms(),
@@ -977,19 +1119,40 @@ impl ControlCore {
             None => return Err(bad_request("missing field: mute")),
         };
         let reply = self.send(|ack| ControlCommand::Mute { mute, ack })?;
-        match reply {
+        let mut response = match reply {
             CommandReply::Mute {
                 mute,
                 applied_block,
                 idempotent,
-            } => Ok(json!({
+            } => json!({
                 "ok": true,
                 "mute": mute,
                 "applied_block": applied_block,
                 "idempotent": idempotent,
-            })),
-            other => Err(unexpected_reply(other)),
+            }),
+            other => return Err(unexpected_reply(other)),
+        };
+        // 安全约束（SPEAKER-MAPPING P3.5）：/api/mute 必须能立即打断测试音。测试音走校准
+        // 播放路径（用户静音标志不影响它），所以静音生效后在这里显式结束播放。
+        if mute && self.test_tone.active() {
+            match self.send(|ack| ControlCommand::CalPlaybackEnd { ack }) {
+                Ok(CommandReply::CalPlaybackEnded { .. }) => {
+                    self.test_tone.cancel_active();
+                    response["speaker_test_stopped"] = json!(true);
+                }
+                Ok(other) => return Err(unexpected_reply(other)),
+                Err(error) => {
+                    return Err(ControlError::new(
+                        error::NOT_APPLIED,
+                        format!(
+                            "mute is applied, but the speaker test tone could not be ended ({}); status still reports the tone so a stop can be retried",
+                            error.message
+                        ),
+                    ))
+                }
+            }
         }
+        Ok(response)
     }
 
     /// 模式界面第一阶段（surface=mode）：校验目标模式 -> 存草稿；commit 才在块边界生效。

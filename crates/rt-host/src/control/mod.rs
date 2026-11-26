@@ -51,6 +51,7 @@ pub mod command;
 pub mod core;
 pub mod reconfigure;
 pub mod snapshot;
+pub mod test_tone;
 pub mod transport;
 
 #[cfg(unix)]

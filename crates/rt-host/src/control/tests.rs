@@ -159,6 +159,12 @@ fn malformed_requests_get_stable_error_codes() {
         .contains("exceeds"));
 }
 
+fn expected_wired() -> Value {
+    let mut wired = WIRED_OPS.to_vec();
+    wired.extend(crate::control::test_tone::TEST_TONE_OPS);
+    json!(wired)
+}
+
 #[test]
 fn status_before_first_snapshot_is_honest() {
     let mut harness = Harness::new();
@@ -172,7 +178,7 @@ fn status_before_first_snapshot_is_honest() {
         "pending snapshot must have a reason: {response}"
     );
     // 能力列表不依赖快照：wired 完整、surfaces 全 true。
-    assert_eq!(response["wired"], json!(WIRED_OPS));
+    assert_eq!(response["wired"], expected_wired());
     for surface in ["volume", "routing", "layout", "format", "mode"] {
         assert_eq!(
             response["surfaces"][surface],
@@ -203,7 +209,7 @@ fn status_reports_snapshot_fields_capabilities_and_age() {
     assert_eq!(response["silent"], json!(false));
     assert_eq!(response["safe_mode"], json!(false));
     assert_eq!(response["mode"], json!("aes67"));
-    assert_eq!(response["wired"], json!(WIRED_OPS));
+    assert_eq!(response["wired"], expected_wired());
     assert_calibration_disabled(&response);
     // 没有已生效方案：图字段为 null 且必须给原因，不允许编数。
     assert_eq!(response["graph_id"], Value::Null);

@@ -544,7 +544,7 @@ mod app {
         status: &RuntimeStatus,
         lifecycle: &DeviceLifecycle,
     ) -> std::io::Result<()> {
-        write_status_file_ext(path, status, lifecycle, None, None)
+        write_status_file_ext(path, status, lifecycle, None, None, None)
     }
 
     /// 增量版状态文件写入：`format`（数据面块长/速率/通道）与 `reconfigure`（M3b 热重配
@@ -555,6 +555,7 @@ mod app {
         lifecycle: &DeviceLifecycle,
         format: Option<&EngineConfig>,
         reconfigure: Option<&crate::control::ReconfigureTracker>,
+        test_tone: Option<&crate::control::test_tone::TestToneSlot>,
     ) -> std::io::Result<()> {
         let graph_id = match status.graph.graph_id.as_deref() {
             Some(id) => json_string(id),
@@ -599,6 +600,11 @@ mod app {
             Some(tracker) => tracker.status_json().to_string(),
             None => "null".to_string(),
         };
+        // 通道识别测试音（加法字段；没有控制通道时为 null，读方按不可用处理）。
+        let test_tone_json = match test_tone {
+            Some(slot) => slot.status_json().to_string(),
+            None => "null".to_string(),
+        };
         // T41：ASRC 状态（未启用为 null；纯增量字段，旧读方忽略即可）。
         let asrc_json = match status.input.asrc {
             Some(asrc) => {
@@ -623,7 +629,7 @@ mod app {
                 "\"receiver\":{{\"packets_received\":{},\"queue_full_drops\":{},\"recv_errors\":{}}},",
                 "\"graph_id\":{},\"last_error\":{},",
                 "\"device_state\":\"{}\",\"absent_since\":{},\"reopen_attempts\":{},\"last_device_error\":{},",
-                "\"format\":{},\"reconfigure\":{}}}\n"
+                "\"format\":{},\"reconfigure\":{},\"speaker_test\":{}}}\n"
             ),
             status.blocks,
             status.state.as_str(),
@@ -650,7 +656,8 @@ mod app {
             lifecycle.reopen_attempts(),
             last_device_error,
             format_json,
-            reconfigure_json
+            reconfigure_json,
+            test_tone_json
         );
         let temporary = path.with_extension("tmp");
         std::fs::write(&temporary, json.as_bytes())?;
@@ -852,6 +859,9 @@ mod app {
                 channels: Some(channels),
                 reconfigure: Some(std::sync::Arc::clone(&reconfigure)),
             });
+            // 测试音会话槽：状态文件/桥读同一份（只有控制通道起来后才有）。
+            let test_tone_shared: std::sync::Arc<crate::control::test_tone::TestToneSlot> =
+                core.test_tone_shared();
             let core = Arc::new(Mutex::new(core));
             let core_handle = Arc::clone(&core);
             match crate::control::start(&settings.control, core) {
@@ -865,7 +875,8 @@ mod app {
                     }
                     control_server = Some(server);
                     bridge = ControlBridge::new(command_rx, snapshot, settings.stats_every)
-                        .with_reconfigure(std::sync::Arc::clone(&reconfigure));
+                        .with_reconfigure(std::sync::Arc::clone(&reconfigure))
+                        .with_test_tone(std::sync::Arc::clone(&test_tone_shared));
                 }
                 Err(err) => {
                     eprintln!(
@@ -1044,12 +1055,24 @@ mod tests {
             sample_rate: 48_000,
             channels: 4,
         };
+        // 测试音会话槽（active 状态）：状态文件同样要上报 speaker_test 增量字段。
+        let test_tone = crate::control::test_tone::TestToneSlot::shared();
+        let progress = std::sync::Arc::new(khaen_host::runtime::CalibrationProgress::new(10));
+        let request = crate::control::test_tone::TestToneRequest {
+            dac: 3,
+            ms: 1_000,
+            kind: crate::control::test_tone::TestToneKind::Sine,
+            freq_hz: Some(1_000.0),
+            level_db: -30.0,
+        };
+        test_tone.install(&request, progress, 10, 128, 48_000);
         app::write_status_file_ext(
             &path,
             &status(),
             &DeviceLifecycle::new(),
             Some(&format),
             Some(&tracker),
+            Some(&test_tone),
         )
         .expect("write status file with deltas");
         let text = std::fs::read_to_string(&path).expect("read status file");
@@ -1072,6 +1095,11 @@ mod tests {
             doc["reconfigure"]["last_result"]["note"],
             serde_json::json!("\"quoted\" 文本要正确转义")
         );
+        // 测试音增量字段：只有目标 DAC + 种类 + 剩余时间。
+        assert_eq!(doc["speaker_test"]["active"], serde_json::json!(true));
+        assert_eq!(doc["speaker_test"]["dac"], serde_json::json!(3));
+        assert_eq!(doc["speaker_test"]["kind"], serde_json::json!("sine"));
+        assert_eq!(doc["speaker_test"]["remaining_ms"], serde_json::json!(26));
 
         // 旧入口（不带增量参数）仍写 `null`，老调用方/测试行为不变。
         app::write_status_file(&path, &status(), &DeviceLifecycle::new())
@@ -1081,6 +1109,7 @@ mod tests {
         let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
         assert!(doc["format"].is_null());
         assert!(doc["reconfigure"].is_null());
+        assert!(doc["speaker_test"].is_null());
     }
 
     #[test]

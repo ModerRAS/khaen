@@ -32,6 +32,8 @@ pub struct ControlBridge {
     publish_period_ms: Option<u64>,
     /// 热重配追踪器（块线程执行 channels_commit 时写；控制线程/状态文件读）。
     reconfigure: SharedReconfigure,
+    /// 测试音会话槽（状态文件 speaker_test 增量字段读；与会话核心同一份）。
+    test_tone: Option<Arc<crate::control::test_tone::TestToneSlot>>,
 }
 
 impl ControlBridge {
@@ -44,6 +46,7 @@ impl ControlBridge {
             published_blocks: 0,
             publish_period_ms: None,
             reconfigure: shared_tracker(),
+            test_tone: None,
         }
     }
 
@@ -60,7 +63,22 @@ impl ControlBridge {
             published_blocks: 0,
             publish_period_ms: None,
             reconfigure: shared_tracker(),
+            test_tone: None,
         }
+    }
+
+    /// 用共享的测试音会话槽（与 ControlCore/状态文件同一份；main 装配用）。
+    pub fn with_test_tone(
+        mut self,
+        test_tone: Arc<crate::control::test_tone::TestToneSlot>,
+    ) -> Self {
+        self.test_tone = Some(test_tone);
+        self
+    }
+
+    /// 测试音会话槽句柄（状态文件写 speaker_test 用）。
+    pub fn test_tone(&self) -> Option<&Arc<crate::control::test_tone::TestToneSlot>> {
+        self.test_tone.as_ref()
     }
 
     /// 用共享的热重配追踪器（与 ControlCore/状态文件同一份；main 装配用）。
