@@ -26,3 +26,37 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+
+  webui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Test
+        run: pnpm test
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: i18n parity
+        run: pnpm i18n:check
+      - name: Build
+        run: pnpm build
+      - name: Committed dist is up to date
+        working-directory: .
+        run: |
+          if [ -n "$(git status --porcelain -- webui/dist)" ]; then
+            echo "webui/dist is stale: run 'pnpm build' in webui and commit the result"
+            git status --short -- webui/dist
+            exit 1
+          fi
