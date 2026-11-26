@@ -58,6 +58,27 @@ jobs:
             -d '{"password":"smoke-test-password","confirm":"smoke-test-password"}' \
             "http://127.0.0.1:$port/api/auth/setup" >/dev/null
           KHAEN_SMOKE_PASSWORD=smoke-test-password bash deploy/smoke-test.sh "http://127.0.0.1:$port" 1
+      # 安装脚本是部署的第一道门：用最新已发布 release 包在临时 runner 上真实执行一次
+      # （--no-restart：不启动/重启任何服务，不碰设备），校验 manifest/BUILD/校验和、
+      # release 目录与 current 符号链接。避免设备上才发现 installer 坏了。
+      - name: Validate deploy/install.sh against the latest release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="$(gh release view --json tagName -q .tagName)"
+          echo "latest release: ${latest}"
+          mkdir -p /tmp/khaen-installer
+          gh release download "${latest}" --pattern '*linux-x86_64.tar.gz*' --dir /tmp/khaen-installer
+          tarfile="$(ls /tmp/khaen-installer/khaen-*-linux-x86_64.tar.gz)"
+          echo "installing ${tarfile}"
+          sudo bash deploy/install.sh "${tarfile}" --no-restart
+          current="$(readlink -f /opt/khaen/current)"
+          echo "current: ${current}"
+          test -n "${current}"
+          sudo test -x "${current}/bin/khaen-daemon"
+          sudo test -x "${current}/bin/khaen-analyze"
+          sudo grep -E '^(version|commit):' "${current}/BUILD"
 
   webui:
     runs-on: ubuntu-latest
