@@ -293,12 +293,29 @@ mod tests {
                     }
                 }
             }
+            // 客户端帧可能晚于本线程的下一次 read（Linux/Windows 调度差异）：用截止时间轮询，
+            // 不用一次 read 赌时序（原来的单次 read 在 CI 上偶发空 data，误报失败）。
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
             let mut response_bytes = Vec::new();
             let mut chunk = [0u8; 1024];
-            if let Ok(count) = stream.read(&mut chunk) {
-                decoder.push(&chunk[..count]);
-                while let Some(frame) = decoder.next_frame().expect("decode") {
-                    response_bytes.extend_from_slice(&frame.payload);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while response_bytes.is_empty() && Instant::now() < deadline {
+                match stream.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        decoder.push(&chunk[..count]);
+                        while let Some(frame) = decoder.next_frame().expect("decode") {
+                            if frame.opcode == Opcode::Binary {
+                                response_bytes.extend_from_slice(&frame.payload);
+                            }
+                        }
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) => {}
+                    Err(_) => break,
                 }
             }
             assert_eq!(response_bytes, b"write".to_vec());
