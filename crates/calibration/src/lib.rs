@@ -4,12 +4,17 @@
 //! 迁自 v1 `khaen-calibration` + `khaen-cal-dsp`（`legacy/pre-rewrite`）。本 crate 只含
 //! 纯离线数学与契约层：不打开声卡、不依赖 host/daemon、不读仓库外路径。
 //!
-//! **未迁入**（依赖重写中的 host/core，见迁移报告）：`capture`（T62 UMIK 采集）、
-//! `stage_backend`（T67 stage 测量后端）、`measured_design`/`fit_wiring`/`host_apply`
-//! （T67/T70/T76 接线）、`compile_apply`/`peq_plan`（T66 plan 编译/应用）、以及 CLI bin。
-//! 这些模块需要 v1 core 的 plan ABI v1/v2 与 factorized/fused compile 引擎、v1 rt-host 的
-//! admission/swap、以及 v1 compat 的 JSON 层；新仓的 core（T10，方案 v3 ABI）与 host（T20+）
-//! 只提供 v2 契约，不含这些 v1 实现，故按任务规则不复制（见迁移报告"需要 core 提供什么"）。
+//! **T70h-a 回迁 spike（capture/时基/测量骨架）**：`capture`（T62 UMIK 采集）、
+//! `stage_backend`（T67 stage 测量后端，Fake/Tools 引擎）、rt-host 的 `clock`/`format`
+//! 经 `legacy_clock`/`legacy_format` 原样迁入；v2 core 缺的 v1 硬件 ABI/RT 错误码/控制块
+//! 由 `legacy_contract` 契约替身承接（正式迁移应换 v3 类型后删除）。旧 Plan(compile/apply)
+//! 路径按任务卡先 stub 成 `E_STAGE_NOT_WIRED`（T76 未迁入）。
+//!
+//! **仍未迁入**（依赖重写中的 host/core，见迁移报告）：`measured_design`/`fit_wiring`/
+//! `host_apply`（T67/T70/T76 接线）、`compile_apply`/`peq_plan`（T66 plan 编译/应用）、
+//! 以及 CLI bin。这些模块需要 v1 core 的 plan ABI v1/v2 与 factorized/fused compile 引擎、
+//! v1 rt-host 的 admission/swap、以及 v1 compat 的 JSON 层；新仓的 core（T10，方案 v3 ABI）
+//! 与 host（T20+）只提供 v2 契约，不含这些 v1 实现，故按任务规则不复制（见迁移报告）。
 //!
 //! RT 常量与块描述统一来自 `khaen_core::rt`（v2 唯一来源，不再本地镜像）。
 
@@ -24,10 +29,13 @@
     clippy::doc_lazy_continuation,
     clippy::explicit_auto_deref,
     clippy::field_reassign_with_default,
+    clippy::large_enum_variant,
     clippy::len_zero,
     clippy::let_and_return,
     clippy::manual_clamp,
+    clippy::manual_contains,
     clippy::manual_div_ceil,
+    clippy::manual_range_contains,
     clippy::manual_is_multiple_of,
     clippy::manual_memcpy,
     clippy::needless_borrows_for_generic_args,
@@ -37,7 +45,9 @@
     clippy::redundant_closure,
     clippy::single_match,
     clippy::too_many_arguments,
-    clippy::unnecessary_map_or
+    clippy::unnecessary_cast,
+    clippy::unnecessary_map_or,
+    clippy::while_let_loop
 )]
 
 pub mod band_levels;
@@ -62,8 +72,12 @@ pub mod single_point_scene;
 pub mod sweep;
 pub mod wav;
 
-#[path = "capture_consts.rs"]
 pub mod capture;
+pub mod stage_backend;
+
+pub(crate) mod legacy_clock;
+pub(crate) mod legacy_contract;
+pub(crate) mod legacy_format;
 
 pub use band_levels::{
     band_powers, relative_band_levels, BandLevelsConfig, BandLevelsError,
