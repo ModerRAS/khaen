@@ -18,6 +18,18 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # 发布包里的 deploy/*.sh 会被设备直接执行（install/rollback/smoke-test）；
+      # git 若丢了 +x，Linux 上会 Permission denied。这里锁住 git mode=100755。
+      - name: Deploy scripts are executable
+        run: |
+          set -euo pipefail
+          for script in deploy/*.sh; do
+            mode="$(git ls-files -s "$script" | cut -d' ' -f1)"
+            if [ "$mode" != "100755" ]; then
+              echo "$script is $mode (expected 100755); run: git update-index --chmod=+x $script" >&2
+              exit 1
+            fi
+          done
       - name: System deps (ALSA dev headers for alsa-sys)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Format
