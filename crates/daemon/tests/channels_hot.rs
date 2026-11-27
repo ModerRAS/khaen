@@ -187,6 +187,25 @@ async fn get_channels_reports_the_rt_host_aes67_input_provenance() {
             .contains_key("input.sdp_sha256"),
         "provenance must remove the input.sdp_sha256 reason: {body}"
     );
+
+    // manual：没有 SDP 文件，sdp_sha256 必须 null 且给明确原因（不是缺数据源）。
+    let mut manual = channels_status_document();
+    manual["input_source"] = json!({ "source": "manual", "sdp_sha256": Value::Null });
+    let fake = FakeTransport::with_rt_status_and_channels(rt_status(&graph_id, 4), manual);
+    let link = support::injected_link(Arc::clone(&fake));
+    let server = support::spawn_with_link(link, None).await;
+    let response = support::request(&server, "GET", "/api/channels").await;
+    assert_eq!(response.status, 200, "{}", response.body_text());
+    let body = response.json();
+    assert_eq!(body["input"]["source"], json!("manual"));
+    assert!(body["input"]["sdp_sha256"].is_null());
+    assert!(
+        body["reasons"]["input.sdp_sha256"]
+            .as_str()
+            .expect("manual sdp reason")
+            .contains("manually"),
+        "manual must explain why sdp_sha256 is null: {body}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
