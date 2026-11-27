@@ -248,13 +248,16 @@ pub fn generate(
         detail: format!("{} lanes do not fit the ABI v3 u16 lane count", lanes.len()),
     })?;
     let routes: Vec<(u16, u16)> = lanes.iter().map(|lane| (lane.lane, lane.dac)).collect();
-    let builder = PlanBuilder::new(PlanConfig::new(
+    // IO I1：content 容器宽度跟随 profile.input_channels，routing 输出宽度跟随
+    // profile.device_channels；两者不再强制相等。
+    let builder = PlanBuilder::new(PlanConfig::new_split(
         u32::try_from(config.block_frames).unwrap_or(u32::MAX),
         config.sample_rate,
+        profile.input_channels,
         profile.device_channels,
     ))
     .set_content(ContentSection {
-        in_channels: profile.device_channels,
+        in_channels: profile.input_channels,
         out_lanes: lane_count,
         folds,
     })

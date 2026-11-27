@@ -13,6 +13,7 @@ const messages = {
   localDraftHint: "This is a local draft (default 2.0 or the last snapshot), not the saved profile.",
   reload: "Reload",
   saved: "Saved",
+  inputChannels: "Input channels",
   deviceChannels: "Device channels",
   planLanes: "Plan lanes",
   graphId: "Plan graph",

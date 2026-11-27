@@ -2,6 +2,8 @@
 //!
 //! - outputs 行数 = device.channels（缺省 22；1..=22）：{dac, enabled, role, gain_db, custom_label}；
 //!   enabled=false 的行在规范化时把 role 收成 None（禁用行不产生 lane）。
+//! - inputs.channels：输入容器宽度（1..=MAX_INPUT_CHANNEL），与 device.channels（物理输出行数）
+//!   分开；plan 的 content.in_channels 跟随它。
 //! - inputs.sources：aes67（RTP 流）与 device（声卡采集：模拟 + 光口都算）两类，
 //!   各自可启用、每通道一个角色标签，引擎按角色自动 fan-out / 求和。
 //! - downmix：缺 C -> C 输入下混到 L/R；缺 LFE/Sub -> LFE 输入分配到其它 lane。
@@ -26,8 +28,11 @@ pub const DEVICE_CHANNELS: u16 = 22;
 pub const MAX_DEVICE_CHANNELS: u16 = 22;
 /// downmix 默认增益（dB）。
 pub const DEFAULT_DOWNMIX_GAIN_DB: f32 = -3.0;
-/// 输入源通道上限（source.channels / fold.src 必须 < 设备通道数，且 <= ABI 输入上限）。
-pub const MAX_INPUT_CHANNEL: u16 = DEVICE_CHANNELS;
+/// 输入源通道上限（source.channels / fold.src 必须 < inputs.channels）。
+///
+/// 输入宽度与物理输出宽度已经解耦（IO I1），因此这里不再复用 DEVICE_CHANNELS（22）；
+/// 上限与 host 准入默认的输入通道预算一致（256），避免把输入写死成 22。
+pub const MAX_INPUT_CHANNEL: u16 = 256;
 
 /// 角色枚举（canonical 19 个；顺序即 §12.1 的 lane 排序：地面 -> 低频 -> 天空 -> 其它）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -384,6 +389,8 @@ pub struct Lane {
 /// 完整 profile。
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioProfile {
+    /// 输入容器宽度（1..=MAX_INPUT_CHANNEL；缺省 = device_channels，兼容旧 profile）。
+    pub input_channels: u16,
     /// 设备通道数（1..=22；缺省 22）。
     pub device_channels: u16,
     /// device_channels 行物理输出。
@@ -425,6 +432,7 @@ impl AudioProfile {
             .collect();
         outputs.sort_by_key(|row| row.dac);
         Self {
+            input_channels: device_channels,
             device_channels,
             outputs,
             sources: default_sources(device_channels),
@@ -609,16 +617,18 @@ impl AudioProfile {
             }
         }
         let device_channels = parse_device_channels(object.get("device"))?;
+        let input_channels = parse_input_channels(object.get("inputs"), device_channels)?;
         let outputs = canonical_outputs(parse_outputs(object.get("outputs"))?, device_channels);
         let sources = match object.get("inputs") {
-            None => default_sources(device_channels),
+            None => default_sources(input_channels),
             Some(inputs) => {
-                canonical_sources(parse_sources(inputs, device_channels)?, device_channels)
+                canonical_sources(parse_sources(inputs, input_channels)?, input_channels)
             }
         };
         let downmix = parse_downmix(object.get("downmix"))?;
         let fanout = parse_fanout(object.get("fanout"))?;
         Ok(Self {
+            input_channels,
             device_channels,
             outputs,
             sources,
@@ -634,6 +644,7 @@ impl AudioProfile {
             "device": { "channels": self.device_channels },
             "outputs": self.outputs.iter().map(output_json).collect::<Vec<_>>(),
             "inputs": {
+                "channels": self.input_channels,
                 "sources": self.sources.iter().map(source_json).collect::<Vec<_>>(),
             },
             "downmix": {
@@ -765,6 +776,35 @@ impl AudioProfile {
                 "outputs",
                 "all physical outputs are disabled: at least one speaker must be enabled",
             ));
+        }
+
+        // IO I1：输入容器宽度与物理输出行数分开校验。
+        if self.input_channels == 0 {
+            errors.push(Issue::new(
+                "input_channels_zero",
+                "inputs.channels",
+                "inputs.channels must be positive",
+            ));
+        }
+        for source in &self.sources {
+            for channel in &source.channels {
+                if channel.channel >= self.input_channels {
+                    errors.push(Issue::new(
+                        "input_channel_out_of_range",
+                        format!(
+                            "inputs.sources[{}].channels[{}]",
+                            source.kind.as_str(),
+                            channel.channel
+                        ),
+                        format!(
+                            "input channel {} is outside 0..{} (inputs.channels = {})",
+                            channel.channel,
+                            self.input_channels.saturating_sub(1),
+                            self.input_channels
+                        ),
+                    ));
+                }
+            }
         }
 
         let lanes = self.enabled_lanes();
@@ -983,6 +1023,35 @@ fn source_json(source: &InputSource) -> Value {
     })
 }
 
+/// 解析 inputs.channels；缺省 = device_channels（旧 profile 兼容：当时输入宽度跟随设备行数）。
+fn parse_input_channels(inputs: Option<&Value>, device_channels: u16) -> Result<u16, ParseError> {
+    let Some(inputs) = inputs else {
+        return Ok(device_channels);
+    };
+    let object = inputs
+        .as_object()
+        .ok_or_else(|| ParseError::new("profile.inputs", "inputs must be an object"))?;
+    let Some(channels) = object.get("channels") else {
+        return Ok(device_channels);
+    };
+    let channels = integer_field(channels, "profile.inputs.channels")?;
+    let channels = u16::try_from(channels).map_err(|_| {
+        ParseError::new(
+            "profile.inputs.channels",
+            "input channel count does not fit u16",
+        )
+    })?;
+    if channels == 0 || channels > MAX_INPUT_CHANNEL {
+        return Err(ParseError::new(
+            "profile.inputs.channels",
+            format!(
+                "input channel count {channels} is outside 1..={MAX_INPUT_CHANNEL}; inputs.channels is the plan content container width, independent of device.channels"
+            ),
+        ));
+    }
+    Ok(channels)
+}
+
 fn parse_device_channels(value: Option<&Value>) -> Result<u16, ParseError> {
     let Some(value) = value else {
         return Ok(DEVICE_CHANNELS);
@@ -1174,7 +1243,7 @@ fn canonical_outputs(rows: Vec<OutputRow>, device_channels: u16) -> Vec<OutputRo
     outputs
 }
 
-fn parse_sources(inputs: &Value, device_channels: u16) -> Result<Vec<InputSource>, ParseError> {
+fn parse_sources(inputs: &Value, input_channels: u16) -> Result<Vec<InputSource>, ParseError> {
     let object = inputs
         .as_object()
         .ok_or_else(|| ParseError::new("profile.inputs", "inputs must be an object"))?;
@@ -1248,12 +1317,12 @@ fn parse_sources(inputs: &Value, device_channels: u16) -> Result<Vec<InputSource
                 let channel = u16::try_from(channel).map_err(|_| {
                     ParseError::new(&channel_field, "input channel index out of range")
                 })?;
-                if channel >= device_channels || channel >= MAX_INPUT_CHANNEL {
+                if channel >= input_channels || channel >= MAX_INPUT_CHANNEL {
                     return Err(ParseError::new(
                         &channel_field,
                         format!(
-                            "input channel {channel} is outside 0..{}: the plan content container has {device_channels} channel(s) (device.channels), and the ABI input cap is {MAX_INPUT_CHANNEL}",
-                            device_channels.min(MAX_INPUT_CHANNEL).saturating_sub(1)
+                            "input channel {channel} is outside 0..{}: the plan content container has {input_channels} channel(s) (inputs.channels), and the ABI input cap is {MAX_INPUT_CHANNEL}",
+                            input_channels.min(MAX_INPUT_CHANNEL).saturating_sub(1)
                         ),
                     ));
                 }
@@ -1282,7 +1351,7 @@ fn parse_sources(inputs: &Value, device_channels: u16) -> Result<Vec<InputSource
 }
 
 /// 规范化 sources：两类来源各一条（缺的补默认禁用配置）、按 kind 排序、通道按序号排序。
-fn canonical_sources(sources: Vec<InputSource>, device_channels: u16) -> Vec<InputSource> {
+fn canonical_sources(sources: Vec<InputSource>, input_channels: u16) -> Vec<InputSource> {
     let mut by_kind: BTreeMap<SourceKind, InputSource> = BTreeMap::new();
     for source in sources {
         by_kind.insert(source.kind, source);
@@ -1291,7 +1360,7 @@ fn canonical_sources(sources: Vec<InputSource>, device_channels: u16) -> Vec<Inp
     for kind in SourceKind::ALL {
         let mut source = by_kind
             .remove(&kind)
-            .unwrap_or_else(|| default_source(kind, false, device_channels));
+            .unwrap_or_else(|| default_source(kind, false, input_channels));
         source.channels.sort_by_key(|channel| channel.channel);
         canonical.push(source);
     }

@@ -158,6 +158,7 @@ test('parseAudioProfileSnapshot normalizes a full document', () => {
     },
     plan: { lanes: 2, enabled_outputs: 2, dac_channels: 22, graph_id: 'graph-1' }
   })
+  assert.equal(snapshot.profile?.inputs.channels, 22)
   assert.equal(snapshot.profile?.inputs.sources[0].kind, 'aes67')
   assert.equal(snapshot.capability.aes67.channel_order_source, 'sdp')
   assert.equal(snapshot.capability.device_inputs.optical_mode, 'adat')

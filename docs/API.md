@@ -255,7 +255,7 @@
 }
 ```
 - 角色 canonical（19 个）：`L,R,C,Lw,Rw,Ls,Rs,Lb,Rb,LFE,Sub,Tfl,Tfr,Tml,Tmr,Trl,Trr,Custom,None`；地面最多 9、天空最多 6（9.1.6 上限）；**同角色可重复任意多只**；显示名走 i18n（`speakerRole.*`），代码只用 canonical。
-- `device.channels` 可选 1–22，缺省 22（MOTU 默认）；不是固定值。`outputs` 行数 = `device.channels`（缺省 22 行），`enabled=false` 时 role 必须为 `None`；结构性错误只有：启用但角色 None、dac 越界、全部禁用、Custom 无 custom_label。重复角色、缺少角色都**不是错误**（缺少只给 informational warning）。**注意**：plan ABI v3 本身支持输入/输出宽度解耦（`content.in_channels` 与 `routing.dac_channels` 是两个字段），host/plan-builder 自 IO I1 起按这两个宽度分别校验；但 daemon 的 audio profile 这一层目前仍用 `device.channels` 描述物理输出行数，输入通道号也沿用同一上限，因此 daemon 生成的方案仍是 `content.in_channels = routing.dac_channels = device.channels`。真正的 2 输入 / 22 输出方案需要 rt-host 侧 `KHAEN_INPUT_CHANNELS` / `KHAEN_OUTPUT_CHANNELS` 与手写/校准生成的方案；profile 的独立输入宽度归后续 IO/UI 工作。
+- `device.channels` 可选 1–22，缺省 22（MOTU 默认）；不是固定值。`outputs` 行数 = `device.channels`（缺省 22 行），`enabled=false` 时 role 必须为 `None`；结构性错误只有：启用但角色 None、dac 越界、全部禁用、Custom 无 custom_label。重复角色、缺少角色都**不是错误**（缺少只给 informational warning）。**注意**：plan ABI v3 本身支持输入/输出宽度解耦（`content.in_channels` 与 `routing.dac_channels` 是两个字段）；IO I1 起 daemon profile 也把输入宽度独立成 `inputs.channels`（1..=256，缺省 = `device.channels` 以兼容旧 profile），plan 生成用 `content.in_channels = inputs.channels`、`routing.dac_channels = device.channels`。因此 2 输入 / 22 输出方案可直接由 profile 生成；rt-host 侧仍需 `KHAEN_INPUT_CHANNELS=2 KHAEN_OUTPUT_CHANNELS=22`（或 SDP）与之一致。
 - `inputs.sources`：`aes67`（RTP 流，当前 2ch）与 `device`（声卡采集通道，**模拟输入和光口都算声卡输入**，按设备实际采集通道列出）。每通道一个角色标签；**两个源可同时启用、各自设成相同的声道布局**，进引擎后按角色**自动求和混音**（每源可选 `gain_db`，默认 0）。AES67 通道顺序**优先取 SDP `channel-order=SMPTE2110.(...)`**（NSP 已发 M/ST/51/71/Uxx），取不到用预设顺序（5.1/7.1 = L,R,C,LFE,Ls,Rs[,Lb,Rb]；天空前→中→后：Tfl,Tfr,Tml,Tmr,Trl,Trr）。
 - `downmix` / `fanout` / `preset` 均可选；缺省值见 §12.6，全部可配置（UI 给选项，默认值如下）。
 
@@ -274,7 +274,7 @@
 - 错误语义：`bad_request` 400（结构错误/参数越界/未带 `audible`+`confirm`）、`busy` 409（校准或热重配中）、`sound_window_closed` 403（配置了 `KHAEN_SOUND_WINDOW` 且在窗口外）、`not_wired` 503（后端/rt-host 未接线）。
 
 ### 12.3 方案生成语义（profile → plan）
-1. 启用输出按 canonical 角色顺序排序为 lane 0..N-1（同角色内按 DAC 升序）；`content.in_channels=device.channels`、`out_lanes=N`、`crossover/matrix/protection.lanes=N`、`routing.dac_channels=device.channels`，routes 为 N 条启用行；未启用 DAC **不进路由、不写 CueMix、不做特殊静音**（输出缓冲自然为零）。
+1. 启用输出按 canonical 角色顺序排序为 lane 0..N-1（同角色内按 DAC 升序）；`content.in_channels=inputs.channels`、`out_lanes=N`、`crossover/matrix/protection.lanes=N`、`routing.dac_channels=device.channels`，routes 为 N 条启用行；未启用 DAC **不进路由、不写 CueMix、不做特殊静音**（输出缓冲自然为零）。
 2. folds：已启用输入通道按角色 fan-out 到同角色所有 lane（默认 gain 1.0，乘该源 `gain_db`；AES67 与声卡输入同角色自动求和）；缺 C → C 输入额外 fold 到 L/R lane（每 lane 用 `downmix.center.gain_db`）；缺 LFE/Sub → LFE 输入额外 fold 到其它所有启用 lane（`downmix.lfe.gain_db`，`include_heights` 默认 false）——下混只在 folds 增益层，不占矩阵。
 3. `fanout.mode`：`unity`（默认，每 lane 1.0）或 `group`（同角色组按 1/√N 归一化，给被动并联音箱用）。
 4. 生成预览必须列出真实 fold 列表与下混应用明细；生成后必须 inspect → prepare → commit。

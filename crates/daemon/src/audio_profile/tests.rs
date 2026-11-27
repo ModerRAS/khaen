@@ -559,6 +559,43 @@ fn default_profile_generates_a_two_lane_plan_with_full_device_routing() {
 }
 
 #[test]
+fn split_input_output_profile_generates_two_in_twenty_two_out_plan() {
+    let profile = AudioProfile::parse(&json!({
+        "device": { "channels": 22 },
+        "inputs": { "channels": 2 },
+        "outputs": [
+            { "dac": 0, "enabled": true, "role": "L" },
+            { "dac": 1, "enabled": true, "role": "R" },
+        ],
+    }))
+    .expect("2-in / 22-out profile");
+    assert_eq!(profile.input_channels, 2);
+    assert_eq!(profile.device_channels, 22);
+    let generated = super::plan::generate(&profile, &engine_config()).expect("generate");
+    let plan = decode_plan(&generated.bytes);
+    let content = plan.content.as_ref().expect("content");
+    assert_eq!(content.in_channels, 2, "content is 2 channels");
+    assert_eq!(content.out_lanes, 2);
+    let routing = plan.routing.as_ref().expect("routing");
+    assert_eq!(routing.dac_channels, 22, "routing keeps all 22 DAC slots");
+    assert_eq!(routing.routes, vec![(0, 0), (1, 1)]);
+    // 输入通道 2 不属于 inputs.channels=2：parse 必须拒绝，不得静默截断/重映射。
+    assert!(AudioProfile::parse(&json!({
+        "device": { "channels": 22 },
+        "inputs": {
+            "channels": 2,
+            "sources": [{
+                "kind": "aes67",
+                "enabled": true,
+                "channels": [{ "channel": 2, "role": "C" }],
+            }],
+        },
+        "outputs": [{ "dac": 0, "enabled": true, "role": "L" }],
+    }))
+    .is_err());
+}
+
+#[test]
 fn explicit_device_channels_drive_plan_content_and_routing_widths() {
     let profile = AudioProfile::parse(&json!({
         "device": { "channels": 6 },

@@ -136,7 +136,7 @@ export interface AudioProfile {
   schema: string
   device: { channels: number }
   outputs: AudioOutput[]
-  inputs: { sources: AudioInputSource[] }
+  inputs: { channels: number; sources: AudioInputSource[] }
   downmix: AudioDownmix
   fanout: AudioFanout
 }
@@ -224,6 +224,7 @@ export function createDefaultProfile(deviceChannels: number = DEFAULT_DEVICE_CHA
     device: { channels },
     outputs,
     inputs: {
+      channels,
       sources: [
         {
           kind: 'aes67',
@@ -357,12 +358,34 @@ export function validateProfileLocally(profile: AudioProfile): ProfileValidation
   if (profile.outputs.length > 0 && enabledOutputs(profile).length === 0) {
     errors.push({ code: 'no_enabled_outputs', path: 'outputs', message: 'all physical outputs are disabled: at least one speaker must be enabled' })
   }
+  const inputChannels = profile.inputs.channels
+  if (!Number.isInteger(inputChannels) || inputChannels <= 0) {
+    errors.push({
+      code: 'bad_input_channels',
+      path: 'inputs.channels',
+      message: 'inputs.channels must be a positive integer'
+    })
+  }
   const enabledSources = profile.inputs.sources.filter((source) => source.enabled)
   if (enabledSources.length === 0) {
     warnings.push({ code: 'no_input_source', path: 'inputs.sources', message: 'no input source is enabled: the plan will carry no content' })
   }
   for (const source of enabledSources) {
     for (const channel of source.channels) {
+      if (inputChannels > 0 && channel.channel >= inputChannels) {
+        errors.push({
+          code: 'input_channel_out_of_range',
+          path: 'inputs.sources[' + source.kind + '].channels[' + String(channel.channel) + ']',
+          message:
+            'input channel ' +
+            String(channel.channel) +
+            ' is outside 0..' +
+            String(inputChannels - 1) +
+            ' (inputs.channels = ' +
+            String(inputChannels) +
+            ')'
+        })
+      }
       if (!isSpeakerRole(channel.role)) {
         errors.push({
           code: 'bad_input_role',
@@ -677,6 +700,7 @@ export function parseAudioProfile(value: unknown): AudioProfile {
     ? outputsValue.map((item, index) => parseAudioOutput(item, index))
     : []
   const inputs = asRecord(record.inputs, 'profile.inputs') ?? {}
+  const inputChannels = readNumber(inputs, 'channels', 'profile.inputs') ?? (channels ?? DEFAULT_DEVICE_CHANNELS)
   const sourcesValue = inputs.sources
   const sources: AudioInputSource[] = Array.isArray(sourcesValue)
     ? sourcesValue.map((item, index) => parseAudioSource(item, index))
@@ -690,7 +714,7 @@ export function parseAudioProfile(value: unknown): AudioProfile {
     schema: readString(record, 'schema', 'profile') ?? AUDIO_PROFILE_SCHEMA,
     device: { channels: channels ?? DEFAULT_DEVICE_CHANNELS },
     outputs,
-    inputs: { sources },
+    inputs: { channels: inputChannels, sources },
     downmix: {
       center: {
         mode: readString(center, 'mode', 'profile.downmix.center') === 'none' ? 'none' : 'auto',

@@ -13,6 +13,7 @@ const messages = {
   localDraftHint: "当前显示的是本地草稿（默认 2.0 或上次读取值），不是已保存的 profile。",
   reload: "重新读取",
   saved: "已保存",
+  inputChannels: "输入通道数",
   deviceChannels: "设备通道数",
   planLanes: "方案 lane 数",
   graphId: "当前方案 graph",

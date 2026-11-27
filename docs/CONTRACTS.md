@@ -100,8 +100,9 @@
 - plan-builder 的 `PlanConfig` 对应拆成 `input_channels` / `output_channels`
   （`PlanConfig::new` 保持等宽旧行为，`new_split` 构造不等宽配置）。
 - **边界**：输入宽度和输出宽度仍是两个独立预算；不等宽不是“自动上混/下混”，content folds
-  必须显式写出映射，未映射的 lane 输出 +0.0。daemon 的 audio profile 目前仍用
-  `device.channels` 描述物理输出行数，输入通道号也沿用同一上限（见 docs/API.md §12）。
+  必须显式写出映射，未映射的 lane 输出 +0.0。daemon 的 audio profile 用 `inputs.channels`
+  （输入容器宽度）与 `device.channels`（物理输出行数）分别表达，plan 生成时分别对应
+  `content.in_channels` / `routing.dac_channels`（见 docs/API.md §12）。
 
 ### B.1 op 列表
 

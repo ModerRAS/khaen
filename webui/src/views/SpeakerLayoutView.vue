@@ -535,6 +535,7 @@ onBeforeUnmount(() => {
     <!-- 顶部摘要 -->
     <PanelCard title-key="speakerLayout.layoutLabel" :truth="profileTruth">
       <dl class="summary-grid">
+        <div><dt>{{ t('speakerLayout.inputChannels') }}</dt><dd>{{ edit.inputs.channels }}</dd></div>
         <div><dt>{{ t('speakerLayout.deviceChannels') }}</dt><dd>{{ edit.device.channels }}</dd></div>
         <div><dt>{{ t('speakerLayout.planLanes') }}</dt><dd>{{ planSummary.lanes ?? t('common.dash') }}</dd></div>
         <div><dt>{{ t('speakerLayout.graphId') }}</dt><dd class="mono">{{ planSummary.graph_id ?? t('common.dash') }}</dd></div>
