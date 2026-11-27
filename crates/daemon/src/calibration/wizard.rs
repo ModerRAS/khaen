@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
-use super::rt_host_backend::DESIGN_ARTIFACT;
+use super::rt_host_backend::{COMPILE_REPORT_ARTIFACT_NAME, DESIGN_ARTIFACT, PLAN_ARTIFACT_NAME};
 use super::service::{
     CalibrationError, CalibrationStatus, JobRecord, JobState, JOB_KIND_SINGLE_POINT_RT_HOST,
 };
@@ -1014,30 +1014,13 @@ pub(crate) fn derive_state(inputs: WizardStateInputs<'_>) -> Value {
         let last = inputs.last_job;
         steps.push(measurement_step(last, inputs.measurement));
         if last.is_some_and(|job| job.kind == JOB_KIND_SINGLE_POINT_RT_HOST) {
-            // C3b2a：solve_g 已接线，succeeded 的 rt-host job 会产出 design.json（predicted-only
-            // 设计，不是实测 PASS）；plan compile/apply 仍属 C3b2b，所以第 7/8 步保持
-            // not_available——不能因为测量成功就假装有可应用 plan，也不能把设计当成 PASS。
+            // C3b2a：solve_g 落 design.json（predicted-only，不是 PASS）；C3b2b：compile 把
+            // rt-host cal_solve 写出的 plan 字节读回校验（sha256/KHAENPLN/ABI v3）并落
+            // plan.bin + compile-report.json。第 7 步看 compile 产物，第 8 步看 apply_state：
+            // job 永不自动 apply，应用是用户显式两阶段控制面操作。
             steps.push(rt_host_analysis_step(last));
-            for (step_number, key, reason) in [
-                (
-                    7usize,
-                    "design",
-                    "the real rt-host job produces a predicted-only design (design.json), but plan compile (turning the design into an applicable plan) is not implemented yet (C3b2b); nothing applicable exists to review",
-                ),
-                (
-                    8,
-                    "review_apply",
-                    "there is no applicable plan in this slice (plan compile/apply: C3b2b); design.json is predicted-only and must not be applied, so there is nothing to review or apply",
-                ),
-            ] {
-                steps.push(step(
-                    step_number,
-                    key,
-                    "not_available",
-                    json!(reason),
-                    json!("C3b2b"),
-                ));
-            }
+            steps.push(rt_host_design_step(last));
+            steps.push(rt_host_review_step(last));
         } else {
             steps.push(analysis_step(last));
             steps.push(design_step(last));
@@ -1177,7 +1160,8 @@ fn measurement_step(last_job: Option<&JobRecord>, measurement: &MeasurementDraft
 ///
 /// C3b2a 的 solve_g 在真实测量成功后调用 rt-host cal_solve，并落 design.json（真实的
 /// predicted-only 单点设计）。只有 job succeeded 且 design artifact 真实存在才 passed；
-/// reason 必须说明「PREDICTED_ONLY 不是实测 PASS」且 plan compile/apply 仍属 C3b2b。
+/// reason 必须说明「PREDICTED_ONLY 不是实测 PASS」，且 compile 只是把它变成可校验的
+/// plan（第 7 步）、job 自身永不 apply。
 /// job 未成功 -> blocked（可重试）；succeeded 却没有 design.json -> not_available（如实
 /// 报证据缺口，不拿测量成功冒充分析结果）。
 fn rt_host_analysis_step(last_job: Option<&JobRecord>) -> Value {
@@ -1193,7 +1177,7 @@ fn rt_host_analysis_step(last_job: Option<&JobRecord>) -> Value {
                     "analysis",
                     "passed",
                     json!(format!(
-                        "job {} produced design.json (a single-point FIR design from the real measurement); its verdict is PREDICTED_ONLY, which is not a measured PASS, and plan compile/apply (C3b2b) is still missing",
+                        "job {} produced design.json (a single-point FIR design from the real measurement); its verdict is PREDICTED_ONLY, which is not a measured PASS. compile copies the plan rt-host wrote into the job directory after verifying it (step 7); applying it is a separate explicit two-phase operation",
                         job.job_id
                     )),
                     Value::Null,
@@ -1207,7 +1191,7 @@ fn rt_host_analysis_step(last_job: Option<&JobRecord>) -> Value {
                         "job {} succeeded but has no design.json artifact: solve_g produced no design evidence, so the analysis stays unavailable instead of claiming a result",
                         job.job_id
                     )),
-                    json!("C3b2b"),
+                    Value::Null,
                 )
             }
         }
@@ -1227,6 +1211,121 @@ fn rt_host_analysis_step(last_job: Option<&JobRecord>) -> Value {
             "analysis",
             "blocked",
             json!("no calibration job yet: the analysis is produced by the solve_g stage of a real-measurement job"),
+            Value::Null,
+        ),
+    }
+}
+
+/// rt-host 真实测量 job 的第 7 步（design）：compile 产物是否真实存在。
+///
+/// C3b2b 的 compile 只在 “rt-host cal_solve 写出的 plan 字节通过 sha256/KHAENPLN/ABI v3
+/// 校验” 后写 plan/plan.bin + compile/compile-report.json；这里只按 artifact ledger 判断
+/// （不重读文件、不把设计当 PASS）。job 未成功 -> blocked（可重试）；succeeded 但没有
+/// compile 产物 -> blocked（compile 没有产出可审阅方案，重跑 job 而不是假装有方案）。
+fn rt_host_design_step(last_job: Option<&JobRecord>) -> Value {
+    match last_job {
+        Some(job) if job.state == JobState::Succeeded => {
+            let plan = job
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.name == PLAN_ARTIFACT_NAME);
+            let compile = job
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.name == COMPILE_REPORT_ARTIFACT_NAME);
+            match (plan, compile) {
+                (Some(plan), Some(compile)) => step(
+                    7,
+                    "design",
+                    "passed",
+                    json!(format!(
+                        "job {} compiled the predicted-only design into a verified plan: plan.bin sha256 {} (compile re-read the rt-host bytes and verified sha256/KHAENPLN/ABI v3; compile-report.json sha256 {}). The verdict is PREDICTED_ONLY — not a measured PASS — and no remeasure/holdout verification was run; the running data plane is untouched until an explicit two-phase apply",
+                        job.job_id, plan.sha256, compile.sha256
+                    )),
+                    Value::Null,
+                ),
+                _ => step(
+                    7,
+                    "design",
+                    "blocked",
+                    json!(format!(
+                        "job {} is succeeded but has no plan.bin/compile-report.json artifact: compile produced no verifiable plan, so there is nothing to review (re-run the job instead of assuming a plan exists)",
+                        job.job_id
+                    )),
+                    Value::Null,
+                ),
+            }
+        }
+        Some(job) => step(
+            7,
+            "design",
+            "blocked",
+            json!(format!(
+                "job {} is {}: the design/plan is produced by the compile stage of a succeeded real-measurement job",
+                job.job_id,
+                job.state.as_str()
+            )),
+            Value::Null,
+        ),
+        None => step(
+            7,
+            "design",
+            "blocked",
+            json!("no calibration job yet: a real-measurement job's compile stage produces the verified plan"),
+            Value::Null,
+        ),
+    }
+}
+
+/// rt-host 真实测量 job 的第 8 步（review_apply）。
+///
+/// C3b2b 只产出可应用 plan，**永不自动 apply**：应用是用户显式调用的两阶段控制面操作
+/// （prepare -> commit，按 host_link.target 路由）。只有 job.apply_state=applied 才 passed；
+/// 其余一律 blocked 并提示手动两阶段 apply（不再 not_available/C3b2b）。
+fn rt_host_review_step(last_job: Option<&JobRecord>) -> Value {
+    match last_job {
+        Some(job) if job.apply.state == super::service::ApplyState::Applied => step(
+            8,
+            "review_apply",
+            "passed",
+            json!(format!(
+                "job {} is applied at version {} (control-plane two-phase prepare -> commit); the job itself never applied anything",
+                job.job_id,
+                job.apply
+                    .applied_version
+                    .map(|version| version.to_string())
+                    .unwrap_or_else(|| "<not reported>".to_string())
+            )),
+            Value::Null,
+        ),
+        Some(job) if job.state == JobState::Succeeded => step(
+            8,
+            "review_apply",
+            "blocked",
+            json!(format!(
+                "job {} is succeeded but apply_state is {}: applying is a separate explicit two-phase control-plane operation on the compiled plan — POST /api/calibration/jobs/{}/apply with stage=prepare, then stage=commit with the returned engine_token. The job never applies automatically",
+                job.job_id,
+                job.apply.state.as_str(),
+                job.job_id
+            )),
+            Value::Null,
+        ),
+        Some(job) => step(
+            8,
+            "review_apply",
+            "blocked",
+            json!(format!(
+                "job {} is {}: only a succeeded real-measurement job with a compiled plan can be applied",
+                job.job_id,
+                job.state.as_str()
+            )),
+            Value::Null,
+        ),
+        None => step(
+            8,
+            "review_apply",
+            "blocked",
+            json!("no calibration job yet: nothing to review or apply"),
             Value::Null,
         ),
     }
@@ -1646,15 +1745,71 @@ mod tests {
         assert!(reason.contains("design.json"), "{reason}");
         assert!(reason.contains("PREDICTED_ONLY"), "{reason}");
         assert_eq!(state["steps"][5]["task"], Value::Null, "{state}");
-        // 第 7/8 步（plan compile/apply）仍是能力缺口（C3b2b），不因测量/设计成功而放行。
-        for index in 6..8 {
-            assert_eq!(
-                state["steps"][index]["status"],
-                json!("not_available"),
-                "{state}"
-            );
-            assert_eq!(state["steps"][index]["task"], json!("C3b2b"), "{state}");
-        }
+        // C3b2b：第 7 步（design）以 compile 产物为 gate；该 job 只有 design.json、没有
+        // plan.bin/compile-report.json -> blocked（不是 not_available，也不给任务号）。
+        assert_eq!(state["steps"][6]["status"], json!("blocked"), "{state}");
+        assert_eq!(state["steps"][6]["task"], Value::Null, "{state}");
+        // 第 8 步（review_apply）未应用 -> blocked 并提示手动两阶段 apply；不再 C3b2b。
+        assert_eq!(state["steps"][7]["status"], json!("blocked"), "{state}");
+        assert_eq!(state["steps"][7]["task"], Value::Null, "{state}");
+        let reason = state["steps"][7]["reason"]
+            .as_str()
+            .expect("review_apply reason");
+        assert!(reason.contains("stage=prepare"), "{reason}");
+        assert!(reason.contains("stage=commit"), "{reason}");
+        assert!(reason.contains("never applies automatically"), "{reason}");
+
+        // compile 产物存在 -> 第 7 步 passed；reason 明说 PREDICTED_ONLY 不是实测 PASS、
+        // 没有 remeasure/holdout 复核。job 仍未 apply，所以第 8 步保持 blocked。
+        let artifact = |name: &str, sha: String| super::super::service::ArtifactInfo {
+            name: name.to_string(),
+            sha256: sha,
+            bytes: 1024,
+            content_type: None,
+        };
+        let mut compiled = job.clone();
+        compiled.artifacts = vec![
+            artifact("design.json", "d".repeat(64)),
+            artifact(PLAN_ARTIFACT_NAME, "e".repeat(64)),
+            artifact(COMPILE_REPORT_ARTIFACT_NAME, "f".repeat(64)),
+        ];
+        let derive = |job: &JobRecord| {
+            derive_state(WizardStateInputs {
+                status: &status,
+                control_status: &control,
+                calibration: &calibration,
+                last_job: Some(job),
+                stored: &stored,
+                measurement: &measurement,
+                updated_at: "2026-01-01T00:00:00Z",
+            })
+        };
+        let state = derive(&compiled);
+        assert_eq!(state["steps"][6]["status"], json!("passed"), "{state}");
+        let reason = state["steps"][6]["reason"].as_str().expect("design reason");
+        assert!(reason.contains("PREDICTED_ONLY"), "{reason}");
+        assert!(reason.contains("not a measured PASS"), "{reason}");
+        assert!(reason.contains("remeasure/holdout"), "{reason}");
+        assert!(reason.contains(&"e".repeat(64)), "{reason}");
+        assert_eq!(state["steps"][6]["task"], Value::Null, "{state}");
+        assert_eq!(state["steps"][7]["status"], json!("blocked"), "{state}");
+
+        // apply_state=applied -> 第 8 步 passed（应用来自显式两阶段控制面操作，不是 job 自动做的）。
+        let mut applied = compiled.clone();
+        applied.apply = super::super::service::JobApply {
+            state: super::super::service::ApplyState::Applied,
+            applied_version: Some(7),
+            previous_version: Some(6),
+            applied_at: Some("2026-01-01T00:00:00Z".to_string()),
+            plan_sha256: Some("e".repeat(64)),
+        };
+        let state = derive(&applied);
+        assert_eq!(state["steps"][7]["status"], json!("passed"), "{state}");
+        assert_eq!(state["steps"][7]["task"], Value::Null, "{state}");
+        let reason = state["steps"][7]["reason"]
+            .as_str()
+            .expect("review_apply reason");
+        assert!(reason.contains("applied at version 7"), "{reason}");
 
         // job succeeded 但没有 design.json：第 6 步如实 not_available（不拿测量成功冒充分析）。
         let mut without_design = job.clone();
@@ -1673,7 +1828,7 @@ mod tests {
             json!("not_available"),
             "{state}"
         );
-        assert_eq!(state["steps"][5]["task"], json!("C3b2b"), "{state}");
+        assert_eq!(state["steps"][5]["task"], Value::Null, "{state}");
         assert!(state["steps"][5]["reason"]
             .as_str()
             .is_some_and(|reason| reason.contains("no design.json")));

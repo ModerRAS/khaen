@@ -257,6 +257,27 @@ pub async fn spawn_at_with_system(
     }
 }
 
+/// 用指定状态目录 + 注入校准服务与 rt-host 控制通道启动服务；不自动登录。
+///
+/// C3b2b 的 apply 测试需要 REST 层按 host_link.target=rt-host 路由两阶段 prepare/commit，
+/// 所以 daemon 的 host link 必须与校准 backend 用同一条注入链路（否则 apply 会打到进程内
+/// 引擎而不是伪造的 rt-host 控制面）。
+pub async fn spawn_at_with_service_and_link(
+    state_dir: &Path,
+    service: Arc<dyn CalibrationService>,
+    link: Arc<HostLink>,
+) -> TestServer {
+    spawn_custom(
+        state_dir,
+        AuthConfig::for_tests(state_dir.to_path_buf()),
+        None,
+        Some(service),
+        Some(link),
+        None,
+    )
+    .await
+}
+
 /// 用临时状态目录 + 注入校准 job 服务启动服务（自动 setup/login）。
 pub async fn spawn_with_calibration(service: Arc<dyn CalibrationService>) -> TestServer {
     let dir = Arc::new(TempStateDir::new("calibration"));

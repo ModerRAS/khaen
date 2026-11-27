@@ -344,13 +344,15 @@ pub const JOB_KIND_SINGLE_POINT_RT_HOST: &str = "single_point_rt_host";
 pub const OFFLINE_JOB_STEPS: [&str; 5] = ["validate", "compile", "levels", "closed_loop", "bundle"];
 
 /// rt-host 真实测量 job 的步骤顺序（如实映射 khaen_calibration::job::SINGLE_POINT_RT_HOST_PLAN：
-/// validate -> sweep_capture -> quality_check -> solve_g -> bundle；C3b2a 只产出 design，
-/// plan compile/apply 属 C3b2b）。
-pub const RT_HOST_JOB_STEPS: [&str; 5] = [
+/// validate -> sweep_capture -> quality_check -> solve_g -> compile -> bundle；C3b2b 的
+/// compile 只校验/落盘 rt-host cal_solve 写出的 plan，**不 apply**——应用仍是用户显式
+/// 两阶段控制面操作）。
+pub const RT_HOST_JOB_STEPS: [&str; 6] = [
     "validate",
     "sweep_capture",
     "quality_check",
     "solve_g",
+    "compile",
     "bundle",
 ];
 
@@ -599,8 +601,8 @@ pub struct DesignResult {
     pub admission_reason: Option<String>,
 }
 
-/// 应用所需的方案产物（result.plan）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 应用所需的方案产物（result.plan / job plan 摘要）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanResult {
     /// 方案文件 sha256。
     pub sha256: String,
@@ -1058,6 +1060,7 @@ mod tests {
                 "sweep_capture",
                 "quality_check",
                 "solve_g",
+                "compile",
                 "bundle"
             ]
         );

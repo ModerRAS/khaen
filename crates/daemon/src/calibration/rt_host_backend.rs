@@ -1,6 +1,7 @@
-//! daemon 侧 rt-host 真实测量 job backend（C3b1 测量 + C3b2a solve）：经 host link 驱动
-//! rt-host 的 cal_enter / cal_measure / cal_status / cal_solve / cal_leave，产出真实
-//! measurement 证据与单点设计（design.json）。
+//! daemon 侧 rt-host 真实测量 job backend（C3b1 测量 + C3b2a solve + C3b2b compile）：
+//! 经 host link 驱动 rt-host 的 cal_enter / cal_measure / cal_status / cal_solve / cal_leave，
+//! 产出真实 measurement 证据、单点设计（design.json）与**可校验但未应用**的方案
+//! （plan/plan.bin + compile/compile-report.json）。
 //!
 //! # 为什么是独立 backend
 //!
@@ -9,7 +10,7 @@
 //! 无法自己产生数据。把两者放进同一个 backend 会逼出 "这个 kind 在这个 stage 不做事" 的
 //! 静默分支；独立实现让每个 stage 的语义只有一种解释，也便于测试逐 op 断言。
 //!
-//! # stage 语义（plan = validate -> sweep_capture -> quality_check -> solve_g -> bundle）
+//! # stage 语义（plan = validate -> sweep_capture -> quality_check -> solve_g -> compile -> bundle）
 //!
 //! - validate：目标必须是 rt-host；MicProfile 必须已保存且校准文件可读、sha256 对得上；
 //!   job 必须显式授权可闻扫频（P08）；再做一个只读 cal_status 预检（设备缺失/静音/
@@ -27,21 +28,37 @@
 //! - solve_g（C3b2a）：cal_solve（校准模式下、measurement 成功后）-> 把回执里的 design 对象
 //!   与 verdict/note 逐字段写成 design.json（schema khaen-calibration-rt-host-design/v1，
 //!   缺失即 null）；缺 design 对象/与本次 measure_id 不一致 -> 稳定码 E_CAL_SOLVE，不伪造。
-//!   设计是 PREDICTED_ONLY：不提交、不改正在跑的输出，本切片也没有 plan compile/apply
-//!   （C3b2b）；**design 不是 PASS**；
+//!   设计是 PREDICTED_ONLY：不提交、不改正在跑的输出；**design 不是 PASS**；
+//! - compile（C3b2b）：从 design.json 读 cal_solve 回执里的 design.plan（path/sha256/
+//!   graph_id/bytes/block_size/sample_rate/channels），把 rt-host 写在 design.plan.path 的
+//!   plan 字节**读回来自己验证**：必须是普通文件、大小在 (0, MAX_PLAN_FILE_BYTES] 内、
+//!   sha256 与回执一致、以 KHAENPLN 魔数开头、Plan ABI v3 解码成功，且解码出的
+//!   block_size/sample_rate/channels/graph_id 与回执一致；任何一步不符都不伪造，给稳定码
+//!   E_CAL_PLAN（文件/大小/sha 检查）或 E_PLAN_ABI（魔数/ABI 解码/回执与字节不一致）。
+//!   通过后写 **job 目录内**的 plan/plan.bin 与 compile/compile-report.json（verdict 只写
+//!   PREDICTED_ONLY，绝不写 PASS）。compile 不 apply：应用是用户显式两阶段控制面操作；
+//!   本 stage 失败/取消同样先 cal_leave 再返回原错误；
 //! - bundle：cal_leave 幂等（成功路径只在这里 leave 一次；本实例已 leave 过就不再发第二个
 //!   op）、写 report.json（真实 job id / measure_id / artifact sha256；design 的 sha/verdict
-//!   如实汇总，verdict 仍 null 并说明 plan compile/apply 属 C3b2b）。
+//!   与 plan 的 sha/graph_id 如实汇总，verdict 仍 null：PREDICTED_ONLY 不是 PASS，且没有
+//!   remeasure/holdout 复核）。
 //!
-//! # leave 时机（C3b2a 的关键约束）
+//! # leave 时机（C3b2a/C3b2b 的关键约束）
 //!
 //! rt-host 的 cal_solve 只在“校准模式 + 本会话已有成功测量”时可用，所以成功路径的顺序是
-//! validate -> sweep_capture -> quality_check -> solve_g -> bundle，cal_leave 只在 bundle
-//! 发一次。任何失败/取消必须**尽早** leave：sweep_capture/quality_check/solve_g 的错误路径
-//! 都会先 ensure_leave 再返回原错误（leave 失败只追加 message 并尽力写 cal_leave.json，
-//! 不掩盖原错误）；成功路径 leave 失败则 job 以 E_CAL_LEAVE 失败。另外 Drop 兜底：若进过
-//! 校准模式、却没有任何 stage 尝试过 leave（例如 job 在 stage 边界被取消），backend 释放时
-//! 补一次 cal_leave（只补没尝试过的第一次，绝不重试 C3a 的 leave 语义）。
+//! validate -> sweep_capture -> quality_check -> solve_g -> compile -> bundle，cal_leave 只在
+//! bundle 发一次。任何失败/取消必须**尽早** leave：sweep_capture/quality_check/solve_g/
+//! compile 的错误路径都会先 ensure_leave 再返回原错误（leave 失败只追加 message 并尽力写
+//! cal_leave.json，不掩盖原错误）；成功路径 leave 失败则 job 以 E_CAL_LEAVE 失败。另外 Drop
+//! 兜底：若进过校准模式、却没有任何 stage 尝试过 leave（例如 job 在 stage 边界被取消），
+//! backend 释放时补一次 cal_leave（只补没尝试过的第一次，绝不重试 C3a 的 leave 语义）。
+//!
+//! # apply 语义（C3b2b 不做的事）
+//!
+//! compile 只把 rt-host 已经写出的 plan 字节复制/验收到 job 产物里，**job 永远不会 apply**：
+//! 应用是用户对 job 产物显式调用的既有两阶段控制面操作（prepare -> commit，按
+//! host_link.target 路由），daemon 的 backend.apply() 只读 job 目录内的 plan/plan.bin 并重算
+//! sha256。PREDICTED_ONLY 设计不是 PASS，也不是“已应用”；设计没有 remeasure/holdout 复核。
 //!
 //! # 诚实性
 //!
@@ -49,11 +66,13 @@
 //!   engine/simulated/real_capture/umik；缺失即 null，不补默认值；
 //! - 不假成功：rt-host 业务错误码原样进 job failure.code（例如 mic_declaration_invalid /
 //!   device_absent / audio_blocked / format_unsupported），transport 不可用映射成稳定码
-//!   E_RT_HOST 且 message 保留 host_link_unavailable 原因；
+//!   E_RT_HOST 且 message 保留 host_link_unavailable 原因；plan 字节一律由 daemon 重读并
+//!   校验 sha256/ABI，绝不把回执里的 sha 当成“已校验”；
 //! - leave 失败不掩盖原错误：有原错误时把 leave 失败追加到 message（code 保持原错误），
 //!   并尽力写 cal_leave.json 证据；成功路径 leave 失败则 job 以 E_CAL_LEAVE 失败。
 
 use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -62,6 +81,7 @@ use serde_json::{json, Map, Value};
 use khaen_calibration::job::{
     sha256_hex, ArtifactKind, CalibrationJobBackend, JobId, JobStage, StageCtx, StageFailure,
 };
+use khaen_core::plan::{Plan, MAGIC as PLAN_ABI_MAGIC};
 
 use crate::calibration::mic::{MicProfile, MicProfileStore};
 use crate::calibration::service::RtHostJobInputs;
@@ -71,8 +91,16 @@ use crate::host_link::{HostLink, Target, WireReply, HOST_LINK_UNAVAILABLE};
 pub const MEASUREMENT_ARTIFACT: &str = "measurement.json";
 /// 质量检查 artifact（available:false 时也写，绝不写假 PASS）。
 pub const QUALITY_ARTIFACT: &str = "quality.json";
-/// 单点设计 artifact（C3b2a：cal_solve 的真实回执；predicted-only，不是可应用 plan）。
+/// 单点设计 artifact（C3b2a：cal_solve 的真实回执；predicted-only 设计摘要）。
 pub const DESIGN_ARTIFACT: &str = "design.json";
+/// compile 产出的方案 artifact（C3b2b：**job 目录内**的相对路径；与离线 job/daemon apply 同一约定）。
+pub const PLAN_ARTIFACT: &str = khaen_calibration::PLAN_ARTIFACT_PATH;
+/// 方案 artifact 在 job.artifacts / REST 下载里的展示名（bare filename，store 白名单同名）。
+pub const PLAN_ARTIFACT_NAME: &str = "plan.bin";
+/// compile 产出的编译报告 artifact（相对路径；daemon backend 从同一路径读 plan 摘要）。
+pub const COMPILE_REPORT_ARTIFACT: &str = "compile/compile-report.json";
+/// 编译报告在 job.artifacts / REST 下载里的展示名（bare filename，store 白名单同名）。
+pub const COMPILE_REPORT_ARTIFACT_NAME: &str = "compile-report.json";
 /// 结束报告 artifact（真实 sha 汇总；verdict 恒 null）。
 pub const REPORT_ARTIFACT: &str = "report.json";
 /// leave 失败时的证据 artifact（尽力写；不作为成功证据）。
@@ -84,6 +112,8 @@ pub const MEASUREMENT_SCHEMA: &str = "khaen-calibration-rt-host-measurement/v1";
 pub const QUALITY_SCHEMA: &str = "khaen-calibration-rt-host-quality/v1";
 /// design.json schema（C3b2a）：job/measure 身份 + cal_solve 回执逐字段拷贝。
 pub const DESIGN_SCHEMA: &str = "khaen-calibration-rt-host-design/v1";
+/// compile/compile-report.json schema（C3b2b）：plan 摘要 + 回执原件 + 验证方式。
+pub const COMPILE_SCHEMA: &str = "khaen-calibration-rt-host-compile/v1";
 /// report.json schema。
 pub const REPORT_SCHEMA: &str = "khaen-calibration-rt-host-report/v1";
 
@@ -107,8 +137,14 @@ pub const E_CAL_LEAVE: &str = "E_CAL_LEAVE";
 pub const E_MEASUREMENT_ARTIFACT: &str = "E_MEASUREMENT_ARTIFACT";
 /// 稳定错误码：cal_solve 回执畸形（缺 design 对象/与本次测量错配），不伪造设计。
 pub const E_CAL_SOLVE: &str = "E_CAL_SOLVE";
-/// 稳定错误码：design.json 缺失/不可解析（bundle 的前置证据）。
+/// 稳定错误码：design.json 缺失/不可解析（compile/bundle 的前置证据）。
 pub const E_DESIGN_ARTIFACT: &str = "E_DESIGN_ARTIFACT";
+/// 稳定错误码：rt-host cal_solve 回执里的 plan 路径不可读/不是普通文件/大小越界/
+/// sha256 与回执不符（daemon 必须真读文件，不能凭回执自称成功）。
+pub const E_CAL_PLAN: &str = "E_CAL_PLAN";
+/// 稳定错误码：plan 字节不是合法 khaen plan ABI v3，或解码结果与 cal_solve 回执的
+/// block_size/sample_rate/channels/graph_id 不一致（不拼接两个来源冒充一个方案）。
+pub const E_PLAN_ABI: &str = "E_PLAN_ABI";
 /// 稳定错误码：job 层会话参数非法（channels 重复/越界、level 越界；API 层已校验，这里兜底）。
 pub const E_RT_HOST_INPUT: &str = "E_RT_HOST_INPUT";
 /// 稳定错误码：rt-host measurement 回执的状态不在已知集合内。
@@ -116,6 +152,13 @@ pub const E_RT_HOST_STATUS: &str = "E_RT_HOST_STATUS";
 
 /// cal_solve 的目标曲线（rt-host ALLOWED_TARGETS 的默认值；显式传，不依赖默认）。
 pub const SOLVE_TARGET_FLAT: &str = "flat";
+
+/// compile 允许读取的 plan 文件大小上限。
+///
+/// ABI v3 的 total_bytes 是 u32，理论上限远大于此；但真实房间校正 FIR 方案在 64 MiB 以内
+/// 绰绰有余（22 lane × 65k taps × f32 ≈ 5.5 MiB），所以把“rt-host 给的路径”限制在一个
+/// 不会拖垮 daemon 的上限内：超过就失败（E_CAL_PLAN）而不是把整个文件读进内存。
+pub const MAX_PLAN_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// 真实测量 job 的轮询配置（测试注入短间隔，生产默认 250 ms / 30 min）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -962,6 +1005,66 @@ impl RtHostJobBackend {
     }
 
     // -----------------------------------------------------------------
+    // compile（C3b2b：读回 rt-host 写出的 plan 字节并自己校验，不 apply）
+    // -----------------------------------------------------------------
+
+    fn compile(&mut self, ctx: &mut StageCtx<'_>) -> Result<(), StageFailure> {
+        // 设备仍在校准模式（leave 延后到 bundle）：compile 失败/取消必须在这里尽早 leave。
+        match self.compile_verified(ctx) {
+            Ok(()) => Ok(()),
+            Err(error) => Err(self.fail_with_leave(ctx, "compile", error)),
+        }
+    }
+
+    fn compile_verified(&mut self, ctx: &mut StageCtx<'_>) -> Result<(), StageFailure> {
+        ctx.cancel_token().check()?;
+        let dir = ctx.artifacts_dir();
+        // 前置证据：solve_g 写的 design.json（rt-host cal_solve 的真实回执；plan.path 在这里）。
+        let design_bytes = read_artifact_bytes(&dir, DESIGN_ARTIFACT, E_DESIGN_ARTIFACT)?;
+        let design: Value = serde_json::from_slice(&design_bytes).map_err(|error| {
+            StageFailure::failed(
+                E_DESIGN_ARTIFACT,
+                format!("design artifact is not valid JSON: {error}"),
+            )
+        })?;
+        ctx.report_progress(0.1);
+        ctx.cancel_token().check()?;
+        let receipt = plan_receipt(&design)?;
+        let verified = verify_plan_bytes(Path::new(&receipt.path), &receipt)?;
+        ctx.report_progress(0.5);
+        ctx.cancel_token().check()?;
+        // 只落 job 目录内的相对路径：rt-host 的绝对路径留在 design.json 的回执里，
+        // 不进 artifact registry（登记/下载只认 job 相对路径）。
+        ctx.write_artifact(
+            ArtifactKind::CalibrationDraft,
+            PLAN_ARTIFACT,
+            &verified.bytes,
+            "rt-host-cal-solve/abi-v3",
+        )?;
+        ctx.report_progress(0.8);
+        let report = compile_report_json(
+            ctx.job_id(),
+            design.get("measure_id").cloned().unwrap_or(Value::Null),
+            &receipt,
+            &verified,
+        );
+        let report_bytes = serde_json::to_vec_pretty(&report).map_err(|error| {
+            StageFailure::failed(
+                E_CAL_PLAN,
+                format!("cannot serialize compile-report.json: {error}"),
+            )
+        })?;
+        ctx.write_artifact(
+            ArtifactKind::Other("rt_host_compile_report".to_string()),
+            COMPILE_REPORT_ARTIFACT,
+            &report_bytes,
+            COMPILE_SCHEMA,
+        )?;
+        ctx.report_progress(1.0);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------
     // bundle
     // -----------------------------------------------------------------
 
@@ -997,9 +1100,39 @@ impl RtHostJobBackend {
                 format!("quality artifact is not valid JSON: {error}"),
             )
         })?;
+        // compile 的产物是 bundle 的前置证据：没有已验证的 plan / 编译报告就不自称完整
+        // （bundle 会重新算 plan sha256 并与 compile-report 比对，防产物被换掉）。
+        let plan_bytes = read_artifact_bytes(&dir, PLAN_ARTIFACT, E_CAL_PLAN)?;
+        let compile_bytes = read_artifact_bytes(&dir, COMPILE_REPORT_ARTIFACT, E_CAL_PLAN)?;
+        let compile: Value = serde_json::from_slice(&compile_bytes).map_err(|error| {
+            StageFailure::failed(
+                E_CAL_PLAN,
+                format!("compile report is not valid JSON: {error}"),
+            )
+        })?;
         let measurement_sha256 = sha256_hex(&measurement_bytes);
         let quality_sha256 = sha256_hex(&quality_bytes);
         let design_sha256 = sha256_hex(&design_bytes);
+        let plan_sha256 = sha256_hex(&plan_bytes);
+        let compile_sha256 = sha256_hex(&compile_bytes);
+        let compile_plan_sha256 = compile
+            .get("plan_sha256")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                StageFailure::failed(
+                    E_CAL_PLAN,
+                    "compile/compile-report.json has no string field plan_sha256: the bundle cannot verify which plan was compiled",
+                )
+            })?;
+        if !plan_sha256.eq_ignore_ascii_case(compile_plan_sha256.trim()) {
+            return Err(StageFailure::failed(
+                E_CAL_PLAN,
+                format!(
+                    "plan artifact {PLAN_ARTIFACT} hashes to {plan_sha256}, but {COMPILE_REPORT_ARTIFACT} records plan_sha256 {}: the compile artifacts are inconsistent",
+                    compile_plan_sha256.trim()
+                ),
+            ));
+        }
         let design_verdict = design.get("verdict").cloned().unwrap_or(Value::Null);
         let verdict = quality.get("verdict").cloned().unwrap_or(Value::Null);
         let quality_available = quality
@@ -1020,7 +1153,7 @@ impl RtHostJobBackend {
             "umik": measurement.get("umik").cloned().unwrap_or(Value::Null),
             "verdict": verdict,
             "quality_available": quality_available,
-            "verdict_reason": "this job records a real rt-host measurement and a predicted-only single-point design; a closed-loop quality verdict is not wired (no PASS is fabricated), and the design is never compiled/applied in this slice (plan compile/apply: C3b2b); the daemon reports verdict=null instead of a PASS",
+            "verdict_reason": "this job records a real rt-host measurement, a predicted-only single-point design and a verified (but not applied) plan; a closed-loop quality verdict is not wired and no remeasure/holdout verification was run, so the daemon reports verdict=null instead of a PASS. The plan is never applied by the job: applying is a separate explicit two-phase prepare/commit control-plane operation",
             "design": {
                 "available": true,
                 "sha256": design_sha256,
@@ -1028,6 +1161,23 @@ impl RtHostJobBackend {
                 "measure_id": design.get("measure_id").cloned().unwrap_or(Value::Null),
                 "applied": design.get("design").and_then(|value| value.get("applied")).cloned().unwrap_or(Value::Null),
                 "note": "design.json copies the rt-host cal_solve reply verbatim; it is a PREDICTED_ONLY FIR design, not an applied or verified correction",
+            },
+            "plan": {
+                "available": true,
+                "sha256": plan_sha256,
+                "graph_id": compile.get("graph_id").cloned().unwrap_or(Value::Null),
+                "bytes": plan_bytes.len(),
+                "block_size": compile.get("block_size").cloned().unwrap_or(Value::Null),
+                "sample_rate": compile.get("sample_rate").cloned().unwrap_or(Value::Null),
+                "channels": compile.get("channels").cloned().unwrap_or(Value::Null),
+                "source": compile.get("source").cloned().unwrap_or(Value::Null),
+                "verdict": compile.get("verdict").cloned().unwrap_or(Value::Null),
+                "applied": false,
+                "artifacts": {
+                    "plan": PLAN_ARTIFACT,
+                    "compile_report": COMPILE_REPORT_ARTIFACT,
+                },
+                "note": "the daemon re-read and verified the plan bytes rt-host wrote (sha256, KHAENPLN magic, ABI v3 decode, graph_id/metadata match) before copying them under the job directory; nothing was applied and no remeasure/holdout verification was run",
             },
             "artifacts": [
                 {
@@ -1045,6 +1195,16 @@ impl RtHostJobBackend {
                     "sha256": design_sha256,
                     "bytes": design_bytes.len(),
                 },
+                {
+                    "name": PLAN_ARTIFACT,
+                    "sha256": plan_sha256,
+                    "bytes": plan_bytes.len(),
+                },
+                {
+                    "name": COMPILE_REPORT_ARTIFACT,
+                    "sha256": compile_sha256,
+                    "bytes": compile_bytes.len(),
+                },
             ],
             "artifacts_manifest": "artifacts.manifest.json (written by the khaen-calibration job manager at the terminal state; it lists every artifact with sha256/bytes)",
             "cal_leave": {
@@ -1056,8 +1216,9 @@ impl RtHostJobBackend {
             "notes": [
                 "measurement.json is a field-by-field copy of the rt-host cal_status reply (no daemon-side recomputation)",
                 "quality.json reports available:false when the rt-host reply carried no quality/verdict object; no PASS is fabricated",
-                "design.json is the verbatim rt-host cal_solve reply (predicted-only FIR design); nothing was applied to the running data plane",
-                "the job does not compile or apply a plan in this slice (plan compile/apply: C3b2b), so there is no applicable plan",
+                "design.json is the verbatim rt-host cal_solve reply (predicted-only FIR design); the design verdict PREDICTED_ONLY is not a PASS",
+                "plan/plan.bin is the rt-host cal_solve plan bytes copied into the job directory after the daemon re-read and verified them (sha256/KHAENPLN/ABI v3/graph_id); compile/compile-report.json records the verified identity",
+                "the job never applies: the running data plane is untouched. Applying the verified plan is a separate user-driven two-phase prepare/commit operation (POST /api/calibration/jobs/{id}/apply with stage=prepare, then stage=commit)",
             ],
         });
         let report_bytes = serde_json::to_vec_pretty(&report).map_err(|error| {
@@ -1164,6 +1325,326 @@ fn read_artifact_bytes(
     })
 }
 
+/// rt-host cal_solve 回执里声明的 plan 身份（design.plan 摘要；daemon 只读，不补值）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlanReceipt {
+    /// rt-host 写 plan.bin 的绝对路径（daemon 必须真读这个文件）。
+    path: String,
+    /// rt-host 声明的 plan 字节 sha256（daemon 会重算比对）。
+    sha256: String,
+    /// rt-host 声明的 plan graph_id（daemon 会从解码结果重算比对）。
+    graph_id: String,
+    /// rt-host 声明的 plan 字节数（daemon 会与真实文件长度比对）。
+    bytes: u64,
+    block_size: u32,
+    sample_rate: u32,
+    channels: u16,
+}
+
+/// 从 design.json 提取 design.plan；字段缺失/类型不符给 E_CAL_PLAN（不伪造）。
+///
+/// 这里只做“回执是否可读”的检查；plan 字节本身由 verify_plan_bytes 重新读取并校验，
+/// 回执里的 sha256/bytes/graph_id 只是**待比对**的声明值，绝不直接当成已校验结果。
+fn plan_receipt(design: &Value) -> Result<PlanReceipt, StageFailure> {
+    let plan = design
+        .get("design")
+        .and_then(|design| design.get("plan"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            StageFailure::failed(
+                E_CAL_PLAN,
+                "design.json has no object field design.plan: rt-host cal_solve did not report where it wrote the plan, so the daemon cannot read and verify it (no plan is fabricated)",
+            )
+        })?;
+    let string_field = |key: &str| -> Result<String, StageFailure> {
+        plan.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                StageFailure::failed(
+                    E_CAL_PLAN,
+                    format!(
+                        "design.json design.plan.{key} is missing, not a string, or empty: the rt-host cal_solve receipt is not usable and no plan is fabricated"
+                    ),
+                )
+            })
+    };
+    let integer_field = |key: &str| -> Result<u64, StageFailure> {
+        plan.get(key)
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                StageFailure::failed(
+                    E_CAL_PLAN,
+                    format!(
+                        "design.json design.plan.{key} is missing, not a positive integer, or zero: the rt-host cal_solve receipt is not usable and no plan is fabricated"
+                    ),
+                )
+            })
+    };
+    let path = string_field("path")?;
+    if !Path::new(&path).is_absolute() {
+        return Err(StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "design.json design.plan.path {path:?} is not absolute: the daemon reads the exact path rt-host reported and will not resolve a relative path against its own cwd"
+            ),
+        ));
+    }
+    let sha256 = string_field("sha256")?;
+    if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "design.json design.plan.sha256 {sha256:?} is not 64 hex chars: a malformed receipt cannot be used to verify the plan bytes"
+            ),
+        ));
+    }
+    let graph_id = string_field("graph_id")?;
+    let bytes = integer_field("bytes")?;
+    let block_size = u32::try_from(integer_field("block_size")?).map_err(|_| {
+        StageFailure::failed(
+            E_CAL_PLAN,
+            "design.json design.plan.block_size does not fit a u32 plan field",
+        )
+    })?;
+    let sample_rate = u32::try_from(integer_field("sample_rate")?).map_err(|_| {
+        StageFailure::failed(
+            E_CAL_PLAN,
+            "design.json design.plan.sample_rate does not fit a u32 plan field",
+        )
+    })?;
+    let channels = u16::try_from(integer_field("channels")?).map_err(|_| {
+        StageFailure::failed(
+            E_CAL_PLAN,
+            "design.json design.plan.channels does not fit a u16 plan field",
+        )
+    })?;
+    Ok(PlanReceipt {
+        path,
+        sha256,
+        graph_id,
+        bytes,
+        block_size,
+        sample_rate,
+        channels,
+    })
+}
+
+/// compile 的验证结果：从 plan 字节重算的身份/元数据（不采信回执里的数值）。
+#[derive(Debug)]
+struct VerifiedPlan {
+    /// 真实读到的 plan 字节（之后原样写进 job 目录）。
+    bytes: Vec<u8>,
+    /// 解码后的规范方案（用于重算 graph_id/元数据）。
+    plan: Plan,
+    /// 重算的 sha256（小写 hex）。
+    sha256: String,
+    /// 重算的 graph_id（小写 hex）。
+    graph_id: String,
+    /// 解码出的输入通道数（content.in_channels）。
+    channels: u16,
+}
+
+/// 读回 rt-host 的 plan 文件并做 sha256 / KHAENPLN / ABI v3 / 回执一致性校验。
+///
+/// 失败分两类稳定码：
+/// - E_CAL_PLAN：路径不可读/不是普通文件/大小越界/sha256 或字节数与回执不符（文件层）；
+/// - E_PLAN_ABI：魔数不对/ABI v3 解码失败/解码出的 graph_id 或 block_size/sample_rate/
+///   channels 与回执不一致（字节与回执对不上）。
+///
+/// 任何失败都不复制文件、不写 compile-report，**不伪造**。
+fn verify_plan_bytes(path: &Path, receipt: &PlanReceipt) -> Result<VerifiedPlan, StageFailure> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "rt-host cal_solve plan path {} cannot be inspected: {error} (the daemon reads the exact file rt-host wrote; it does not skip compile)",
+                path.display()
+            ),
+        )
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "rt-host cal_solve plan path {} is not a regular file ({:?}); only a regular file written by the plan compiler is accepted",
+                path.display(),
+                metadata.file_type()
+            ),
+        ));
+    }
+    let size = metadata.len();
+    if size == 0 {
+        return Err(StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "rt-host cal_solve plan path {} is empty (0 bytes): an empty file is not a plan",
+                path.display()
+            ),
+        ));
+    }
+    if size > MAX_PLAN_FILE_BYTES {
+        return Err(StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "rt-host cal_solve plan path {} is {size} bytes, above the {MAX_PLAN_FILE_BYTES} byte safety limit",
+                path.display()
+            ),
+        ));
+    }
+    let bytes = fs::read(path).map_err(|error| {
+        StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "rt-host cal_solve plan path {} cannot be read: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    let sha256 = sha256_hex(&bytes);
+    if !sha256.eq_ignore_ascii_case(receipt.sha256.trim()) {
+        return Err(StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "rt-host cal_solve plan {} hashes to {sha256}, but design.plan.sha256 declares {}: refusing to compile an unverified plan",
+                path.display(),
+                receipt.sha256.trim()
+            ),
+        ));
+    }
+    if bytes.len() as u64 != receipt.bytes {
+        return Err(StageFailure::failed(
+            E_CAL_PLAN,
+            format!(
+                "rt-host cal_solve plan {} is {} bytes, but design.plan.bytes declares {}",
+                path.display(),
+                bytes.len(),
+                receipt.bytes
+            ),
+        ));
+    }
+    if bytes.get(..PLAN_ABI_MAGIC.len()) != Some(PLAN_ABI_MAGIC.as_slice()) {
+        return Err(StageFailure::failed(
+            E_PLAN_ABI,
+            format!(
+                "rt-host cal_solve plan {} does not start with the KHAENPLN magic: it is not a khaen plan ABI v3 file",
+                path.display()
+            ),
+        ));
+    }
+    let plan = Plan::decode(&bytes).map_err(|error| {
+        StageFailure::failed(
+            E_PLAN_ABI,
+            format!(
+                "rt-host cal_solve plan {} is not a valid khaen plan ABI v3 file: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    let graph_id = plan.graph_id_hex();
+    if !graph_id.eq_ignore_ascii_case(receipt.graph_id.trim()) {
+        return Err(StageFailure::failed(
+            E_PLAN_ABI,
+            format!(
+                "decoded plan graph_id {graph_id} does not match design.plan.graph_id {}: the bytes and the cal_solve receipt describe different plans",
+                receipt.graph_id.trim()
+            ),
+        ));
+    }
+    if plan.block_size != receipt.block_size {
+        return Err(StageFailure::failed(
+            E_PLAN_ABI,
+            format!(
+                "decoded plan block_size {} does not match design.plan.block_size {}",
+                plan.block_size, receipt.block_size
+            ),
+        ));
+    }
+    if plan.sample_rate != receipt.sample_rate {
+        return Err(StageFailure::failed(
+            E_PLAN_ABI,
+            format!(
+                "decoded plan sample_rate {} does not match design.plan.sample_rate {}",
+                plan.sample_rate, receipt.sample_rate
+            ),
+        ));
+    }
+    let channels = plan
+        .content
+        .as_ref()
+        .map(|content| content.in_channels)
+        .ok_or_else(|| {
+            StageFailure::failed(
+                E_PLAN_ABI,
+                format!(
+                    "decoded plan has no content section, so its channel count cannot be checked against design.plan.channels {}",
+                    receipt.channels
+                ),
+            )
+        })?;
+    if channels != receipt.channels {
+        return Err(StageFailure::failed(
+            E_PLAN_ABI,
+            format!(
+                "decoded plan content.in_channels {channels} does not match design.plan.channels {}",
+                receipt.channels
+            ),
+        ));
+    }
+    Ok(VerifiedPlan {
+        bytes,
+        plan,
+        sha256,
+        graph_id,
+        channels,
+    })
+}
+
+/// compile/compile-report.json：已验证的 plan 身份 + cal_solve 回执原件（只读拷贝）。
+///
+/// verdict 固定 PREDICTED_ONLY：设计是单次测量的 FIR 拟合，不是 PASS、也没有
+/// remeasure/holdout 复核；applied 固定 false（compile 绝不改运行数据面）。
+fn compile_report_json(
+    job_id: JobId,
+    measure_id: Value,
+    receipt: &PlanReceipt,
+    verified: &VerifiedPlan,
+) -> Value {
+    json!({
+        "schema": COMPILE_SCHEMA,
+        "job_id": job_id.to_string(),
+        "measure_id": measure_id,
+        "source": "rt-host cal_solve",
+        "verdict": "PREDICTED_ONLY",
+        "applied": false,
+        "plan_sha256": verified.sha256,
+        "graph_id": verified.graph_id,
+        "bytes": verified.bytes.len(),
+        "block_size": verified.plan.block_size,
+        "sample_rate": verified.plan.sample_rate,
+        "channels": verified.channels,
+        "abi": "khaen-plan/v3",
+        "plan_artifact": PLAN_ARTIFACT,
+        "receipt": {
+            "sha256": receipt.sha256,
+            "graph_id": receipt.graph_id,
+            "bytes": receipt.bytes,
+            "block_size": receipt.block_size,
+            "sample_rate": receipt.sample_rate,
+            "channels": receipt.channels,
+        },
+        "reasons": {
+            "verified": "the daemon re-read the plan bytes from design.plan.path and verified them itself: regular file, size within the safety limit, sha256 equal to design.plan.sha256, KHAENPLN magic, khaen plan ABI v3 decode, and decoded block_size/sample_rate/channels/graph_id equal to the cal_solve receipt",
+            "predicted_only": "the cal_solve design is a FIR fit from one measurement (PREDICTED_ONLY): it is not a verified room correction, and no remeasure/holdout verification was run",
+            "not_applied": "compile never applies a plan: the running data plane is untouched. Applying is a separate user-driven two-phase prepare/commit operation on the job's plan/plan.bin",
+        },
+        "note": "compile-report.json records the verified plan identity; job.verdict stays null (PREDICTED_ONLY is not a PASS)",
+    })
+}
+
 /// 从 cal_solve 回执构造 design.json（C3b2a）。
 ///
 /// 只做三件事：身份（job_id/measure_id）+ 逐字段拷贝回执（design/verdict/note，缺失即
@@ -1255,6 +1736,7 @@ impl CalibrationJobBackend for RtHostJobBackend {
             JobStage::SweepCapture => self.sweep_capture(ctx),
             JobStage::QualityCheck => self.quality_check(ctx),
             JobStage::SolveG => self.solve_g(ctx),
+            JobStage::Compile => self.compile(ctx),
             JobStage::Bundle => self.bundle(ctx),
             other => Err(StageFailure::failed(
                 E_RT_HOST_STATUS,
@@ -1431,6 +1913,312 @@ mod tests {
                 .expect_err("unidentifiable measurement must be rejected");
             assert_eq!(error.code, E_MEASUREMENT_ARTIFACT, "{measurement}");
         }
+    }
+
+    // ===== compile（C3b2b）：plan 字节必须由 daemon 重读 + 校验，回执不是证据 =====
+
+    /// 造一份合法 ABI v3 方案字节（content 恒等、2 lane）。
+    fn abi_plan_bytes(sample_rate: u32, block_size: u32, channels: u16) -> Vec<u8> {
+        use khaen_core::plan::{ContentSection, Plan};
+        Plan {
+            block_size,
+            sample_rate,
+            content: Some(ContentSection {
+                in_channels: channels,
+                out_lanes: channels,
+                folds: Vec::new(),
+            }),
+            ..Plan::default()
+        }
+        .encode()
+    }
+
+    /// 用真实 plan 字节造 cal_solve 回执摘要（与 rt-host solve_design 的 plan 段同形）。
+    fn receipt_for(path: &std::path::Path, bytes: &[u8]) -> PlanReceipt {
+        let plan = Plan::decode(bytes).expect("test plan decodes");
+        plan_receipt(&json!({
+            "design": {
+                "plan": {
+                    "path": path.display().to_string(),
+                    "sha256": sha256_hex(bytes),
+                    "graph_id": plan.graph_id_hex(),
+                    "bytes": bytes.len(),
+                    "block_size": plan.block_size,
+                    "sample_rate": plan.sample_rate,
+                    "channels": plan.content.as_ref().expect("content").in_channels,
+                }
+            }
+        }))
+        .expect("valid receipt")
+    }
+
+    /// 临时文件（Drop 删除；测试失败也不留垃圾）。
+    struct TempFile {
+        path: std::path::PathBuf,
+    }
+
+    impl TempFile {
+        fn dir(tag: &str) -> TempFile {
+            static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "khaen-rt-host-compile-{}-{tag}-{unique}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            TempFile { path }
+        }
+
+        fn path(&self) -> std::path::PathBuf {
+            self.path.clone()
+        }
+
+        fn write(&self, name: &str, bytes: &[u8]) -> std::path::PathBuf {
+            let path = self.path.join(name);
+            std::fs::write(&path, bytes).expect("write temp plan");
+            path
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn compile_artifact_paths_are_job_relative_and_match_the_offline_convention() {
+        // daemon 的 backend.apply() 读 job_dir/plan/plan.bin，collect_rt_host_completion 读
+        // compile/compile-report.json：两处必须与离线 job 的约定逐字一致。
+        assert_eq!(PLAN_ARTIFACT, khaen_calibration::offline_job::PLAN_FILE);
+        assert_eq!(
+            COMPILE_REPORT_ARTIFACT,
+            khaen_calibration::offline_job::COMPILE_REPORT_FILE
+        );
+        // 只登记 job 内相对路径：不带 rt-host 绝对路径、不含 ".."、不带盘符/根。
+        assert_eq!(PLAN_ARTIFACT, "plan/plan.bin");
+        assert_eq!(COMPILE_REPORT_ARTIFACT, "compile/compile-report.json");
+        // REST 展示名只能是 bare filename（store::is_safe_artifact_name 的口径）且与路径末段一致。
+        assert_eq!(PLAN_ARTIFACT.rsplit('/').next(), Some(PLAN_ARTIFACT_NAME));
+        assert_eq!(
+            COMPILE_REPORT_ARTIFACT.rsplit('/').next(),
+            Some(COMPILE_REPORT_ARTIFACT_NAME)
+        );
+        for name in [PLAN_ARTIFACT_NAME, COMPILE_REPORT_ARTIFACT_NAME] {
+            assert!(!name.contains('/') && !name.contains(".."), "{name}");
+        }
+        for path in [PLAN_ARTIFACT, COMPILE_REPORT_ARTIFACT] {
+            assert!(!path.contains(".."), "{path}");
+            assert!(!path.starts_with('/') && !path.contains(':'), "{path}");
+        }
+    }
+
+    fn plan_design(receipt: &PlanReceipt) -> Value {
+        json!({
+            "design": {
+                "plan": {
+                    "path": receipt.path,
+                    "sha256": receipt.sha256,
+                    "graph_id": receipt.graph_id,
+                    "bytes": receipt.bytes,
+                    "block_size": receipt.block_size,
+                    "sample_rate": receipt.sample_rate,
+                    "channels": receipt.channels,
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn plan_receipt_requires_every_cal_solve_field_instead_of_guessing() {
+        // 没有 design 对象 / 没有 design.plan：E_CAL_PLAN，不伪造。
+        for malformed in [json!({}), json!({ "design": {} }), json!({ "design": [] })] {
+            let error = plan_receipt(&malformed).expect_err("missing design.plan");
+            assert_eq!(error.code, "E_CAL_PLAN", "{malformed}");
+        }
+        // 用绝对路径（Windows 的 "/tmp/..." 不是绝对路径；daemon 只读 rt-host 报的绝对路径）。
+        let absolute_plan = std::env::temp_dir()
+            .join("khaen-test-plan.bin")
+            .display()
+            .to_string();
+        let mut receipt = PlanReceipt {
+            path: absolute_plan.clone(),
+            sha256: "a".repeat(64),
+            graph_id: "b".repeat(64),
+            bytes: 100,
+            block_size: 128,
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        // 每个字段缺失/类型错都失败（不拿默认值兜底）。
+        for key in [
+            "path",
+            "sha256",
+            "graph_id",
+            "bytes",
+            "block_size",
+            "sample_rate",
+            "channels",
+        ] {
+            let mut design = plan_design(&receipt);
+            design["design"]["plan"]
+                .as_object_mut()
+                .expect("plan object")
+                .remove(key);
+            let error = plan_receipt(&design).expect_err(key);
+            assert_eq!(error.code, "E_CAL_PLAN", "{key}: {error}");
+            assert!(error.message.contains(key), "{key}: {}", error.message);
+        }
+        // 非绝对路径：daemon 不按自己的 cwd 解析 rt-host 的路径。
+        receipt.path = "relative/plan.bin".to_string();
+        let error = plan_receipt(&plan_design(&receipt)).expect_err("relative path");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        assert!(error.message.contains("not absolute"), "{}", error.message);
+        // sha256 不是 64 hex：回执本身就是坏的。
+        receipt.path = absolute_plan;
+        receipt.sha256 = "not-a-sha".to_string();
+        let error = plan_receipt(&plan_design(&receipt)).expect_err("bad sha");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        // 合法回执逐字段读出（不改值）。
+        receipt.sha256 = "a".repeat(64);
+        assert_eq!(
+            plan_receipt(&plan_design(&receipt)).expect("valid"),
+            receipt
+        );
+    }
+
+    #[test]
+    fn verify_plan_bytes_rejects_tampering_and_accepts_verified_abi_v3() {
+        let temp = TempFile::dir("verify");
+        let bytes = abi_plan_bytes(48_000, 128, 2);
+        let plan_path = temp.write("plan.bin", &bytes);
+        let receipt = receipt_for(&plan_path, &bytes);
+
+        // 合法：从字节重算 sha/graph_id/元数据。
+        let verified = verify_plan_bytes(&plan_path, &receipt).expect("verified plan");
+        assert_eq!(verified.bytes, bytes);
+        assert_eq!(verified.sha256, sha256_hex(&bytes));
+        assert_eq!(verified.plan.block_size, 128);
+        assert_eq!(verified.plan.sample_rate, 48_000);
+        assert_eq!(verified.graph_id, verified.plan.graph_id_hex());
+        assert_eq!(verified.channels, 2);
+
+        // 文件不存在：E_CAL_PLAN（不跳过 compile）。
+        let missing = temp.path().join("missing.bin");
+        let error = verify_plan_bytes(&missing, &receipt).expect_err("missing file");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        assert!(
+            error.message.contains("cannot be inspected"),
+            "{}",
+            error.message
+        );
+
+        // 目录不是普通文件：E_CAL_PLAN。
+        let error = verify_plan_bytes(&temp.path(), &receipt).expect_err("directory");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        assert!(
+            error.message.contains("not a regular file"),
+            "{}",
+            error.message
+        );
+
+        // 空文件：E_CAL_PLAN。
+        let empty_path = temp.write("empty.bin", b"");
+        let error = verify_plan_bytes(&empty_path, &receipt).expect_err("empty file");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        assert!(error.message.contains("empty"), "{}", error.message);
+
+        // 超过安全上限：E_CAL_PLAN（先看大小，不读进内存）。
+        let huge_path = temp.path().join("huge.bin");
+        let huge = std::fs::File::create(&huge_path).expect("create huge");
+        huge.set_len(MAX_PLAN_FILE_BYTES + 1).expect("set len");
+        let error = verify_plan_bytes(&huge_path, &receipt).expect_err("oversized file");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        assert!(error.message.contains("safety limit"), "{}", error.message);
+
+        // sha256 与回执不符（字节被换掉）：E_CAL_PLAN。
+        let tampered = temp.write("tampered.bin", &{
+            let mut bytes = bytes.clone();
+            let last = bytes.len() - 1;
+            bytes[last] ^= 0xFF;
+            bytes
+        });
+        let error = verify_plan_bytes(&tampered, &receipt).expect_err("tampered file");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        assert!(error.message.contains("hashes to"), "{}", error.message);
+
+        // 字节数与回执不符：E_CAL_PLAN（sha 对得上也要求字节数一致）。
+        let mut wrong_bytes = receipt.clone();
+        wrong_bytes.bytes += 1;
+        let error = verify_plan_bytes(&plan_path, &wrong_bytes).expect_err("bytes mismatch");
+        assert_eq!(error.code, "E_CAL_PLAN");
+        assert!(
+            error.message.contains("design.plan.bytes"),
+            "{}",
+            error.message
+        );
+
+        // 非 ABI 字节（sha/bytes 都匹配回执）：E_PLAN_ABI，魔数检查先失败。
+        let garbage = b"NOTAPLAN-and-not-a-plan-file".to_vec();
+        let garbage_path = temp.write("garbage.bin", &garbage);
+        let mut garbage_receipt = receipt.clone();
+        garbage_receipt.sha256 = sha256_hex(&garbage);
+        garbage_receipt.bytes = garbage.len() as u64;
+        let error = verify_plan_bytes(&garbage_path, &garbage_receipt).expect_err("bad magic");
+        assert_eq!(error.code, "E_PLAN_ABI");
+        assert!(error.message.contains("KHAENPLN"), "{}", error.message);
+
+        // 回执与字节描述的不是同一份方案：graph_id/块长/采样率/通道数不一致 -> E_PLAN_ABI。
+        let mutators: [fn(&mut PlanReceipt); 4] = [
+            |receipt| receipt.graph_id = "0".repeat(64),
+            |receipt| receipt.block_size = 256,
+            |receipt| receipt.sample_rate = 96_000,
+            |receipt| receipt.channels = 4,
+        ];
+        for mutate in mutators {
+            let mut mismatched = receipt.clone();
+            mutate(&mut mismatched);
+            let error = verify_plan_bytes(&plan_path, &mismatched)
+                .expect_err("receipt must match the decoded plan");
+            assert_eq!(error.code, "E_PLAN_ABI", "{}", error.message);
+        }
+    }
+
+    #[test]
+    fn compile_report_records_a_predicted_only_identity_and_never_claims_apply() {
+        let temp = TempFile::dir("report");
+        let bytes = abi_plan_bytes(48_000, 128, 2);
+        let plan_path = temp.write("plan.bin", &bytes);
+        let receipt = receipt_for(&plan_path, &bytes);
+        let verified = verify_plan_bytes(&plan_path, &receipt).expect("verified plan");
+        let report = compile_report_json(JobId(3), json!(7), &receipt, &verified);
+        assert_eq!(report["schema"], json!(COMPILE_SCHEMA));
+        assert_eq!(report["job_id"], json!("job-0003"));
+        assert_eq!(report["measure_id"], json!(7));
+        assert_eq!(report["source"], json!("rt-host cal_solve"));
+        // 设计只是 predicted-only：不得把 verdict 写成 PASS，也不得声称已 apply。
+        assert_eq!(report["verdict"], json!("PREDICTED_ONLY"));
+        assert_eq!(report["applied"], json!(false));
+        assert_eq!(report["plan_sha256"], json!(sha256_hex(&bytes)));
+        assert_eq!(report["graph_id"], json!(verified.graph_id));
+        assert_eq!(report["bytes"], json!(bytes.len()));
+        assert_eq!(report["block_size"], json!(128));
+        assert_eq!(report["sample_rate"], json!(48_000));
+        assert_eq!(report["channels"], json!(2));
+        assert_eq!(report["abi"], json!("khaen-plan/v3"));
+        // artifact 路径必须是 job 目录内相对路径，不是 rt-host 的绝对路径。
+        assert_eq!(report["plan_artifact"], json!(PLAN_ARTIFACT));
+        // 回执原件逐字段保留（供审计对照）。
+        assert_eq!(report["receipt"]["sha256"], json!(receipt.sha256));
+        assert_eq!(report["receipt"]["graph_id"], json!(receipt.graph_id));
+        assert_eq!(report["receipt"]["bytes"], json!(receipt.bytes));
+        assert!(
+            !report
+                .to_string()
+                .contains(&plan_path.display().to_string()),
+            "compile report must not leak the rt-host absolute path: {report}"
+        );
     }
 
     /// 记录 cal op 的假传输（Drop 兜底 leave 的单测用）。

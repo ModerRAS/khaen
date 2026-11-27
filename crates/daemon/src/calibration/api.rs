@@ -907,8 +907,8 @@ pub(crate) async fn cancel_job(
 
 /// 单个 job 的 REST JSON（job 对象；缺失字段 null，原因在 job_reasons）。
 fn job_json(record: &JobRecord) -> Value {
-    // 步骤名按 job 种类取（离线 5 步 / rt-host 4 步）：固定用离线步骤会把 rt-host 的
-    // sweep_capture/quality_check 抹成 compile/levels 占位（不诚实）。
+    // 步骤名按 job 种类取（离线 5 步 / rt-host 6 步）：固定用离线步骤会把 rt-host 的
+    // sweep_capture/quality_check/solve_g 抹成 compile/levels/closed_loop 占位（不诚实）。
     let step_names = crate::calibration::service::job_step_names(&record.kind);
     let steps: Vec<Value> = step_names
         .iter()
@@ -1129,7 +1129,7 @@ fn job_reasons(record: &JobRecord) -> Map<String, Value> {
         record.result.is_none(),
         if rt_host {
             format!(
-                "job is {state}: rt-host measurement jobs have no closed-loop comparison result (a solve design is in design.json; plan compile/apply is not wired — C3b2b); measurement evidence is in measurement.json/quality.json/design.json/report.json"
+                "job is {state}: rt-host measurement jobs have no closed-loop comparison result (a predicted-only solve design is in design.json, a verified but unapplied plan is in plan.bin/compile-report.json; applying is a separate explicit two-phase operation); measurement evidence is in measurement.json/quality.json/design.json/report.json"
             )
         } else {
             format!(

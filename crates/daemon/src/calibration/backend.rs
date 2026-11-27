@@ -27,6 +27,8 @@
 //! # NOT_RUN
 //!
 //! 真机 UMIK/MOTU 采集（T70f-c）、rt-host 目标下的真实 apply（会重开 PCM/出声，需设备窗口）。
+//! C3b2b 的 compile/apply 接线用脚本化 rt-host 回执 + 临时 plan 文件测过；真机 plan 回读与
+//! 真机两阶段 apply 仍是 NOT_RUN（需设备窗口与用户授权），不得当成已实测。
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -50,7 +52,8 @@ use khaen_core::plan::Plan;
 
 use super::mic::{MicProfile, MicProfileStore};
 use super::rt_host_backend::{
-    RtHostJobBackend, RtHostJobConfig, DESIGN_ARTIFACT, MEASUREMENT_ARTIFACT, QUALITY_ARTIFACT,
+    RtHostJobBackend, RtHostJobConfig, COMPILE_REPORT_ARTIFACT, COMPILE_REPORT_ARTIFACT_NAME,
+    DESIGN_ARTIFACT, MEASUREMENT_ARTIFACT, PLAN_ARTIFACT, PLAN_ARTIFACT_NAME, QUALITY_ARTIFACT,
     REPORT_ARTIFACT,
 };
 use super::service::{
@@ -104,14 +107,18 @@ const EXPOSED_ARTIFACTS_OFFLINE: [(&str, &str); 4] = [
     ("report.json", CLOSED_LOOP_REPORT_FILE),
 ];
 
-/// 白名单产物：REST 名字 -> rt-host 真实测量 job 相对路径（C3b1 测量 + C3b2a solve）。
+/// 白名单产物：REST 名字 -> rt-host 真实测量 job 相对路径（C3b1 测量 + C3b2a solve +
+/// C3b2b compile）。
 ///
-/// design.json 是 cal_solve 的真实回执（predicted-only 设计，不是可应用 plan），
-/// 单独暴露给 REST；plan compile/apply 属 C3b2b。
-const EXPOSED_ARTIFACTS_RT_HOST: [(&str, &str); 4] = [
+/// design.json 是 cal_solve 的真实回执（predicted-only 设计）；plan.bin 是 compile 从
+/// rt-host 回执路径读回并校验过的 ABI v3 方案字节，compile-report.json 是它的验证记录。
+/// 三者都只是**证据**：apply 仍是用户显式两阶段控制面操作，job 不自动 apply。
+const EXPOSED_ARTIFACTS_RT_HOST: [(&str, &str); 6] = [
     ("measurement.json", MEASUREMENT_ARTIFACT),
     ("quality.json", QUALITY_ARTIFACT),
     ("design.json", DESIGN_ARTIFACT),
+    (PLAN_ARTIFACT_NAME, PLAN_ARTIFACT),
+    (COMPILE_REPORT_ARTIFACT_NAME, COMPILE_REPORT_ARTIFACT),
     ("report.json", REPORT_ARTIFACT),
 ];
 
@@ -842,12 +849,22 @@ impl JobManagerCalibration {
             );
             reasons.insert(
                 "result".to_string(),
-                "this job records a real rt-host measurement plus a single-point design (design.json, verdict PREDICTED_ONLY); it does not run a closed-loop comparison and produces no applicable plan (plan compile/apply is C3b2b), so result stays null".to_string(),
+                "this job records a real rt-host measurement, a predicted-only design (design.json) and a verified plan (plan/plan.bin + compile/compile-report.json, verdict PREDICTED_ONLY); it does not run a closed-loop comparison and never applies the plan (applying is a separate user-driven two-phase prepare/commit operation), so result stays null and no PASS is reported".to_string(),
+            );
+            reasons.insert(
+                "plan".to_string(),
+                match &job.plan {
+                    Some(plan) => format!(
+                        "the job compiled and verified plan/plan.bin (sha256 {}, graph_id {}): the daemon re-read the bytes rt-host cal_solve wrote and checked sha256/KHAENPLN/ABI v3. The plan is not applied by the job; call POST /api/calibration/jobs/{{id}}/apply with stage=prepare then stage=commit to apply it explicitly",
+                        plan.sha256, plan.graph_id
+                    ),
+                    None => "the job has no compile/compile-report.json plan record; apply is unavailable for this job".to_string(),
+                },
             );
             if job.verdict.is_none() {
                 reasons.insert(
                     "verdict".to_string(),
-                    "the rt-host cal_status reply carried no quality/verdict object, so no PASS is reported (quality.json records available:false with the reason)".to_string(),
+                    "the rt-host cal_status reply carried no quality/verdict object, so no PASS is reported (quality.json records available:false with the reason); the design verdict PREDICTED_ONLY is not a PASS and no remeasure/holdout verification was run".to_string(),
                 );
             }
         } else if job.result.is_some() {
@@ -1180,6 +1197,11 @@ impl CalibrationService for JobManagerCalibration {
         self.read_exposed_artifact(&job, name)
     }
 
+    /// 取 apply 所需的 job 产物（C3b2b 起 rt-host 真实测量 job 也走同一条通用路径）。
+    ///
+    /// 只做“job 成功 + compile 报告记录的 plan 存在 + job 目录内 plan 字节重算 sha256 与
+    /// 记录一致”三件事；真正的两阶段 prepare/commit 由 REST 层按 host_link.target 路由。
+    /// 这里**不做任何 apply 动作**，也不把 PREDICTED_ONLY 设计当成 PASS。
     fn apply(&self, job_id: &str) -> Result<ApplyPlan, CalibrationError> {
         let id = Self::parse_job_id(job_id)?;
         self.sync();
@@ -1187,12 +1209,6 @@ impl CalibrationService for JobManagerCalibration {
         let state = JobState::parse(&job.state).unwrap_or(JobState::Failed);
         if state != JobState::Succeeded {
             return Err(CalibrationError::job_not_succeeded(job_id, state.as_str()));
-        }
-        if job.kind == JOB_KIND_SINGLE_POINT_RT_HOST {
-            return Err(CalibrationError::plan_unavailable(
-                job_id,
-                "rt-host measurement jobs now record a predicted-only design (design.json), but plan compile/apply (an applicable plan) is not wired in this slice (C3b2b), so there is no applicable plan",
-            ));
         }
         let plan = job.plan.as_ref().ok_or_else(|| {
             CalibrationError::plan_unavailable(
@@ -1335,11 +1351,13 @@ impl CalibrationService for JobManagerCalibration {
 ///
 /// 真实测量的设备 owner 在 rt-host 进程：模式切换与"交还播放"由 rt-host 的 cal_enter /
 /// cal_leave 完成，daemon 侧不打开/不抢占任何本地设备。因此 acquire/release 记录"远端已
-/// 交接"并成功；apply 相关的 restore_last_good/activate_safe_mute 在本切片不可能发生
-/// （不产生可应用方案），任何真实调用仍 fail-closed，绝不静默假装恢复。
+/// 交接"并成功。C3b2b 的 compile 只产出 job 产物、不 apply；apply 是 REST 层按
+/// host_link.target 路由的显式两阶段控制面操作，不经过 job backend 的 Safety 接口，所以
+/// job 内的 restore_last_good/activate_safe_mute 仍不可达；任何真实调用仍 fail-closed，
+/// 绝不静默假装恢复。
 struct RemoteCalibrationSafety;
 
-const REMOTE_CALIBRATION_DEVICE_ERROR: &str = "rt-host measurement jobs never apply a plan: plan compile/apply is not wired in this slice (C3b2b), so restore_last_good/safe mute cannot be reached";
+const REMOTE_CALIBRATION_DEVICE_ERROR: &str = "rt-host jobs never apply through the job backend: applying a compiled plan is a separate explicit two-phase control-plane operation routed by host_link.target, so last-good/safe-mute recovery is not reachable from this job kind";
 
 impl SafeOutputController for RemoteCalibrationSafety {
     fn acquire_calibration_owner(&self) -> Result<(), SafetyError> {
@@ -1655,6 +1673,22 @@ fn collect_rt_host_completion(
             changed = true;
         }
     }
+    // compile（C3b2b）：plan 几何只从 compile/compile-report.json 的记录来——compile stage
+    // 已重读并校验过 plan 字节，这里不重算 sha/ABI、不补 result/verdict。
+    if let Some(compile) = read_json(&dir.join(COMPILE_REPORT_ARTIFACT)) {
+        let plan = compile
+            .get("plan_sha256")
+            .and_then(Value::as_str)
+            .zip(compile.get("graph_id").and_then(Value::as_str))
+            .map(|(sha256, graph_id)| PlanResult {
+                sha256: sha256.to_string(),
+                graph_id: graph_id.to_string(),
+            });
+        if job.plan != plan {
+            job.plan = plan;
+            changed = true;
+        }
+    }
     changed
 }
 
@@ -1726,7 +1760,7 @@ fn build_result(
 
 /// 由审计快照推导步骤（不伪造逐 stage 时间戳：只有 job 级时间可用）。
 ///
-/// 步骤名与数量按 job 种类取（离线 5 步 / rt-host 4 步），与 JobManager plan 同源。
+/// 步骤名与数量按 job 种类取（离线 5 步 / rt-host 6 步），与 JobManager plan 同源。
 fn derive_steps(job: &PersistedJob) -> Vec<JobStep> {
     let state = JobState::parse(&job.state).unwrap_or(JobState::Failed);
     let names = job_step_names(&job.kind);
@@ -1775,6 +1809,7 @@ fn stage_sha(job: &PersistedJob, step: &str) -> Option<String> {
             "sweep_capture" => MEASUREMENT_ARTIFACT,
             "quality_check" => QUALITY_ARTIFACT,
             "solve_g" => DESIGN_ARTIFACT,
+            "compile" => PLAN_ARTIFACT_NAME,
             "bundle" => REPORT_ARTIFACT,
             _ => return None,
         }

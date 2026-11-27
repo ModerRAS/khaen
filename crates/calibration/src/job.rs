@@ -100,11 +100,13 @@ impl fmt::Display for JobId {
 /// - `SinglePointOffline`（T70h-b）：离线闭环证据 job（PLAN §4.7）。输入是已上传的方案 +
 ///   两段 WAV（基线/施加），步骤 `validate -> compile -> levels -> closed_loop -> bundle`，
 ///   不打开设备、不跑 RT 图（真实测量采集属 T70f-c）。
-/// - `SinglePointRtHost`（C3b1 + C3b2a）：真实单点测量 job。daemon 经 host link 驱动 rt-host 的
-///   `cal_enter -> cal_measure -> cal_status -> cal_solve -> cal_leave`（真实设备/UMIK 采集），
-///   步骤 `validate -> sweep_capture -> quality_check -> solve_g -> bundle`；本切片在测量成功后
-///   产出真实单点设计（design.json，verdict 恒 PREDICTED_ONLY），但不编译/应用方案（C3b2b），
-///   job 不产出可应用 plan、不报 PASS。
+/// - `SinglePointRtHost`（C3b1 测量 + C3b2a solve + C3b2b compile）：真实单点测量 job。daemon
+///   经 host link 驱动 rt-host 的 `cal_enter -> cal_measure -> cal_status -> cal_solve ->
+///   cal_leave`（真实设备/UMIK 采集），步骤
+///   `validate -> sweep_capture -> quality_check -> solve_g -> compile -> bundle`；测量成功后
+///   产出真实单点设计（design.json，verdict 恒 PREDICTED_ONLY），compile 把 rt-host cal_solve
+///   写出的 plan 字节读回来做 sha256/ABI 校验并落成 `plan/plan.bin` + `compile/compile-report.json`。
+///   job 自身**不 apply**（应用仍是用户显式两阶段控制面操作），也不报 PASS。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobKind {
     Full,
@@ -144,18 +146,22 @@ pub const SINGLE_POINT_OFFLINE_PLAN: [JobStage; 5] = [
     JobStage::Bundle,
 ];
 
-/// SinglePointRtHost 的 stage 顺序（C3b1 测量 + C3b2a solve：真实测量证据链，不跳步）。
+/// SinglePointRtHost 的 stage 顺序（C3b1 测量 + C3b2a solve + C3b2b compile：证据链，不跳步）。
 ///
 /// `validate`（MicProfile/rt-host 可用性/可闻授权）-> `sweep_capture`（rt-host cal_enter +
 /// cal_measure + 轮询 cal_status）-> `quality_check`（只搬 rt-host 真实质量字段；没有就写
 /// unavailable）-> `solve_g`（校准模式下 `cal_solve`，落 predicted-only 的 design.json）
-/// -> `bundle`（幂等 cal_leave + 报告 + manifest）。这里没有 compile/apply：本切片只产出
-/// 设计证据，不产出可应用方案，也不报 PASS。
-pub const SINGLE_POINT_RT_HOST_PLAN: [JobStage; 5] = [
+/// -> `compile`（读 design.plan.path 指向的 plan 字节，校验普通文件/大小/sha256/KHAENPLN
+/// 魔数/Plan ABI v3，落 `plan/plan.bin` + `compile/compile-report.json`；失败时先
+/// cal_leave）-> `bundle`（幂等 cal_leave + 报告 + manifest）。它仍**没有 apply stage**：
+/// 应用是用户对 job 产物显式调用的两阶段控制面操作（prepare -> commit），job 不自动 apply，
+/// 也不把 PREDICTED_ONLY 设计写成 PASS。
+pub const SINGLE_POINT_RT_HOST_PLAN: [JobStage; 6] = [
     JobStage::Validate,
     JobStage::SweepCapture,
     JobStage::QualityCheck,
     JobStage::SolveG,
+    JobStage::Compile,
     JobStage::Bundle,
 ];
 
@@ -4135,7 +4141,8 @@ mod tests {
             .iter()
             .map(|stage| stage.as_str())
             .collect();
-        // C3b2a：测量成功后多一个 solve_g（cal_solve -> design.json），再 bundle（leave）。
+        // C3b2a：测量成功后多一个 solve_g（cal_solve -> design.json）；C3b2b 再加 compile
+        // （校验 rt-host 的 plan 字节并落 plan.bin + compile-report.json），最后 bundle（leave）。
         assert_eq!(
             names,
             [
@@ -4143,6 +4150,7 @@ mod tests {
                 "sweep_capture",
                 "quality_check",
                 "solve_g",
+                "compile",
                 "bundle"
             ]
         );
@@ -4163,6 +4171,8 @@ mod tests {
         assert!(!JobStage::Validate.needs_calibration_device());
         assert!(!JobStage::QualityCheck.needs_calibration_device());
         assert!(!JobStage::SolveG.needs_calibration_device());
+        // compile 只读 rt-host 写出的文件 + 写 job 产物，不交接设备。
+        assert!(!JobStage::Compile.needs_calibration_device());
         assert!(!JobStage::Bundle.needs_calibration_device());
     }
 
