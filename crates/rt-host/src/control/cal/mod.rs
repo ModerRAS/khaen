@@ -33,7 +33,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use khaen_calibration::capture::UmikDeviceConfig;
+use khaen_calibration::capture::{
+    UmikDeviceConfig, UMIK_ORIENTATION_AXIAL, UMIK_ORIENTATION_VERTICAL,
+};
 use khaen_calibration::ir_extract::{extract_irs, DeconvolvedIr, IrExtractConfig};
 use khaen_calibration::job::{CancelToken, StageFailure};
 use khaen_calibration::stage_backend::{
@@ -116,6 +118,11 @@ pub const DEFAULT_CAPTURE_CHANNEL: u16 = 0;
 pub const DEFAULT_BUFFER_FRAMES: u32 = 512;
 /// 默认 settle（ms；T62/T67 板端口径 1200）。
 pub const DEFAULT_SETTLE_MS: u64 = 1_200;
+/// cal_enter 请求内 mic 覆盖的校准文件上限（1 MiB；与 daemon MicProfile 上传限制一致）。
+pub const MIC_CAL_FILE_MAX_BYTES: u64 = 1024 * 1024;
+/// 允许的 UMIK 朝向（ACCEPTANCE §0.1.2：全向麦只允许 90°（听音位）/ 0°（单只近场））。
+pub const ALLOWED_UMIK_ORIENTATIONS: [&str; 2] =
+    [UMIK_ORIENTATION_VERTICAL, UMIK_ORIENTATION_AXIAL];
 
 /// 旧扫频常量（cal_control.rs）：起始频率。
 pub const LEGACY_SWEEP_START_HZ: f64 = 20.0;
@@ -152,6 +159,11 @@ pub mod error {
     pub const UMIK_OPEN_FAILED: &str = "umik_open_failed";
     /// UMIK 声明缺失（serial/cal_file/cal_sha256）。
     pub const MIC_DECLARATION_MISSING: &str = "mic_declaration_missing";
+    /// cal_enter 请求内 mic 覆盖的声明非法（shape/字段/朝向；不猜、不静默降级）。
+    pub const MIC_DECLARATION_INVALID: &str = "mic_declaration_invalid";
+    /// cal_enter 请求内 mic 覆盖的校准文件非法（不存在/非普通文件/超限/非 UTF-8/BOM/
+    /// sha256 不符/首行 SERNO 与声明 serial 不符）。
+    pub const MIC_CAL_FILE_INVALID: &str = "mic_cal_file_invalid";
     /// 运行时格式不支持校准（UMIK 48k 与块长 64/128）。
     pub const FORMAT_UNSUPPORTED: &str = "cal_format_unsupported";
     /// 校准配置非法（通道列表/电平/设备参数）。
@@ -741,6 +753,10 @@ pub struct CalibrationCore {
     runtime_format: EngineConfig,
     snapshot: SharedSnapshot,
     mode: CalMode,
+    /// cal_enter 请求内的 per-session mic 覆盖（None = 用 env/config 声明）。
+    session_mic: Option<UmikDeviceConfig>,
+    /// 采集设备覆盖（与请求 mic.device 同步；leave/shutdown 清空）。
+    session_capture_device: Option<String>,
     options: Option<SessionOptions>,
     progress: Arc<CalProgress>,
     engine_slot: Arc<Mutex<Option<Box<dyn StageAudioEngine>>>>,
@@ -756,6 +772,7 @@ impl std::fmt::Debug for CalibrationCore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CalibrationCore")
             .field("mode", &self.mode)
+            .field("session_capture_device", &self.session_capture_device)
             .field("options", &self.options)
             .field("next_measure_id", &self.next_measure_id)
             .field("next_pass", &self.next_pass)
@@ -781,6 +798,8 @@ impl CalibrationCore {
             runtime_format,
             snapshot,
             mode: CalMode::Playback,
+            session_mic: None,
+            session_capture_device: None,
             options: None,
             progress,
             engine_slot: Arc::new(Mutex::new(None)),
@@ -803,6 +822,8 @@ impl CalibrationCore {
         let mut slot = lock(&self.engine_slot);
         let _ = slot.take();
         self.mode = CalMode::Playback;
+        self.session_mic = None;
+        self.session_capture_device = None;
     }
 
     // ------------------------------------------------------------------
@@ -853,6 +874,16 @@ impl CalibrationCore {
         let engine_open = lock(&self.engine_slot).is_some();
         let measuring = state == CalState::Measuring;
         let umik_open = self.mode == CalMode::Calibration && (engine_open || measuring);
+        // 生效声明：cal_enter 的请求覆盖优先（仅本会话），否则 env/config。
+        let effective_mic = self.effective_mic();
+        let effective_capture_device = self.effective_capture_device().to_string();
+        let declaration_source = if self.session_mic.is_some() {
+            "cal_enter_override"
+        } else if self.config.mic.is_some() {
+            "env"
+        } else {
+            "missing"
+        };
         let mut reasons = Map::new();
         if self.mode != CalMode::Calibration {
             reasons.insert(
@@ -872,7 +903,7 @@ impl CalibrationCore {
                 json!("the last measurement failed: see measure.error.code/stage_code; no fabricated result is reported"),
             );
         }
-        if self.config.mic.is_none() {
+        if effective_mic.is_none() {
             reasons.insert(
                 "mic".to_string(),
                 json!(self
@@ -947,11 +978,12 @@ impl CalibrationCore {
             "real_capture": !self.factory.simulated(),
             "umik": {
                 "open": umik_open,
-                "device": self.config.umik_device,
+                "device": effective_capture_device,
                 "capture_channels": self.config.capture_channels,
                 "capture_channel": self.config.capture_channel,
-                "declared": self.config.mic.is_some(),
-                "declaration": self.config.mic.as_ref().map(|mic| json!({
+                "declared": effective_mic.is_some(),
+                "declaration_source": declaration_source,
+                "declaration": effective_mic.map(|mic| json!({
                     "model": mic.model,
                     "serial": mic.serial,
                     "cal_file": mic.cal_file,
@@ -960,7 +992,11 @@ impl CalibrationCore {
                     "clock_domain": mic.clock_domain,
                     "sample_rate_hz": mic.sample_rate_hz,
                 })),
-                "missing_reason": self.config.mic_missing_reason,
+                "missing_reason": if effective_mic.is_some() {
+                    Value::Null
+                } else {
+                    json!(self.config.mic_missing_reason)
+                },
             },
             "config": {
                 "layout": self.options.as_ref().map(|options| options.layout.clone()).unwrap_or_else(|| self.config.layout.clone()),
@@ -1062,7 +1098,22 @@ impl CalibrationCore {
                 "a calibration measurement is still running; poll cal_status and retry cal_enter after it finishes",
             ));
         }
+        // 请求内可选 mic 覆盖（C2：daemon 转发 UI MicProfile）。先完整校验；失败不改状态、
+        // 不改 env/config、不打开任何设备（校验只读声明与校准文件）。
+        let mic_override = parse_mic_override(request)?;
         if self.mode == CalMode::Calibration {
+            if let Some(over) = mic_override.as_ref() {
+                if self.mic_declaration_matches(over) {
+                    return Ok(self.status_ok_json(json!({
+                        "entered": false,
+                        "note": "already in calibration mode; the requested mic override matches the active session declaration",
+                    })));
+                }
+                return Err(ControlError::new(
+                    error::BUSY,
+                    "cal_enter cannot change the mic declaration while a calibration session is active: cal_leave first (the current session keeps the capture device it probed)",
+                ));
+            }
             return Ok(self.status_ok_json(
                 json!({ "entered": false, "note": "already in calibration mode" }),
             ));
@@ -1076,7 +1127,10 @@ impl CalibrationCore {
         let snapshot = self.require_snapshot()?;
         self.ensure_device_present(&snapshot)?;
         self.ensure_not_muted(&snapshot)?;
-        let mic = self.mic_or_error()?;
+        let mic = match mic_override.as_ref() {
+            Some(over) => over.mic.clone(),
+            None => self.mic_or_error()?,
+        };
         let options = self.resolve_options(request)?;
         let stage = self.build_stage_config(&mic, &options, audible)?;
         let progress = Arc::new(CalProgress::new());
@@ -1094,9 +1148,23 @@ impl CalibrationCore {
                 error::UMIK_OPEN_FAILED,
                 format!(
                     "UMIK capture device is not usable ({}): {}",
-                    self.config.umik_device, probe.notes
+                    self.effective_capture_device(),
+                    probe.notes
                 ),
             ));
+        }
+        // probe 通过后才落地会话覆盖：失败路径保持 env/config（如实回滚）。
+        let mic_override_active = mic_override.is_some();
+        match mic_override {
+            Some(over) => {
+                self.session_mic = Some(over.mic);
+                self.session_capture_device = Some(over.capture_device);
+            }
+            None => {
+                // 无 mic 的 enter 回到 env/config 声明（清空上次会话的防御性残留）。
+                self.session_mic = None;
+                self.session_capture_device = None;
+            }
         }
         {
             let mut slot = lock(&self.engine_slot);
@@ -1122,8 +1190,13 @@ impl CalibrationCore {
         }
         Ok(self.status_ok_json(json!({
             "entered": true,
+            "mic_override": mic_override_active,
             "probe": probe_json(&probe),
-            "note": "UMIK probe passed; the capture device is opened per measurement session (not held open while idle) so playback mode never occupies it",
+            "note": if mic_override_active {
+                "UMIK probe passed for the cal_enter mic override; the override applies to this calibration session only and cal_leave restores the env/config declaration (the env config was not modified)"
+            } else {
+                "UMIK probe passed; the capture device is opened per measurement session (not held open while idle) so playback mode never occupies it"
+            },
         })))
     }
 
@@ -1137,6 +1210,9 @@ impl CalibrationCore {
         }
         self.mode = CalMode::Playback;
         self.options = None;
+        // 会话覆盖随 leave 结束：回到 env/config 声明（不残留到下一次会话）。
+        self.session_mic = None;
+        self.session_capture_device = None;
         self.progress.reset();
         // 不擦除最近测量/求解状态：leave 之后 cal_status 仍要能如实读出证据
         // （测量中离开时，取消会让状态变成 failed/CANCELLED，同样如实保留）。
@@ -1458,8 +1534,32 @@ impl CalibrationCore {
         Ok(())
     }
 
+    /// 本会话生效的 mic 声明：cal_enter 的请求覆盖优先，否则 env/config。
+    fn effective_mic(&self) -> Option<&UmikDeviceConfig> {
+        self.session_mic.as_ref().or(self.config.mic.as_ref())
+    }
+
+    /// 本会话生效的采集设备：cal_enter 的请求覆盖优先，否则 env/config。
+    fn effective_capture_device(&self) -> &str {
+        self.session_capture_device
+            .as_deref()
+            .unwrap_or(self.config.umik_device.as_str())
+    }
+
+    /// 请求覆盖是否与当前生效声明一致（已在校准模式时 cal_enter 幂等用；不比较
+    /// cal_file 记录名——同一份文件由 sha256 标识）。
+    fn mic_declaration_matches(&self, over: &MicOverride) -> bool {
+        self.effective_capture_device() == over.capture_device.as_str()
+            && self.effective_mic().is_some_and(|mic| {
+                mic.device == over.mic.device
+                    && mic.serial == over.mic.serial
+                    && mic.cal_sha256 == over.mic.cal_sha256
+                    && mic.orientation == over.mic.orientation
+            })
+    }
+
     fn mic_or_error(&self) -> Result<UmikDeviceConfig, ControlError> {
-        self.config.mic.clone().ok_or_else(|| {
+        self.effective_mic().cloned().ok_or_else(|| {
             ControlError::new(
                 error::MIC_DECLARATION_MISSING,
                 self.config
@@ -1572,7 +1672,7 @@ impl CalibrationCore {
                     "runtime channel count does not fit u16",
                 )
             })?,
-            capture_device: self.config.umik_device.clone(),
+            capture_device: self.effective_capture_device().to_string(),
             capture_channels: self.config.capture_channels,
             capture_channel: self.config.capture_channel,
             sample_rate: STAGE_UMIK_SAMPLE_RATE_HZ,
@@ -1760,6 +1860,194 @@ fn u32_list_field(
             "field {key} must be an array of non-negative integers"
         ))),
     }
+}
+
+// ---------------------------------------------------------------------------
+// cal_enter 的 per-session mic 覆盖（C2：daemon 转发 UI MicProfile）
+// ---------------------------------------------------------------------------
+
+/// cal_enter 请求内的 mic 覆盖（来源请求，仅本校准会话生效；不写回 env/config）。
+#[derive(Debug, Clone)]
+struct MicOverride {
+    /// 已校验的 UMIK 声明（cal_file 记录为 cal_path 的文件名）。
+    mic: UmikDeviceConfig,
+    /// 本会话的 ALSA 采集设备（= 请求 mic.device，trim 后）。
+    capture_device: String,
+}
+
+fn mic_declaration_invalid(message: impl Into<String>) -> ControlError {
+    ControlError::new(error::MIC_DECLARATION_INVALID, message)
+}
+
+fn mic_cal_file_invalid(message: impl Into<String>) -> ControlError {
+    ControlError::new(error::MIC_CAL_FILE_INVALID, message)
+}
+
+/// 解析/校验 cal_enter 的可选 `mic` 对象。缺失/null = 无覆盖（完全走 env/config）；
+/// 有值则先做声明校验（`mic_declaration_invalid`）再做校准文件校验（`mic_cal_file_invalid`）。
+/// 失败不改任何状态、不打开设备。
+fn parse_mic_override(request: &Map<String, Value>) -> Result<Option<MicOverride>, ControlError> {
+    let value = match request.get("mic") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(value) => value,
+    };
+    let object = value.as_object().ok_or_else(|| {
+        mic_declaration_invalid(
+            "field mic must be an object {device, serial, cal_path, cal_sha256, orientation}",
+        )
+    })?;
+    // 五项都必需：缺一/类型不对都是声明非法（不猜默认值）。
+    let device = mic_string_field(object, "device")?;
+    let serial = mic_string_field(object, "serial")?;
+    let cal_path = mic_string_field(object, "cal_path")?;
+    let cal_sha256 = mic_string_field(object, "cal_sha256")?;
+    let orientation = mic_string_field(object, "orientation")?;
+    if device.is_empty() {
+        return Err(mic_declaration_invalid(
+            "field mic.device must be a non-empty ALSA capture device name",
+        ));
+    }
+    if serial.is_empty() {
+        return Err(mic_declaration_invalid(
+            "field mic.serial must be a non-empty UMIK serial (e.g. 718-7696)",
+        ));
+    }
+    if cal_path.is_empty() {
+        return Err(mic_declaration_invalid(
+            "field mic.cal_path must be a non-empty path to the UMIK calibration file on this host",
+        ));
+    }
+    if cal_sha256.is_empty() {
+        return Err(mic_declaration_invalid(
+            "field mic.cal_sha256 must declare the calibration file sha256 (64 lowercase hex)",
+        ));
+    }
+    if !ALLOWED_UMIK_ORIENTATIONS.contains(&orientation) {
+        return Err(mic_declaration_invalid(format!(
+            "field mic.orientation must be one of {ALLOWED_UMIK_ORIENTATIONS:?} (got {orientation:?})"
+        )));
+    }
+    // cal_path 必须是本机普通文件、<=1 MiB；不做任意路径白名单（daemon 只转发 state dir 路径）。
+    let path = Path::new(cal_path);
+    let metadata = fs::metadata(path).map_err(|error| {
+        mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} is not a readable file: {error}"
+        ))
+    })?;
+    if !metadata.is_file() {
+        return Err(mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} is not a regular file"
+        )));
+    }
+    if metadata.len() > MIC_CAL_FILE_MAX_BYTES {
+        return Err(mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} is {} bytes; the UMIK calibration file limit is {MIC_CAL_FILE_MAX_BYTES} bytes (1 MiB)",
+            metadata.len()
+        )));
+    }
+    // cal_file 只是报告用的文件名记录；真实文件内容由 cal_path 读取、由 sha256 标识。
+    let cal_file = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| cal_path.to_string());
+    let declared = UmikDeviceConfig::umik1(device, serial, cal_file, cal_sha256, orientation);
+    if let Err(error) = declared.validate() {
+        return Err(mic_declaration_invalid(format!(
+            "mic declaration rejected by T62: {error}"
+        )));
+    }
+    let bytes = fs::read(path).map_err(|error| {
+        mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} could not be read: {error}"
+        ))
+    })?;
+    if bytes.len() as u64 > MIC_CAL_FILE_MAX_BYTES {
+        return Err(mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} changed size while being read ({} bytes > {MIC_CAL_FILE_MAX_BYTES})",
+            bytes.len()
+        )));
+    }
+    validate_mic_cal_file(&bytes, cal_path, &declared)?;
+    Ok(Some(MicOverride {
+        mic: declared,
+        capture_device: device.to_string(),
+    }))
+}
+
+fn mic_string_field<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+) -> Result<&'a str, ControlError> {
+    match object.get(key) {
+        Some(Value::String(value)) => Ok(value.trim()),
+        Some(_) => Err(mic_declaration_invalid(format!(
+            "field mic.{key} must be a string"
+        ))),
+        None => Err(mic_declaration_invalid(format!(
+            "field mic.{key} is required (device, serial, cal_path, cal_sha256 and orientation are all mandatory)"
+        ))),
+    }
+}
+
+/// 校验 UMIK 校准文件内容：无 UTF-8 BOM、UTF-8/ASCII 文本、字节 sha256 等于声明值、
+/// 首行 `SERNO <serial>` 与声明 serial 逐字相等（trim 后比较；大小写/连字符不归一化）。
+fn validate_mic_cal_file(
+    bytes: &[u8],
+    cal_path: &str,
+    declared: &UmikDeviceConfig,
+) -> Result<(), ControlError> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return Err(mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} starts with a UTF-8 BOM (EF BB BF); UMIK calibration files must be BOM-free UTF-8/ASCII text"
+        )));
+    }
+    let text = std::str::from_utf8(bytes).map_err(|error| {
+        mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} is not UTF-8/ASCII text: {error}"
+        ))
+    })?;
+    let actual = khaen_host::sha256_hex(bytes);
+    if actual != declared.cal_sha256 {
+        return Err(mic_cal_file_invalid(format!(
+            "mic.cal_sha256 mismatch: the declaration says {}, file {cal_path:?} hashes to {actual}",
+            declared.cal_sha256
+        )));
+    }
+    let first_line = text.lines().next().unwrap_or("").trim();
+    // 真实 miniDSP 文件首行形如 "Sens Factor =-0.0109999dB, SERNO: 7187696"，
+    // 因此 SERNO 关键字可出现在行内任意位置（大小写不敏感），其后可带 ':'/'='/引号/空白。
+    let lower = first_line.to_ascii_lowercase();
+    let position = lower.find("serno").ok_or_else(|| {
+        mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} first line must declare the UMIK serial (miniDSP format, e.g. \"Sens Factor =-0.0109999dB, SERNO: 7187696\"; got {first_line:?})"
+        ))
+    })?;
+    let mut rest = first_line[position + "serno".len()..].trim_start();
+    rest = rest
+        .strip_prefix(':')
+        .or_else(|| rest.strip_prefix('='))
+        .map(str::trim_start)
+        .unwrap_or(rest);
+    let mut file_serial = String::new();
+    for character in rest.chars() {
+        if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+            file_serial.push(character);
+        } else if !(file_serial.is_empty() && matches!(character, '"' | '\'' | ' ' | '\t')) {
+            break;
+        }
+    }
+    if file_serial.is_empty() {
+        return Err(mic_cal_file_invalid(format!(
+            "mic.cal_path {cal_path:?} first line declares SERNO but has no serial number value: {first_line:?}"
+        )));
+    }
+    if file_serial != declared.serial {
+        return Err(mic_cal_file_invalid(format!(
+            "mic.serial mismatch: the declaration says {:?}, file {cal_path:?} first line declares {file_serial:?} (compared verbatim after trim; case/hyphens are not normalised)",
+            declared.serial
+        )));
+    }
+    Ok(())
 }
 
 fn json_f64(value: f64) -> Value {

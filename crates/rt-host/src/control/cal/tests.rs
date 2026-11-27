@@ -661,6 +661,423 @@ fn measure_failure_reports_stage_code_and_writes_error_artifact_only() {
 }
 
 // ===========================================================================
+// cal_enter mic override（C2：daemon 转发 UI MicProfile；仅本会话生效）
+// ===========================================================================
+
+/// 写一个合法的 UMIK 校准文件（首行 SERNO + 频率/灵敏度行），返回 (path, sha256)。
+fn write_mic_cal_file(dir: &Path, name: &str, first_line: &str) -> (PathBuf, String) {
+    let path = dir.join(name);
+    let body = format!("{first_line}\n20.0 -1.0\n100.0 0.0\n1000.0 0.0\n20000.0 -1.0\n");
+    std::fs::write(&path, body.as_bytes()).expect("write mic cal file");
+    let sha = khaen_host::sha256_hex(body.as_bytes());
+    (path, sha)
+}
+
+fn mic_override_json(
+    device: &str,
+    serial: &str,
+    cal_path: &Path,
+    cal_sha256: &str,
+    orientation: &str,
+) -> serde_json::Value {
+    json!({
+        "device": device,
+        "serial": serial,
+        "cal_path": cal_path.display().to_string(),
+        "cal_sha256": cal_sha256,
+        "orientation": orientation,
+    })
+}
+
+/// 断言 mic 覆盖被拒后状态完全没动（mode 仍 playback、仍是 env 声明）。
+fn assert_env_declaration_untouched(harness: &mut Harness) {
+    let status = harness.call_json(&json!({ "op": "cal_status" }));
+    assert_eq!(status["mode"], json!("playback"), "{status}");
+    assert_eq!(status["umik"]["device"], json!("hw:0,0"), "{status}");
+    assert_eq!(status["umik"]["declared"], json!(true), "{status}");
+    assert_eq!(
+        status["umik"]["declaration_source"],
+        json!("env"),
+        "{status}"
+    );
+    assert_eq!(
+        status["umik"]["declaration"]["cal_sha256"],
+        json!(fake_cal_sha()),
+        "{status}"
+    );
+}
+
+#[test]
+fn enter_applies_mic_override_for_the_session_and_leave_restores_env_declaration() {
+    let dir = TempDir::new("mic-override");
+    let (cal_path, sha) =
+        write_mic_cal_file(dir.path(), "umik1_718-7696_90deg.txt", "SERNO718-7696");
+    let mut harness = fake_harness(dir.path());
+    publish_snapshot(&mut harness);
+
+    // 无覆盖时：env/config 声明照旧（不因新增字段改变既有语义）。
+    let before = harness.call_json(&json!({ "op": "cal_status" }));
+    assert_eq!(before["umik"]["device"], json!("hw:0,0"), "{before}");
+    assert_eq!(
+        before["umik"]["declaration_source"],
+        json!("env"),
+        "{before}"
+    );
+
+    let mic = mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "90deg");
+    let entered = harness.call_json(&json!({ "op": "cal_enter", "audible": true, "mic": mic }));
+    assert_eq!(entered["ok"], json!(true), "enter failed: {entered}");
+    assert_eq!(entered["mode"], json!("calibration"));
+    assert_eq!(entered["mic_override"], json!(true));
+    assert_eq!(entered["umik"]["device"], json!("hw:UMIK1,0"));
+    assert_eq!(entered["umik"]["declared"], json!(true));
+    assert_eq!(
+        entered["umik"]["declaration_source"],
+        json!("cal_enter_override")
+    );
+    assert_eq!(entered["umik"]["declaration"]["serial"], json!("718-7696"));
+    assert_eq!(entered["umik"]["declaration"]["cal_sha256"], json!(sha));
+    assert_eq!(
+        entered["umik"]["declaration"]["orientation"],
+        json!("90deg")
+    );
+    assert_eq!(
+        entered["umik"]["declaration"]["cal_file"],
+        json!("umik1_718-7696_90deg.txt")
+    );
+    assert_eq!(entered["umik"]["missing_reason"], serde_json::Value::Null);
+
+    // 同一覆盖重复 enter：幂等（不重复 probe，如实 entered=false）。
+    let again = harness.call_json(&json!({
+        "op": "cal_enter",
+        "audible": true,
+        "mic": mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "90deg"),
+    }));
+    assert_eq!(again["entered"], json!(false), "{again}");
+    assert!(
+        again["note"].as_str().unwrap_or("").contains("already"),
+        "{again}"
+    );
+
+    // 校准会话进行中不允许换声明：cal_busy，且当前会话设备不变。
+    let changed = harness.call_json(&json!({
+        "op": "cal_enter",
+        "audible": true,
+        "mic": mic_override_json("hw:UMIK2,0", "718-7696", &cal_path, &sha, "90deg"),
+    }));
+    assert_err(&changed, error::BUSY);
+    let active = harness.call_json(&json!({ "op": "cal_status" }));
+    assert_eq!(active["umik"]["device"], json!("hw:UMIK1,0"), "{active}");
+
+    // leave：清覆盖、恢复 env 声明（env/config 从未被改写）。
+    let left = harness.call_json(&json!({ "op": "cal_leave" }));
+    assert_eq!(left["mode"], json!("playback"));
+    assert_eq!(left["umik"]["device"], json!("hw:0,0"), "{left}");
+    assert_eq!(left["umik"]["declaration_source"], json!("env"), "{left}");
+    assert_eq!(
+        left["umik"]["declaration"]["cal_sha256"],
+        json!(fake_cal_sha()),
+        "{left}"
+    );
+
+    // 再次无 mic enter：回到 env 配置（设备/文件名/序列号都来自 config）。
+    let reentered = harness.call_json(&json!({ "op": "cal_enter", "audible": true }));
+    assert_eq!(reentered["mode"], json!("calibration"), "{reentered}");
+    assert_eq!(reentered["mic_override"], json!(false));
+    assert_eq!(reentered["umik"]["device"], json!("hw:0,0"));
+    assert_eq!(reentered["umik"]["declaration_source"], json!("env"));
+    assert_eq!(
+        reentered["umik"]["declaration"]["cal_file"],
+        json!("umik1-90deg.txt")
+    );
+}
+
+#[test]
+fn enter_accepts_real_minidsp_header_with_sens_factor_and_serno() {
+    // 真实 UMIK-1 文件首行不是裸 "SERNO"，而是 Sens Factor + SERNO 同一行；
+    // 若这里只认裸 SERNO，UI 上传的真实校准文件将无法进入测量（C1/C2 会漂移）。
+    let dir = TempDir::new("mic-cal-real-header");
+    let (cal_path, sha) = write_mic_cal_file(
+        dir.path(),
+        "umik1_7187696_90deg.txt",
+        "\"Sens Factor =-0.0109999dB, SERNO: 7187696\"",
+    );
+    let mut harness = fake_harness(dir.path());
+    publish_snapshot(&mut harness);
+
+    let entered = harness.call_json(&json!({
+        "op": "cal_enter",
+        "audible": true,
+        "mic": mic_override_json("hw:UMIK1,0", "7187696", &cal_path, &sha, "90deg"),
+    }));
+    assert_eq!(entered["entered"], json!(true), "{entered}");
+    let status = harness.call_json(&json!({ "op": "cal_status" }));
+    assert_eq!(status["umik"]["declared"], json!(true), "{status}");
+    assert_eq!(status["umik"]["device"], json!("hw:UMIK1,0"), "{status}");
+    assert_eq!(
+        status["umik"]["declaration_source"],
+        json!("cal_enter_override"),
+        "{status}"
+    );
+
+    let left = harness.call_json(&json!({ "op": "cal_leave" }));
+    assert_eq!(left["left"], json!(true), "{left}");
+}
+
+#[test]
+fn enter_mic_override_works_without_env_declaration_and_measure_uses_it() {
+    let dir = TempDir::new("mic-override-no-env");
+    let (cal_path, sha) =
+        write_mic_cal_file(dir.path(), "umik1_718-7696_0deg.txt", "SERNO 718-7696");
+    let mut config = fake_config(dir.path());
+    config.mic = None;
+    config.mic_missing_reason = Some("UMIK declaration missing: set KHAEN_UMIK_SERIAL".to_string());
+    let mut harness = Harness::with_calibration(CalibrationSetup {
+        config,
+        factory: Box::new(FakeCalFactory::new()),
+    });
+    publish_snapshot(&mut harness);
+
+    // 无 mic：与改动前一致，如实 mic_declaration_missing。
+    assert_err(
+        &call_cal_enter(&mut harness, true),
+        error::MIC_DECLARATION_MISSING,
+    );
+
+    // 有 mic（0deg + "SERNO <serial>" 空格形式）：本会话声明生效，
+    // 即使进程启动时 env 没有声明也能进校准模式。
+    let entered = harness.call_json(&json!({
+        "op": "cal_enter",
+        "audible": true,
+        "channels": [0],
+        "layout": "mono-1.0",
+        "mic": mic_override_json("hw:UMIK9,0", "718-7696", &cal_path, &sha, "0deg"),
+    }));
+    assert_eq!(entered["mode"], json!("calibration"), "{entered}");
+    assert_eq!(entered["umik"]["device"], json!("hw:UMIK9,0"));
+    assert_eq!(entered["umik"]["declared"], json!(true));
+    assert_eq!(entered["umik"]["declaration"]["orientation"], json!("0deg"));
+    assert_eq!(entered["umik"]["missing_reason"], serde_json::Value::Null);
+
+    // 覆盖对测量阶段同样生效（env 无声明也不会报 mic_declaration_missing）。
+    let measured = harness.call_json(&json!({
+        "op": "cal_measure",
+        "audible": true,
+        "wait_ms": 300_000,
+    }));
+    assert_eq!(measured["ok"], json!(true), "measure failed: {measured}");
+    assert_eq!(measured["state"], json!("done"));
+
+    // leave 后回到 env 配置（缺失声明如实上报，不残留覆盖）。
+    let left = harness.call_json(&json!({ "op": "cal_leave" }));
+    assert_eq!(left["mode"], json!("playback"));
+    assert_eq!(left["umik"]["device"], json!("hw:0,0"));
+    assert_eq!(left["umik"]["declared"], json!(false));
+    assert_eq!(left["umik"]["declaration_source"], json!("missing"));
+    assert!(left["umik"]["missing_reason"].is_string(), "{left}");
+    assert_err(
+        &call_cal_enter(&mut harness, true),
+        error::MIC_DECLARATION_MISSING,
+    );
+}
+
+#[test]
+fn enter_rejects_invalid_mic_declarations_without_touching_state() {
+    let dir = TempDir::new("mic-declaration-invalid");
+    let (cal_path, sha) =
+        write_mic_cal_file(dir.path(), "umik1_718-7696_90deg.txt", "SERNO718-7696");
+    let mut harness = fake_harness(dir.path());
+    publish_snapshot(&mut harness);
+
+    let mut missing_field = mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "90deg");
+    missing_field
+        .as_object_mut()
+        .expect("mic object")
+        .remove("cal_path");
+    let mut wrong_type = mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "90deg");
+    wrong_type["device"] = json!(7);
+    let mut empty_cal_path = mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "90deg");
+    empty_cal_path["cal_path"] = json!("   ");
+
+    let cases = [
+        ("shape is not an object", json!("hw:UMIK1,0")),
+        ("missing cal_path", missing_field),
+        ("device is not a string", wrong_type),
+        (
+            "empty device",
+            mic_override_json("  ", "718-7696", &cal_path, &sha, "90deg"),
+        ),
+        (
+            "empty serial",
+            mic_override_json("hw:UMIK1,0", "  ", &cal_path, &sha, "90deg"),
+        ),
+        ("empty cal_path", empty_cal_path),
+        (
+            "empty cal_sha256",
+            mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, "  ", "90deg"),
+        ),
+        (
+            "orientation 45deg",
+            mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "45deg"),
+        ),
+        (
+            "uppercase orientation",
+            mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "90DEG"),
+        ),
+    ];
+    for (label, mic) in cases {
+        let response =
+            harness.call_json(&json!({ "op": "cal_enter", "audible": true, "mic": mic }));
+        assert_err(&response, error::MIC_DECLARATION_INVALID);
+        assert!(
+            response["message"]
+                .as_str()
+                .expect("message")
+                .contains("mic"),
+            "{label}: {response}"
+        );
+        assert_env_declaration_untouched(&mut harness);
+    }
+}
+
+#[test]
+fn enter_rejects_invalid_mic_cal_files_without_touching_state() {
+    let dir = TempDir::new("mic-cal-file-invalid");
+    let (cal_path, sha) =
+        write_mic_cal_file(dir.path(), "umik1_718-7696_90deg.txt", "SERNO718-7696");
+    let mut harness = fake_harness(dir.path());
+    publish_snapshot(&mut harness);
+
+    // 首行不是 SERNO。
+    let no_serno_path = dir.path().join("no-serno.txt");
+    std::fs::write(&no_serno_path, b"60 0.0\n100 0.0\n").expect("write no-serno file");
+    let no_serno_sha = khaen_host::sha256_hex(b"60 0.0\n100 0.0\n");
+    // BOM 前缀（字节 sha 与声明一致，失败原因只能是 BOM）。
+    let mut bom_bytes = vec![0xEF, 0xBB, 0xBF];
+    bom_bytes.extend_from_slice(b"SERNO718-7696\n20 -1.0\n");
+    let bom_path = dir.path().join("bom.txt");
+    std::fs::write(&bom_path, &bom_bytes).expect("write bom file");
+    let bom_sha = khaen_host::sha256_hex(&bom_bytes);
+    // 非 UTF-8 字节（sha 声明与实际一致，失败原因只能是编码）。
+    let raw_bytes = [0xFFu8, 0xFE, 0x00, 0x0A];
+    let raw_path = dir.path().join("raw.txt");
+    std::fs::write(&raw_path, raw_bytes).expect("write raw file");
+    let raw_sha = khaen_host::sha256_hex(&raw_bytes);
+    // 大小写敏感：文件 SERNO 为 "UMIK-9-001"，声明小写 → 逐字比较不相等。
+    let case_bytes = b"SERNOUMIK-9-001\n20 -1.0\n";
+    let case_path = dir.path().join("case.txt");
+    std::fs::write(&case_path, case_bytes).expect("write case file");
+    let case_sha = khaen_host::sha256_hex(case_bytes);
+    // 超过 1 MiB（首行合法）。
+    let mut big = b"SERNO718-7696\n".to_vec();
+    big.resize(super::MIC_CAL_FILE_MAX_BYTES as usize + 1, b'0');
+    let big_path = dir.path().join("big.txt");
+    std::fs::write(&big_path, &big).expect("write big file");
+    let big_sha = khaen_host::sha256_hex(&big);
+
+    let cases = [
+        (
+            "missing file",
+            mic_override_json(
+                "hw:UMIK1,0",
+                "718-7696",
+                &dir.path().join("nope.txt"),
+                &fake_cal_sha(),
+                "90deg",
+            ),
+        ),
+        (
+            "path is a directory",
+            mic_override_json(
+                "hw:UMIK1,0",
+                "718-7696",
+                dir.path(),
+                &fake_cal_sha(),
+                "90deg",
+            ),
+        ),
+        (
+            "sha256 mismatch",
+            mic_override_json(
+                "hw:UMIK1,0",
+                "718-7696",
+                &cal_path,
+                &"cd".repeat(32),
+                "90deg",
+            ),
+        ),
+        (
+            "serial mismatch (hyphens not normalised)",
+            mic_override_json("hw:UMIK1,0", "7187696", &cal_path, &sha, "90deg"),
+        ),
+        (
+            "serial case mismatch",
+            mic_override_json("hw:UMIK1,0", "umik-9-001", &case_path, &case_sha, "90deg"),
+        ),
+        (
+            "first line is not SERNO",
+            mic_override_json(
+                "hw:UMIK1,0",
+                "718-7696",
+                &no_serno_path,
+                &no_serno_sha,
+                "90deg",
+            ),
+        ),
+        (
+            "UTF-8 BOM",
+            mic_override_json("hw:UMIK1,0", "718-7696", &bom_path, &bom_sha, "90deg"),
+        ),
+        (
+            "not UTF-8/ASCII",
+            mic_override_json("hw:UMIK1,0", "718-7696", &raw_path, &raw_sha, "90deg"),
+        ),
+        (
+            "larger than 1 MiB",
+            mic_override_json("hw:UMIK1,0", "718-7696", &big_path, &big_sha, "90deg"),
+        ),
+    ];
+    for (label, mic) in cases {
+        let response =
+            harness.call_json(&json!({ "op": "cal_enter", "audible": true, "mic": mic }));
+        assert_err(&response, error::MIC_CAL_FILE_INVALID);
+        assert!(
+            response["message"]
+                .as_str()
+                .expect("message")
+                .contains("mic."),
+            "{label}: {response}"
+        );
+        assert_env_declaration_untouched(&mut harness);
+    }
+}
+
+#[test]
+fn enter_mic_override_rolls_back_when_umik_probe_fails() {
+    let dir = TempDir::new("mic-override-probe-fail");
+    let (cal_path, sha) =
+        write_mic_cal_file(dir.path(), "umik1_718-7696_90deg.txt", "SERNO718-7696");
+    let factory_config = FakeEngineConfig {
+        force_unavailable: true,
+        ..FakeEngineConfig::default()
+    };
+    let mut harness = fake_harness_with(
+        dir.path(),
+        Box::new(FakeCalFactory::with_config(factory_config)),
+    );
+    publish_snapshot(&mut harness);
+
+    let response = harness.call_json(&json!({
+        "op": "cal_enter",
+        "audible": true,
+        "mic": mic_override_json("hw:UMIK1,0", "718-7696", &cal_path, &sha, "90deg"),
+    }));
+    assert_err(&response, error::DEVICE_ABSENT);
+    // probe 失败：不落地会话覆盖，仍是 env 声明（不残留半开状态）。
+    assert_env_declaration_untouched(&mut harness);
+}
+
+// ===========================================================================
 // Runtime 校准播放 seam（host::runtime；Windows 可跑）
 // ===========================================================================
 
