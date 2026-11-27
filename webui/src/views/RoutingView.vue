@@ -34,7 +34,6 @@ import { useStatusPolling } from '@/composables/useStatusPolling'
 import { isStatusStale, reasonForPath, runStateKind, runStateLabelKey } from '@/api/status'
 import { MOTU_KNOWN_OUTPUT_NUMBERS, motuOutputLabelKey } from '@/api/channels'
 import {
-  ROUTING_MATRIX_LANES,
   buildPlanSummary,
   buildRoutingChain,
   currentRoutingSource,
@@ -713,7 +712,6 @@ void loadRouting()
               <StatRow
                 :label="t('routing.chain.matrix.lanes')"
                 :value="matrixLanesText"
-                :suffix="t('routing.chain.matrix.expectedSuffix', { lanes: ROUTING_MATRIX_LANES })"
                 :reason="chain.matrix.lanes.reason"
               />
               <StatRow
@@ -944,7 +942,7 @@ void loadRouting()
           {{ t('routingEdit.edit.prepareBlockedMetaReason', { reason: capabilityReason }) }}
         </p>
         <p v-else-if="capability === 'unknown'" class="aux-text">{{ t('routingEdit.meta.unknown') }}</p>
-        <p class="aux-text">{{ t('routingEdit.edit.laneHint', { lanes: ROUTING_MATRIX_LANES }) }}</p>
+        <p class="aux-text">{{ t('routingEdit.edit.laneHint') }}</p>
       </PanelCard>
 
       <!-- ④ 草稿审查 + commit/abort -->

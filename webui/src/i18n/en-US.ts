@@ -1393,7 +1393,6 @@ const messages: Messages = {
       matrix: {
         title: 'Matrix domain',
         lanes: 'Lanes',
-        expectedSuffix: '({lanes} designed)',
         routedLanes: 'Routed lanes',
         routes: 'Routes'
       },

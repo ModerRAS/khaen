@@ -8,9 +8,10 @@
  *                          plan.{version,latency_samples,applied_at,source,graph_id} / host_link / reasons；
  * - GET /api/plan/history  已生效历史：current_version + entries（当前版本、latency 的回退来源、applied_at）。
  *
- * 当前可编辑值（唯一来源）：GET /api/channels 的 `mapping`（lane → 0-based DAC）。它是 daemon 在
- * prepare/upload 时记录的**方案 routing 镜像**，不是数据面实时回读；mapping = null 表示 routing 段
- * 未知，页面必须显示「当前值未知」+ 原因，**不得用 dac_map / 旧值 / 默认值冒充当前值**（API.md §5 末条、
+ * 当前可编辑值（唯一来源）：GET /api/channels 的 `mapping`（lane → 0-based DAC）。它的优先来源是
+ * rt-host 控制 status 的 `readback.routing`（真实已加载 base plan），拿不到才退回 daemon 在
+ * prepare/upload 时记录的方案 routing；mapping = null 表示 routing 段未知，页面必须显示
+ * 「当前值未知」+ 原因，**不得用 dac_map / 旧值 / 默认值冒充当前值**（API.md §5 末条、
  * §9.7、§11 裁决 G3/G6）。
  *
  * 写入口（两阶段，API.md §1 / §4）：`POST /api/surface {surface:"routing", data:{routes:[lane,dac],
@@ -40,9 +41,6 @@ import {
   type StatusReadback,
   type StatusResponse
 } from './status.ts'
-
-/** 设计上的矩阵域 lane 数（PLAN：22 lane）；只用于显示「期望值」，不用于补数据。 */
-export const ROUTING_MATRIX_LANES = 22
 
 /** 路由页组合用的只读端点（写入口复用 api/control.ts 的 CONTROL_PATHS）。 */
 export const ROUTING_PATHS = {
@@ -548,7 +546,6 @@ export interface RoutingChain {
     routedLanes: RoutingChainField
     /** 路由条目数（mapping 条数）。 */
     routes: RoutingChainField
-    expectedLanes: number
   }
   output: {
     /** DAC 输出声道数。 */
@@ -610,8 +607,7 @@ export function buildRoutingChain(
     matrix: {
       lanes: field(statusChannels, reasonForPath(status, 'format.channels')),
       routedLanes: field(routedLanes, reasonForRoutingChannelsPath(channels, 'mapping')),
-      routes: field(routes, reasonForRoutingChannelsPath(channels, 'mapping')),
-      expectedLanes: ROUTING_MATRIX_LANES
+      routes: field(routes, reasonForRoutingChannelsPath(channels, 'mapping'))
     },
     output: {
       channels: field(dacChannels, reasonForRoutingChannelsPath(channels, 'output.channels')),

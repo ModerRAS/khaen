@@ -65,7 +65,7 @@ const messages = {
       unknownCurrent: 'Current value unknown: cannot prefill from /api/channels.mapping, so add lane → DAC rows manually. Reason: {reason}',
       prefilled: 'Prefilled from /api/channels.mapping ({time}).',
       editedHint: 'The draft was edited manually (refresh does not overwrite it); click "Prefill from mapping" to rebuild it.',
-      laneHint: 'The matrix domain is designed for {lanes} lanes; out-of-range lanes are rejected by backend admission (frontend does not guess the lane count).',
+      laneHint: 'The matrix lane count comes from the current plan/data plane (the frontend neither hard-codes nor guesses it); out-of-range lanes are rejected by backend admission.',
       dacChannels: 'DAC channels (dac_channels)',
       explicitDac: 'Send dac_channels explicitly',
       inheritDac: 'Not explicit: inherit the current plan value (dac_channels is not sent)',

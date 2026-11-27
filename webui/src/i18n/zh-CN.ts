@@ -1390,7 +1390,6 @@ const messages = {
       matrix: {
         title: '矩阵域',
         lanes: 'lane 数',
-        expectedSuffix: '（设计 {lanes} lane）',
         routedLanes: '已路由 lane',
         routes: '路由条目'
       },

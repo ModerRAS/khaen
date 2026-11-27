@@ -66,7 +66,7 @@ const messages = {
       unknownCurrent: '当前值未知：无法用 /api/channels.mapping 预填，需手动添加 lane → DAC 行。原因：{reason}',
       prefilled: '已用 /api/channels.mapping 预填（{time}）。',
       editedHint: '草稿已被手动编辑（刷新不会覆盖）；需要重新预填请点「从 mapping 预填」。',
-      laneHint: '矩阵域设计 {lanes} lane；lane 越界由后端准入拒绝（前端不猜 lane 总数）。',
+      laneHint: '矩阵域 lane 数由当前方案/数据面决定（前端不写死、不猜 lane 总数）；lane 越界由后端准入拒绝。',
       dacChannels: 'DAC 声道数（dac_channels）',
       explicitDac: '显式指定 dac_channels',
       inheritDac: '未显式指定：沿用当前方案值（请求体不发送 dac_channels）',

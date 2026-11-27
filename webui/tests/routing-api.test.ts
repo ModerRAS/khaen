@@ -4,7 +4,6 @@ import { ApiClient, isApiError } from '../src/api/client.ts'
 import { CONTROL_PATHS, createControlApi } from '../src/api/control.ts'
 import { parseStatusResponse } from '../src/api/status.ts'
 import {
-  ROUTING_MATRIX_LANES,
   ROUTING_PATHS,
   buildPlanSummary,
   buildRoutingChain,
@@ -52,8 +51,7 @@ function wiredChannels() {
   return parseRoutingChannels(buildRealChannelsDocument('wired'))
 }
 
-test('routing: editable two-phase contract constants (22-lane matrix, read + write paths)', () => {
-  assert.equal(ROUTING_MATRIX_LANES, 22)
+test('routing: editable two-phase contract constants (read + write paths)', () => {
   assert.deepEqual({ ...ROUTING_PATHS }, { channels: '/api/channels', planHistory: '/api/plan/history' })
   // 写入口复用控制面共享路径（docs/API.md §4）：surface / commit / abort。
   assert.equal(CONTROL_PATHS.surface, '/api/surface')
@@ -204,7 +202,6 @@ test('routing: buildRoutingChain wires input -> matrix -> DAC without guessing',
   assert.equal(chain.matrix.lanes.value, 22)
   assert.equal(chain.matrix.routedLanes.value, 22)
   assert.equal(chain.matrix.routes.value, 22)
-  assert.equal(chain.matrix.expectedLanes, 22)
   assert.equal(chain.output.channels.value, 22)
   assert.equal(chain.output.dacMap.value?.length, 22)
   assert.equal(chain.output.knownLabels, 7)
