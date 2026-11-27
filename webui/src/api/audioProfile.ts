@@ -171,12 +171,24 @@ export interface DeviceInputChannel {
   kind: 'analog' | 'optical' | 'unknown'
 }
 
+export interface AlsaCaptureDevice {
+  name: string
+  description: string | null
+  card: number | null
+  device: number | null
+  channels_min: number | null
+  channels_max: number | null
+  open_error: string | null
+}
+
 export interface DeviceInputsCapability {
   available: boolean | null
   optical_mode: 'spdif' | 'adat' | null
   sample_rate: number | null
   channels: DeviceInputChannel[] | null
   source: string | null
+  /** 真实枚举到的 ALSA capture PCM（Linux）；非 Linux/枚举失败为 null。 */
+  alsa_capture: AlsaCaptureDevice[] | null
   reason: string | null
 }
 
@@ -807,12 +819,31 @@ export function parseDeviceInputs(value: unknown): DeviceInputsCapability {
         }
       })
     : null
+  const alsaCapture: AlsaCaptureDevice[] | null = Array.isArray(record.alsa_capture)
+    ? record.alsa_capture.map((item, index) => {
+        const path = 'device_inputs.alsa_capture[' + String(index) + ']'
+        const deviceRecord = asRecord(item, path)
+        if (deviceRecord === null) {
+          throw invalidResponse(path, 'must be an object')
+        }
+        return {
+          name: readString(deviceRecord, 'name', path) ?? '',
+          description: readString(deviceRecord, 'description', path),
+          card: readNumber(deviceRecord, 'card', path),
+          device: readNumber(deviceRecord, 'device', path),
+          channels_min: readNumber(deviceRecord, 'channels_min', path),
+          channels_max: readNumber(deviceRecord, 'channels_max', path),
+          open_error: readString(deviceRecord, 'open_error', path)
+        }
+      })
+    : null
   return {
     available: readBoolean(record, 'available', 'device_inputs'),
     optical_mode: optical === 'spdif' || optical === 'adat' ? optical : null,
     sample_rate: readNumber(record, 'sample_rate', 'device_inputs'),
     channels,
     source: readString(record, 'source', 'device_inputs'),
+    alsa_capture: alsaCapture,
     reason: readString(record, 'reason', 'device_inputs')
   }
 }

@@ -40,6 +40,7 @@ import {
   summarizeRoleGroups,
   unusedDacs,
   type AudioInputSource,
+  type AlsaCaptureDevice,
   type AudioProfile,
   type AudioSourceKind,
   type SpeakerRole,
@@ -92,6 +93,17 @@ const notWiredReason = computed<string | null>(() => {
 
 const profileTruth = computed<TruthKind>(() => (snapshot.value?.profile != null ? 'actual' : 'notWired'))
 const inputsTruth = computed<TruthKind>(() => (deviceInputs.value?.available === true ? 'actual' : 'notWired'))
+const alsaCaptureDevices = computed(() => deviceInputs.value?.alsa_capture ?? null)
+
+function captureChannelsText(device: AlsaCaptureDevice): string {
+  if (device.channels_min === null && device.channels_max === null) {
+    return t('common.dash')
+  }
+  return t('speakerLayout.deviceInputs.captureChannels', {
+    min: device.channels_min ?? '?',
+    max: device.channels_max ?? '?'
+  })
+}
 const deviceInputsText = computed(() => {
   const raw = deviceInputs.value?.reason ?? t('speakerLayout.deviceInputs.unavailable')
   if (deviceInputs.value?.available === true) {
@@ -637,7 +649,17 @@ onBeforeUnmount(() => {
       <div v-if="deviceInputs === null || deviceInputs.available !== true" class="banner banner--warn" role="status">
         {{ deviceInputsText }}
       </div>
-      <dl v-else class="summary-grid">
+      <div v-if="alsaCaptureDevices !== null">
+        <p class="aux-text">{{ t('speakerLayout.deviceInputs.alsaCapture', { count: alsaCaptureDevices.length }) }}</p>
+        <ul v-if="alsaCaptureDevices.length > 0" class="plain-list mono">
+          <li v-for="device in alsaCaptureDevices" :key="device.name">
+            {{ device.name }} · {{ device.description ?? t('common.dash') }} · {{ captureChannelsText(device) }}
+            <span v-if="device.open_error"> · {{ device.open_error }}</span>
+          </li>
+        </ul>
+        <p v-else class="aux-text">{{ t('speakerLayout.deviceInputs.alsaCaptureEmpty') }}</p>
+      </div>
+      <dl v-if="deviceInputs !== null && deviceInputs.available === true" class="summary-grid">
         <div><dt>{{ t('speakerLayout.deviceInputs.opticalMode') }}</dt><dd>{{ deviceInputs.optical_mode ?? t('common.dash') }}</dd></div>
         <div><dt>{{ t('speakerLayout.deviceInputs.sampleRate') }}</dt><dd>{{ deviceInputs.sample_rate ?? t('common.dash') }}</dd></div>
         <div><dt>{{ t('speakerLayout.deviceInputs.channels') }}</dt><dd>{{ deviceInputList.length }}</dd></div>

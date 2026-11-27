@@ -42,6 +42,9 @@ const messages = {
     channels: "Capture channels",
     reason: "Unavailable reason",
     unavailable: "Device input capability unavailable",
+    alsaCapture: "ALSA capture devices ({count})",
+    alsaCaptureEmpty: "ALSA enumeration succeeded but found no capture PCM devices.",
+    captureChannels: "channels {min}–{max}",
   },
   outputs: {
     title: "Physical outputs ↔ roles",

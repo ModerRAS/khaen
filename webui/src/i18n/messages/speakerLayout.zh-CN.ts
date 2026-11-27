@@ -42,6 +42,9 @@ const messages = {
     channels: "采集通道",
     reason: "不可用原因",
     unavailable: "声卡输入能力不可用",
+    alsaCapture: "ALSA capture 设备（{count}）",
+    alsaCaptureEmpty: "ALSA 枚举成功，但没有发现 capture PCM 设备。",
+    captureChannels: "通道 {min}–{max}",
   },
   outputs: {
     title: "物理输出 ↔ 角色",

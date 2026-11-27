@@ -22,7 +22,7 @@ const SNAPSHOT: AudioProfileSnapshot = {
   validation: { ok: true, errors: [], warnings: [] },
   capability: {
     aes67: { channels: 2, map: [0, 1], channel_order: 'M', channel_order_source: 'sdp' },
-    device_inputs: { available: true, optical_mode: 'spdif', sample_rate: 48000, channels: [], source: 'motu-alsa', reason: null }
+    device_inputs: { available: true, optical_mode: 'spdif', sample_rate: 48000, channels: [], source: 'motu-alsa', alsa_capture: null, reason: null }
   },
   plan: { lanes: 2, enabled_outputs: 2, dac_channels: 22, graph_id: 'graph-1' },
   reasons: {}
@@ -34,6 +34,7 @@ const DEVICE_INPUTS: DeviceInputsCapability = {
   sample_rate: null,
   channels: null,
   source: null,
+  alsa_capture: null,
   reason: 'not wired'
 }
 
