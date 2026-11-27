@@ -1,4 +1,4 @@
-//! /api/audio-profile 与 /api/device/inputs 的 REST 层（docs/API.md §12.2）。
+//! /api/audio-profile 与 /api/device/{inputs,outputs} 的 REST 层（docs/API.md §12.2）。
 //!
 //! - GET /api/audio-profile：read-only 永远 200。已保存 profile（首次运行默认 2.0）+ validation +
 //!   capability（AES67 从 rt-host channels_status 只读推导；声卡输入按现有 MOTU 只读控制面探测）+
@@ -8,6 +8,8 @@
 //! - GET /api/device/inputs：声卡采集通道能力。ALSA capture 设备枚举已实现（`alsa_capture`
 //!   加法字段），但 ALSA 不给逐通道 analog/optical 角色，所以 `available:false` + reason，
 //!   不编通道列表；采样率能只读读到就如实给。
+//! - GET /api/device/outputs：真实枚举 ALSA playback PCM（设备能力，不声称当前正在用哪张卡）；
+//!   拿不到时 null + reason。
 //!
 //! 全是控制面路径（非实时路径）：socket / 设备 IO 都在 tokio blocking 线程池里做。
 
@@ -39,6 +41,7 @@ pub fn routes() -> Router<Arc<DaemonState>> {
             post(super::plan::generate_plan_endpoint),
         )
         .route("/api/device/inputs", get(get_device_inputs))
+        .route("/api/device/outputs", get(get_device_outputs))
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +404,33 @@ pub(crate) async fn get_device_inputs(State(state): State<Arc<DaemonState>>) -> 
     if let Some(object) = body.as_object_mut() {
         object.insert("ok".to_string(), Value::Bool(true));
     }
+    (StatusCode::OK, Json(body)).into_response()
+}
+
+/// GET /api/device/outputs：read-only，永远 200。
+///
+/// 返回真实枚举到的 ALSA playback PCM（设备级能力，不代表当前 rt-host 正在使用哪张卡）；
+/// 拿不到时 `alsa_playback:null` + `reason`，不伪造设备列表。
+pub(crate) async fn get_device_outputs() -> Response {
+    let enumeration =
+        tokio::task::spawn_blocking(crate::audio_profile::capture::enumerate_playback).await;
+    let body = match enumeration {
+        Ok(Ok(devices)) => json!({
+            "ok": true,
+            "alsa_playback": crate::audio_profile::capture::devices_json(&devices),
+            "reason": Value::Null,
+        }),
+        Ok(Err(reason)) => json!({
+            "ok": true,
+            "alsa_playback": Value::Null,
+            "reason": reason,
+        }),
+        Err(join_error) => json!({
+            "ok": true,
+            "alsa_playback": Value::Null,
+            "reason": format!("ALSA playback enumeration task failed: {join_error}"),
+        }),
+    };
     (StatusCode::OK, Json(body)).into_response()
 }
 

@@ -15,6 +15,7 @@ use support::motu_fake::FakeCueMix;
 const PROFILE: &str = "/api/audio-profile";
 const PLAN: &str = "/api/audio-profile/plan";
 const DEVICE_INPUTS: &str = "/api/device/inputs";
+const DEVICE_OUTPUTS: &str = "/api/device/outputs";
 
 fn default_profile_json() -> Value {
     khaen_daemon::audio_profile::AudioProfile::default().to_json()
@@ -533,6 +534,35 @@ async fn device_inputs_is_read_only_and_honest_when_no_probe_exists() {
     assert!(body["reason"]
         .as_str()
         .is_some_and(|reason| reason.contains("capture")));
+}
+
+#[tokio::test]
+async fn device_outputs_enumerates_playback_pcms_or_reports_a_reason() {
+    let server = support::spawn().await;
+    let response = support::request(&server, "GET", DEVICE_OUTPUTS).await;
+    assert_eq!(response.status, 200, "{}", response.body_text());
+    let body = response.json();
+    assert_eq!(body["ok"], json!(true));
+    // Linux 上可能是真实数组（也可能 0 个设备）；非 Linux 必须是 null + Linux-only 原因。
+    if body["alsa_playback"].is_null() {
+        assert!(
+            body["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("Linux-only")),
+            "null playback list must explain why: {body}"
+        );
+    } else {
+        let devices = body["alsa_playback"]
+            .as_array()
+            .unwrap_or_else(|| panic!("alsa_playback must be an array: {body}"));
+        for device in devices {
+            assert!(device["name"].as_str().is_some_and(|name| !name.is_empty()));
+        }
+        assert!(
+            body["reason"].is_null(),
+            "success must not carry a reason: {body}"
+        );
+    }
 }
 
 #[tokio::test]

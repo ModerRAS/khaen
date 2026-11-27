@@ -1,4 +1,4 @@
-//! ALSA capture device enumeration（R/IO：/api/device/inputs 的真实数据源）。
+//! ALSA PCM device enumeration（R/IO：/api/device/inputs 与 /api/device/outputs 的真实数据源）。
 //!
 //! 为什么只做“设备级枚举”而不直接给 analog/optical 通道表：
 //! - ALSA 的 PCM hints / hw_params 只暴露设备名、方向、通道数范围，**不暴露每个通道是模拟还是光口**；
@@ -53,12 +53,41 @@ impl CaptureDevice {
     }
 }
 
+/// PCM 方向（仅本模块内部用于选择 ALSA hint/PCM 方向）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PcmDirection {
+    Capture,
+    Playback,
+}
+
+impl PcmDirection {
+    #[cfg(target_os = "linux")]
+    fn as_alsa(self) -> alsa::Direction {
+        match self {
+            Self::Capture => alsa::Direction::Capture,
+            Self::Playback => alsa::Direction::Playback,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Capture => "capture",
+            Self::Playback => "playback",
+        }
+    }
+}
+
 /// 枚举本机所有 capture PCM。
 ///
 /// 返回 `Err(reason)` 表示枚举本身不可用（非 Linux / ALSA 库错误）；单个设备打不开时
 /// 仍在 `Ok` 列表里带 `open_error`，不把“设备忙”误报成“没有输入设备”。
 pub fn enumerate_capture() -> Result<Vec<CaptureDevice>, String> {
-    platform_enumerate()
+    platform_enumerate(PcmDirection::Capture)
+}
+
+/// 枚举本机所有 playback PCM（I5 通用输出：设备能力，不代表当前正在用哪张卡）。
+pub fn enumerate_playback() -> Result<Vec<CaptureDevice>, String> {
+    platform_enumerate(PcmDirection::Playback)
 }
 
 /// 纯函数：设备列表 -> JSON 数组（空列表是合法的“枚举成功但 0 个设备”）。
@@ -67,15 +96,16 @@ pub fn devices_json(devices: &[CaptureDevice]) -> Value {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_enumerate() -> Result<Vec<CaptureDevice>, String> {
+fn platform_enumerate(direction: PcmDirection) -> Result<Vec<CaptureDevice>, String> {
     use alsa::device_name::HintIter;
-    use alsa::{pcm::HwParams, pcm::PCM, Direction};
+    use alsa::{pcm::HwParams, pcm::PCM};
 
     let hints = HintIter::new_str(None, "pcm")
         .map_err(|error| format!("ALSA device_name_hint failed: {error}"))?;
     let mut names: Vec<(String, Option<String>)> = Vec::new();
+    let alsa_direction = direction.as_alsa();
     for hint in hints {
-        if hint.direction.is_some() && hint.direction != Some(Direction::Capture) {
+        if hint.direction.is_some() && hint.direction != Some(alsa_direction) {
             continue;
         }
         let Some(name) = hint.name else { continue };
@@ -98,7 +128,7 @@ fn platform_enumerate() -> Result<Vec<CaptureDevice>, String> {
             rate_max: None,
             open_error: None,
         };
-        match PCM::new(&name, Direction::Capture, true) {
+        match PCM::new(&name, alsa_direction, true) {
             Ok(pcm) => {
                 if let Ok(info) = pcm.info() {
                     device.card = Some(info.get_card());
@@ -123,11 +153,11 @@ fn platform_enumerate() -> Result<Vec<CaptureDevice>, String> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn platform_enumerate() -> Result<Vec<CaptureDevice>, String> {
-    Err(
-        "ALSA capture enumeration is Linux-only; this process is not on Linux and the channel list is not fabricated"
-            .to_string(),
-    )
+fn platform_enumerate(direction: PcmDirection) -> Result<Vec<CaptureDevice>, String> {
+    Err(format!(
+        "ALSA {} enumeration is Linux-only; this process is not on Linux and the device list is not fabricated",
+        direction.as_str()
+    ))
 }
 
 #[cfg(test)]
@@ -183,6 +213,15 @@ mod tests {
     #[test]
     fn non_linux_enumerator_returns_a_stable_reason() {
         let error = enumerate_capture().expect_err("non-Linux must not fabricate capture devices");
-        assert!(error.contains("Linux-only"), "{error}");
+        assert!(
+            error.contains("capture") && error.contains("Linux-only"),
+            "{error}"
+        );
+        let error =
+            enumerate_playback().expect_err("non-Linux must not fabricate playback devices");
+        assert!(
+            error.contains("playback") && error.contains("Linux-only"),
+            "{error}"
+        );
     }
 }
