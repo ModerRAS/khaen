@@ -393,7 +393,7 @@ const messages: Messages = {
     wizard: {
       pageTitle: 'Calibration wizard',
       subtitle:
-        'Dirac-style 8-step offline calibration closed loop (P1). Every gate is decided by the daemon (/api/calibration/wizard/state); missing capabilities (multi-point/ART, realtime measurement, ...) are shown grey with NOT_AVAILABLE. No fake progress or results.',
+        'Dirac-style 8-step calibration wizard. Every gate is decided by the daemon (/api/calibration/wizard/state); step 5 can start a real rt-host measurement (C3b1, audible), while solve/design/apply belong to C3b2; missing capabilities (multi-point/ART, ...) are shown grey with NOT_AVAILABLE. No fake progress or results.',
       stepNav: 'Wizard steps',
       stepShort: 'Step {step}',
       stepOf: 'Step {current} / {total}',
@@ -419,6 +419,7 @@ const messages: Messages = {
         saved: 'Calibration settings saved',
         uploaded: 'Upload complete',
         jobCreated: 'Analysis job created',
+        measurementStarted: 'Real measurement job created',
         jobCancelled: 'Job cancelled'
       },
       device: {
@@ -466,7 +467,7 @@ const messages: Messages = {
         parsed: 'Server parse',
         parsedValue: 'SERNO {serno} · {points} points',
         rtHost: 'rt-host UMIK status',
-        rtHostAvailable: 'rt-host declared and can use the UMIK (live measurement is still pending)',
+        rtHostAvailable: 'rt-host declared and can use the UMIK (real measurement ready)',
         orientation: 'Microphone orientation',
         orientation0: '0° (pointing at the source)',
         orientation90: '90° (pointing at the ceiling)',
@@ -505,7 +506,7 @@ const messages: Messages = {
         artReason: 'ART needs multi-point measurements and support groups; khaen has no such backend.'
       },
       measure: {
-        desc: 'P1 is offline only: upload the baseline and applied WAV recordings; realtime measurement needs a capture service (later version).',
+        desc: 'Step 5 has two mutually exclusive paths: real rt-host measurement (primary, C3b1, audible, requires an explicit audible authorization) and offline WAV upload (offline/CI).',
         baseline: 'baseline (before calibration)',
         applied: 'applied (after calibration)',
         hint: '48 kHz / 16–24 bit / mono or stereo; ≤ 64 MiB.',
@@ -515,9 +516,70 @@ const messages: Messages = {
         formatValue: '{rate} / {bits} bit / {channels} ch',
         savedBaseline: 'Saved baseline',
         savedApplied: 'Saved applied',
-        realtime: 'Realtime measurement (mic capture / sweep)',
-        realtimeReason: 'The daemon has no capture service; realtime measurement is unavailable in this version (needs the T42 follow-up backend, P2).',
-        realtimeTask: 'C',
+        availability: {
+          micProfile: 'MicProfile (saved in step 3)',
+          profileValue: '{device} · SERNO {serial}',
+          profileMissing: 'No MicProfile saved yet (the daemon rejects real measurement with 409 mic_profile_missing)',
+          profileReason: 'Why the daemon has no profile',
+          rtHost: 'rt-host UMIK status',
+          available: 'rt-host available (real measurement ready)',
+          unavailable: 'rt-host unavailable',
+          notLoaded: 'rt-host status not fetched yet (press refresh to retry)',
+          unavailableTitle: 'Real rt-host measurement unavailable',
+          statusErrorTitle: 'Cannot fetch the rt-host status',
+          refresh: 'Refresh status'
+        },
+        realtime: {
+          title: 'Real rt-host measurement (single_point_rt_host)',
+          desc: 'The rt-host plays a sweep on the real device and the UMIK captures it; progress and artifacts come from the real daemon job (no fake progress).',
+          audibleHint: 'Audible: the audible authorization (P08) must be confirmed before starting.',
+          audibleConfirmTitle: 'Start the real measurement?',
+          audibleConfirmMessage: 'A real measurement makes the rt-host play an audible sweep through the device and captures it with the UMIK. Continue only inside the allowed sound window and after confirming the room is safe.',
+          audibleConfirmOk: 'Confirm audible and start',
+          start: 'Start real measurement',
+          starting: 'Creating job…',
+          creating: 'Create request sent; fetching the real job state…',
+          advanced: 'Advanced settings (omitted by default; the rt-host configuration decides)',
+          channels: 'Measurement channels (comma separated)',
+          channelsPlaceholder: 'empty = rt-host KHAEN_CAL_CHANNELS',
+          channelsHint: 'Non-empty, ≤22 entries, non-negative integers, no duplicates; empty lets the rt-host configuration decide.',
+          channelsInvalid: 'Invalid measurement channels: non-empty, ≤22 entries, non-negative integers, no duplicates (or leave empty).',
+          levelDbfs: 'Sweep level (dBFS)',
+          levelHint: 'Empty = the rt-host level; an explicit value must be within -60 … -1 dBFS.',
+          levelInvalid: 'Invalid sweep level: must be within -60 … -1 dBFS (or leave empty).',
+          omittedHint: 'Empty fields are omitted so the rt-host configuration decides; the page never invents daemon defaults.',
+          jobId: 'job id',
+          kind: 'job kind',
+          progress: 'Real progress',
+          currentStep: 'Current step',
+          engine: 'Engine',
+          cancel: 'Cancel measurement',
+          cancelConfirmTitle: 'Cancel the real measurement?',
+          cancelConfirmMessage: 'This cancels the running measurement job {id}; the daemon stops cooperatively and calls cal_leave, finished steps are kept.',
+          jobFailedTitle: 'Real measurement failed',
+          jobCancelledTitle: 'Real measurement cancelled',
+          jobCancelledDesc: 'The calibration mode was restored; you can start the measurement again.',
+          succeededTitle: 'Real measurement finished',
+          failedTitle: 'Real measurement request failed',
+          errorCode: 'Stable error code',
+          artifacts: 'Artifacts (downloadable)',
+          noArtifacts: 'This job has no artifacts (failed/cancelled or the backend produced none).',
+          download: 'Download',
+          c3b2Note: 'solve / design / apply belong to C3b2: this step only completes the real measurement, produces no applicable plan and reports no PASS.',
+          noPassNote: 'A null job verdict is truthful (quality.json records available:false with the reason), not a failure.',
+          solveUnavailable:
+            'The latest job is a real rt-host measurement: analysis / design / apply (solve) belong to C3b2 and stay not available in this slice; a successful measurement does not unlock them.'
+        },
+        offline: {
+          title: 'Offline WAV (offline / CI closed loop)',
+          badge: 'offline / CI',
+          desc: 'This is the single_point_offline path: upload the baseline/applied WAVs and create an offline closed-loop job in step 6; it never drives the real rt-host measurement, and neither path replaces the other.'
+        },
+        errors: {
+          micProfileMissing: 'Save the MicProfile in step 3 first (device / serial / calibration file).',
+          busy: 'A calibration job is already running: wait for it to finish or cancel it.',
+          notWired: 'The daemon explicitly reports the calibration backend as not wired: no fake progress or results.'
+        },
         parseError: 'The file is not a usable WAV: {message}',
         formatError: 'Format does not meet the calibration requirements: {message}',
         pairError: 'The two recordings are structurally inconsistent: {message}',
@@ -583,6 +645,10 @@ const messages: Messages = {
       succeeded: 'Succeeded',
       failed: 'Failed',
       cancelled: 'Cancelled'
+    },
+    jobKind: {
+      single_point_offline: 'Offline closed loop (single_point_offline)',
+      single_point_rt_host: 'Real rt-host measurement (single_point_rt_host)'
     },
     jobStepStatus: {
       pending: 'Pending',
@@ -683,6 +749,9 @@ const messages: Messages = {
         compile: 'Compile plan',
         levels: 'Levels / prediction',
         closed_loop: 'Closed-loop analysis',
+        validate: 'Preflight validation',
+        sweep_capture: 'Sweep capture',
+        quality_check: 'Quality check',
         bundle: 'Bundle artifacts'
       }
     },

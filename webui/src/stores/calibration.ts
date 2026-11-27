@@ -27,6 +27,7 @@ import {
   type CalibrationApplyOutcome,
   type CalibrationArtifactDownload,
   type CalibrationCreateJobInputs,
+  type CalibrationCreateJobRequest,
   type CalibrationErrorInfo,
   type CalibrationJob,
   type CalibrationJobStatus,
@@ -37,6 +38,7 @@ import {
   type CalibrationWizardApplyOutcome,
   type CalibrationWizardResponse,
   type CalibrationWizardStateResponse,
+  type RtHostMeasurementInputs,
   type WizardConfig,
   type WizardMeasurementDraft,
   type WizardSaveRequest
@@ -170,6 +172,10 @@ export interface CalibrationController {
   uploadMeasurement(input: MeasurementUploadInput): Promise<CalibrationActionResult<CalibrationUploadResult>>
   uploadMicCal(input: { bytes: ArrayBuffer; filename: string; contentType: string }): Promise<CalibrationActionResult<CalibrationUploadResult>>
   createJob(inputs: CalibrationCreateJobInputs): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>>
+  /** 创建 rt-host 真实测量 job（single_point_rt_host）；audible 未明确 true 时本地拒绝、不发请求。 */
+  createRtHostMeasurementJob(
+    inputs: RtHostMeasurementInputs
+  ): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>>
   loadJob(jobId: string): Promise<CalibrationActionResult<CalibrationJob>>
   startJobPolling(jobId: string): void
   stopJobPolling(): void
@@ -465,13 +471,14 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
     void pollOnce()
   }
 
-  async function createJob(
-    inputs: CalibrationCreateJobInputs
+  /** 创建任意 kind 的 job：共同的 busy/错误/轮询状态机，kind 只由调用方给的 request 决定。 */
+  async function postJob(
+    request: CalibrationCreateJobRequest
   ): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>> {
     setBusy('createJob', true)
     state.actionError = null
     try {
-      const created = await deps.api.createJob({ kind: 'single_point_offline', inputs })
+      const created = await deps.api.createJob(request)
       state.job = null
       state.jobPhase = 'loading'
       state.jobError = null
@@ -486,6 +493,31 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
     } finally {
       setBusy('createJob', false)
     }
+  }
+
+  function createJob(
+    inputs: CalibrationCreateJobInputs
+  ): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>> {
+    return postJob({ kind: 'single_point_offline', inputs })
+  }
+
+  function createRtHostMeasurementJob(
+    inputs: RtHostMeasurementInputs
+  ): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>> {
+    // P08 防御：真实测量会出声/采音，没有显式 audible:true 授权就不发请求（daemon 也会 400 拒绝）。
+    if (inputs.audible !== true) {
+      const info: CalibrationErrorInfo = {
+        category: 'invalid_request',
+        status: 0,
+        code: 'audible_required',
+        i18nKey: 'error.calibration.invalidRequest',
+        detail: 'a real rt-host measurement plays an audible sweep: audible:true authorization is required',
+        retryable: false
+      }
+      state.actionError = info
+      return Promise.resolve({ ok: false, error: info })
+    }
+    return postJob({ kind: 'single_point_rt_host', inputs })
   }
 
   async function loadJob(jobId: string): Promise<CalibrationActionResult<CalibrationJob>> {
@@ -727,6 +759,7 @@ export function createCalibrationController(state: CalibrationState, deps: Calib
     uploadMeasurement,
     uploadMicCal,
     createJob,
+    createRtHostMeasurementJob,
     loadJob,
     startJobPolling,
     stopJobPolling,
@@ -792,6 +825,13 @@ export function createCalibrationJob(
   inputs: CalibrationCreateJobInputs
 ): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>> {
   return controller.createJob(inputs)
+}
+
+/** 创建 rt-host 真实测量 job（single_point_rt_host；会出声，调用方必须先拿到用户明确授权）。 */
+export function createCalibrationRtHostJob(
+  inputs: RtHostMeasurementInputs
+): Promise<CalibrationActionResult<{ job_id: string; location: string | null }>> {
+  return controller.createRtHostMeasurementJob(inputs)
 }
 
 export function loadCalibrationJob(jobId: string): Promise<CalibrationActionResult<CalibrationJob>> {

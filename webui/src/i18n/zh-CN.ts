@@ -393,7 +393,7 @@ const messages = {
     wizard: {
       pageTitle: '校准向导',
       subtitle:
-        'Dirac 式 8 步离线校准闭环（P1）。每步门禁由 daemon 的 /api/calibration/wizard/state 判定；缺失能力（多点/ART、实时测量等）灰态明示，不伪造进度与结果。',
+        'Dirac 式 8 步校准向导。每步门禁由 daemon 的 /api/calibration/wizard/state 判定；第 5 步可发起 rt-host 真实测量（C3b1，会出声），solve/design/apply 属 C3b2；缺失能力（多点/ART 等）灰态明示，不伪造进度与结果。',
       stepNav: '向导步骤',
       stepShort: '第 {step} 步',
       stepOf: '第 {current} / {total} 步',
@@ -419,6 +419,7 @@ const messages = {
         saved: '校准设置已保存',
         uploaded: '上传完成',
         jobCreated: '分析 job 已创建',
+        measurementStarted: '真实测量 job 已创建',
         jobCancelled: 'job 已取消'
       },
       device: {
@@ -466,7 +467,7 @@ const messages = {
         parsed: '服务端解析',
         parsedValue: 'SERNO {serno} · {points} 点',
         rtHost: 'rt-host UMIK 状态',
-        rtHostAvailable: 'rt-host 已声明并可用 UMIK（实时测量待接）',
+        rtHostAvailable: 'rt-host 已声明并可用 UMIK（真实测量就绪）',
         orientation: '麦克风朝向',
         orientation0: '0°（指向声源）',
         orientation90: '90°（指向天花板）',
@@ -505,7 +506,7 @@ const messages = {
         artReason: 'ART 需要多点测量与支持组，khaen 当前没有对应后端。'
       },
       measure: {
-        desc: 'P1 仅离线：上传 baseline 与 applied 两段 WAV；实时测量需要采集服务（后续版本）。',
+        desc: '第 5 步有两条互不替代的路径：rt-host 真实测量（主路径，C3b1，会出声，需显式 audible 授权）与离线 WAV 上传（离线/CI）。',
         baseline: 'baseline（校准前）',
         applied: 'applied（校准后）',
         hint: '48 kHz / 16–24 bit / 单声道或双声道；≤ 64 MiB。',
@@ -515,9 +516,70 @@ const messages = {
         formatValue: '{rate} / {bits} bit / {channels} ch',
         savedBaseline: '已保存 baseline',
         savedApplied: '已保存 applied',
-        realtime: '实时测量（麦克风采集 / 自动扫频）',
-        realtimeReason: 'daemon 没有采集服务，实时测量在本版本不可用（需要 T42 延伸的实时测量后端，P2）。',
-        realtimeTask: 'C',
+        availability: {
+          micProfile: 'MicProfile（第 3 步保存）',
+          profileValue: '{device} · SERNO {serial}',
+          profileMissing: '尚未保存 MicProfile（真实测量会被 daemon 拒绝：409 mic_profile_missing）',
+          profileReason: 'daemon 未保存 profile 的原因',
+          rtHost: 'rt-host UMIK 状态',
+          available: 'rt-host 可用（真实测量就绪）',
+          unavailable: 'rt-host 不可用',
+          notLoaded: '尚未获取 rt-host 状态（点击刷新重试）',
+          unavailableTitle: 'rt-host 真实测量不可用',
+          statusErrorTitle: '无法获取 rt-host 状态',
+          refresh: '刷新状态'
+        },
+        realtime: {
+          title: 'rt-host 真实测量（single_point_rt_host）',
+          desc: '由 rt-host 在真实设备上播放扫频、由 UMIK 采集；进度与产物全部来自 daemon 的真实 job（无假进度）。',
+          audibleHint: '会出声：开始前必须确认 audible 授权（P08）。',
+          audibleConfirmTitle: '确认开始真实测量？',
+          audibleConfirmMessage: '真实测量会让 rt-host 通过设备播放可闻扫频，并由 UMIK 采集。请确认当前在允许出声的时间窗内、现场安全，再继续。',
+          audibleConfirmOk: '确认出声并开始',
+          start: '开始真实测量',
+          starting: '正在创建 job…',
+          creating: '已发出创建请求，正在获取真实 job 状态…',
+          advanced: '高级设置（默认省略，由 rt-host 配置决定）',
+          channels: '测量通道（逗号分隔）',
+          channelsPlaceholder: '留空 = rt-host 的 KHAEN_CAL_CHANNELS',
+          channelsHint: '非空、≤22 项、非负整数、不重复；留空则由 rt-host 配置决定。',
+          channelsInvalid: '测量通道不合法：需要非空、≤22 项、非负整数且不重复（或留空省略）。',
+          levelDbfs: '扫频电平（dBFS）',
+          levelHint: '留空 = rt-host 自己的电平；显式值必须在 -60 … -1 dBFS。',
+          levelInvalid: '扫频电平不合法：必须在 -60 … -1 dBFS 之间（或留空省略）。',
+          omittedHint: '留空即省略该字段，由 rt-host 配置决定；页面不会替 daemon 编造默认值。',
+          jobId: 'job id',
+          kind: 'job 类型',
+          progress: '真实进度',
+          currentStep: '当前步骤',
+          engine: '引擎',
+          cancel: '取消测量',
+          cancelConfirmTitle: '取消真实测量？',
+          cancelConfirmMessage: '将取消进行中的测量 job {id}；daemon 会协作式停止并调用 cal_leave，已完成步骤保留。',
+          jobFailedTitle: '真实测量失败',
+          jobCancelledTitle: '真实测量已取消',
+          jobCancelledDesc: '已恢复到校准前模式；可重新发起测量。',
+          succeededTitle: '真实测量完成',
+          failedTitle: '真实测量请求失败',
+          errorCode: '稳定错误码',
+          artifacts: '产物（可下载）',
+          noArtifacts: '该 job 没有产物（失败/取消或后端未产出）。',
+          download: '下载',
+          c3b2Note: 'solve / design / apply 属 C3b2：本步只完成真实测量，不产生可应用 plan，也不报 PASS。',
+          noPassNote: 'job verdict 为 null 是如实结果（quality.json 记录 available:false + 原因），不是失败。',
+          solveUnavailable:
+            '最近的 job 是 rt-host 真实测量：analysis / design / apply（solve）属 C3b2，本切片固定未接入，测量成功也不会放行。'
+        },
+        offline: {
+          title: '离线 WAV（离线 / CI 闭环）',
+          badge: '离线 / CI',
+          desc: '这是 single_point_offline 路径：上传 baseline/applied 两段 WAV 后由第 6 步创建离线闭环 job；它不会驱动 rt-host 真实测量，两条路径互不替代。'
+        },
+        errors: {
+          micProfileMissing: '请先在第 3 步保存 MicProfile（设备 / 序列号 / 校准文件）。',
+          busy: '已有校准 job 正在运行：先等待完成或取消它。',
+          notWired: 'daemon 明确报告校准后端未接入：不展示假进度/假结果。'
+        },
         parseError: '文件不是可用的 WAV：{message}',
         formatError: '格式不符合校准要求：{message}',
         pairError: '两段录音结构不一致：{message}',
@@ -583,6 +645,10 @@ const messages = {
       succeeded: '成功',
       failed: '失败',
       cancelled: '已取消'
+    },
+    jobKind: {
+      single_point_offline: '离线闭环（single_point_offline）',
+      single_point_rt_host: 'rt-host 真实测量（single_point_rt_host）'
     },
     jobStepStatus: {
       pending: '等待',
@@ -683,6 +749,9 @@ const messages = {
         compile: '编译方案',
         levels: '电平/预测',
         closed_loop: '闭环分析',
+        validate: '前置校验',
+        sweep_capture: '扫频采集',
+        quality_check: '质量检查',
         bundle: '产物打包'
       }
     },

@@ -6,8 +6,11 @@
  * - 每步能否继续**只认后端** GET /api/calibration/wizard/state 的 steps[].status（passed/blocked/not_available）；
  *   缺失 gate 一律 fail closed（下一步禁用），前端不自行判过；
  * - 第 2 步只读展示 /api/status 的 format/channels（/api/channels 已实现；可读即 passed、不可读 blocked）；
- *   第 4 步多点/ART（P3）、第 5 步实时测量（T42/P2）是**声明式能力缺口**：灰态 + NOT_AVAILABLE + 原因 + 任务号，
- *   不产生任何数据，也不阻塞向导（不伪造映射/采集/进度）；
+ *   第 4 步多点/ART（P3）是**声明式能力缺口**：灰态 + NOT_AVAILABLE + 原因 + 任务号，不产生任何数据；
+ * - 第 5 步有两条**互不混淆**的路径：主路径是 rt-host 真实测量 job（single_point_rt_host，C3b1：
+ *   显式 audible 授权 -> 创建 job -> 真实轮询 -> 下载 measurement/quality/report 产物）；离线 WAV 上传
+ *   保留为「离线 / CI」路径。只有后端明确 rt_host.available=false 时才显示 NOT_AVAILABLE + 原因；
+ *   solve/design/apply 属 C3b2，本步不显示 PASS、不伪造 plan；
  * - 进度全部来自真实 job 状态轮询（stores/calibration.ts），无定时器假进度；
  * - 刷新恢复：配置/上传草稿/job 状态来自后端（?step= 记住当前步）；失败/中断保留已完成步骤；
  * - mock/fixture 引擎的数据由 VerdictBadge/JobResultPanel 标「示意」，不冒充实测。
@@ -32,12 +35,17 @@ import {
   WIZARD_STEP_KEYS,
   blockReason,
   canAdvance,
+  engineTruth,
   gateForStep,
   isJobActive,
   isJobTerminal,
+  isRtHostJobKind,
   maxUnlockedStep,
   resultTruth,
   stepDisplayState,
+  type CalibrationErrorInfo,
+  type CalibrationJob,
+  type RtHostMeasurementInputs,
   type WizardConfig,
   type WizardOrientation,
   type WizardTargetMode
@@ -53,6 +61,8 @@ import {
   calibrationState,
   cancelCalibrationJob,
   createCalibrationJob,
+  createCalibrationRtHostJob,
+  downloadCalibrationArtifact,
   loadCalibrationJob,
   loadCalibrationWizard,
   loadCalibrationWizardState,
@@ -520,6 +530,252 @@ async function onMeasurementFile(role: 'baseline' | 'applied', file: File): Prom
   }
 }
 
+/* ------------------------------------------------ 第 5 步：rt-host 真实测量 */
+
+/** 新建 job 后、首次轮询返回前的 pending 标记（只认本次创建的 job id）。 */
+const rtHostJobId = ref<string | null>(null)
+/** 第 5 步动作失败（创建/取消/下载）：稳定 code + 后端 message 原样展示。 */
+const rtHostError = ref<CalibrationErrorInfo | null>(null)
+/** 高级设置默认收起：省略 = 由 rt-host 配置决定（不替用户编造 channels/level）。 */
+const advancedOpen = ref<string[]>([])
+const rtChannelsText = ref('')
+const rtLevelDbfs = ref<number | null>(null)
+const rtAdvancedError = ref<string | null>(null)
+/** 正在下载的产物名（只让被点的那一行显示 loading，其余按钮禁用而不转圈）。 */
+const downloadingArtifact = ref<string | null>(null)
+
+const rtHostStatus = computed(() => micState.status?.rt_host ?? null)
+const rtHostAvailable = computed(() => rtHostStatus.value?.available === true)
+const rtHostUnavailable = computed(() => rtHostStatus.value !== null && rtHostStatus.value.available !== true)
+const rtHostJob = computed<CalibrationJob | null>(() => {
+  const current = job.value
+  return current !== null && isRtHostJobKind(current.kind) ? current : null
+})
+const rtHostJobPending = computed(
+  () =>
+    state.busy.createJob ||
+    (rtHostJobId.value !== null && rtHostJob.value === null && state.jobPhase === 'loading')
+)
+const rtHostJobActive = computed(() => rtHostJob.value !== null && isJobActive(rtHostJob.value.status))
+const anyJobActive = computed(() => job.value !== null && isJobActive(job.value.status))
+const rtHostStartDisabled = computed(
+  () => !rtHostAvailable.value || state.busy.createJob || anyJobActive.value || micState.busy.status
+)
+/** 只有 daemon 明确报 real_audio 才算实测；engine 缺失/合成按未接入/示意显示，不冒充。 */
+const rtHostTruth = computed<TruthKind>(() => engineTruth(rtHostJob.value?.engine ?? null))
+const rtHostProgress = computed<number | null>(() => {
+  const progress = rtHostJob.value?.progress ?? null
+  if (progress === null) {
+    return null
+  }
+  return Math.round(Math.min(Math.max(progress, 0), 1) * 100)
+})
+const rtHostKindText = computed(() => {
+  const kind = rtHostJob.value?.kind ?? null
+  return kind === null ? t('common.dash') : t('calibration.jobKind.' + kind)
+})
+
+watch(
+  job,
+  (current) => {
+    if (current === null) {
+      return
+    }
+    // 只跟踪 rt-host 真实测量 job；出现离线 job 时清掉 pending 标记。
+    rtHostJobId.value = isRtHostJobKind(current.kind) ? current.id : null
+  },
+  { immediate: true }
+)
+
+// 离开第 5 步时清掉本步动作错误（aside 的全局 actionError 仍按原逻辑展示）。
+watch(currentStep, (step) => {
+  if (step !== 5) {
+    rtHostError.value = null
+  }
+})
+
+const micProfileText = computed(() => {
+  const profile = micState.profile
+  if (profile === null) {
+    return t('calibration.wizard.measure.availability.profileMissing')
+  }
+  return t('calibration.wizard.measure.availability.profileValue', {
+    device: profile.device,
+    serial: profile.serial
+  })
+})
+const micProfileReason = computed(() => (micState.profile === null ? micState.reasons.join(' · ') : ''))
+const rtHostStatusText = computed(() => {
+  const status = rtHostStatus.value
+  if (status !== null) {
+    return status.available
+      ? t('calibration.wizard.measure.availability.available')
+      : (status.reason ?? t('calibration.wizard.measure.availability.unavailable'))
+  }
+  if (micState.statusError !== null) {
+    return (
+      t(micState.statusError.i18nKey) +
+      (micState.statusError.detail ? ' — ' + micState.statusError.detail : '')
+    )
+  }
+  return t('calibration.wizard.measure.availability.notLoaded')
+})
+const rtHostErrorHint = computed(() => {
+  const error = rtHostError.value
+  if (error === null) {
+    return null
+  }
+  if (error.code === 'mic_profile_missing') {
+    return t('calibration.wizard.measure.errors.micProfileMissing')
+  }
+  if (error.code === 'switch_busy' || error.category === 'busy') {
+    return t('calibration.wizard.measure.errors.busy')
+  }
+  if (error.category === 'not_wired') {
+    return t('calibration.wizard.measure.errors.notWired')
+  }
+  return null
+})
+
+async function refreshMicAvailability(): Promise<void> {
+  await Promise.all([loadMicProfile(), loadMicStatus()])
+}
+
+/** channels 文本框 -> undefined=省略 / null=非法 / number[]=显式通道（daemon 的 u32 约束）。 */
+function parseRtHostChannels(text: string): number[] | null | undefined {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) {
+    return undefined
+  }
+  const parts = trimmed.split(/[\s,\uFF0C]+/).filter((part) => part.length > 0)
+  if (parts.length === 0) {
+    return undefined
+  }
+  if (parts.length > 22) {
+    return null
+  }
+  const values = parts.map((part) => Number(part))
+  if (values.some((value) => !Number.isInteger(value) || value < 0 || value > 0xffffffff)) {
+    return null
+  }
+  if (new Set(values).size !== values.length) {
+    return null
+  }
+  return values
+}
+
+/** 组装 rt-host 请求 inputs：默认省略 channels/level_dbfs（交给 rt-host 配置）。 */
+function rtHostInputs(): RtHostMeasurementInputs | null {
+  rtAdvancedError.value = null
+  const channels = parseRtHostChannels(rtChannelsText.value)
+  if (channels === null) {
+    rtAdvancedError.value = t('calibration.wizard.measure.realtime.channelsInvalid')
+    return null
+  }
+  const level = rtLevelDbfs.value
+  // 清空 el-input-number 时运行期可能是 null/undefined：都按"省略"处理，不误报非法。
+  if (typeof level === 'number' && (!Number.isFinite(level) || level < -60 || level > -1)) {
+    rtAdvancedError.value = t('calibration.wizard.measure.realtime.levelInvalid')
+    return null
+  }
+  const inputs: RtHostMeasurementInputs = { audible: true }
+  if (channels !== undefined) {
+    inputs.channels = channels
+  }
+  if (typeof level === 'number') {
+    inputs.level_dbfs = level
+  }
+  return inputs
+}
+
+async function startRtHostMeasurement(): Promise<void> {
+  if (rtHostStartDisabled.value) {
+    return
+  }
+  const inputs = rtHostInputs()
+  if (inputs === null) {
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      t('calibration.wizard.measure.realtime.audibleConfirmMessage'),
+      t('calibration.wizard.measure.realtime.audibleConfirmTitle'),
+      {
+        confirmButtonText: t('calibration.wizard.measure.realtime.audibleConfirmOk'),
+        cancelButtonText: t('common.cancel'),
+        type: 'warning'
+      }
+    )
+  } catch {
+    // 用户取消 audible 授权：不发请求（真实测量一定会出声/采音）。
+    return
+  }
+  rtHostError.value = null
+  const result = await createCalibrationRtHostJob(inputs)
+  if (result.ok === true) {
+    rtHostJobId.value = result.value.job_id
+    ElMessage.success(t('calibration.wizard.toast.measurementStarted'))
+  } else {
+    rtHostError.value = result.error
+  }
+}
+
+async function onCancelRtHostJob(): Promise<void> {
+  const current = rtHostJob.value
+  if (current === null) {
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      t('calibration.wizard.measure.realtime.cancelConfirmMessage', { id: current.id }),
+      t('calibration.wizard.measure.realtime.cancelConfirmTitle'),
+      {
+        confirmButtonText: t('calibration.wizard.measure.realtime.cancel'),
+        cancelButtonText: t('common.cancel'),
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+  rtHostError.value = null
+  const result = await cancelCalibrationJob(current.id)
+  if (result.ok !== true) {
+    rtHostError.value = result.error
+  }
+}
+
+function artifactBytesText(bytes: number | null): string {
+  return bytes === null ? t('common.dash') : String(bytes)
+}
+
+/** 产物下载走带认证的 getRaw（页面不直接 <a href>）：拿到无损字节后由页面 Blob 保存。 */
+async function downloadRtHostArtifact(name: string): Promise<void> {
+  const current = rtHostJob.value
+  if (current === null) {
+    return
+  }
+  rtHostError.value = null
+  downloadingArtifact.value = name
+  const result = await downloadCalibrationArtifact(current.id, name).finally(() => {
+    downloadingArtifact.value = null
+  })
+  if (result.ok !== true) {
+    rtHostError.value = result.error
+    return
+  }
+  const download = result.value
+  const blob = new Blob([download.data], { type: download.content_type ?? 'application/octet-stream' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = download.filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(url)
+}
+
 /* -------------------------------------------------------------- 第 6 步分析 */
 
 const canCreateJob = computed(
@@ -699,6 +955,20 @@ const gateFacts = computed<Array<{ label: string; value: string }>>(() => {
   } else if (currentStep.value === 4) {
     facts.push({ label: t('calibration.wizard.positions.single'), value: gate.value?.status === 'passed' ? t('calibration.wizard.positions.selected') : t('calibration.wizard.positions.notSelected') })
   } else if (currentStep.value === 5) {
+    facts.push({
+      label: t('calibration.wizard.measure.availability.rtHost'),
+      value: rtHostAvailable.value
+        ? t('calibration.wizard.measure.availability.available')
+        : t('calibration.wizard.measure.availability.unavailable')
+    })
+    facts.push({
+      label: t('calibration.wizard.measure.realtime.jobId'),
+      value: rtHostJob.value === null ? t('common.dash') : shortenId(rtHostJob.value.id, 12, 6) ?? t('common.dash')
+    })
+    facts.push({
+      label: t('calibration.job.status'),
+      value: rtHostJob.value === null ? t('common.dash') : t('calibration.jobStatus.' + rtHostJob.value.status)
+    })
     facts.push({ label: t('calibration.wizard.measure.baseline'), value: shortenId(measurementShas.value.baseline, 12, 8) ?? t('common.dash') })
     facts.push({ label: t('calibration.wizard.measure.applied'), value: shortenId(measurementShas.value.applied, 12, 8) ?? t('common.dash') })
   } else if (currentStep.value === 6) {
@@ -760,6 +1030,10 @@ watch(
   (status) => {
     if (status !== undefined && isJobTerminal(status)) {
       void refreshStatus()
+      // 真实测量结束（成功/失败/取消）后刷新 rt-host UMIK 状态：cal_leave 后设备状态可能变化。
+      if (isRtHostJobKind(job.value?.kind)) {
+        void refreshMicAvailability()
+      }
     }
   }
 )
@@ -827,6 +1101,9 @@ watch(
 
       <div class="wizard-body">
         <div class="wizard-main">
+          <div v-if="currentStep >= 6 && rtHostJob !== null" class="banner banner--info" role="status">
+            {{ t('calibration.wizard.measure.realtime.solveUnavailable') }}
+          </div>
           <!-- 第 1 步：设备检查 -->
           <section v-if="currentStep === 1" class="step-panel">
             <h2 class="step-panel__title">{{ t('calibration.step.names.device_check') }}</h2>
@@ -1008,52 +1285,244 @@ watch(
             <p v-if="gate?.reason" class="aux-text">{{ t('calibration.gate.reason', { reason: gate.reason }) }}</p>
           </section>
 
-          <!-- 第 5 步：测量（P1 仅离线；实时测量 NOT_AVAILABLE） -->
+          <!-- 第 5 步：测量（主路径 = rt-host 真实测量 single_point_rt_host，C3b1；离线 WAV 保留为离线/CI 路径） -->
           <section v-else-if="currentStep === 5" class="step-panel">
             <h2 class="step-panel__title">{{ t('calibration.step.names.measurement') }}</h2>
             <p class="step-panel__desc">{{ t('calibration.wizard.measure.desc') }}</p>
-            <div class="measure-grid">
-              <UploadCard
-                :label="t('calibration.wizard.measure.baseline')"
-                :hint="t('calibration.wizard.measure.hint')"
-                accept=".wav,audio/wav"
-                :action-label="t('calibration.wizard.measure.select')"
-                :busy="state.busy.upload"
-                :result="state.uploads.baseline"
-                :details="measurementDetails(baselineInfo)"
-                :error-text="baselineError"
-                @select="(file) => onMeasurementFile('baseline', file)"
-              />
-              <UploadCard
-                :label="t('calibration.wizard.measure.applied')"
-                :hint="t('calibration.wizard.measure.hint')"
-                accept=".wav,audio/wav"
-                :action-label="t('calibration.wizard.measure.select')"
-                :busy="state.busy.upload"
-                :result="state.uploads.applied"
-                :details="measurementDetails(appliedInfo)"
-                :error-text="appliedError"
-                @select="(file) => onMeasurementFile('applied', file)"
-              />
-            </div>
-            <div class="banner banner--info" role="status">
+
+            <!-- 可用性：MicProfile 与 rt-host 实时 UMIK 状态（均来自 daemon，不编造） -->
+            <dl class="fact-list fact-list--compact">
+              <div class="fact-list__row">
+                <dt class="fact-list__label">{{ t('calibration.wizard.measure.availability.micProfile') }}</dt>
+                <dd class="fact-list__value">
+                  <span class="mono">{{ micProfileText }}</span>
+                  <TruthTag :kind="micState.profile !== null ? 'actual' : 'notWired'" />
+                </dd>
+              </div>
+              <div v-if="micProfileReason.length > 0" class="fact-list__row">
+                <dt class="fact-list__label">{{ t('calibration.wizard.measure.availability.profileReason') }}</dt>
+                <dd class="fact-list__value aux-text">{{ micProfileReason }}</dd>
+              </div>
+              <div class="fact-list__row">
+                <dt class="fact-list__label">{{ t('calibration.wizard.measure.availability.rtHost') }}</dt>
+                <dd class="fact-list__value">
+                  <span>{{ rtHostStatusText }}</span>
+                  <TruthTag :kind="rtHostAvailable ? 'actual' : 'notWired'" />
+                  <el-button
+                    size="small"
+                    plain
+                    :loading="micState.busy.status"
+                    :disabled="micState.busy.status"
+                    @click="refreshMicAvailability"
+                  >
+                    {{ t('calibration.wizard.measure.availability.refresh') }}
+                  </el-button>
+                </dd>
+              </div>
+            </dl>
+
+            <div v-if="rtHostUnavailable" class="banner banner--warn" role="status">
               <div class="wizard-notice">
-                <strong>NOT_AVAILABLE · {{ t('calibration.wizard.measure.realtime') }}</strong>
-                <span>{{ t('calibration.wizard.measure.realtimeReason') }}</span>
-                <span class="aux-text">{{ t('calibration.gate.task', { task: t('calibration.wizard.measure.realtimeTask') }) }}</span>
+                <strong>NOT_AVAILABLE · {{ t('calibration.wizard.measure.availability.unavailableTitle') }}</strong>
+                <span>{{ rtHostStatusText }}</span>
               </div>
               <TruthTag kind="notWired" />
             </div>
-            <dl v-if="measurementShas.baseline || measurementShas.applied" class="fact-list fact-list--compact">
-              <div class="fact-list__row">
-                <dt class="fact-list__label">{{ t('calibration.wizard.measure.savedBaseline') }}</dt>
-                <dd class="fact-list__value mono">{{ shortenId(measurementShas.baseline, 16, 12) ?? t('common.dash') }}</dd>
+            <div
+              v-else-if="micState.statusError !== null"
+              class="banner"
+              :class="micState.statusError.category === 'not_wired' ? 'banner--warn' : 'banner--danger'"
+              :role="micState.statusError.category === 'not_wired' ? 'status' : 'alert'"
+            >
+              <div class="wizard-notice">
+                <strong v-if="micState.statusError.category === 'not_wired'">
+                  NOT_AVAILABLE · {{ t('calibration.wizard.measure.availability.unavailableTitle') }}
+                </strong>
+                <strong v-else>{{ t('calibration.wizard.measure.availability.statusErrorTitle') }}</strong>
+                <span>{{ t(micState.statusError.i18nKey) }}</span>
+                <span v-if="micState.statusError.detail" class="aux-text">{{ micState.statusError.detail }}</span>
               </div>
-              <div class="fact-list__row">
-                <dt class="fact-list__label">{{ t('calibration.wizard.measure.savedApplied') }}</dt>
-                <dd class="fact-list__value mono">{{ shortenId(measurementShas.applied, 16, 12) ?? t('common.dash') }}</dd>
+            </div>
+
+            <!-- 真实测量：显式 audible 授权 -> 创建 job -> 真实轮询 -> 产物下载 -->
+            <section class="measure-block">
+              <header class="measure-block__head">
+                <h3 class="measure-block__title">{{ t('calibration.wizard.measure.realtime.title') }}</h3>
+                <TruthTag :kind="rtHostAvailable ? 'actual' : 'notWired'" />
+              </header>
+              <p class="aux-text">{{ t('calibration.wizard.measure.realtime.desc') }}</p>
+              <div class="step-actions">
+                <el-button
+                  type="primary"
+                  :disabled="rtHostStartDisabled"
+                  :loading="state.busy.createJob"
+                  @click="startRtHostMeasurement"
+                >
+                  {{ state.busy.createJob ? t('calibration.wizard.measure.realtime.starting') : t('calibration.wizard.measure.realtime.start') }}
+                </el-button>
+                <el-button v-if="rtHostJobActive" type="warning" plain :loading="state.busy.cancelJob" @click="onCancelRtHostJob">
+                  {{ t('calibration.wizard.measure.realtime.cancel') }}
+                </el-button>
+                <span class="aux-text">{{ t('calibration.wizard.measure.realtime.audibleHint') }}</span>
               </div>
-            </dl>
+
+              <el-collapse v-model="advancedOpen" class="measure-advanced">
+                <el-collapse-item name="advanced" :title="t('calibration.wizard.measure.realtime.advanced')">
+                  <div class="form-grid">
+                    <div class="form-field">
+                      <label class="form-field__label" for="wizard-rt-channels">{{ t('calibration.wizard.measure.realtime.channels') }}</label>
+                      <el-input
+                        id="wizard-rt-channels"
+                        v-model="rtChannelsText"
+                        :placeholder="t('calibration.wizard.measure.realtime.channelsPlaceholder')"
+                      />
+                      <span class="form-field__hint">{{ t('calibration.wizard.measure.realtime.channelsHint') }}</span>
+                    </div>
+                    <div class="form-field">
+                      <span class="form-field__label">{{ t('calibration.wizard.measure.realtime.levelDbfs') }}</span>
+                      <el-input-number v-model="rtLevelDbfs" :min="-60" :max="-1" :step="1" :precision="1" />
+                      <span class="form-field__hint">{{ t('calibration.wizard.measure.realtime.levelHint') }}</span>
+                    </div>
+                  </div>
+                  <p class="aux-text">{{ t('calibration.wizard.measure.realtime.omittedHint') }}</p>
+                </el-collapse-item>
+              </el-collapse>
+              <p v-if="rtAdvancedError" class="form-error" role="alert">{{ rtAdvancedError }}</p>
+
+              <div v-if="rtHostError !== null" class="banner banner--danger" role="alert">
+                <div class="wizard-notice">
+                  <strong>{{ t('calibration.wizard.measure.realtime.failedTitle') }}</strong>
+                  <span>{{ t(rtHostError.i18nKey) }}</span>
+                  <span class="mono">{{ t('calibration.wizard.measure.realtime.errorCode') }}: {{ rtHostError.code }}</span>
+                  <span v-if="rtHostError.detail" class="aux-text">{{ rtHostError.detail }}</span>
+                  <span v-if="rtHostErrorHint" class="aux-text">{{ rtHostErrorHint }}</span>
+                </div>
+              </div>
+
+              <div v-if="rtHostJobPending" class="banner banner--info" role="status" aria-busy="true">
+                {{ t('calibration.wizard.measure.realtime.creating') }}
+              </div>
+              <template v-else-if="rtHostJob !== null">
+                <dl class="fact-list fact-list--compact">
+                  <div class="fact-list__row">
+                    <dt class="fact-list__label">{{ t('calibration.wizard.measure.realtime.jobId') }}</dt>
+                    <dd class="fact-list__value mono">{{ rtHostJob.id }}</dd>
+                  </div>
+                  <div class="fact-list__row">
+                    <dt class="fact-list__label">{{ t('calibration.job.status') }}</dt>
+                    <dd class="fact-list__value">{{ t('calibration.jobStatus.' + rtHostJob.status) }}</dd>
+                  </div>
+                  <div class="fact-list__row">
+                    <dt class="fact-list__label">{{ t('calibration.wizard.measure.realtime.kind') }}</dt>
+                    <dd class="fact-list__value mono">{{ rtHostKindText }}</dd>
+                  </div>
+                  <div class="fact-list__row">
+                    <dt class="fact-list__label">{{ t('calibration.wizard.measure.realtime.progress') }}</dt>
+                    <dd class="fact-list__value mono">{{ rtHostProgress === null ? t('common.dash') : rtHostProgress + ' %' }}</dd>
+                  </div>
+                  <div class="fact-list__row">
+                    <dt class="fact-list__label">{{ t('calibration.wizard.measure.realtime.currentStep') }}</dt>
+                    <dd class="fact-list__value mono">{{ rtHostJob.step ?? t('common.dash') }}</dd>
+                  </div>
+                  <div class="fact-list__row">
+                    <dt class="fact-list__label">{{ t('calibration.wizard.measure.realtime.engine') }}</dt>
+                    <dd class="fact-list__value mono">{{ rtHostJob.engine ?? t('common.notWired') }}</dd>
+                  </div>
+                </dl>
+                <el-progress v-if="rtHostProgress !== null" :percentage="rtHostProgress" />
+                <JobTimeline :steps="rtHostJob.steps" :truth="rtHostTruth" />
+
+                <div v-if="rtHostJob.status === 'failed'" class="banner banner--danger" role="alert">
+                  <div class="wizard-notice">
+                    <strong>{{ t('calibration.wizard.measure.realtime.jobFailedTitle') }}</strong>
+                    <span class="mono">{{ t('calibration.wizard.measure.realtime.errorCode') }}: {{ rtHostJob.error?.code ?? t('common.dash') }}</span>
+                    <span v-if="rtHostJob.error?.message" class="aux-text">{{ rtHostJob.error.message }}</span>
+                  </div>
+                </div>
+                <div v-else-if="rtHostJob.status === 'cancelled'" class="banner banner--warn" role="status">
+                  <div class="wizard-notice">
+                    <strong>{{ t('calibration.wizard.measure.realtime.jobCancelledTitle') }}</strong>
+                    <span>{{ t('calibration.wizard.measure.realtime.jobCancelledDesc') }}</span>
+                  </div>
+                </div>
+
+                <section v-if="rtHostJob.artifacts.length > 0" class="artifact-block">
+                  <h4 class="artifact-block__title">{{ t('calibration.wizard.measure.realtime.artifacts') }}</h4>
+                  <ul class="artifact-list">
+                    <li v-for="artifact in rtHostJob.artifacts" :key="artifact.name" class="artifact-list__item">
+                      <span class="artifact-list__name mono">{{ artifact.name }}</span>
+                      <span class="artifact-list__meta mono">
+                        {{ artifact.sha256 === null ? t('common.dash') : shortenId(artifact.sha256, 16, 12) }}
+                        · {{ artifactBytesText(artifact.bytes) }}
+                      </span>
+                      <el-button
+                        size="small"
+                        plain
+                        :disabled="artifact.downloadable === false || state.busy.download"
+                        :loading="downloadingArtifact === artifact.name"
+                        @click="downloadRtHostArtifact(artifact.name)"
+                      >
+                        {{ t('calibration.wizard.measure.realtime.download') }}
+                      </el-button>
+                    </li>
+                  </ul>
+                </section>
+                <p v-else-if="isJobTerminal(rtHostJob.status)" class="aux-text">
+                  {{ t('calibration.wizard.measure.realtime.noArtifacts') }}
+                </p>
+
+                <div v-if="rtHostJob.status === 'succeeded'" class="banner banner--info" role="status">
+                  <div class="wizard-notice">
+                    <strong>{{ t('calibration.wizard.measure.realtime.succeededTitle') }}</strong>
+                    <span>{{ t('calibration.wizard.measure.realtime.c3b2Note') }}</span>
+                    <span>{{ t('calibration.wizard.measure.realtime.noPassNote') }}</span>
+                  </div>
+                </div>
+              </template>
+            </section>
+
+            <!-- 离线 / CI 路径：与真实测量完全分开，明确标注它不是 C3b1 的 rt-host 测量 -->
+            <section class="measure-block measure-block--offline">
+              <header class="measure-block__head">
+                <h3 class="measure-block__title">{{ t('calibration.wizard.measure.offline.title') }}</h3>
+                <span class="measure-badge">{{ t('calibration.wizard.measure.offline.badge') }}</span>
+              </header>
+              <p class="aux-text">{{ t('calibration.wizard.measure.offline.desc') }}</p>
+              <div class="measure-grid">
+                <UploadCard
+                  :label="t('calibration.wizard.measure.baseline')"
+                  :hint="t('calibration.wizard.measure.hint')"
+                  accept=".wav,audio/wav"
+                  :action-label="t('calibration.wizard.measure.select')"
+                  :busy="state.busy.upload"
+                  :result="state.uploads.baseline"
+                  :details="measurementDetails(baselineInfo)"
+                  :error-text="baselineError"
+                  @select="(file) => onMeasurementFile('baseline', file)"
+                />
+                <UploadCard
+                  :label="t('calibration.wizard.measure.applied')"
+                  :hint="t('calibration.wizard.measure.hint')"
+                  accept=".wav,audio/wav"
+                  :action-label="t('calibration.wizard.measure.select')"
+                  :busy="state.busy.upload"
+                  :result="state.uploads.applied"
+                  :details="measurementDetails(appliedInfo)"
+                  :error-text="appliedError"
+                  @select="(file) => onMeasurementFile('applied', file)"
+                />
+              </div>
+              <dl v-if="measurementShas.baseline || measurementShas.applied" class="fact-list fact-list--compact">
+                <div class="fact-list__row">
+                  <dt class="fact-list__label">{{ t('calibration.wizard.measure.savedBaseline') }}</dt>
+                  <dd class="fact-list__value mono">{{ shortenId(measurementShas.baseline, 16, 12) ?? t('common.dash') }}</dd>
+                </div>
+                <div class="fact-list__row">
+                  <dt class="fact-list__label">{{ t('calibration.wizard.measure.savedApplied') }}</dt>
+                  <dd class="fact-list__value mono">{{ shortenId(measurementShas.applied, 16, 12) ?? t('common.dash') }}</dd>
+                </div>
+              </dl>
+            </section>
           </section>
 
           <!-- 第 6 步：分析 -->
@@ -1266,6 +1735,12 @@ watch(
   min-width: 0;
 }
 
+.wizard-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--khaen-space-3);
+}
+
 .wizard-side {
   display: flex;
   flex-direction: column;
@@ -1381,6 +1856,95 @@ watch(
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--khaen-space-3);
+}
+
+.measure-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--khaen-space-2);
+  padding: var(--khaen-space-3);
+  border: 1px solid var(--khaen-border);
+  border-radius: var(--khaen-radius-panel);
+  background: var(--khaen-panel-hover);
+  min-width: 0;
+}
+
+.measure-block--offline {
+  border-style: dashed;
+}
+
+.measure-block__head {
+  display: flex;
+  align-items: center;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+}
+
+.measure-block__title {
+  font-size: var(--khaen-font-card-title);
+  font-weight: 600;
+}
+
+.measure-badge {
+  padding: 1px 8px;
+  border: 1px dashed var(--khaen-border-strong);
+  border-radius: 999px;
+  color: var(--khaen-text-secondary);
+  font-size: 11px;
+  font-family: var(--khaen-font-mono);
+}
+
+.measure-advanced {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+.artifact-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--khaen-space-2);
+  padding: var(--khaen-space-2);
+  border: 1px solid var(--khaen-border);
+  border-radius: var(--khaen-radius-button);
+  background: var(--khaen-panel);
+  min-width: 0;
+}
+
+.artifact-block__title {
+  font-size: var(--khaen-font-aux);
+  font-weight: 600;
+}
+
+.artifact-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--khaen-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--khaen-space-2);
+  flex-wrap: wrap;
+  padding: var(--khaen-space-1) 0;
+  border-bottom: 1px dashed var(--khaen-border);
+  font-size: var(--khaen-font-aux);
+}
+
+.artifact-list__item:last-child {
+  border-bottom: 0;
+}
+
+.artifact-list__name {
+  font-weight: 600;
+}
+
+.artifact-list__meta {
+  color: var(--khaen-text-muted);
+  overflow-wrap: anywhere;
 }
 
 .position-grid {

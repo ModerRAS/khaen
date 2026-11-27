@@ -76,8 +76,29 @@ export const WIZARD_STEP_KEYS: readonly WizardStepKey[] = [
 
 export const WIZARD_STEP_COUNT = WIZARD_STEP_KEYS.length
 
-/** 校准 job 的固定步骤（PLAN §4.7：compile→levels→closed_loop→bundle，不允许跳步直接成功）。 */
-export const JOB_STEP_NAMES = ['compile', 'levels', 'closed_loop', 'bundle'] as const
+/** 校准 job 种类（docs/API.md §7 / §7.2）：离线闭环 / rt-host 真实测量。 */
+export const JOB_KIND_SINGLE_POINT_OFFLINE = 'single_point_offline'
+export const JOB_KIND_SINGLE_POINT_RT_HOST = 'single_point_rt_host'
+export type CalibrationJobKind =
+  | typeof JOB_KIND_SINGLE_POINT_OFFLINE
+  | typeof JOB_KIND_SINGLE_POINT_RT_HOST
+
+/**
+ * 已知 job 步骤名：**只用于可选的本地化标签**，解析不依赖它——后端返回的 name 一律原样接受并呈现。
+ * - 离线 job（PLAN §4.7）：compile → levels → closed_loop → bundle；
+ * - rt-host 真实测量 job（docs/API.md §7.2）：validate → sweep_capture → quality_check → bundle。
+ */
+export const OFFLINE_JOB_STEP_NAMES = ['compile', 'levels', 'closed_loop', 'bundle'] as const
+export const RT_HOST_JOB_STEP_NAMES = ['validate', 'sweep_capture', 'quality_check', 'bundle'] as const
+export const JOB_STEP_NAMES = [
+  'compile',
+  'levels',
+  'closed_loop',
+  'validate',
+  'sweep_capture',
+  'quality_check',
+  'bundle'
+] as const
 
 export interface CalibrationErrorDetail {
   code: string
@@ -146,6 +167,16 @@ export interface CalibrationJobInputs {
   centers_hz: number[]
   tolerance_db: number | null
   min_bands: number | null
+}
+
+/**
+ * rt-host 真实测量 job 的会话输入回显（详情**顶层** inputs_rt_host，docs/API.md §7.2 加法字段）。
+ * 缺失为 null：不把"未上报"补成默认值。离线 job 没有该字段。
+ */
+export interface CalibrationRtHostJobInputs {
+  audible: boolean | null
+  channels: number[] | null
+  level_dbfs: number | null
 }
 
 export interface CalibrationBand {
@@ -219,6 +250,8 @@ export interface CalibrationJob extends CalibrationJobSummary {
   steps: CalibrationStep[]
   artifacts: CalibrationArtifact[]
   inputs: CalibrationJobInputs | null
+  /** rt-host 真实测量 job 的会话输入回显（离线 job 为 null）。 */
+  inputs_rt_host: CalibrationRtHostJobInputs | null
   result: CalibrationJobResult | null
   /** daemon 的 apply 明细对象（缺失时由 apply_state/applied_version 合成）。 */
   apply: CalibrationJobApply | null
@@ -249,10 +282,25 @@ export interface CalibrationCreateJobInputs {
   min_bands: number
 }
 
-export interface CalibrationCreateJobRequest {
-  kind: 'single_point_offline'
-  inputs: CalibrationCreateJobInputs
+/**
+ * rt-host 真实测量 job 的会话输入（docs/API.md §7.2）：
+ * audible 必须显式为 true（P08：真实测量会出声/采音，daemon 拒绝静默请求）。
+ */
+export interface RtHostMeasurementInputs {
+  audible: true
+  /** 可选：测量通道（u32；非空、≤22、不重复）；省略 = 由 rt-host 的 KHAEN_CAL_CHANNELS 决定。 */
+  channels?: number[]
+  /** 可选：扫频电平 dBFS（[-60,-1]）；省略 = 由 rt-host 自己的电平决定。 */
+  level_dbfs?: number
 }
+
+/**
+ * POST /api/calibration/jobs 的请求体（discriminated union）。
+ * 两种 kind 的 inputs 形状完全不同，不能把离线上传字段塞进 rt-host 请求（或反之）。
+ */
+export type CalibrationCreateJobRequest =
+  | { kind: typeof JOB_KIND_SINGLE_POINT_OFFLINE; inputs: CalibrationCreateJobInputs }
+  | { kind: typeof JOB_KIND_SINGLE_POINT_RT_HOST; inputs: RtHostMeasurementInputs }
 
 export interface CalibrationCreateJobResult {
   job_id: string
@@ -578,6 +626,28 @@ function readNumberArray(record: Record<string, unknown>, field: string, endpoin
   })
 }
 
+/** 缺失/null = null（与 readNumberArray 的 [] 默认值区分：echo 字段不能补成空数组）。 */
+function readNullableNumberArray(
+  record: Record<string, unknown>,
+  field: string,
+  endpoint: string,
+  path: string
+): number[] | null {
+  const value = record[field]
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!Array.isArray(value)) {
+    throw invalidResponse(endpoint, path + '.' + field + ' must be an array of numbers or null')
+  }
+  return value.map((item, index) => {
+    if (typeof item !== 'number' || !Number.isFinite(item)) {
+      throw invalidResponse(endpoint, path + '.' + field + '[' + String(index) + '] must be a finite number')
+    }
+    return item
+  })
+}
+
 function readStringArray(record: Record<string, unknown>, field: string, endpoint: string, path: string): string[] {
   const value = record[field]
   if (value === null || value === undefined) {
@@ -758,6 +828,10 @@ function parseJobSummary(value: unknown, endpoint: string, path: string): Calibr
   }
 }
 
+/**
+ * 解析一个 job 步骤。**不校验固定步骤名**：离线 job 的 compile/levels/... 与 rt-host 真实测量的
+ * validate/sweep_capture/quality_check/... 都原样接收；未来后端新增的 name 也如实呈现（不映射、不丢弃）。
+ */
 function parseJobStep(value: unknown, endpoint: string, path: string): CalibrationStep {
   const record = asRecord(value, endpoint, path)
   return {
@@ -793,6 +867,26 @@ function parseJobInputs(value: unknown, endpoint: string, path: string): Calibra
     centers_hz: readNumberArray(record, 'centers_hz', endpoint, path),
     tolerance_db: readNumber(record, 'tolerance_db', endpoint, path),
     min_bands: readNumber(record, 'min_bands', endpoint, path)
+  }
+}
+
+/**
+ * 解析 rt-host job 的会话输入回显（详情顶层 inputs_rt_host；缺失 = null，不补默认值）。
+ * 字段本身允许为 null（channels/level_dbfs 省略时后端回 null），类型不对仍按 invalid_response 拒绝。
+ */
+function parseRtHostJobInputs(
+  value: unknown,
+  endpoint: string,
+  path: string
+): CalibrationRtHostJobInputs | null {
+  const record = optionalRecord(value, endpoint, path)
+  if (record === null) {
+    return null
+  }
+  return {
+    audible: readBoolean(record, 'audible', endpoint, path),
+    channels: readNullableNumberArray(record, 'channels', endpoint, path),
+    level_dbfs: readNumber(record, 'level_dbfs', endpoint, path)
   }
 }
 
@@ -957,6 +1051,12 @@ function parseJobObject(
       parseArtifact(item, endpoint, path + '.artifacts[' + String(index) + ']')
     ),
     inputs: parseJobInputs(jobRecord.inputs, endpoint, path + '.inputs'),
+    // C3b1 加法字段在**详情顶层**（job 内没有）：兼容两种位置，缺失为 null。
+    inputs_rt_host: parseRtHostJobInputs(
+      jobRecord.inputs_rt_host ?? fallback?.inputs_rt_host,
+      endpoint,
+      path + '.inputs_rt_host'
+    ),
     result: parseJobResult(jobRecord.result ?? fallback?.result, endpoint, path + '.result'),
     apply: applyRecord === null ? null : parseJobApply(applyRecord, applyState, appliedVersion, endpoint, path + '.apply')
   }
@@ -1578,6 +1678,11 @@ export function isJobActive(status: CalibrationJobStatus | null | undefined): bo
   return status === 'queued' || status === 'running'
 }
 
+/** 该 job kind 是否为 rt-host 真实测量（C3b1；UI 据此区分真实测量与离线闭环两条路径）。 */
+export function isRtHostJobKind(kind: string | null | undefined): boolean {
+  return kind === JOB_KIND_SINGLE_POINT_RT_HOST
+}
+
 /** job 是否已到终态（轮询停止条件）。 */
 export function isJobTerminal(status: CalibrationJobStatus | null | undefined): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled'
@@ -1818,6 +1923,7 @@ const CODE_CATEGORY: Record<string, CalibrationErrorCategory> = {
   not_wired: 'not_wired',
   unsupported: 'not_wired',
   switch_busy: 'busy',
+  mic_profile_missing: 'conflict',
   job_not_active: 'busy',
   job_not_succeeded: 'conflict',
   plan_unavailable: 'conflict',

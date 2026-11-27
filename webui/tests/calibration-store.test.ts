@@ -159,6 +159,7 @@ function jobDetail(status: CalibrationJob['status'] = 'running'): CalibrationJob
     ],
     artifacts: [],
     inputs: null,
+    inputs_rt_host: null,
     result: null,
     apply: null
   }
