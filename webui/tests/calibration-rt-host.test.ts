@@ -526,7 +526,7 @@ test('job detail parsing keeps rt-host kind/steps/inputs_rt_host and unknown ste
   assert.equal(parsed.job.verdict, null)
   assert.equal(parsed.job.inputs, null)
   assert.deepEqual(parsed.job.inputs_rt_host, { audible: true, channels: [0, 1], level_dbfs: -12 })
-  // steps 不按离线固定名解析：rt-host 的 4 个 name 原样保留。
+  // steps 不按离线固定名解析：rt-host 的 6 个 name 原样保留（含 solve_g/compile）。
   assert.deepEqual(
     parsed.job.steps.map((step) => step.name),
     [...RT_HOST_JOB_STEP_NAMES]
@@ -540,7 +540,7 @@ test('job detail parsing keeps rt-host kind/steps/inputs_rt_host and unknown ste
   // 未来新增的步骤名也必须如实呈现（不映射成 compile/levels 占位）。
   const future: any = structuredClone(detail)
   future.job.steps.push({ name: 'solve', status: 'pending', started_at: null, finished_at: null, sha256: null, detail: null })
-  assert.equal(parseJobResponse(future).job.steps[4].name, 'solve')
+  assert.equal(parseJobResponse(future).job.steps[RT_HOST_JOB_STEP_NAMES.length].name, 'solve')
 
   // inputs_rt_host 缺失 = null，不补默认值。
   const noEcho: any = structuredClone(detail)

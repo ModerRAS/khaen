@@ -89,7 +89,14 @@ export type CalibrationJobKind =
  * - rt-host 真实测量 job（docs/API.md §7.2）：validate → sweep_capture → quality_check → bundle。
  */
 export const OFFLINE_JOB_STEP_NAMES = ['compile', 'levels', 'closed_loop', 'bundle'] as const
-export const RT_HOST_JOB_STEP_NAMES = ['validate', 'sweep_capture', 'quality_check', 'bundle'] as const
+export const RT_HOST_JOB_STEP_NAMES = [
+  'validate',
+  'sweep_capture',
+  'quality_check',
+  'solve_g',
+  'compile',
+  'bundle'
+] as const
 export const JOB_STEP_NAMES = [
   'compile',
   'levels',

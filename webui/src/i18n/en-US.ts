@@ -565,10 +565,10 @@ const messages: Messages = {
           artifacts: 'Artifacts (downloadable)',
           noArtifacts: 'This job has no artifacts (failed/cancelled or the backend produced none).',
           download: 'Download',
-          c3b2Note: 'solve / design / apply belong to C3b2: this step only completes the real measurement, produces no applicable plan and reports no PASS.',
+          c3b2Note: 'The real measurement job now includes solve_g and compile: design/plan are marked PREDICTED_ONLY (not a measured PASS; no remeasure/holdout was run); applying requires an explicit two-phase prepare→commit and never happens automatically.',
           noPassNote: 'A null job verdict is truthful (quality.json records available:false with the reason), not a failure.',
           solveUnavailable:
-            'The latest job is a real rt-host measurement: analysis / design / apply (solve) belong to C3b2 and stay not available in this slice; a successful measurement does not unlock them.'
+            'The rt-host measurement job now runs validate → sweep_capture → quality_check → solve_g → compile → bundle; design/plan artifacts are marked PREDICTED_ONLY. analysis/design/apply gates follow the backend job/artifacts, and apply stays an explicit two-phase user action.'
         },
         offline: {
           title: 'Offline WAV (offline / CI closed loop)',
@@ -752,6 +752,7 @@ const messages: Messages = {
         validate: 'Preflight validation',
         sweep_capture: 'Sweep capture',
         quality_check: 'Quality check',
+        solve_g: 'Solve design (PREDICTED_ONLY)',
         bundle: 'Bundle artifacts'
       }
     },

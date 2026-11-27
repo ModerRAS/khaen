@@ -565,10 +565,10 @@ const messages = {
           artifacts: '产物（可下载）',
           noArtifacts: '该 job 没有产物（失败/取消或后端未产出）。',
           download: '下载',
-          c3b2Note: 'solve / design / apply 属 C3b2：本步只完成真实测量，不产生可应用 plan，也不报 PASS。',
+          c3b2Note: '真实测量 job 现在包含 solve_g 与 compile：design/plan 标 PREDICTED_ONLY（不是实测 PASS，未做 remeasure/holdout）；应用需手动两阶段 prepare→commit，不会自动生效。',
           noPassNote: 'job verdict 为 null 是如实结果（quality.json 记录 available:false + 原因），不是失败。',
           solveUnavailable:
-            '最近的 job 是 rt-host 真实测量：analysis / design / apply（solve）属 C3b2，本切片固定未接入，测量成功也不会放行。'
+            'rt-host 真实测量 job 现在包含 validate → sweep_capture → quality_check → solve_g → compile → bundle；design/plan 产物标 PREDICTED_ONLY。analysis/design/apply 的 gate 由后端 job/artifact 驱动，apply 仍是用户显式两阶段。'
         },
         offline: {
           title: '离线 WAV（离线 / CI 闭环）',
@@ -752,6 +752,7 @@ const messages = {
         validate: '前置校验',
         sweep_capture: '扫频采集',
         quality_check: '质量检查',
+        solve_g: '求解设计（PREDICTED_ONLY）',
         bundle: '产物打包'
       }
     },
