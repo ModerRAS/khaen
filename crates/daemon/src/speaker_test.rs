@@ -7,7 +7,8 @@
 //!   KHAEN_SOUND_WINDOW（如 "08:30-12:00,14:30-18:00"）配置时窗口外 403 sound_window_closed；
 //!   忙（校准 job / rt-host busy）409；rt-host 未接线/not_applied 503；链路不可用 503
 //!   host_link_unavailable（绝不假成功）。
-//! - audible=true 且 confirm=true 必须同时显式给出；dac 0..=21、ms 500..=10000、
+//! - audible=true 且 confirm=true 必须同时显式给出；dac 0..=MAX_OUTPUT_CHANNELS-1（协议上限；
+//!   实际输出设备更窄时由 rt-host 按 format.channels 拒绝，不假设 MOTU 22 通道）、ms 500..=10000、
 //!   db -60..=-12（默认 -30）在 daemon 二次校验（rt-host 自己也校验）。
 //!
 //! 时间来源可注入（SpeakerTestRuntime::with_clock）；窗口判断是纯函数（SoundWindow），
@@ -34,8 +35,11 @@ pub const ENABLED_ENV: &str = "KHAEN_SPEAKER_TEST";
 /// KHAEN_SOUND_WINDOW 环境变量名。
 pub const WINDOW_ENV: &str = "KHAEN_SOUND_WINDOW";
 
-/// 可达 DAC 数（MOTU 22 通道；rt-host 若报告更小通道数由它自己拒绝并透传）。
-pub const DAC_CHANNELS: u16 = 22;
+/// 协议允许的最大 DAC 数（`khaen_core::rt::MAX_OUTPUT_CHANNELS`）。
+///
+/// 这不是“设备一定有 22 路”：具体设备可能更窄，rt-host 会按它真实的 `format.channels`
+/// 拒绝越界 DAC 并透传；daemon 只做协议上限校验，不把 MOTU 22 通道写死成设备假设。
+pub const DAC_CHANNELS: usize = khaen_core::rt::MAX_OUTPUT_CHANNELS;
 /// 测试音最短时长（毫秒）。
 pub const MIN_MS: u64 = 500;
 /// 测试音最长时长（毫秒；硬上限 10 s，与出声纪律一致）。
@@ -89,7 +93,7 @@ impl TestToneKind {
 /// 已校验的测试音请求（daemon 二次校验后的口径）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct TestToneRequest {
-    /// 目标 DAC（0..=21）。
+    /// 目标 DAC（0..=`MAX_OUTPUT_CHANNELS-1`；设备更窄时由 rt-host 拒绝）。
     pub dac: u16,
     /// 时长（毫秒，500..=10000）。
     pub ms: u64,
@@ -496,11 +500,11 @@ pub fn parse_request(object: &Map<String, Value>) -> Result<TestToneRequest, Api
     }
 
     let dac = integer_field(object, "dac")?;
-    if dac >= u64::from(DAC_CHANNELS) {
+    if dac >= DAC_CHANNELS as u64 {
         return Err(ApiError::invalid_field(
             "dac",
             format!(
-                "field dac must be in 0..={} (the {DAC_CHANNELS}-channel device)",
+                "field dac must be in 0..={} (the protocol maximum; the actual output device may report fewer channels, and rt-host rejects DACs beyond format.channels)",
                 DAC_CHANNELS - 1
             ),
         ));
