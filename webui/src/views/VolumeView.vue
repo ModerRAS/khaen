@@ -82,8 +82,34 @@ const safe = computed(() => data.value?.state.safe === true)
 const writeLocked = computed(() => faulted.value || safe.value)
 const lockReason = computed<string | null>(() => data.value?.state.last_error ?? null)
 
-const laneCount = computed<number | null>(() => data.value?.format.channels ?? null)
+const readback = computed(() => data.value?.readback ?? null)
+/**
+ * 逐 lane 增益的 lane 数优先取 readback.protection.lanes（真实 DSP lane），
+ * 拿不到才退回 format.channels（输出设备通道数）。两者不是一回事：22 个 DAC 通道
+ * 可能只跑 13 个 DSP lane，不能用设备通道数冒充增益 lane 数。
+ */
+const laneCount = computed<number | null>(() => {
+  const snapshot = readback.value
+  if (snapshot?.available === true && snapshot.protection?.lanes != null) {
+    return snapshot.protection.lanes
+  }
+  return data.value?.format.channels ?? null
+})
 const lanes = ref<LaneGainDraft[]>([])
+
+/** 当前实际逐 lane 保护增益（base_plan 回读）；不可读返回 null，不编 0 dB。 */
+function currentLaneGain(lane: number): number | null {
+  const snapshot = readback.value
+  if (snapshot?.available !== true || snapshot.protection === null) {
+    return null
+  }
+  return snapshot.protection.entries.find((entry) => entry.lane === lane)?.gain_db ?? null
+}
+
+function currentGainText(lane: number): string {
+  const gain = currentLaneGain(lane)
+  return gain === null ? t('common.dash') : gainText(gain)
+}
 
 function resetLaneDrafts(): void {
   lanes.value = laneCount.value === null ? [] : createLaneDrafts(laneCount.value)
@@ -340,6 +366,10 @@ const laneHint = computed(() => {
     return t('volume.gains.noLanes', {
       reason: data.value === null ? t('common.unknown') : reasonForPath(data.value, 'format.channels') ?? t('volume.gains.noLanesReasonUnknown')
     })
+  }
+  const snapshot = readback.value
+  if (snapshot?.available === true && snapshot.protection !== null) {
+    return t('volume.gains.readbackAvailable', { source: snapshot.source ?? t('common.dash') })
   }
   return annotateGapById(t('volume.gains.readbackMissing'), 'volumeLaneGain', gapLocaleOf(locale.value))
 })
@@ -611,7 +641,7 @@ function onRefreshMotu(): void {
         :truth="laneCount === null ? 'notWired' : 'actual'"
       >
         <p class="volume-gains__readback">
-          <TruthTag kind="notWired" :reason="laneHint" />
+          <TruthTag :kind="readback?.available === true ? 'actual' : 'notWired'" :reason="laneHint" />
           <span class="aux-text">{{ laneHint }}</span>
         </p>
         <p class="aux-text">{{ t('motu.gainsSeparation') }}</p>
@@ -641,6 +671,9 @@ function onRefreshMotu(): void {
               @change="onLaneInclude(index, $event)"
             />
             <span class="volume-gains__lane mono">lane {{ draft.lane }}</span>
+            <span class="volume-gains__current mono" :title="t('volume.gains.current')">
+              {{ currentGainText(draft.lane) }}
+            </span>
             <el-slider
               :model-value="draft.gain_db"
               :min="VOLUME_GAIN_MIN_DB"
@@ -853,7 +886,7 @@ function onRefreshMotu(): void {
 
 .volume-gains__row {
   display: grid;
-  grid-template-columns: 24px 64px minmax(120px, 1fr) 88px;
+  grid-template-columns: 24px 64px 72px minmax(120px, 1fr) 88px;
   align-items: center;
   gap: var(--khaen-space-2);
   min-height: 36px;
@@ -862,6 +895,13 @@ function onRefreshMotu(): void {
 .volume-gains__lane {
   color: var(--khaen-text-secondary);
   font-size: 11px;
+}
+
+.volume-gains__current {
+  color: var(--khaen-text-muted);
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .volume-gains__slider {

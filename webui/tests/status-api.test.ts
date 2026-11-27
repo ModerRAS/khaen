@@ -60,6 +60,48 @@ test('parseStatusResponse keeps all present fixture values', () => {
   assert.equal(status.mode, null)
 })
 
+test('parseStatusResponse reads readback from base_plan without inventing values', () => {
+  const status = parseStatusResponse(presentBody())
+  assert.ok(status.readback)
+  assert.equal(status.readback.available, true)
+  assert.equal(status.readback.source, 'base_plan')
+  assert.equal(status.readback.content?.in_channels, 2)
+  assert.equal(status.readback.content?.out_lanes, 13)
+  assert.deepEqual(status.readback.content?.folds, [
+    { src: 0, dst: 0, gain: 1 },
+    { src: 1, dst: 1, gain: 1 }
+  ])
+  assert.equal(status.readback.matrix?.decimation, 16)
+  assert.equal(status.readback.protection?.entries[0]?.gain_db, 0)
+  assert.equal(status.readback.routing?.dac_channels, 22)
+  assert.deepEqual(status.readback.routing?.routes, [{ lane: 0, dac: 0 }])
+
+  const missing = presentBody()
+  delete missing.readback
+  assert.equal(parseStatusResponse(missing).readback, null)
+
+  const unavailable = presentBody()
+  unavailable.readback = { available: false, reason: 'no plan loaded' }
+  const degraded = parseStatusResponse(unavailable)
+  assert.equal(degraded.readback?.available, false)
+  assert.equal(degraded.readback?.reason, 'no plan loaded')
+  assert.equal(degraded.readback?.content, null)
+})
+
+test('parseStatusResponse rejects malformed readback instead of faking values', async () => {
+  const wrongAvailable = presentBody()
+  wrongAvailable.readback.available = 'yes'
+  assert.equal((await captureError(async () => parseStatusResponse(wrongAvailable))).code, 'invalid_response')
+
+  const wrongFold = presentBody()
+  wrongFold.readback.content.folds = [{ src: 0, dst: 0 }]
+  assert.equal((await captureError(async () => parseStatusResponse(wrongFold))).code, 'invalid_response')
+
+  const wrongRouting = presentBody()
+  wrongRouting.readback.routing.routes = [{ lane: 0, dac: '0' }]
+  assert.equal((await captureError(async () => parseStatusResponse(wrongRouting))).code, 'invalid_response')
+})
+
 test('parseStatusResponse reads top-level mode and does not borrow host_link.mode', async () => {
   const present = presentBody()
   present.mode = 'aes67'

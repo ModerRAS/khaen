@@ -114,6 +114,79 @@ export interface StatusCalibration {
   last_verdict: string | null
 }
 
+/** base_plan 的只读语义（status.readback）；不含 FIR/矩阵系数。 */
+export interface StatusReadbackFold {
+  src: number
+  dst: number
+  gain: number
+}
+
+export interface StatusReadbackContent {
+  in_channels: number | null
+  out_lanes: number | null
+  folds: StatusReadbackFold[]
+}
+
+export interface StatusReadbackCrossoverFilter {
+  lane: number
+  taps: number
+}
+
+export interface StatusReadbackCrossover {
+  lanes: number | null
+  filters: StatusReadbackCrossoverFilter[]
+}
+
+export interface StatusReadbackMatrix {
+  rows: number | null
+  cols: number | null
+  decimation: number | null
+  interpolation: number | null
+  taps: number | null
+}
+
+export interface StatusReadbackProtectionEntry {
+  lane: number
+  delay_samples: number | null
+  polarity: number | null
+  gain_db: number | null
+  peq_bands: number | null
+}
+
+export interface StatusReadbackProtection {
+  lanes: number | null
+  entries: StatusReadbackProtectionEntry[]
+}
+
+export interface StatusReadbackRoute {
+  lane: number
+  dac: number
+}
+
+export interface StatusReadbackRouting {
+  dac_channels: number | null
+  routes: StatusReadbackRoute[]
+}
+
+/**
+ * 控制面 base_plan 的只读回读（/api/status.readback 加法字段）。
+ *
+ * null = 该响应没有 readback 字段（旧 daemon / 未接链路）；可用性以 available 为准。
+ * 拿不到时不得用默认布局或上次值冒充“当前值”。
+ */
+export interface StatusReadback {
+  available: boolean
+  source: string | null
+  reason: string | null
+  sample_rate: number | null
+  block_size: number | null
+  content: StatusReadbackContent | null
+  crossover: StatusReadbackCrossover | null
+  matrix: StatusReadbackMatrix | null
+  protection: StatusReadbackProtection | null
+  routing: StatusReadbackRouting | null
+}
+
 /** not_wired 列表项：daemon 如实上报的未接入能力。 */
 export interface StatusNotWiredEntry {
   path: string
@@ -130,6 +203,8 @@ export interface StatusResponse {
    * null = 未上报；原因在 reasons.mode。不得用 host_link.mode 或提交回执顶替。
    */
   mode: string | null
+  /** 控制面 base_plan 的只读回读；null = 响应没有该加法字段。 */
+  readback: StatusReadback | null
   plan: StatusPlan
   format: StatusFormat
   input: StatusInput
@@ -321,6 +396,144 @@ function parseCalibration(value: unknown): StatusCalibration {
   }
 }
 
+function readObjectArray(
+  record: Record<string, unknown>,
+  field: string,
+  path: string
+): Record<string, unknown>[] {
+  const value = record[field]
+  if (value === null || value === undefined) {
+    return []
+  }
+  if (!Array.isArray(value)) {
+    throw invalidResponse(path + '.' + field + ' must be an array or null')
+  }
+  return value.map((item, index) => {
+    const itemPath = path + '.' + field + '[' + String(index) + ']'
+    const entry = asRecord(item, itemPath)
+    if (entry === null) {
+      throw invalidResponse(itemPath + ' must be an object')
+    }
+    return entry
+  })
+}
+
+function parseReadbackFolds(value: Record<string, unknown>): StatusReadbackFold[] {
+  return readObjectArray(value, 'folds', 'readback.content').map((fold, index) => ({
+    src: requiredNumber(fold, 'src', 'readback.content.folds[' + String(index) + ']'),
+    dst: requiredNumber(fold, 'dst', 'readback.content.folds[' + String(index) + ']'),
+    gain: requiredNumber(fold, 'gain', 'readback.content.folds[' + String(index) + ']')
+  }))
+}
+
+function requiredNumber(record: Record<string, unknown>, field: string, path: string): number {
+  const value = readNumber(record, field, path)
+  if (value === null) {
+    throw invalidResponse(path + '.' + field + ' is required')
+  }
+  return value
+}
+
+function parseReadbackContent(value: unknown): StatusReadbackContent | null {
+  const record = asRecord(value, 'readback.content')
+  if (record === null) {
+    return null
+  }
+  return {
+    in_channels: readNumber(record, 'in_channels', 'readback.content'),
+    out_lanes: readNumber(record, 'out_lanes', 'readback.content'),
+    folds: parseReadbackFolds(record)
+  }
+}
+
+function parseReadbackCrossover(value: unknown): StatusReadbackCrossover | null {
+  const record = asRecord(value, 'readback.crossover')
+  if (record === null) {
+    return null
+  }
+  return {
+    lanes: readNumber(record, 'lanes', 'readback.crossover'),
+    filters: readObjectArray(record, 'filters', 'readback.crossover').map((filter, index) => ({
+      lane: requiredNumber(filter, 'lane', 'readback.crossover.filters[' + String(index) + ']'),
+      taps: requiredNumber(filter, 'taps', 'readback.crossover.filters[' + String(index) + ']')
+    }))
+  }
+}
+
+function parseReadbackMatrix(value: unknown): StatusReadbackMatrix | null {
+  const record = asRecord(value, 'readback.matrix')
+  if (record === null) {
+    return null
+  }
+  return {
+    rows: readNumber(record, 'rows', 'readback.matrix'),
+    cols: readNumber(record, 'cols', 'readback.matrix'),
+    decimation: readNumber(record, 'decimation', 'readback.matrix'),
+    interpolation: readNumber(record, 'interpolation', 'readback.matrix'),
+    taps: readNumber(record, 'taps', 'readback.matrix')
+  }
+}
+
+function parseReadbackProtection(value: unknown): StatusReadbackProtection | null {
+  const record = asRecord(value, 'readback.protection')
+  if (record === null) {
+    return null
+  }
+  return {
+    lanes: readNumber(record, 'lanes', 'readback.protection'),
+    entries: readObjectArray(record, 'entries', 'readback.protection').map((entry, index) => {
+      const path = 'readback.protection.entries[' + String(index) + ']'
+      return {
+        lane: requiredNumber(entry, 'lane', path),
+        delay_samples: readNumber(entry, 'delay_samples', path),
+        polarity: readNumber(entry, 'polarity', path),
+        gain_db: readNumber(entry, 'gain_db', path),
+        peq_bands: readNumber(entry, 'peq_bands', path)
+      }
+    })
+  }
+}
+
+function parseReadbackRouting(value: unknown): StatusReadbackRouting | null {
+  const record = asRecord(value, 'readback.routing')
+  if (record === null) {
+    return null
+  }
+  return {
+    dac_channels: readNumber(record, 'dac_channels', 'readback.routing'),
+    routes: readObjectArray(record, 'routes', 'readback.routing').map((route, index) => {
+      const path = 'readback.routing.routes[' + String(index) + ']'
+      return {
+        lane: requiredNumber(route, 'lane', path),
+        dac: requiredNumber(route, 'dac', path)
+      }
+    })
+  }
+}
+
+function parseReadback(value: unknown): StatusReadback | null {
+  const record = asRecord(value, 'readback')
+  if (record === null) {
+    return null
+  }
+  const available = readBoolean(record, 'available', 'readback')
+  if (available === null) {
+    throw invalidResponse('readback.available is required')
+  }
+  return {
+    available,
+    source: readString(record, 'source', 'readback'),
+    reason: readString(record, 'reason', 'readback'),
+    sample_rate: readNumber(record, 'sample_rate', 'readback'),
+    block_size: readNumber(record, 'block_size', 'readback'),
+    content: parseReadbackContent(record.content),
+    crossover: parseReadbackCrossover(record.crossover),
+    matrix: parseReadbackMatrix(record.matrix),
+    protection: parseReadbackProtection(record.protection),
+    routing: parseReadbackRouting(record.routing)
+  }
+}
+
 function parseNotWired(value: unknown): StatusNotWiredEntry[] {
   if (value === null || value === undefined) {
     return []
@@ -379,6 +592,7 @@ export function parseStatusResponse(body: unknown): StatusResponse {
     host_link: parseHostLink(root.host_link),
     state: parseState(root.state),
     mode: readString(root, 'mode', 'body'),
+    readback: parseReadback(root.readback),
     plan: parsePlan(root.plan),
     format: parseFormat(root.format),
     input: parseInput(root.input),

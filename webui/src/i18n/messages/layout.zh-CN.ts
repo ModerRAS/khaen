@@ -34,11 +34,18 @@ const messages = {
     },
     current: {
       title: '当前内容布局',
-      desc: '当前布局内容没有数据源：控制协议没有读取 content.folds 的 op，/api/status 也不含布局内容。',
-      unavailable: '不可读（无数据源）',
+      desc: '当前内容布局来自 /api/status.readback（控制面 base_plan）；readback 不可用时显示原因，不拿默认值冒充。',
+      unavailable: '不可读（readback 不可用）',
       reason:
-        '控制协议没有读取当前 content.folds 的 op，/api/status 也不包含布局内容；页面不猜当前值，也不拿默认值冒充。',
-      note: '下方表单是本地草稿：默认值只是编辑起点，不是当前布局。'
+        '/api/status.readback 没有可用的 base_plan（rt-host 未加载/未 commit 方案，或链路降级）；页面不猜当前值，也不拿默认值冒充。',
+      note: '上方数字来自 readback；下方表单是本地草稿，默认值只是编辑起点，不是当前布局。',
+      field: {
+        inChannels: '输入通道数',
+        outLanes: '输出 lane 数',
+        folds: '折叠项数',
+        source: '数据来源'
+      },
+      sourceValue: 'base_plan 回读（{source}）'
     },
     form: {
       title: '折叠表（本地草稿）',

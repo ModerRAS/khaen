@@ -68,6 +68,27 @@ const PRESENT = {
     state: 'present',
     rate_readback: 48000
   },
+  readback: {
+    available: true,
+    source: 'base_plan',
+    sample_rate: 48000,
+    block_size: 128,
+    content: {
+      in_channels: 2,
+      out_lanes: 13,
+      folds: [
+        { src: 0, dst: 0, gain: 1 },
+        { src: 1, dst: 1, gain: 1 }
+      ]
+    },
+    crossover: { lanes: 13, filters: [{ lane: 0, taps: 2048 }] },
+    matrix: { rows: 13, cols: 13, decimation: 16, interpolation: 16, taps: 1 },
+    protection: {
+      lanes: 13,
+      entries: [{ lane: 0, delay_samples: 0, polarity: 1, gain_db: 0, peq_bands: 0 }]
+    },
+    routing: { dac_channels: 22, routes: [{ lane: 0, dac: 0 }] }
+  },
   calibration: { active_job: null, last_job_id: 'job-20261126-0001', last_verdict: 'PASS' },
   not_wired: [
     { path: '/api/surfaces', reason: 'M3: surfaces aggregate not implemented in the mock' },
@@ -142,6 +163,7 @@ const MISSING = {
   input: { packets: null, underruns: null, jitter_fill: null, ssrc: null, queue_full_drops: null, recv_errors: null },
   output: { blocks: null, xruns: null, out_errors: null, bytes_written: null },
   device: { id: null, card: null, state: null, rate_readback: null },
+  readback: null,
   calibration: { active_job: null, last_job_id: null, last_verdict: null },
   not_wired: [
     { path: '/api/status', reason: 'this mock fixture reports every value as missing' },

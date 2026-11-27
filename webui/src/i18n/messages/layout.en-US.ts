@@ -34,11 +34,18 @@ const messages = {
     },
     current: {
       title: 'Current content layout',
-      desc: 'No data source for the current layout: the control protocol has no op to read content.folds and /api/status carries no layout content.',
-      unavailable: 'Unreadable (no data source)',
+      desc: 'The current content layout comes from /api/status.readback (control-plane base_plan); when readback is unavailable the page shows why and never passes defaults off as current.',
+      unavailable: 'Unreadable (readback unavailable)',
       reason:
-        'The control protocol has no op to read the current content.folds and /api/status carries no layout content; the page never guesses it or passes a default value off as current.',
-      note: 'The form below is a local draft: its defaults are only an editing starting point, not the current layout.'
+        '/api/status.readback has no usable base_plan (rt-host loaded/committed no plan, or the link is degraded); the page never guesses it or passes a default value off as current.',
+      note: 'The numbers above come from readback; the form below is a local draft whose defaults are only an editing starting point, not the current layout.',
+      field: {
+        inChannels: 'Input channels',
+        outLanes: 'Output lanes',
+        folds: 'Fold count',
+        source: 'Data source'
+      },
+      sourceValue: 'base_plan readback ({source})'
     },
     form: {
       title: 'Fold table (local draft)',

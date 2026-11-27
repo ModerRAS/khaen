@@ -1019,9 +1019,11 @@ const messages: Messages = {
     },
     gains: {
       title: 'Per-lane gain draft',
-      desc: 'POST /api/surface （surface: "volume", data: gains_db） → POST /api/commit, two-phase. There is no readback of current gains, so the draft starts from a neutral 0 dB and you select the lanes to submit.',
+      desc: 'POST /api/surface （surface: "volume", data: gains_db） → POST /api/commit, two-phase. Current protection gains come from /api/status.readback (base_plan); the draft still starts from a neutral 0 dB and you select the lanes to submit.',
+      readbackAvailable: 'Current per-lane protection gains: read from base_plan (source={source})',
       readbackMissing:
         'Current per-lane protection gains: not wired (the control protocol has no per-lane gain read op; no invented 0 dB)',
+      current: 'Current value',
       noLanes: 'Cannot build per-lane sliders: /api/status did not report format.channels (reason: {reason}).',
       noLanesReasonUnknown: 'the daemon gave no reason',
       toolbar: {
@@ -1030,7 +1032,7 @@ const messages: Messages = {
         includeAll: 'Select all',
         clear: 'Reset to 0 dB'
       },
-      count: '{count} lanes (from format.channels)',
+      count: '{count} lanes (readback.protection.lanes when available, otherwise format.channels)',
       include: 'Include in this commit',
       lane: 'lane {lane} gain',
       patchSummary: '{count} lane gains will be submitted (unselected lanes keep their current values)',

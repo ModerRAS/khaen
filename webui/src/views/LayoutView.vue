@@ -94,6 +94,36 @@ onMounted(() => {
 })
 
 const localeId = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
+
+/** 当前内容布局：/api/status.readback（base_plan）；拿不到 = null + 原因，不拿默认值冒充。 */
+const currentReadback = computed(() => statusState.data?.readback ?? null)
+const currentLayout = computed(() => {
+  const snapshot = currentReadback.value
+  if (snapshot?.available !== true || snapshot.content === null) {
+    return null
+  }
+  return snapshot.content
+})
+const currentLayoutRows = computed<KvRow[]>(() => {
+  const content = currentLayout.value
+  if (content === null) {
+    return []
+  }
+  return [
+    {
+      label: t('layout.current.field.inChannels'),
+      value: content.in_channels === null ? null : formatInteger(content.in_channels, localeId.value)
+    },
+    {
+      label: t('layout.current.field.outLanes'),
+      value: content.out_lanes === null ? null : formatInteger(content.out_lanes, localeId.value)
+    },
+    {
+      label: t('layout.current.field.folds'),
+      value: formatInteger(content.folds.length, localeId.value)
+    }
+  ]
+})
 const statusData = computed(() => statusState.data)
 const surface = computed(() => metaSurfaceState('layout'))
 const capabilityReason = computed(() => metaCapabilityReason({ surface: 'layout' }))
@@ -447,13 +477,32 @@ async function onRefreshMeta(): Promise<void> {
         class="layout-grid__span-7"
         title-key="layout.current.title"
         desc-key="layout.current.desc"
-        truth="notWired"
+        :truth="currentLayout === null ? 'notWired' : 'actual'"
       >
-        <div class="metric">
-          <span class="metric__value metric__value--muted">{{ t('layout.current.unavailable') }}</span>
-          <TruthTag kind="notWired" :reason="annotateGapById(t('layout.current.reason'), 'layoutFolds', gapLocaleOf(locale))" />
-        </div>
-        <p class="aux-text">{{ t('layout.current.note') }}</p>
+        <template v-if="currentLayout !== null">
+          <ul class="kv-list">
+            <StatRow
+              v-for="row in currentLayoutRows"
+              :key="row.label"
+              :label="row.label"
+              :value="row.value"
+              :reason="null"
+            />
+            <StatRow
+              :label="t('layout.current.field.source')"
+              :value="t('layout.current.sourceValue', { source: currentReadback?.source ?? t('common.dash') })"
+              :reason="null"
+            />
+          </ul>
+          <p class="aux-text">{{ t('layout.current.note') }}</p>
+        </template>
+        <template v-else>
+          <div class="metric">
+            <span class="metric__value metric__value--muted">{{ t('layout.current.unavailable') }}</span>
+            <TruthTag kind="notWired" :reason="annotateGapById(t('layout.current.reason'), 'layoutFolds', gapLocaleOf(locale))" />
+          </div>
+          <p class="aux-text">{{ t('layout.current.note') }}</p>
+        </template>
       </PanelCard>
 
       <PanelCard

@@ -1017,8 +1017,10 @@ const messages = {
     },
     gains: {
       title: '逐 lane 增益草稿',
-      desc: 'POST /api/surface （surface: "volume", data: gains_db） → POST /api/commit，两阶段。当前实际增益没有读接口：草稿从 0 dB 中性值开始，勾选要提交的 lane。',
+      desc: 'POST /api/surface （surface: "volume", data: gains_db） → POST /api/commit，两阶段。当前实际保护增益来自 /api/status.readback（base_plan）；草稿仍从 0 dB 中性值开始，勾选要提交的 lane。',
+      readbackAvailable: '当前实际逐 lane 保护增益：来自 base_plan 回读（source={source}）',
       readbackMissing: '当前实际逐 lane 保护增益：未接入（控制协议没有读取 per-lane gains 的 op；不编造 0 dB）',
+      current: '当前实际值',
       noLanes: '无法生成逐 lane 滑杆：/api/status 未上报 format.channels（原因：{reason}）。',
       noLanesReasonUnknown: 'daemon 未给出原因',
       toolbar: {
@@ -1027,7 +1029,7 @@ const messages = {
         includeAll: '全选',
         clear: '全部归零'
       },
-      count: '共 {count} 个 lane（来自 format.channels）',
+      count: '共 {count} 个 lane（优先 readback.protection.lanes，拿不到时退回 format.channels）',
       include: '参与本次提交',
       lane: 'lane {lane} 增益',
       patchSummary: '将提交 {count} 个 lane 的增益（未勾选的 lane 保持原值）',
