@@ -24,7 +24,8 @@ const messages = {
     yes: '是',
     no: '否',
     none: '无',
-    retry: '重试'
+    retry: '重试',
+    gapTask: '（任务 {task}）'
   },
   nav: {
     overview: '概览',
@@ -506,7 +507,7 @@ const messages = {
         savedApplied: '已保存 applied',
         realtime: '实时测量（麦克风采集 / 自动扫频）',
         realtimeReason: 'daemon 没有采集服务，实时测量在本版本不可用（需要 T42 延伸的实时测量后端，P2）。',
-        realtimeTask: 'T42 / P2',
+        realtimeTask: 'C',
         parseError: '文件不是可用的 WAV：{message}',
         formatError: '格式不符合校准要求：{message}',
         pairError: '两段录音结构不一致：{message}',
@@ -1011,7 +1012,7 @@ const messages = {
         readback: '当前主音量回读'
       },
       sourceValue: 'daemon 控制面（T70f-b 转发 rt-host）',
-      taskValue: 'T70f-a / T70f-b / T53',
+      taskValue: 'R',
       replacedBy: '替代方案：用右侧「逐 lane 增益」逐个设置并提交；当前实际增益不可读（无读接口）。'
     },
     gains: {
@@ -1071,9 +1072,10 @@ const messages = {
     },
     current: {
       title: '当前格式（/api/status）',
-      desc: '方案速率、设备速率回读、块长/声道数、编码与 AES67 参数；缺失字段显示「未接入」+ 原因。',
-      sourceHint: '来源：daemon 聚合的 /api/status（khaen-status/v1）；设备速率回读才是设备侧事实。',
-      encodingReason: 'daemon 未上报编码（预留字段，无数据源）',
+      desc: '方案速率、设备速率回读、块长与声道数来自 /api/status。AES67 组地址、端口、载荷类型和映射来自 /api/channels.current。编码没有数据源。',
+      sourceHint: '速率与块长来自 /api/status；AES67 来自 /api/channels.current（不读 status 里恒为空的 format.aes67）。',
+      aes67Loading: '正在读取 /api/channels，AES67 当前值尚未到达。',
+      encodingReason: 'daemon 未上报编码（预留字段，无数据源，留到读回阶段补源）',
       rateNotAsserted: '设备速率尚未确认（rate_asserted=false）',
       retryReadback: '重试回读',
       retryOk: '已请求设备监督器重试并回读',

@@ -144,6 +144,13 @@ export interface MotuDetection {
   reason_detail: string | null
 }
 
+/** daemon 按需缓存元数据（加法字段；旧响应没有它时为 null）。 */
+export interface MotuCacheMeta {
+  age_ms: number | null
+  stale: boolean | null
+  last_error: string | null
+}
+
 /** GET /api/motu 归一化快照。 */
 export interface MotuStatus extends MotuDetection {
   schema: string | null
@@ -157,6 +164,8 @@ export interface MotuStatus extends MotuDetection {
   not_wired: MotuNotWiredEntry[]
   /** 路径 -> 原因（e.g. "mute"/"vol"/"state"）；字段为 null 时据此显示“未上报 + 原因”。 */
   reasons: Record<string, string>
+  /** 快照缓存。瞬时读失败时字段仍是上一份成功值，stale/last_error 说明这一点。 */
+  cache: MotuCacheMeta | null
 }
 
 /** 写计划（prepare/commit 回执里的 write_plan；逐通道单键写 + 回读）。 */
@@ -537,6 +546,25 @@ function parseTargetDevice(value: unknown): MotuDetection | null {
   return parseDetection(record)
 }
 
+function parseCache(value: unknown): MotuCacheMeta | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  const record = asRecord(value)
+  if (record === null) {
+    throw invalidResponse('cache must be an object or null')
+  }
+  const lastError = record.last_error
+  if (lastError !== null && lastError !== undefined && typeof lastError !== 'string') {
+    throw invalidResponse('cache.last_error must be a string or null')
+  }
+  return {
+    age_ms: readNumber(record, 'age_ms'),
+    stale: readBoolean(record, 'stale'),
+    last_error: typeof lastError === 'string' ? lastError : null
+  }
+}
+
 /** 校验并归一化 GET /api/motu（只读快照；null 字段保留为 null）。 */
 export function parseMotuStatus(body: unknown): MotuStatus {
   const record = asRecord(body)
@@ -560,7 +588,8 @@ export function parseMotuStatus(body: unknown): MotuStatus {
     read_error: readError,
     write,
     not_wired: parseNotWired(record.not_wired),
-    reasons: parseReasons(record.reasons)
+    reasons: parseReasons(record.reasons),
+    cache: parseCache(record.cache)
   }
 }
 

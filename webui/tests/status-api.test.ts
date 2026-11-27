@@ -57,6 +57,26 @@ test('parseStatusResponse keeps all present fixture values', () => {
   assert.equal(status.calibration.last_verdict, 'PASS')
   assert.equal(status.not_wired.length, 2)
   assert.deepEqual(status.reasons, {})
+  assert.equal(status.mode, null)
+})
+
+test('parseStatusResponse reads top-level mode and does not borrow host_link.mode', async () => {
+  const present = presentBody()
+  present.mode = 'aes67'
+  present.host_link.mode = 'socket'
+  assert.equal(parseStatusResponse(present).mode, 'aes67')
+
+  const missing = presentBody()
+  missing.mode = null
+  missing.reasons = { mode: 'rt-host did not report mode' }
+  missing.host_link.mode = 'file'
+  const status = parseStatusResponse(missing)
+  assert.equal(status.mode, null)
+  assert.equal(reasonForPath(status, 'mode'), 'rt-host did not report mode')
+
+  const wrong = presentBody()
+  wrong.mode = 1
+  assert.equal((await captureError(async () => parseStatusResponse(wrong))).code, 'invalid_response')
 })
 
 test('parseStatusResponse rejects a wrong or missing schema', async () => {

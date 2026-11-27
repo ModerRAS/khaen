@@ -12,7 +12,7 @@
 const messages = {
   routingEdit: {
     subtitle:
-      '输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断 + lane → DAC 可编辑两阶段：当前值来自 /api/channels 的 mapping（daemon 在 prepare/upload 时记录的方案 routing 镜像，不是数据面实时回读）；编辑经 POST /api/surface（surface:"routing"）→ POST /api/commit / POST /api/abort。mapping=null 时显示「当前值未知」+ 原因，不用旧值/默认值冒充；changed/diff 等可选回执缺失时如实显示「服务端未上报」。',
+      '输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断 + lane → DAC 可编辑两阶段：当前值来自 /api/channels 的 mapping（daemon 在 prepare/upload 时记录的方案 routing 镜像，不是数据面实时回读）；编辑经 POST /api/surface（surface:"routing"）→ POST /api/commit / POST /api/abort。mapping=null 时显示「当前值未知」+ 原因，不用旧值/默认值冒充；changed/diff 等可选回执缺失时如实显示「服务端未上报」。22 路是当前输出假设，不是输入上限（任务 R/IO）。',
     meta: {
       label: '能力（/api/meta surface=routing）',
       wired: '已接入：可以 prepare → commit',
@@ -22,7 +22,7 @@ const messages = {
     },
     current: {
       title: '当前值来源（只读诊断）',
-      desc: '/api/channels.mapping 是 daemon 在 prepare/upload 时记录的方案 routing 镜像（lane → 0-based DAC），不是数据面实时回读；mapping=null 时当前值未知，本页用空表 + 原因如实标注，不用旧值/默认值冒充。',
+      desc: '/api/channels.mapping 是 daemon 在 prepare/upload 时记录的方案 routing 镜像（lane → 0-based DAC），不是数据面实时回读；mapping=null 时当前值未知，本页用空表 + 原因如实标注，不用旧值/默认值冒充。实时回读尚未接通（任务 R/IO）。',
       source: '数据来源',
       sourceValue: '/api/channels.mapping（方案 routing 镜像）',
       sourceUnknown: '无来源（mapping 未上报）',

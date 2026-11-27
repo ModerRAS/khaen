@@ -83,7 +83,7 @@ const detectionRows = computed<Row[]>(() => {
   }
   const reasonKey =
     status.reason === null ? null : t('motu.device.reason') + ': ' + status.reason
-  return [
+  const rows: Row[] = [
     { label: t('motu.device.detected'), value: detectedText.value, reason: null },
     { label: t('motu.device.model'), value: textOrNull(status.model), reason: null },
     { label: t('motu.device.cardId'), value: textOrNull(status.card_id), reason: null },
@@ -93,6 +93,16 @@ const detectionRows = computed<Row[]>(() => {
     { label: t('motu.device.reasonDetail'), value: textOrNull(status.reason_detail), reason: null },
     { label: t('motu.device.channelCount'), value: integer(status.channel_count), reason: null }
   ]
+  const cache = status.cache
+  if (cache !== null) {
+    const age = cache.age_ms === null ? null : formatInteger(cache.age_ms, localeId.value)
+    rows.push({
+      label: t('motu.device.cacheAge'),
+      value: age === null ? null : t('motu.device.cacheAgeValue', { age }),
+      reason: cache.stale === true ? cache.last_error ?? t('motu.device.cacheStale') : null
+    })
+  }
+  return rows
 })
 
 const channelListText = computed(() => {

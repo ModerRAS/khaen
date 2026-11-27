@@ -50,7 +50,7 @@
 | GET | `/api/coeff` | 当前已生效方案 `{ok, version, graph_id, ...}` |
 | GET | `/api/plan/history` | `{ok, schema:"khaen-plan-history/v1", current:{...}, entries:[{version,graph_id,sha256,committed_at?},...], versions（= entries 别名）}`；v0.1.11 真 daemon 另带 `source`（daemon-process/rt-host/file/none）、`pagination`、`reasons`（缺失字段原因） |
 | POST | `/api/plan/inspect` | 请求 `{plan_path, plan_sha256?}`；响应 `{ok, decoded, admission, graph_id, budget}`（只读试运行） |
-| GET | `/api/motu` | `{schema:"khaen-motu/v1", detected, model, card_id, card_index, control_reachable, reason, reason_detail, channel_count, channels:[{channel,name,datastore}], mute, vol:[{channel,linear,db}], state:{...}, read_error, write:{status,single_key,readback,two_phase,batch,max_channels_per_request,reason}, not_wired:[], reasons:{}}`（只读；`ok` 可缺省） |
+| GET | `/api/motu` | `{schema:"khaen-motu/v1", detected, model, card_id, card_index, control_reachable, reason, reason_detail, channel_count, channels:[{channel,name,datastore}], mute, vol:[{channel,linear,db}], state:{...}, read_error, write:{status,single_key,readback,two_phase,batch,max_channels_per_request,reason}, not_wired:[], reasons:{}, cache:{age_ms,stale,last_error}}`（只读；`ok` 可缺省） | **`cache` 为【加法】字段**：有近期请求时 daemon 后台约 2 秒刷新一次，约 30 秒无请求后停止；瞬时读失败保留上一份成功快照并置 `stale=true`/`last_error`，不把已知字段清成 null。
 | GET | `/api/calibration/wizard` | `{ok, schema, config, defaults, saved, updated_at, reasons}`（PUT 同形 + `set_fields`；详见 §7） |
 | GET | `/api/calibration/wizard/state` | `{ok, schema, current_step, steps:[{step,key,status,reason,task}], active_job_id, last_job_id, measurement, snapshot, updated_at, reasons}`（8 步 gate 由 daemon 判定；详见 §7） |
 | GET | `/api/system/info` | `{ok, version, uptime_s, host, os, ...}` |

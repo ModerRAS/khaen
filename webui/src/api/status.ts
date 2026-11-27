@@ -125,6 +125,11 @@ export interface StatusResponse {
   daemon: StatusDaemon
   host_link: StatusHostLink
   state: StatusRunState
+  /**
+   * 运行模式（rt-host 控制 status 的顶层 mode，如 off / aes67）。
+   * null = 未上报；原因在 reasons.mode。不得用 host_link.mode 或提交回执顶替。
+   */
+  mode: string | null
   plan: StatusPlan
   format: StatusFormat
   input: StatusInput
@@ -373,6 +378,7 @@ export function parseStatusResponse(body: unknown): StatusResponse {
     daemon: parseDaemon(root.daemon),
     host_link: parseHostLink(root.host_link),
     state: parseState(root.state),
+    mode: readString(root, 'mode', 'body'),
     plan: parsePlan(root.plan),
     format: parseFormat(root.format),
     input: parseInput(root.input),

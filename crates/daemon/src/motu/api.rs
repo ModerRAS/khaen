@@ -51,13 +51,67 @@ pub fn routes() -> Router<Arc<DaemonState>> {
 // ---------------------------------------------------------------------------
 
 /// GET /api/motu：检测对象 + mute/vol 现状（恒 200，拿不到的字段 null + reasons）。
+///
+/// 有近期请求时后台大约每 2 秒刷新一次；连续 GET 返回最后一次成功快照，不每次打设备。
+/// 读失败保留上一份成功字段，并在 `cache` 里标 stale / last_error。
 pub(crate) async fn get_motu(State(state): State<Arc<DaemonState>>) -> Response {
-    let control = Arc::clone(state.motu().control());
-    let body = match tokio::task::spawn_blocking(move || compose_motu(&control)).await {
-        Ok(body) => body,
-        Err(join_error) => degraded_status_json(&format!("MOTU status task failed: {join_error}")),
-    };
+    let now = Instant::now();
+    state.motu().touch_request(now);
+    ensure_motu_poller(&state);
+    if state.motu().needs_device_read(Instant::now()) {
+        let generation = state.motu().current_generation();
+        let control = Arc::clone(state.motu().control());
+        match tokio::task::spawn_blocking(move || compose_motu(&control)).await {
+            Ok(body) => state
+                .motu()
+                .absorb_composed(generation, body, Instant::now(), None),
+            Err(join_error) => {
+                let message = format!("MOTU status task failed: {join_error}");
+                let body = degraded_status_json(&message);
+                state
+                    .motu()
+                    .absorb_composed(generation, body, Instant::now(), Some(message));
+            }
+        }
+    }
+    let body = state
+        .motu()
+        .cached_response(Instant::now())
+        .unwrap_or_else(|| {
+            degraded_status_json("MOTU status cache is empty after the device read")
+        });
     (StatusCode::OK, Json(body)).into_response()
+}
+
+/// 有 GET 时拉起唯一的后台刷新线程。线程先睡眠再读，空闲超过 30 秒后退出且不再读设备。
+///
+/// 不用 `tokio::time`（daemon 的 tokio 没开 time feature）：睡眠放在独立线程里，不占 async worker。
+fn ensure_motu_poller(state: &Arc<DaemonState>) {
+    if !state.motu().try_start_poller() {
+        return;
+    }
+    let poller_state = Arc::clone(state);
+    let spawned = std::thread::Builder::new()
+        .name("khaen-motu-cache".to_string())
+        .spawn(move || loop {
+            std::thread::sleep(super::MOTU_REFRESH_INTERVAL);
+            let now = Instant::now();
+            if !poller_state.motu().should_background_refresh(now) {
+                if poller_state.motu().end_poller(now) {
+                    break;
+                }
+                continue;
+            }
+            let generation = poller_state.motu().current_generation();
+            let control = Arc::clone(poller_state.motu().control());
+            let body = compose_motu(&control);
+            poller_state
+                .motu()
+                .absorb_composed(generation, body, Instant::now(), None);
+        });
+    if spawned.is_err() {
+        state.motu().clear_poller_flag();
+    }
 }
 
 /// 合成 GET /api/motu 响应（同步；调用方在 blocking 线程池里）。
@@ -400,6 +454,9 @@ fn commit(state: &DaemonState, object: &Map<String, Value>) -> Result<Value, Mot
         match control.write_volume(index, draft.linear) {
             Ok(receipt) => receipts.push((*channel, receipt)),
             Err(error) => {
+                if !receipts.is_empty() {
+                    state.motu().invalidate_snapshot();
+                }
                 let extra = json!({
                     "channel": channel,
                     "requested_channels": draft.channels,
@@ -412,6 +469,7 @@ fn commit(state: &DaemonState, object: &Map<String, Value>) -> Result<Value, Mot
             }
         }
     }
+    state.motu().invalidate_snapshot();
     let idempotent = receipts.iter().all(|(_, receipt)| !receipt.frame_sent);
     Ok(json!({
         "ok": true,
@@ -803,13 +861,16 @@ pub(crate) async fn with_mute_side_effect(
             StatusCode::OK,
             Json(attach_motu(control_body, mute_motu_json(&detection, None))),
         ),
-        Ok(MuteEffect::Written(detection, receipt)) => (
-            StatusCode::OK,
-            Json(attach_motu(
-                control_body,
-                mute_motu_json(&detection, Some(&receipt)),
-            )),
-        ),
+        Ok(MuteEffect::Written(detection, receipt)) => {
+            state.motu().invalidate_snapshot();
+            (
+                StatusCode::OK,
+                Json(attach_motu(
+                    control_body,
+                    mute_motu_json(&detection, Some(&receipt)),
+                )),
+            )
+        }
         Ok(MuteEffect::Failed(detection, error)) => {
             let status = device_status(error.code);
             (
@@ -873,6 +934,7 @@ fn mute_motu_json(detection: &DeviceDetection, receipt: Option<&WriteReceipt<boo
 
 #[cfg(test)]
 mod tests {
+    use super::super::MotuHub;
     use super::*;
 
     fn object(value: Value) -> Map<String, Value> {
@@ -1229,6 +1291,38 @@ mod tests {
             .as_str()
             .expect("reason")
             .contains("readback timed out"));
+    }
+
+    #[test]
+    fn cached_status_reads_the_device_once_until_invalidated() {
+        let reading = MotuReading {
+            mute: Some(true),
+            main_faders: vec![Some(1.0), Some(0.5)],
+            ..MotuReading::default()
+        };
+        let control = ComposedControl::new(ready_detection(), Ok(reading));
+        let hub = MotuHub::new(control.as_control());
+        let now = Instant::now();
+        hub.touch_request(now);
+        assert!(hub.needs_device_read(now));
+        let generation = hub.current_generation();
+        hub.absorb_composed(generation, compose_motu(&control.as_control()), now, None);
+        assert_eq!(control.reads.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert!(!hub.needs_device_read(now));
+        let body = hub.cached_response(now).expect("cached snapshot");
+        assert_eq!(body["mute"], json!(true));
+        assert_eq!(body["cache"]["stale"], json!(false));
+        assert!(body.get("cache").is_some());
+
+        hub.invalidate_snapshot();
+        assert!(hub.needs_device_read(now));
+        let generation = hub.current_generation();
+        hub.absorb_composed(generation, compose_motu(&control.as_control()), now, None);
+        assert_eq!(
+            control.reads.load(std::sync::atomic::Ordering::Relaxed),
+            2,
+            "invalidation must cause the next read to hit the device"
+        );
     }
 
     #[test]

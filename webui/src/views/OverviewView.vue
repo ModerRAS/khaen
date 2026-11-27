@@ -17,6 +17,7 @@ import PanelCard from '@/components/PanelCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import StatRow from '@/components/StatRow.vue'
 import TruthTag from '@/components/TruthTag.vue'
+import { annotateGapById, gapLocaleOf, type GapId } from '@/api/capabilityGaps'
 import { useStatusPolling } from '@/composables/useStatusPolling'
 import {
   formatChannelMap,
@@ -173,6 +174,15 @@ function deviceStateText(deviceState: string | null): string | null {
 
 function truthOf(...values: readonly unknown[]): TruthKind {
   return hasAnyValue(values) ? 'actual' : 'notWired'
+}
+
+/** 值为空时给后端原因加上缺口任务号；已有真值则不标成未完成。 */
+function gapReason(current: StatusResponse, path: string, value: unknown, id: GapId): string | null {
+  const reason = reasonForPath(current, path)
+  if (value !== null && value !== undefined) {
+    return reason
+  }
+  return annotateGapById(reason, id, gapLocaleOf(locale.value))
 }
 
 /** 校准的「没有记录」与「拿不到」要区分：没有原因 => 真的没有记录。 */
@@ -428,7 +438,7 @@ const cards = computed<OverviewCard[]>(() => {
           label: t('overview.card.plan.field.sha256'),
           value: shortenId(plan.sha256, 12, 8),
           copy: plan.sha256,
-          reason: reasonForPath(current, 'plan.sha256')
+          reason: gapReason(current, 'plan.sha256', plan.sha256, 'overviewPlan')
         },
         {
           label: t('overview.card.plan.field.version'),
@@ -438,17 +448,17 @@ const cards = computed<OverviewCard[]>(() => {
         {
           label: t('overview.card.plan.field.latencySamples'),
           value: intText(plan.latency_samples),
-          reason: reasonForPath(current, 'plan.latency_samples')
+          reason: gapReason(current, 'plan.latency_samples', plan.latency_samples, 'overviewPlan')
         },
         {
           label: t('overview.card.plan.field.appliedAt'),
           value: timeText(plan.applied_at),
-          reason: reasonForPath(current, 'plan.applied_at')
+          reason: gapReason(current, 'plan.applied_at', plan.applied_at, 'overviewPlan')
         },
         {
           label: t('overview.card.plan.field.source'),
           value: planSourceText(plan.source),
-          reason: reasonForPath(current, 'plan.source')
+          reason: gapReason(current, 'plan.source', plan.source, 'overviewPlan')
         }
       ]
     },
@@ -497,12 +507,12 @@ const cards = computed<OverviewCard[]>(() => {
         {
           label: t('overview.card.format.field.encoding'),
           value: format.encoding,
-          reason: reasonForPath(current, 'format.encoding')
+          reason: gapReason(current, 'format.encoding', format.encoding, 'encoding')
         },
         {
           label: t('overview.card.format.field.deviceId'),
           value: device.id,
-          reason: reasonForPath(current, 'device.id')
+          reason: gapReason(current, 'device.id', device.id, 'overviewDevice')
         },
         {
           label: t('overview.card.format.field.deviceState'),
@@ -514,12 +524,12 @@ const cards = computed<OverviewCard[]>(() => {
           label: t('overview.card.format.field.deviceCard'),
           value: device.card,
           copy: device.card,
-          reason: reasonForPath(current, 'device.card')
+          reason: gapReason(current, 'device.card', device.card, 'overviewDevice')
         },
         {
           label: t('overview.card.format.field.rateReadback'),
           value: rateText(device.rate_readback),
-          reason: reasonForPath(current, 'device.rate_readback')
+          reason: gapReason(current, 'device.rate_readback', device.rate_readback, 'overviewDevice')
         }
       ]
     },

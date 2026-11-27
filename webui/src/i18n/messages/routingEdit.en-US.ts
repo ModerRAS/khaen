@@ -11,7 +11,7 @@
 const messages = {
   routingEdit: {
     subtitle:
-      'Read-only diagnostics of input → 22-lane matrix → DAC outputs, plus editable two-phase lane → DAC routing: the current value comes from /api/channels mapping (the plan routing mirror daemon recorded at prepare/upload, not a live data-plane readback). Edits go through POST /api/surface (surface:"routing") → POST /api/commit / POST /api/abort. When mapping=null the page shows "current value unknown" with the reason — old/default values are never passed off as current; optional receipts (changed/diff/…) are shown honestly as "not reported by server" when absent.',
+      'Read-only diagnostics of input → 22-lane matrix → DAC outputs, plus editable two-phase lane → DAC routing: the current value comes from /api/channels mapping (the plan routing mirror daemon recorded at prepare/upload, not a live data-plane readback). Edits go through POST /api/surface (surface:"routing") → POST /api/commit / POST /api/abort. When mapping=null the page shows "current value unknown" with the reason — old/default values are never passed off as current; optional receipts (changed/diff/…) are shown honestly as "not reported by server" when absent. The fixed 22 lanes are the current output assumption, not an input ceiling (task R/IO).',
     meta: {
       label: 'Capability (/api/meta surface=routing)',
       wired: 'Wired: prepare → commit is available',
@@ -21,7 +21,7 @@ const messages = {
     },
     current: {
       title: 'Current value source (read-only diagnostics)',
-      desc: '/api/channels mapping is the plan routing mirror daemon recorded at prepare/upload (lane → 0-based DAC), not a live data-plane readback. When mapping=null the current value is unknown: this page shows an empty draft plus the reason and never passes off old/default values as current.',
+      desc: '/api/channels mapping is the plan routing mirror daemon recorded at prepare/upload (lane → 0-based DAC), not a live data-plane readback. When mapping=null the current value is unknown: this page shows an empty draft plus the reason and never passes off old/default values as current. Live readback is not wired yet (task R/IO).',
       source: 'Data source',
       sourceValue: '/api/channels mapping (plan routing mirror)',
       sourceUnknown: 'No source (mapping not reported)',

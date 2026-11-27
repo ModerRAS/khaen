@@ -27,6 +27,7 @@ import StatRow from '@/components/StatRow.vue'
 import TruthTag from '@/components/TruthTag.vue'
 import DraftReview from '@/components/control/DraftReview.vue'
 import ControlErrorNotice from '@/components/control/ControlErrorNotice.vue'
+import { annotateGapById, gapLocaleOf } from '@/api/capabilityGaps'
 import { useStatusPolling } from '@/composables/useStatusPolling'
 import { runStateKind } from '@/api/status'
 import type { ControlCommitAck, ControlErrorInfo } from '@/api/control'
@@ -450,7 +451,7 @@ async function onRefreshMeta(): Promise<void> {
       >
         <div class="metric">
           <span class="metric__value metric__value--muted">{{ t('layout.current.unavailable') }}</span>
-          <TruthTag kind="notWired" :reason="t('layout.current.reason')" />
+          <TruthTag kind="notWired" :reason="annotateGapById(t('layout.current.reason'), 'layoutFolds', gapLocaleOf(locale))" />
         </div>
         <p class="aux-text">{{ t('layout.current.note') }}</p>
       </PanelCard>

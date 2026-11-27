@@ -17,6 +17,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import { annotateGapById, gapLocaleOf } from '@/api/capabilityGaps'
 import PageHeader from '@/components/PageHeader.vue'
 import PanelCard from '@/components/PanelCard.vue'
 import type { TruthKind } from '@/types/ui'
@@ -61,7 +62,7 @@ import {
   stopSpeakerTest
 } from '@/stores/audioProfile.ts'
 
-const { t } = useI18n({ useScope: 'global' })
+const { t, locale } = useI18n({ useScope: 'global' })
 
 /* ------------------------------------------------------------------ 只读快照 / 本地草稿 */
 
@@ -91,6 +92,16 @@ const notWiredReason = computed<string | null>(() => {
 
 const profileTruth = computed<TruthKind>(() => (snapshot.value?.profile != null ? 'actual' : 'notWired'))
 const inputsTruth = computed<TruthKind>(() => (deviceInputs.value?.available === true ? 'actual' : 'notWired'))
+const deviceInputsText = computed(() => {
+  const raw = deviceInputs.value?.reason ?? t('speakerLayout.deviceInputs.unavailable')
+  if (deviceInputs.value?.available === true) {
+    return raw
+  }
+  return annotateGapById(raw, 'deviceInputs', gapLocaleOf(locale.value))
+})
+const speakerTestGap = computed(() =>
+  annotateGapById(t('speakerLayout.speakerTest.notWired'), 'speakerTest', gapLocaleOf(locale.value))
+)
 
 /** 本地编辑草稿：有快照 profile 用快照，否则退化为默认 2.0（页面明示）。 */
 const edit = ref<AudioProfile>(editingProfile(null))
@@ -598,7 +609,7 @@ onBeforeUnmount(() => {
 
     <PanelCard title-key="speakerLayout.deviceInputs.title" :truth="inputsTruth">
       <div v-if="deviceInputs === null || deviceInputs.available !== true" class="banner banner--warn" role="status">
-        {{ deviceInputs?.reason ?? t('speakerLayout.deviceInputs.unavailable') }}
+        {{ deviceInputsText }}
       </div>
       <dl v-else class="summary-grid">
         <div><dt>{{ t('speakerLayout.deviceInputs.opticalMode') }}</dt><dd>{{ deviceInputs.optical_mode ?? t('common.dash') }}</dd></div>
@@ -871,6 +882,7 @@ onBeforeUnmount(() => {
           {{ t('speakerLayout.speakerTest.stop') }}
         </el-button>
       </div>
+      <p class="aux-text">{{ speakerTestGap }}</p>
       <p class="aux-text">{{ t('speakerLayout.speakerTest.mockHint') }}</p>
     </PanelCard>
   </div>

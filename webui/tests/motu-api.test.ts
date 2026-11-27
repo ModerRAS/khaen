@@ -212,6 +212,24 @@ test('parseMotuStatus keeps the wired device snapshot verbatim (no invented valu
   assert.equal(status.write?.max_channels_per_request, 2)
   assert.deepEqual(status.not_wired, [])
   assert.deepEqual(status.reasons, {})
+  assert.equal(status.cache, null)
+})
+
+test('parseMotuStatus keeps cache age stale and last_error without clearing device fields', () => {
+  const status = parseMotuStatus({
+    ...STATUS_WIRED,
+    cache: { age_ms: 1500, stale: true, last_error: 'timed out' }
+  })
+  assert.equal(status.mute, false)
+  assert.equal(status.cache?.age_ms, 1500)
+  assert.equal(status.cache?.stale, true)
+  assert.equal(status.cache?.last_error, 'timed out')
+
+  assert.equal(
+    parseMotuStatus({ ...STATUS_WIRED, cache: { age_ms: 0, stale: false, last_error: null } }).cache?.last_error,
+    null
+  )
+  assert.throws(() => parseMotuStatus({ ...STATUS_WIRED, cache: 'fresh' }), /cache must be an object/)
 })
 
 test('parseMotuStatus degrades honestly: null fields + reasons + read_error + not_detected write', () => {

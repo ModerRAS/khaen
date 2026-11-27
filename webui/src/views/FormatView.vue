@@ -4,7 +4,9 @@
  *
  * 数据来源：
  * - GET /api/status（5s 轮询）：format.plan_rate / device_rate / rate_asserted / block_frames /
- *   channels / encoding / aes67.* 与 plan.version；
+ *   channels / encoding 与 plan.version；
+ * - GET /api/channels：current 里的 AES67 组地址、端口、载荷类型、声道数和映射
+ *   （不读 /api/status 里恒为 null 的 format.aes67）；
  * - POST /api/format {sample_rate?, chunksize?} → POST /api/commit {engine_token}：两阶段；
  * - POST /api/device/retry：rate_asserted=false 时请求设备监督器立即重试一次并回读；
  * - abort：POST /api/abort 丢弃草稿。
@@ -13,10 +15,11 @@
  * - 后端 format commit 的语义是"重建控制面引擎并丢弃正在跑的图"，响应显式带 device_restart_required：
  *   真实 ALSA 设备必须重开 PCM 流，只有重启 rt-host 后 /api/status 的 device_rate 才会变化；
  * - 页面把「控制面回执」与「设备回读（/api/status）」分成两栏显示，重启前不假装设备已按新速率运行；
- * - 编码（encoding）后端没有数据源：只显示「未接入」+ 原因，不做只读占位假值；
+ * - 编码（encoding）后端没有数据源：只显示「未接入」+ 原因 + 任务 R，不做只读占位假值；
+ * - AES67 只来自 /api/channels；channels 不可用时显示该错误，不回退到 status 的空 AES67；
  * - 支持的采样率/块长来自后端能力（48k/96k、64/128）；设备是否真的支持由后端/设备拒绝，前端不猜。
  */
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
@@ -28,6 +31,9 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import ControlErrorNotice from '@/components/control/ControlErrorNotice.vue'
 import { useStatusPolling } from '@/composables/useStatusPolling'
 import { isStatusStale, reasonForPath, runStateKind, runStateLabelKey } from '@/api/status'
+import { aes67FromChannels } from '@/api/formatAes67'
+import { annotateGapById, gapLocaleOf } from '@/api/capabilityGaps'
+import { channelsState, refreshChannels } from '@/stores/channels'
 import {
   SUPPORTED_BLOCK_SIZES,
   SUPPORTED_SAMPLE_RATES_HZ,
@@ -48,6 +54,18 @@ import type { StatusKind } from '@/types/ui'
 const { t, locale } = useI18n({ useScope: 'global' })
 const router = useRouter()
 const { state: statusState, refresh } = useStatusPolling()
+
+onMounted(() => {
+  void refreshChannels()
+})
+watch(
+  () => statusState.loadedAt,
+  (loadedAt) => {
+    if (loadedAt !== null) {
+      void refreshChannels()
+    }
+  }
+)
 
 const data = computed(() => statusState.data)
 const localeId = computed(() => (locale.value === 'en-US' ? 'en-US' : 'zh-CN'))
@@ -184,13 +202,34 @@ interface KvRow {
   tone?: 'ok' | 'warn' | 'bad' | null
 }
 
+const aes67View = computed(() => {
+  const info = channelsState.info
+  if (info !== null) {
+    return aes67FromChannels(info, null)
+  }
+  const error = channelsState.error
+  const reason =
+    error === null ? t('formatPage.current.aes67Loading') : error.detail ?? t(error.i18nKey)
+  return aes67FromChannels(null, reason)
+})
+
 const currentRows = computed<KvRow[]>(() => {
   const current = data.value
   if (current === null) {
     return []
   }
   const format = current.format
-  const aes67 = format.aes67
+  const aes67 = aes67View.value.fields
+  const aes67Reason = aes67View.value.reasons
+  const gapLocale = gapLocaleOf(locale.value)
+  const encodingReason =
+    format.encoding === null
+      ? annotateGapById(
+          reasonForPath(current, 'format.encoding') ?? t('formatPage.current.encodingReason'),
+          'encoding',
+          gapLocale
+        )
+      : null
   return [
     { label: t('formatPage.current.field.planRate'), value: rateText(format.plan_rate), reason: reasonForPath(current, 'format.plan_rate') },
     {
@@ -210,32 +249,32 @@ const currentRows = computed<KvRow[]>(() => {
     {
       label: t('formatPage.current.field.encoding'),
       value: format.encoding,
-      reason: format.encoding === null ? reasonForPath(current, 'format.encoding') ?? t('formatPage.current.encodingReason') : null
+      reason: encodingReason
     },
     {
       label: t('formatPage.current.field.aes67Channels'),
       value: intText(aes67.channels),
-      reason: reasonForPath(current, 'format.aes67.channels') ?? reasonForPath(current, 'aes67.channels')
+      reason: aes67Reason.channels
     },
     {
       label: t('formatPage.current.field.aes67Map'),
-      value: aes67.map === null || aes67.map.length === 0 ? null : aes67.map.join(','),
-      reason: reasonForPath(current, 'format.aes67.map') ?? reasonForPath(current, 'aes67.map')
+      value: aes67.map === null ? null : aes67.map.length === 0 ? t('common.none') : aes67.map.join(','),
+      reason: aes67Reason.map
     },
     {
       label: t('formatPage.current.field.aes67Group'),
       value: aes67.group,
-      reason: reasonForPath(current, 'format.aes67.group') ?? reasonForPath(current, 'aes67.group')
+      reason: aes67Reason.group
     },
     {
       label: t('formatPage.current.field.aes67Pt'),
       value: intText(aes67.pt),
-      reason: reasonForPath(current, 'format.aes67.pt') ?? reasonForPath(current, 'aes67.pt')
+      reason: aes67Reason.pt
     },
     {
       label: t('formatPage.current.field.aes67Port'),
       value: intText(aes67.port),
-      reason: reasonForPath(current, 'format.aes67.port') ?? reasonForPath(current, 'aes67.port')
+      reason: aes67Reason.port
     }
   ]
 })

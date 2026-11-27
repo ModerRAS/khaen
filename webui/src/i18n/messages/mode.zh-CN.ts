@@ -11,7 +11,7 @@ const messages = {
   mode: {
     pageTitle: '工作模式',
     subtitle:
-      '输入使能两阶段（off / aes67）：prepare 只生成草稿，commit 才在块边界生效；当前模式没有读回数据源，页面不猜当前值。',
+      '输入使能两阶段（off / aes67）：prepare 只生成草稿，commit 才在块边界生效。当前模式来自 GET /api/status 的 mode；为空时显示原因，不用提交回执顶替。',
     capability: {
       title: '界面能力',
       desc: '来自 GET /api/meta 的 surfaces / not_wired：未接通的能力显示原因，不渲染可点击的假操作（API.md §9.1）。',
@@ -34,11 +34,14 @@ const messages = {
     },
     current: {
       title: '当前模式',
-      desc: '当前模式没有数据源：/api/status 不含 mode，控制协议也没有读取 op。',
+      desc: '当前模式来自 GET /api/status 的顶层 mode。最近一次提交回执单独列出，不是设备回读。',
       unavailable: '不可读（无数据源）',
+      source: '来源：GET /api/status 的 mode（rt-host 控制状态）',
+      statusMissing: '运行状态尚未读到：当前模式未知，不用上次提交回执顶替。',
       reason:
-        '/api/status 不包含当前工作模式，控制协议也没有读取模式的 op；页面不猜当前值，也不拿默认值冒充。',
+        'GET /api/status 的 mode 为空，且没有 reasons.mode。页面不使用上次提交回执、默认值或 host_link.mode 顶替。',
       receiptLabel: '最近一次提交回执（不是设备回读）',
+      receiptNote: '这是本次会话的提交回执，不是设备回读。',
       noReceipt: '本次会话尚无模式提交回执。',
       mutedLabel: '静音（/api/status.state.muted）',
       mutedNote: '静音是独立状态：手动静音或 mode=off 都可能让它为 true，不能反推当前 mode。',

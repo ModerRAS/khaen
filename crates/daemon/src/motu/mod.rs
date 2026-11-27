@@ -33,7 +33,7 @@ pub mod api;
 pub mod native;
 
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -55,6 +55,12 @@ pub const CHANNEL_COUNT: u16 = MAIN_FADER_CHANNELS;
 pub const PENDING_TTL_SECS: u64 = 120;
 /// 音量草稿有效期（[Duration] 形式）。
 pub const PENDING_TTL: Duration = Duration::from_secs(PENDING_TTL_SECS);
+/// `GET /api/motu` 驱动的后台刷新间隔：有近期请求时大约每 2 秒读一次设备。
+pub const MOTU_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+/// 超过该时间没有 `GET /api/motu` 就停止后台刷新，且停止时不再读设备。
+pub const MOTU_IDLE_STOP: Duration = Duration::from_secs(30);
+/// 成功快照老于该时间则 `cache.stale=true`（两个刷新间隔，给一次读留余量）。
+const MOTU_STALE_AFTER: Duration = Duration::from_secs(4);
 /// 音量端点请求体上限（JSON 控制面）。
 pub const MAX_JSON_BODY: usize = 16 * 1024;
 /// MOTU 控制被环境变量显式关闭时的检测原因（`KHAEN_MOTU_DISABLE=1`）。
@@ -288,11 +294,36 @@ impl MotuTokenError {
     }
 }
 
-/// MOTU 控制面共享状态：设备抽象 + 两阶段音量草稿（单草稿槽）。
+/// 最后一次成功的 `GET /api/motu` 正文（不含 `cache` 字段）。
+#[derive(Clone, Debug)]
+struct CachedMotuSnapshot {
+    body: serde_json::Value,
+    /// 这份成功快照的采集时刻（失败重试不改它，年龄反映上次成功）。
+    at: Instant,
+}
+
+/// `GET /api/motu` 的按需缓存。不进入实时音频路径。
+#[derive(Debug)]
+struct MotuReadCache {
+    /// 写成功时递增。在途读若代际不符，结果丢弃，避免旧读覆盖新写入。
+    generation: u64,
+    /// true = 下一次读必须打设备（快照可能仍留着，供失败时回退）。
+    invalidated: bool,
+    last_request: Option<Instant>,
+    /// 最近一次尝试读设备的时刻（成功或失败都更新，避免失败期间每个 GET 都打设备）。
+    last_attempt: Option<Instant>,
+    snapshot: Option<CachedMotuSnapshot>,
+    last_error: Option<String>,
+}
+
+/// MOTU 控制面共享状态：设备抽象 + 两阶段音量草稿（单草稿槽）+ 读快照缓存。
 #[derive(Debug)]
 pub struct MotuHub {
     control: Arc<dyn MotuControl>,
     pending: Mutex<Option<PendingVolumeDraft>>,
+    cache: Mutex<MotuReadCache>,
+    /// 后台刷新线程是否在跑。空闲退出后清掉，下一次 GET 再拉起。
+    poller_running: AtomicBool,
 }
 
 impl MotuHub {
@@ -301,6 +332,15 @@ impl MotuHub {
         Self {
             control,
             pending: Mutex::new(None),
+            cache: Mutex::new(MotuReadCache {
+                generation: 0,
+                invalidated: false,
+                last_request: None,
+                last_attempt: None,
+                snapshot: None,
+                last_error: None,
+            }),
+            poller_running: AtomicBool::new(false),
         }
     }
 
@@ -312,6 +352,138 @@ impl MotuHub {
     /// 检测设备（透传；调用方负责放到 blocking 线程池）。
     pub fn detection(&self) -> DeviceDetection {
         self.control.detection()
+    }
+
+    /// 记录一次 `GET /api/motu`，用来维持后台刷新的空闲窗口。
+    pub fn touch_request(&self, now: Instant) {
+        self.lock_cache().last_request = Some(now);
+    }
+
+    /// 当前读代际。现场读开始前记下它，写成功会把它递增。
+    pub fn current_generation(&self) -> u64 {
+        self.lock_cache().generation
+    }
+
+    /// 这次 GET 是否必须打设备。
+    ///
+    /// 后台线程在跑、且快照未失效时，GET 只返回缓存。没有快照、写后失效、
+    /// 或后台线程已停且距上次尝试超过一个刷新间隔时，才现场读。
+    pub fn needs_device_read(&self, now: Instant) -> bool {
+        let cache = self.lock_cache();
+        if cache.invalidated || cache.snapshot.is_none() {
+            return true;
+        }
+        if self.poller_running.load(Ordering::Acquire) {
+            return false;
+        }
+        let attempt = cache
+            .last_attempt
+            .or_else(|| cache.snapshot.as_ref().map(|snapshot| snapshot.at));
+        match attempt {
+            Some(attempt) => now.saturating_duration_since(attempt) > MOTU_REFRESH_INTERVAL,
+            None => true,
+        }
+    }
+
+    /// 最近一次 GET 是否仍落在空闲窗口内（窗口内才允许后台刷新）。
+    pub fn should_background_refresh(&self, now: Instant) -> bool {
+        match self.lock_cache().last_request {
+            Some(last) => now.saturating_duration_since(last) <= MOTU_IDLE_STOP,
+            None => false,
+        }
+    }
+
+    /// 尝试成为唯一的后台刷新线程。已有线程在跑时返回 false。
+    pub fn try_start_poller(&self) -> bool {
+        self.poller_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    /// 线程创建失败时清掉「正在跑」标志，让下一次 GET 可以再试。
+    pub fn clear_poller_flag(&self) {
+        self.poller_running.store(false, Ordering::Release);
+    }
+
+    /// 空闲窗口已过时结束本线程。返回 true 表示调用方应退出。
+    ///
+    /// 两次判断用同一个 `now`。清标志前若又有 GET，它的时刻不早于这次判断，
+    /// `saturating_duration_since` 为 0，第二次判断会重新认领，避免和 GET 的拉起互相漏掉。
+    pub fn end_poller(&self, now: Instant) -> bool {
+        if self.should_background_refresh(now) {
+            return false;
+        }
+        self.poller_running.store(false, Ordering::Release);
+        if self.should_background_refresh(now) && self.try_start_poller() {
+            return false;
+        }
+        true
+    }
+
+    /// 音量或静音写入并回读成功后调用：下一读必须反映设备新值。
+    pub fn invalidate_snapshot(&self) {
+        let mut cache = self.lock_cache();
+        cache.generation = cache.generation.wrapping_add(1);
+        cache.invalidated = true;
+    }
+
+    /// 收纳一次 `compose_motu` 的结果。
+    ///
+    /// `generation` 与当前代际不符时整段丢弃（写发生在这次读的中途）。
+    /// 读失败且已有成功快照时保留字段，只记下 `last_error`。
+    pub fn absorb_composed(
+        &self,
+        generation: u64,
+        mut body: serde_json::Value,
+        now: Instant,
+        hard_fail: Option<String>,
+    ) {
+        let mut cache = self.lock_cache();
+        if cache.generation != generation {
+            return;
+        }
+        cache.last_attempt = Some(now);
+        let failure = hard_fail.or_else(|| read_failure_message(&body));
+        if let Some(message) = failure {
+            if cache.snapshot.is_some() {
+                cache.last_error = Some(message);
+                cache.invalidated = false;
+                return;
+            }
+            cache.last_error = Some(message);
+        } else {
+            cache.last_error = None;
+        }
+        if let Some(object) = body.as_object_mut() {
+            object.remove("cache");
+        }
+        cache.snapshot = Some(CachedMotuSnapshot { body, at: now });
+        cache.invalidated = false;
+    }
+
+    /// 带 `cache` 字段的响应。还没有任何快照时返回 None。
+    pub fn cached_response(&self, now: Instant) -> Option<serde_json::Value> {
+        let cache = self.lock_cache();
+        let snapshot = cache.snapshot.as_ref()?;
+        let age = now.saturating_duration_since(snapshot.at);
+        let age_ms = u64::try_from(age.as_millis()).unwrap_or(u64::MAX);
+        let stale = cache.last_error.is_some() || age > MOTU_STALE_AFTER;
+        let last_error = match &cache.last_error {
+            Some(message) => serde_json::Value::String(message.clone()),
+            None => serde_json::Value::Null,
+        };
+        let mut body = snapshot.body.clone();
+        if let Some(object) = body.as_object_mut() {
+            object.insert(
+                "cache".to_string(),
+                serde_json::json!({
+                    "age_ms": age_ms,
+                    "stale": stale,
+                    "last_error": last_error,
+                }),
+            );
+        }
+        Some(body)
     }
 
     /// 保存音量草稿：同一目标（通道 + 量化值）且未过期时幂等返回同一 token；
@@ -372,6 +544,25 @@ impl MotuHub {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    fn lock_cache(&self) -> std::sync::MutexGuard<'_, MotuReadCache> {
+        self.cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+/// `compose_motu` 在设备读失败时把 `read_error` 设成对象；检测不到设备时它保持 null。
+fn read_failure_message(body: &serde_json::Value) -> Option<String> {
+    let error = body.get("read_error")?;
+    if error.is_null() {
+        return None;
+    }
+    error
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| Some("MOTU device read failed".to_string()))
 }
 
 /// 草稿 token：sha256(目标 + 创建时刻 + 进程内计数器) 前 16 位（每次新草稿都不同）。
@@ -548,5 +739,106 @@ mod tests {
         };
         assert!(!mismatched.verified());
         assert_eq!(mismatched.to_json()["verified"], serde_json::json!(false));
+    }
+
+    fn success_body() -> serde_json::Value {
+        serde_json::json!({
+            "schema": SCHEMA_STATUS,
+            "mute": true,
+            "vol": [{"channel": 1, "linear": 1.0}],
+            "read_error": null
+        })
+    }
+
+    #[test]
+    fn cache_serves_the_last_success_without_another_read_until_it_is_invalidated() {
+        let hub = hub();
+        let now = Instant::now();
+        assert!(hub.needs_device_read(now));
+        let generation = hub.current_generation();
+        hub.absorb_composed(generation, success_body(), now, None);
+        hub.touch_request(now);
+        assert!(!hub.needs_device_read(now));
+        let served = hub.cached_response(now).expect("snapshot");
+        assert_eq!(served["mute"], serde_json::json!(true));
+        assert_eq!(served["cache"]["stale"], serde_json::json!(false));
+        assert_eq!(served["cache"]["age_ms"], serde_json::json!(0));
+        assert_eq!(served["cache"]["last_error"], serde_json::Value::Null);
+
+        let failed = serde_json::json!({
+            "schema": SCHEMA_STATUS,
+            "mute": null,
+            "vol": null,
+            "read_error": {"code": "E_TIMEOUT", "message": "timed out", "retryable": true}
+        });
+        hub.absorb_composed(
+            hub.current_generation(),
+            failed,
+            now + Duration::from_millis(10),
+            None,
+        );
+        let kept = hub
+            .cached_response(now + Duration::from_millis(10))
+            .expect("kept snapshot");
+        assert_eq!(
+            kept["mute"],
+            serde_json::json!(true),
+            "a failed read must not null a known field"
+        );
+        assert_eq!(kept["cache"]["stale"], serde_json::json!(true));
+        assert!(kept["cache"]["last_error"]
+            .as_str()
+            .expect("last_error")
+            .contains("timed out"));
+        assert!(
+            !hub.needs_device_read(now + Duration::from_millis(10)),
+            "a recent failed attempt must not make every GET hit the device"
+        );
+
+        let stale_generation = hub.current_generation();
+        hub.invalidate_snapshot();
+        assert!(hub.needs_device_read(now + Duration::from_millis(20)));
+        hub.absorb_composed(
+            stale_generation,
+            success_body(),
+            now + Duration::from_millis(20),
+            None,
+        );
+        assert!(
+            hub.needs_device_read(now + Duration::from_millis(20)),
+            "a read started before the write must not clear the invalidation"
+        );
+        let fresh_generation = hub.current_generation();
+        let mut written = success_body();
+        written["mute"] = serde_json::json!(false);
+        hub.absorb_composed(
+            fresh_generation,
+            written,
+            now + Duration::from_millis(30),
+            None,
+        );
+        assert!(!hub.needs_device_read(now + Duration::from_millis(30)));
+        assert_eq!(
+            hub.cached_response(now + Duration::from_millis(30))
+                .expect("fresh")["mute"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn background_refresh_stops_after_the_idle_window_and_the_poller_flag_is_single_owner() {
+        let hub = hub();
+        let now = Instant::now();
+        assert!(!hub.should_background_refresh(now));
+        hub.touch_request(now);
+        assert!(hub.should_background_refresh(now + MOTU_IDLE_STOP));
+        assert!(!hub.should_background_refresh(now + MOTU_IDLE_STOP + Duration::from_millis(1)));
+
+        assert!(hub.try_start_poller());
+        assert!(!hub.try_start_poller());
+        assert!(!hub.end_poller(now), "a recent request keeps the poller");
+        assert!(!hub.try_start_poller());
+        assert!(hub.end_poller(now + MOTU_IDLE_STOP + Duration::from_secs(1)));
+        assert!(hub.try_start_poller());
     }
 }

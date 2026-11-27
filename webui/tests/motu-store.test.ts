@@ -46,6 +46,7 @@ function statusFixture(overrides: Partial<MotuStatus> = {}): MotuStatus {
     },
     not_wired: [],
     reasons: {},
+    cache: null,
     ...overrides
   }
 }

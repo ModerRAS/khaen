@@ -39,6 +39,7 @@ import MotuVolumeControl from '@/components/motu/MotuVolumeControl.vue'
 import { useMotuPolling } from '@/components/motu/useMotuPolling'
 import { useStatusPolling } from '@/composables/useStatusPolling'
 import { isStatusStale, reasonForPath, runStateKind, runStateLabelKey } from '@/api/status'
+import { annotateGapById, gapLocaleOf } from '@/api/capabilityGaps'
 import {
   VOLUME_GAIN_MAX_DB,
   VOLUME_GAIN_MIN_DB,
@@ -340,7 +341,7 @@ const laneHint = computed(() => {
       reason: data.value === null ? t('common.unknown') : reasonForPath(data.value, 'format.channels') ?? t('volume.gains.noLanesReasonUnknown')
     })
   }
-  return t('volume.gains.readbackMissing')
+  return annotateGapById(t('volume.gains.readbackMissing'), 'volumeLaneGain', gapLocaleOf(locale.value))
 })
 
 const gainDraftRow = computed(() => {
@@ -591,13 +592,13 @@ function onRefreshMotu(): void {
       <PanelCard class="volume-grid__span-5" title-key="volume.master.title" desc-key="volume.master.desc" truth="notWired">
         <div class="metric">
           <span class="metric__value metric__value--muted">{{ t('common.dash') }}</span>
-          <TruthTag kind="notWired" :reason="t('volume.master.reason')" />
+          <TruthTag kind="notWired" :reason="annotateGapById(t('volume.master.reason'), 'volumeMaster', gapLocaleOf(locale))" />
         </div>
-        <p class="volume-master__reason">{{ t('volume.master.reason') }}</p>
+        <p class="volume-master__reason">{{ annotateGapById(t('volume.master.reason'), 'volumeMaster', gapLocaleOf(locale)) }}</p>
         <ul class="kv-list">
           <StatRow :label="t('volume.master.field.source')" :value="t('volume.master.sourceValue')" :reason="null" />
           <StatRow :label="t('volume.master.field.task')" :value="t('volume.master.taskValue')" :reason="null" />
-          <StatRow :label="t('volume.master.field.readback')" :value="null" :reason="t('volume.master.reason')" />
+          <StatRow :label="t('volume.master.field.readback')" :value="null" :reason="annotateGapById(t('volume.master.reason'), 'volumeMaster', gapLocaleOf(locale))" />
         </ul>
         <p class="aux-text">{{ t('volume.master.replacedBy') }}</p>
       </PanelCard>

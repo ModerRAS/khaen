@@ -22,7 +22,8 @@ const messages: Messages = {
     yes: 'Yes',
     no: 'No',
     none: 'None',
-    retry: 'Retry'
+    retry: 'Retry',
+    gapTask: '(task {task})'
   },
   nav: {
     overview: 'Overview',
@@ -506,7 +507,7 @@ const messages: Messages = {
         savedApplied: 'Saved applied',
         realtime: 'Realtime measurement (mic capture / sweep)',
         realtimeReason: 'The daemon has no capture service; realtime measurement is unavailable in this version (needs the T42 follow-up backend, P2).',
-        realtimeTask: 'T42 / P2',
+        realtimeTask: 'C',
         parseError: 'The file is not a usable WAV: {message}',
         formatError: 'Format does not meet the calibration requirements: {message}',
         pairError: 'The two recordings are structurally inconsistent: {message}',
@@ -1013,7 +1014,7 @@ const messages: Messages = {
         readback: 'Current master volume readback'
       },
       sourceValue: 'daemon control plane (T70f-b proxies rt-host)',
-      taskValue: 'T70f-a / T70f-b / T53',
+      taskValue: 'R',
       replacedBy: 'Alternative: use the per-lane gain editor on the right; the current gains cannot be read back (no read endpoint).'
     },
     gains: {
@@ -1074,9 +1075,10 @@ const messages: Messages = {
     },
     current: {
       title: 'Current format (/api/status)',
-      desc: 'Plan rate, device rate readback, block length/channel count, encoding and AES67 parameters; missing fields show "Not wired" plus the reason.',
-      sourceHint: 'Source: the daemon /api/status aggregate (khaen-status/v1); the device rate readback is the device-side truth.',
-      encodingReason: 'The daemon does not report encoding (reserved field, no data source)',
+      desc: 'Plan rate, device rate readback, block length and channel count come from /api/status. The AES67 group, port, payload type and map come from /api/channels current. Encoding has no data source.',
+      sourceHint: 'Rate and block length come from /api/status. AES67 comes from /api/channels current (not the always-empty format.aes67 on status).',
+      aes67Loading: 'Loading /api/channels; the AES67 current value is not here yet.',
+      encodingReason: 'The daemon does not report encoding (reserved field, no data source; the readback phase will add one)',
       rateNotAsserted: 'The device rate is not asserted yet (rate_asserted=false)',
       retryReadback: 'Retry readback',
       retryOk: 'Asked the device supervisor to retry and read back',

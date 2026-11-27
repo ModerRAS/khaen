@@ -5,14 +5,14 @@
  * 数据来源：
  * - GET /api/meta（AppShell 预热 + 本页 ensureMeta）：surface=mode 的能力三态与 not_wired 原因
  *   （§9.1：未接通的能力显示原因，不渲染可点击的假操作）；
- * - GET /api/status（5s 轮询）：run state / safe / last_error，用于 safe/faulted 写锁（§9）；
+ * - GET /api/status（5s 轮询）：顶层 mode（当前运行模式）+ run state / safe / last_error（写锁）；
  * - POST /api/surface {surface:"mode", data:{mode}} → POST /api/commit {engine_token} /
  *   POST /api/abort {engine_token}：两阶段草稿统一由 control store 管理（busy 互斥、prepare 失败清草稿、
  *   token 只能消费一次、401 交给会话 store、错误归类成稳定码 + 本地化文案）。
  *
  * 诚实边界（不编数据、不假成功）：
- * - 当前模式没有数据源：/api/status 不含 mode，控制协议也没有读取 op → 显示「不可读（无数据源）」，
- *   不拿默认值/上次提交值冒充当前值（最近一次提交回执单独标注「不是设备回读」）；
+ * - 当前模式只认 /api/status 顶层 mode；为 null 时显示 reasons.mode，不用上次提交、默认值或 host_link.mode 顶替
+ *   （最近一次提交回执单独标注「不是设备回读」）；
  * - UI 只提供后端已接通的 off / aes67（on 是 aes67 的别名；analog/toslink/dante 未实现，后端 bad_request）；
  * - prepare/commit/abort 失败只显示稳定错误码 + 本地化原因（不弹窗轰炸），401 由共享 ApiClient 交会话 store。
  */
@@ -26,7 +26,7 @@ import TruthTag from '@/components/TruthTag.vue'
 import DraftReview from '@/components/control/DraftReview.vue'
 import ControlErrorNotice from '@/components/control/ControlErrorNotice.vue'
 import { useStatusPolling } from '@/composables/useStatusPolling'
-import { runStateKind } from '@/api/status'
+import { reasonForPath, runStateKind } from '@/api/status'
 import type { ControlCommitAck, ControlErrorInfo, RunMode } from '@/api/control'
 import { abortControlDraft, commitControlDraft, controlState, prepareMode } from '@/stores/control'
 import {
@@ -171,11 +171,30 @@ function modeDisplay(raw: string | null): string | null {
   return key === null ? raw : t(key)
 }
 
+/** 设备此刻的运行模式。只认 status.mode，不看 host_link.mode 或提交回执。 */
+const runtimeMode = computed(() => (statusData.value === null ? null : statusData.value.mode))
+const modeReason = computed<string | null>(() => {
+  if (statusData.value === null) {
+    return t('mode.current.statusMissing')
+  }
+  if (runtimeMode.value !== null) {
+    return null
+  }
+  return reasonForPath(statusData.value, 'mode') ?? t('mode.current.reason')
+})
+const currentTruth = computed<TruthKind>(() => (runtimeMode.value === null ? 'notWired' : 'actual'))
+const currentModeText = computed(() => {
+  if (runtimeMode.value === null) {
+    return t('mode.current.unavailable')
+  }
+  return modeDisplay(runtimeMode.value)
+})
+
 const currentRows = computed<KvRow[]>(() => [
   {
     label: t('mode.current.receiptLabel'),
     value: modeDisplay(lastCommit.value === null ? null : lastCommit.value.mode),
-    reason: lastCommit.value === null ? t('mode.current.noReceipt') : null
+    reason: lastCommit.value === null ? t('mode.current.noReceipt') : t('mode.current.receiptNote')
   },
   {
     label: t('mode.current.mutedLabel'),
@@ -371,11 +390,16 @@ async function onRefreshMeta(): Promise<void> {
         class="mode-grid__span-7"
         title-key="mode.current.title"
         desc-key="mode.current.desc"
-        truth="notWired"
+        :truth="currentTruth"
       >
         <div class="metric">
-          <span class="metric__value metric__value--muted">{{ t('mode.current.unavailable') }}</span>
-          <TruthTag kind="notWired" :reason="t('mode.current.reason')" />
+          <span class="metric__value" :class="{ 'metric__value--muted': runtimeMode === null }">
+            {{ currentModeText }}
+          </span>
+          <TruthTag
+            :kind="currentTruth"
+            :reason="runtimeMode === null ? modeReason : t('mode.current.source')"
+          />
         </div>
         <ul class="kv-list">
           <StatRow

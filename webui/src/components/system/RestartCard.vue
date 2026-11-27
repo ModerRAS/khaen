@@ -14,6 +14,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import PanelCard from '@/components/PanelCard.vue'
 import TruthTag from '@/components/TruthTag.vue'
+import { annotateGapById, gapLocaleOf } from '@/api/capabilityGaps'
 import { classifySystemError, isRestartAvailable, type SystemInfo } from '@/api/system'
 import { formatTimestamp } from '@/utils/format'
 import { systemApi } from '@/stores/system'
@@ -97,7 +98,7 @@ async function submit(): Promise<void> {
       </div>
       <div v-else class="restart-card__blocked">
         <strong>{{ t('system.restart.disabledTitle') }}</strong>
-        <span>{{ t('system.restart.disabledReason', { reason: disabledReason }) }}</span>
+        <span>{{ annotateGapById(t('system.restart.disabledReason', { reason: disabledReason }), 'systemRestart', gapLocaleOf(locale)) }}</span>
       </div>
 
       <div class="restart-card__daemon">
@@ -105,7 +106,7 @@ async function submit(): Promise<void> {
           <strong>NOT_AVAILABLE · {{ t('system.restart.daemonTitle') }}</strong>
           <TruthTag kind="notWired" />
         </div>
-        <p class="aux-text">{{ t('system.restart.daemonReason') }}</p>
+        <p class="aux-text">{{ annotateGapById(t('system.restart.daemonReason'), 'systemDaemonRestart', gapLocaleOf(locale)) }}</p>
       </div>
     </PanelCard>
 

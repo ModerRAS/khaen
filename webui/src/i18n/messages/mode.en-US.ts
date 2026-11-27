@@ -11,7 +11,7 @@ const messages = {
   mode: {
     pageTitle: 'Operating mode',
     subtitle:
-      'Two-phase input enable (off / aes67): prepare only stages a draft, commit applies at a block boundary. There is no readback source for the current mode, so the page never guesses it.',
+      'Two-phase input enable (off / aes67): prepare only stages a draft, commit applies at a block boundary. The current mode comes from GET /api/status mode; when it is empty the page shows the reason and never substitutes the last commit receipt.',
     capability: {
       title: 'Surface capability',
       desc: 'From GET /api/meta surfaces / not_wired: not-wired capabilities show the reason and never render clickable fake actions (API.md §9.1).',
@@ -34,11 +34,14 @@ const messages = {
     },
     current: {
       title: 'Current mode',
-      desc: 'No data source for the current mode: /api/status does not include mode and the control protocol has no read op.',
+      desc: 'The current mode comes from the top-level mode field of GET /api/status. The latest commit receipt is listed separately and is not a device readback.',
       unavailable: 'Unreadable (no data source)',
+      source: 'Source: GET /api/status mode (rt-host control status)',
+      statusMissing: 'Runtime status has not been read yet: the current mode is unknown and the last commit receipt is not used in its place.',
       reason:
-        '/api/status does not expose the current operating mode and the control protocol has no read op; the page never guesses it or passes a default value off as current.',
+        'GET /api/status mode is empty and reasons.mode is missing. The page does not substitute the last commit receipt, a default, or host_link.mode.',
       receiptLabel: 'Last commit receipt (not a device readback)',
+      receiptNote: 'This is the commit receipt for this session, not a device readback.',
       noReceipt: 'No mode commit receipt in this session yet.',
       mutedLabel: 'Muted (/api/status.state.muted)',
       mutedNote: 'Mute is an independent state: manual mute or mode=off can both make it true, so it cannot be used to infer the current mode.',
