@@ -154,6 +154,46 @@ async fn get_channels_reports_the_live_channels_status_shape() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn get_channels_uses_readback_routing_for_a_plan_loaded_by_another_daemon() {
+    // rt-host 已经加载了一份方案（例如重启前/别的 daemon 准备），本 daemon 的方案库没有记录；
+    // control status 的 readback.routing 是当前 lane -> DAC 的真实来源。
+    let graph_id = "externally-loaded-graph";
+    let mut status = rt_status(graph_id, 4);
+    status["readback"] = json!({
+        "available": true,
+        "source": "base_plan",
+        "routing": {
+            "dac_channels": 4,
+            "routes": [{"lane": 0, "dac": 1}, {"lane": 1, "dac": 3}]
+        }
+    });
+    let fake = FakeTransport::with_rt_status_and_channels(status, channels_status_document());
+    let link = support::injected_link(Arc::clone(&fake));
+    let server = support::spawn_with_link(link, None).await;
+
+    let response = support::request(&server, "GET", "/api/channels").await;
+    assert_eq!(response.status, 200, "{}", response.body_text());
+    let body = response.json();
+    assert_eq!(body["plan"]["graph_id"], graph_id);
+    assert_eq!(body["plan"]["routing_known"], true);
+    assert_eq!(
+        body["output"]["dac_map"],
+        json!([Value::Null, 0, Value::Null, 1])
+    );
+    assert_eq!(
+        body["mapping"],
+        json!([{"lane": 0, "dac": 1}, {"lane": 1, "dac": 3}])
+    );
+    assert!(
+        !body["reasons"]
+            .as_object()
+            .expect("reasons")
+            .contains_key("mapping"),
+        "readback routing must not produce a mapping reason: {body}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn get_channels_degrades_with_reasons_when_channels_status_is_unsupported() {
     let fake = FakeTransport::new();
     // 第一次调用（status）成功；第二次（channels_status）是 rt-host 的业务 unsupported。

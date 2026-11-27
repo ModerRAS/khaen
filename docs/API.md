@@ -101,7 +101,7 @@
   - prepare 可带 `channels`/`sample_rate`/`aes67_group`/`aes67_port`/`aes67_payload_type`/`aes67_channels`/`aes67_map`/`jitter_frames`/`mapping`/`dac_map`；响应 `{ok, changed, diff, current, target, engine_token, token, commit_supported, blockers, admission, graph:{action,reason}, warnings}`。
   - commit `{stage:"commit", engine_token}` 响应 `{ok, applied, changed, generation, gap_ms, format, graph_dropped, rolled_back?, routing:{...}, idempotent?}`；失败按 §1 错误码 + `details.rolled_back`。
   - abort `{stage:"abort", engine_token}` 响应 `{ok, aborted, aborted_token, local:{...}}`。
-- **当前值来源**：`mapping` 是 daemon 在 prepare/upload 时记录的方案 routing 镜像（lane->DAC），不是数据面实时回读；方案图被 channels_commit 丢弃或 mirror 未记录时 `mapping=null`，UI 必须显示“当前值未知”并给原因，禁止用旧值冒充当前值。
+- **当前值来源**：`mapping` 优先取 rt-host 控制 status 的 `readback.routing`（真实已加载 base plan 的 lane->DAC，即使方案由别的 daemon/重启前准备）；拿不到或形状不完整（越界、DAC 重复占用等）时退回 daemon 在 prepare/upload 时记录的方案 routing。两条来源都不可用、方案图被 channels_commit 丢弃或 mirror 未记录时 `mapping=null`，UI 必须显示“当前值未知”并给原因，禁止用旧值冒充当前值。
 
 ## 6. 方案文件上传
 | 方法 | 路径 | 请求 | 成功响应 |

@@ -6,8 +6,9 @@
 //! 1. rt-host channels_status（M3b 热重配的现取状态）：current（channels/sample_rate/
 //!    aes67_*/jitter/device）、device.probe、generation、busy、pending、last_gap_ms、
 //!    last_result。这是数据面唯一权威来源，拿不到时逐字段 null + reasons；
-//! 2. 计划 routing 信息（daemon 在 prepare/upload 时按 graph_id 记录的方案 routing 段）作为
-//!    mapping / output.dac_map 的来源（rt-host 控制 status 只报 graph_id，不报 routing）；
+//! 2. 当前已生效方案的 routing 作为 mapping / output.dac_map 的来源：优先用 rt-host 控制
+//!    status 的 `readback.routing`（真实已加载的 base plan，即使方案不是本 daemon 准备的），
+//!    拿不到时才退回 daemon 在 prepare/upload 时按 graph_id 记录的方案 routing 段；
 //! 3. 契约 B status（op status）的 data-plane format 作为 output.channels / format 的降级来源。
 //!
 //! - output.channels：channels_status.current.channels > 方案 routing.dac_channels > status.format.channels；
@@ -188,6 +189,8 @@ struct LiveData {
     version: Option<u64>,
     /// 当前生效方案 graph_id（拿不到为 None）。
     graph_id: Option<String>,
+    /// 控制 status 的 `readback`（rt-host 真实已加载 base plan 的只读回读；拿不到为 None）。
+    readback: Option<Value>,
     /// rt-host 数据面 format.channels（文件/不可用时为 None）。
     format_channels: Option<u16>,
     /// rt-host 数据面 format.sample_rate（文件/不可用时为 None）。
@@ -218,6 +221,10 @@ fn live_data(state: &DaemonState, snapshot: &LinkSnapshot, now: SystemTime) -> L
                     .get("graph_id")
                     .and_then(Value::as_str)
                     .map(str::to_string),
+                readback: status
+                    .get("readback")
+                    .filter(|value| value.is_object())
+                    .cloned(),
                 format_channels: status
                     .get("format")
                     .and_then(|format| format.get("channels"))
@@ -253,6 +260,10 @@ fn live_data(state: &DaemonState, snapshot: &LinkSnapshot, now: SystemTime) -> L
                         .get("graph_id")
                         .and_then(Value::as_str)
                         .map(str::to_string),
+                    readback: status
+                        .get("readback")
+                        .filter(|value| value.is_object())
+                        .cloned(),
                     format_channels: format
                         .and_then(|format| format.get("channels"))
                         .and_then(Value::as_u64)
@@ -293,6 +304,7 @@ fn live_data(state: &DaemonState, snapshot: &LinkSnapshot, now: SystemTime) -> L
                             .get("graph_id")
                             .and_then(Value::as_str)
                             .map(str::to_string),
+                        readback: None,
                         format_channels: None,
                         format_sample_rate: None,
                         format_block_frames: None,
@@ -332,12 +344,62 @@ fn live_data(state: &DaemonState, snapshot: &LinkSnapshot, now: SystemTime) -> L
     }
 }
 
-/// 当前生效方案的 routing 视图（graph_id 关联到 daemon 记录过的方案）。
-fn current_routing(state: &DaemonState, live: &LiveData) -> Option<(PlanRecord, RoutingView)> {
+/// 当前生效方案的 routing 视图。
+///
+/// 优先用 rt-host 控制 status 的 `readback.routing`：这是 rt-host 真实加载的 base plan，
+/// 即使方案由别的 daemon/重启前准备，也能给出当前 lane -> DAC 绑定；拿不到或形状不可信时
+/// 退回本 daemon 按 graph_id 记录的方案 routing 段（旧行为）。两条路都拿不到才 None。
+fn current_routing(state: &DaemonState, live: &LiveData) -> Option<RoutingView> {
+    if let Some(routing) = live
+        .readback
+        .as_ref()
+        .and_then(|readback| routing_from_readback(readback, live.graph_id.as_deref()))
+    {
+        return Some(routing);
+    }
     let graph_id = live.graph_id.as_deref()?;
     let record = state.plans().plan_by_graph_id(graph_id)?;
-    let routing = record.routing()?;
-    Some((record, routing))
+    record.routing()
+}
+
+/// 从控制 status 的 `readback` 解析 routing；形状不可信时返回 None（由调用方退回本地记录）。
+///
+/// 只接受完整、自洽的 routing：dac_channels 在 1..=u16::MAX、每条 route 的 lane/dac 都落在
+/// dac_channels 内、同一个 DAC 不被两条 route 同时占用（否则 lane -> DAC 映射有歧义，不猜）。
+fn routing_from_readback(readback: &Value, graph_id: Option<&str>) -> Option<RoutingView> {
+    let routing = readback.get("routing").filter(|value| value.is_object())?;
+    let dac_channels = routing
+        .get("dac_channels")
+        .and_then(Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())?;
+    if dac_channels == 0 {
+        return None;
+    }
+    let routes = routing.get("routes")?.as_array()?;
+    let mut parsed = Vec::with_capacity(routes.len());
+    let mut used_dacs = BTreeSet::new();
+    for route in routes {
+        let lane = route
+            .get("lane")
+            .and_then(Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())?;
+        let dac = route
+            .get("dac")
+            .and_then(Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())?;
+        if lane >= dac_channels || dac >= dac_channels {
+            return None;
+        }
+        if !used_dacs.insert(dac) {
+            return None;
+        }
+        parsed.push((lane, dac));
+    }
+    Some(RoutingView {
+        graph_id: graph_id.map(str::to_string),
+        dac_channels,
+        routes: parsed,
+    })
 }
 
 // ===========================================================================
@@ -422,7 +484,7 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
     if output_channels.is_none() {
         output_channels = routing
             .as_ref()
-            .map(|(_, routing)| u64::from(routing.dac_channels));
+            .map(|routing| u64::from(routing.dac_channels));
         if output_channels.is_some() {
             output_source = Some("plan-routing");
         }
@@ -442,7 +504,7 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
     // 数据面通道数与方案 routing 的 dac_channels 不一致：方案 routing 不能代表运行中的图。
     let routing_dac_channels = routing
         .as_ref()
-        .map(|(_, routing)| u64::from(routing.dac_channels));
+        .map(|routing| u64::from(routing.dac_channels));
     let routing_mismatch = match (routing_dac_channels, output_channels, output_source) {
         (Some(dac_channels), Some(channels), Some("rt-host-channels-status")) => {
             dac_channels != channels
@@ -465,15 +527,15 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
     let mapping_trusted = !routing_mismatch && routing_invalidation.is_none();
     let no_routing_reason = match &live.graph_id {
         Some(graph_id) => format!(
-            "the applied plan routing section is not known to the daemon (rt-host reports graph_id {graph_id:?}, which matches no plan prepared/uploaded through this daemon; the rt-host control status reports graph_id but not routing)"
+            "no applied-plan routing is available: the rt-host control status readback does not carry a usable routing section and the daemon has no plan record for graph_id {graph_id:?} (the plan was prepared/uploaded through another daemon or before a restart); the lane -> DAC mapping is not fabricated"
         ),
-        None => "no applied plan is known: the rt-host control status reports no graph_id and the daemon has no prepared plan".to_string(),
+        None => "no applied plan is known: the rt-host control status reports no graph_id/readback routing and the daemon has no prepared plan".to_string(),
     };
     let (mapping, dac_map) = if !mapping_trusted {
         (Value::Null, Value::Null)
     } else {
         match &routing {
-            Some((_, routing)) => (routing.mapping_json(), routing.dac_map_json()),
+            Some(routing) => (routing.mapping_json(), routing.dac_map_json()),
             None => {
                 reasons.insert("mapping".to_string(), no_routing_reason.clone());
                 reasons.insert("output.dac_map".to_string(), no_routing_reason.clone());
@@ -1892,6 +1954,45 @@ mod tests {
 
     fn object(value: Value) -> Map<String, Value> {
         value.as_object().expect("object").clone()
+    }
+
+    #[test]
+    fn readback_routing_parses_a_complete_mapping() {
+        let routing = routing_from_readback(
+            &json!({
+                "available": true,
+                "source": "base_plan",
+                "routing": {
+                    "dac_channels": 4,
+                    "routes": [{"lane": 0, "dac": 1}, {"lane": 1, "dac": 3}]
+                }
+            }),
+            Some("graph-external"),
+        )
+        .expect("routing");
+        assert_eq!(routing.dac_channels, 4);
+        assert_eq!(routing.routes, vec![(0, 1), (1, 3)]);
+        assert_eq!(routing.graph_id.as_deref(), Some("graph-external"));
+    }
+
+    #[test]
+    fn readback_routing_rejects_ambiguous_or_out_of_range_shapes() {
+        for bad in [
+            json!({ "routing": null }),
+            json!({ "routing": { "dac_channels": 0, "routes": [] } }),
+            json!({ "routing": { "dac_channels": 4, "routes": [{ "lane": 0, "dac": 4 }] } }),
+            json!({ "routing": { "dac_channels": 4, "routes": [{ "lane": 4, "dac": 0 }] } }),
+            json!({ "routing": { "dac_channels": 4, "routes": [
+                { "lane": 0, "dac": 1 }, { "lane": 1, "dac": 1 }
+            ] } }),
+            json!({ "routing": { "dac_channels": 4, "routes": [{ "lane": 0 }] } }),
+            json!({ "routing": { "dac_channels": 4 } }),
+        ] {
+            assert!(
+                routing_from_readback(&bad, None).is_none(),
+                "must not trust {bad}"
+            );
+        }
     }
 
     #[test]
