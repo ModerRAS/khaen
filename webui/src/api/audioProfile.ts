@@ -96,7 +96,7 @@ export const SPEAKER_ROLE_GROUPS = {
 export const MAX_GROUND_ROLES = 9
 export const MAX_HEIGHT_ROLES = 6
 
-/** 一个物理输出（22 行固定）。 */
+/** 一条物理输出（outputs 行数 = device.channels，不是固定 22）。 */
 export interface AudioOutput {
   dac: number
   enabled: boolean

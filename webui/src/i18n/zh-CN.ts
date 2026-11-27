@@ -1378,7 +1378,7 @@ const messages = {
     statusUnavailable: '/api/status 未接入：路由页拿不到输入/格式/控制通道事实；请检查会话与 daemon。',
     chain: {
       title: '当前路由链（输入 → 矩阵域 → DAC 输出）',
-      desc: '只读诊断：AES67 输入（/api/status.format.aes67）→ 22 lane 矩阵域（format.channels）→ DAC 物理输出（/api/channels.output + mapping）。没有数据源的字段显示「未接入」+ 原因，不假设 lane i → DAC i 的直通映射。',
+      desc: '只读诊断：AES67 输入（/api/status.format.aes67）→ 矩阵域（lane 数随 format.channels）→ DAC 物理输出（/api/channels.output + mapping）。没有数据源的字段显示「未接入」+ 原因，不假设 lane i → DAC i 的直通映射。',
       input: {
         title: '输入 · AES67',
         channels: '接收声道数',

@@ -12,7 +12,7 @@
 const messages = {
   routingEdit: {
     subtitle:
-      '输入 → 22 lane 矩阵域 → DAC 物理输出的只读诊断 + lane → DAC 可编辑两阶段：当前值来自 /api/channels 的 mapping（daemon 在 prepare/upload 时记录的方案 routing 镜像，不是数据面实时回读）；编辑经 POST /api/surface（surface:"routing"）→ POST /api/commit / POST /api/abort。mapping=null 时显示「当前值未知」+ 原因，不用旧值/默认值冒充；changed/diff 等可选回执缺失时如实显示「服务端未上报」。22 路是当前输出假设，不是输入上限（任务 R/IO）。',
+      '输入 → 矩阵域（lane 数随 format.channels）→ DAC 物理输出的只读诊断 + lane → DAC 可编辑两阶段：当前值优先取 /api/status.readback.routing（rt-host 真实 base_plan），拿不到才退回 /api/channels.mapping；编辑经 POST /api/surface（surface:"routing"）→ POST /api/commit / POST /api/abort。mapping=null 时显示「当前值未知」+ 原因，不用旧值/默认值冒充；changed/diff 等可选回执缺失时如实显示「服务端未上报」。',
     meta: {
       label: '能力（/api/meta surface=routing）',
       wired: '已接入：可以 prepare → commit',
@@ -22,13 +22,13 @@ const messages = {
     },
     current: {
       title: '当前值来源（只读诊断）',
-      desc: '/api/channels.mapping 是 daemon 在 prepare/upload 时记录的方案 routing 镜像（lane → 0-based DAC），不是数据面实时回读；mapping=null 时当前值未知，本页用空表 + 原因如实标注，不用旧值/默认值冒充。实时回读尚未接通（任务 R/IO）。',
+      desc: '当前值优先来自 /api/status.readback.routing（rt-host 已加载 base_plan 的 lane → 0-based DAC），拿不到才退回 /api/channels.mapping（daemon 在 prepare/upload 时记录的方案 routing）；两条都不可用时显示未知 + 原因，不用旧值/默认值冒充。',
       source: '数据来源',
-      sourceValue: '/api/channels.mapping（方案 routing 镜像）',
+      sourceValue: '/api/channels.mapping（readback 不可用时的方案 routing 回退）',
       sourceBasePlan: '/api/status.readback（base_plan 控制面语义，source={source}）',
       sourceUnknown: '无来源（mapping 未上报）',
       semantics: '语义',
-      semanticsValue: 'daemon 在 prepare/upload 时记录的方案 routing 镜像，不是数据面实时回读',
+      semanticsValue: 'rt-host 真实 base_plan 的 lane → DAC（readback）；回退时才是 daemon 记录的方案 routing',
       semanticsBasePlan: '控制面已生效方案的 lane → DAC 语义；不是数据面实时回读',
       planVersion: '来源方案版本',
       graphId: '来源 graph_id',

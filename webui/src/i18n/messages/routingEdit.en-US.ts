@@ -11,7 +11,7 @@
 const messages = {
   routingEdit: {
     subtitle:
-      'Read-only diagnostics of input → 22-lane matrix → DAC outputs, plus editable two-phase lane → DAC routing: the current value comes from /api/channels mapping (the plan routing mirror daemon recorded at prepare/upload, not a live data-plane readback). Edits go through POST /api/surface (surface:"routing") → POST /api/commit / POST /api/abort. When mapping=null the page shows "current value unknown" with the reason — old/default values are never passed off as current; optional receipts (changed/diff/…) are shown honestly as "not reported by server" when absent. The fixed 22 lanes are the current output assumption, not an input ceiling (task R/IO).',
+      'Read-only diagnostics of input → matrix lanes (format.channels) → DAC outputs, plus editable two-phase lane → DAC routing: the current value prefers /api/status.readback.routing (the real base_plan loaded by rt-host) and falls back to /api/channels mapping only when readback is unavailable. Edits go through POST /api/surface (surface:"routing") → POST /api/commit / POST /api/abort. When mapping=null the page shows "current value unknown" with the reason — old/default values are never passed off as current; optional receipts (changed/diff/…) are shown honestly as "not reported by server" when absent.',
     meta: {
       label: 'Capability (/api/meta surface=routing)',
       wired: 'Wired: prepare → commit is available',
@@ -21,13 +21,13 @@ const messages = {
     },
     current: {
       title: 'Current value source (read-only diagnostics)',
-      desc: '/api/channels mapping is the plan routing mirror daemon recorded at prepare/upload (lane → 0-based DAC), not a live data-plane readback. When mapping=null the current value is unknown: this page shows an empty draft plus the reason and never passes off old/default values as current. Live readback is not wired yet (task R/IO).',
+      desc: 'The current value prefers /api/status.readback.routing (lane → 0-based DAC of the real base_plan loaded by rt-host) and falls back to /api/channels mapping only when readback is unavailable. When both are unavailable the current value is unknown: this page shows the reason and never passes off old/default values as current.',
       source: 'Data source',
-      sourceValue: '/api/channels mapping (plan routing mirror)',
+      sourceValue: '/api/channels mapping (plan-routing fallback when readback is unavailable)',
       sourceBasePlan: '/api/status.readback (base_plan control-plane semantics, source={source})',
       sourceUnknown: 'No source (mapping not reported)',
       semantics: 'Semantics',
-      semanticsValue: 'plan routing mirror recorded by daemon at prepare/upload, not a live data-plane readback',
+      semanticsValue: 'lane → DAC of the real rt-host base_plan (readback); only the fallback is the daemon-recorded plan routing',
       semanticsBasePlan: 'lane → DAC semantics of the applied plan; not a live data-plane readback',
       planVersion: 'Source plan version',
       graphId: 'Source graph_id',

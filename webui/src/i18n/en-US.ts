@@ -1381,7 +1381,7 @@ const messages: Messages = {
     statusUnavailable: '/api/status is not wired: the routing page cannot read input/format/control-link facts; check the session and the daemon.',
     chain: {
       title: 'Current routing chain (input → matrix → DAC output)',
-      desc: 'Read-only: AES67 input (/api/status.format.aes67) → 22-lane matrix (format.channels) → DAC physical outputs (/api/channels.output + mapping). Fields without a data source show "not wired" plus the reason; no lane i → DAC i identity mapping is assumed.',
+      desc: 'Read-only: AES67 input (/api/status.format.aes67) → matrix lanes (format.channels) → DAC physical outputs (/api/channels.output + mapping). Fields without a data source show "not wired" plus the reason; no lane i → DAC i identity mapping is assumed.',
       input: {
         title: 'Input · AES67',
         channels: 'Receive channels',
