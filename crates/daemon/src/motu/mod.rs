@@ -414,10 +414,7 @@ impl MotuHub {
             return false;
         }
         self.poller_running.store(false, Ordering::Release);
-        if self.should_background_refresh(now) && self.try_start_poller() {
-            return false;
-        }
-        true
+        !(self.should_background_refresh(now) && self.try_start_poller())
     }
 
     /// 音量或静音写入并回读成功后调用：下一读必须反映设备新值。
