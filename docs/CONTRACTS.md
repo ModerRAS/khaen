@@ -90,7 +90,7 @@
 
 | op | 请求字段 | 响应要点 |
 | --- | --- | --- |
-| status | — | 快照：runtime_state、graph_id、epoch、blocks、xruns、underruns、faults、silent、mute、safe_mode、actual_version、format{}、surfaces{}、surface_reasons{}、wired[]、not_wired[] |
+| status | — | 快照：runtime_state、graph_id、epoch、blocks、xruns、underruns、faults、silent、mute、safe_mode、actual_version、mode、readback{}、format{}、surfaces{}、surface_reasons{}、wired[]、not_wired[] |
 | mute | mute(bool) | 回执：applied_block、mute（生效后 actual）、idempotent |
 | prepare | plan_path、plan_sha256 | 准入结果：engine_token、planned_version、admission{} |
 | commit | engine_token | 块边界生效：applied_block、version、all_ack |
@@ -106,6 +106,7 @@
 - `wired`：已实现 op 的名字数组，例如 `["status","mute"]`。
 - `not_wired`：对象数组 `{"op": "...", "reason": "..."}`，reason 不得为空。
 - `reasons`：`status` 的附加字段；凡是当前没有数据来源的字段（值为 null）必须在这里给出原因，禁止编造数值。
+- `readback`：`status` 的加法字段，控制面 `base_plan`（启动时加载或最近一次 commit）的只读回读（`available/source:"base_plan"/sample_rate/block_size/content{in_channels,out_lanes,folds}/crossover{lanes,filters[{lane,taps}]}/matrix{rows,cols,decimation,interpolation,taps}/protection{lanes,entries[{lane,delay_samples,polarity,gain_db,peq_bands}]}/routing{dac_channels,routes[{lane,dac}]}`）。只给控制面语义，不复制 FIR/矩阵系数；没有已 commit 方案时 `available:false` + `reason`，不返回默认布局。
 
 ### B.1.2 语义界面（surface）
 

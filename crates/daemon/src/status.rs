@@ -327,6 +327,10 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         }
     };
 
+    // 当前已生效方案的只读回读：socket 主路径直接转发 rt-host 的加法字段；
+    // 不把状态文件/本地默认值当前值（文件 schema 没有，process 目标没有 rt-host）。
+    let readback = readback_value(sources.link, &mut reasons);
+
     // 只读能力/数据源固定缺口：与 rt-host 在不在线无关。
     insert_reason(&mut reasons, "format.encoding", ENCODING_REASON);
     for path in [
@@ -513,6 +517,8 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         "reconfigure": reconfigure,
         // 运行时模式（加法字段）：rt-host 控制 status 顶层 mode；file/none/process 为 null+原因。
         "mode": runtime_mode,
+        // 当前已生效方案的只读回读（加法字段）：volume/layout/routing 的“当前值”数据源。
+        "readback": readback,
         "speaker_test": speaker_test,
         "plan": {
             "graph_id": rt.graph_id,
@@ -1352,6 +1358,47 @@ fn socket_nullable_string(
     )
 }
 
+/// `/api/status.readback`：当前已生效方案的只读回读。
+///
+/// 只有 rt-host 控制 status（socket 主路径）能提供它（rt-host 的 `base_plan` 是块边界已生效方案）。
+/// 状态文件 schema 不落这份数据、process 目标没有 rt-host；这些情况一律 null + 原因，
+/// 不用 daemon 的 EngineConfig、默认布局或上次缓存冒充“当前值”。
+fn readback_value(link: &LinkSnapshot, reasons: &mut Map<String, Value>) -> Value {
+    match link {
+        LinkSnapshot::Socket { status, .. } => match status.get("readback") {
+            Some(readback @ Value::Object(_)) => readback.clone(),
+            Some(other) => {
+                insert_reason(
+                    reasons,
+                    "readback",
+                    format!("rt-host control status readback is not an object: {other}"),
+                );
+                Value::Null
+            }
+            None => {
+                insert_reason(
+                    reasons,
+                    "readback",
+                    "the rt-host control status does not report readback (older rt-host?); update or restart rt-host to read the applied plan",
+                );
+                Value::Null
+            }
+        },
+        LinkSnapshot::Unavailable { reason, .. } => {
+            insert_reason(
+                reasons,
+                "readback",
+                format!("the rt-host control socket is unavailable ({reason}); readback requires the rt-host control status"),
+            );
+            Value::Null
+        }
+        LinkSnapshot::Process => {
+            insert_reason(reasons, "readback", PROCESS_TARGET_REASON);
+            Value::Null
+        }
+    }
+}
+
 /// `device.state`：优先 rt-host 的 `device_state`（socket status 或状态文件），
 /// 退而用 daemon `DeviceMonitor` 的生命周期状态。
 fn device_state_value(
@@ -1751,6 +1798,24 @@ mod tests {
             "calibration": { "enabled": false },
             "surfaces": ["volume"],
             "surface_reasons": {},
+            "readback": {
+                "available": true,
+                "source": "base_plan",
+                "sample_rate": 48_000,
+                "block_size": 256,
+                "content": {
+                    "in_channels": 2,
+                    "out_lanes": 13,
+                    "folds": [{ "src": 0, "dst": 0, "gain": 1.0 }],
+                },
+                "crossover": { "lanes": 13, "filters": [{ "lane": 0, "taps": 2048 }] },
+                "matrix": { "rows": 13, "cols": 13, "decimation": 16, "interpolation": 16, "taps": 1 },
+                "protection": {
+                    "lanes": 13,
+                    "entries": [{ "lane": 0, "delay_samples": 0, "polarity": 1, "gain_db": -2.5, "peq_bands": 0 }],
+                },
+                "routing": { "dac_channels": 22, "routes": [{ "lane": 0, "dac": 0 }] },
+            },
             "age_ms": 42,
             "stale": false,
             "snapshot_interval_ms": 2,
@@ -1916,6 +1981,7 @@ mod tests {
             "ok",
             "output",
             "plan",
+            "readback",
             "reasons",
             "reconfigure",
             "safe",
@@ -2349,6 +2415,27 @@ mod tests {
         assert_eq!(at(&body, "device.state"), &json!("present"));
         assert_eq!(at(&body, "device.rate_readback"), &json!(48_000));
 
+        // readback：socket 主路径原样转发已生效方案的只读语义，不用默认值/daemon 配置冒充。
+        assert_eq!(body["readback"]["available"], json!(true));
+        assert_eq!(body["readback"]["source"], json!("base_plan"));
+        assert_eq!(at(&body, "readback.content.out_lanes"), &json!(13));
+        assert_eq!(
+            at(&body, "readback.protection.entries"),
+            &json!([{
+                "lane": 0,
+                "delay_samples": 0,
+                "polarity": 1,
+                "gain_db": -2.5,
+                "peq_bands": 0,
+            }])
+        );
+        assert_eq!(at(&body, "readback.routing.dac_channels"), &json!(22));
+        assert!(
+            body["reasons"].get("readback").is_none(),
+            "socket 拿到真实 readback，不该登记缺口原因: {}",
+            body["reasons"]
+        );
+
         // 控制通道已接通：not_wired 里不该再有 host_link.control。
         let not_wired = body["not_wired"].as_array().expect("not_wired");
         assert!(not_wired
@@ -2357,6 +2444,22 @@ mod tests {
         assert!(not_wired
             .iter()
             .any(|entry| entry["path"] == json!("calibration.jobs")));
+    }
+
+    #[test]
+    fn socket_status_without_readback_is_null_with_reason() {
+        let mut status = full_socket_status();
+        status
+            .as_object_mut()
+            .expect("status object")
+            .remove("readback");
+        let body = aggregate_socket(&status, SystemTime::now());
+        assert_eq!(body["readback"], Value::Null);
+        assert!(
+            reason_of(&body, "readback").contains("does not report readback"),
+            "{}",
+            reason_of(&body, "readback")
+        );
     }
 
     #[test]

@@ -28,8 +28,8 @@ use khaen_core::sha256::sha256;
 use khaen_host::admission::{admit, AdmissionLimits};
 use khaen_host::control::{
     apply_surface_patch, budget_json, compile_error_to_control, engine_token, error, format_json,
-    string_field, ControlError, RuntimeMode, MAX_REQUEST_BYTES, NOT_WIRED_OPS, NOT_WIRED_SURFACES,
-    PROTOCOL_VERSION, WIRED_OPS, WIRED_SURFACES,
+    string_field, ControlError, ControlState, RuntimeMode, MAX_REQUEST_BYTES, NOT_WIRED_OPS,
+    NOT_WIRED_SURFACES, PROTOCOL_VERSION, WIRED_OPS, WIRED_SURFACES,
 };
 use khaen_host::engine::EngineConfig;
 use khaen_host::plan::Plan;
@@ -901,6 +901,7 @@ impl ControlCore {
                 "safe_mode": Value::Null,
                 "actual_version": Value::Null,
                 "mode": self.mode.as_str(),
+                "readback": ControlState::plan_readback_json(self.base_plan.as_ref()),
                 "format": format_json(&self.engine_config),
                 "control_format": format_json(&self.engine_config),
                 "format_mismatch": false,
@@ -991,6 +992,7 @@ impl ControlCore {
             "safe_mode": safe_mode,
             "actual_version": graph.version,
             "mode": self.mode.as_str(),
+            "readback": ControlState::plan_readback_json(self.base_plan.as_ref()),
             "format": format_json(&snapshot.format),
             "control_format": format_json(&self.engine_config),
             "format_mismatch": format_mismatch,

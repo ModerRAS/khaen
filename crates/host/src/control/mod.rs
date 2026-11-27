@@ -1277,6 +1277,96 @@ impl ControlState {
         }
     }
 
+    /// 控制面 `base_plan`（启动时加载或最近一次 commit 的方案）的只读回读（加法能力；`/api/status.readback` 的数据源）。
+    ///
+    /// 为什么只给这些字段：五个语义界面（volume/layout/routing/mode/format）的“当前值”需要的是
+    /// 控制面语义（逐 lane 增益/延迟/极性、内容折叠、lane→DAC），而矩阵/FIR 系数是实时执行数据，
+    /// 不是 UI 当前值；把大数组塞进每 5 s 轮询的 status 既浪费又容易被误当成“系数确认”。
+    /// 拿不到方案时返回 `available:false` + 原因，不返回默认/假值。
+    pub fn plan_readback_json(plan: Option<&Plan>) -> Value {
+        let Some(plan) = plan else {
+            return json!({
+                "available": false,
+                "source": Value::Null,
+                "reason": "no plan is loaded yet: prepare + commit a plan (or let rt-host load its startup plan); readback describes the loaded base plan",
+            });
+        };
+        let content = plan.content.as_ref().map(|content| {
+            json!({
+                "in_channels": content.in_channels,
+                "out_lanes": content.out_lanes,
+                "folds": content
+                    .folds
+                    .iter()
+                    .map(|fold| json!({
+                        "src": fold.src,
+                        "dst": fold.dst,
+                        "gain": fold.gain,
+                    }))
+                    .collect::<Vec<_>>(),
+            })
+        });
+        let crossover = plan.crossover.as_ref().map(|crossover| {
+            json!({
+                "lanes": crossover.lanes,
+                "filters": crossover
+                    .filters
+                    .iter()
+                    .map(|filter| json!({
+                        "lane": filter.lane,
+                        "taps": filter.coeffs.len(),
+                    }))
+                    .collect::<Vec<_>>(),
+            })
+        });
+        let matrix = plan.matrix.as_ref().map(|matrix| {
+            json!({
+                "rows": matrix.rows,
+                "cols": matrix.cols,
+                "decimation": matrix.decimation,
+                "interpolation": matrix.interpolation,
+                "taps": matrix.taps,
+            })
+        });
+        let protection = plan.protection.as_ref().map(|protection| {
+            json!({
+                "lanes": protection.lanes,
+                "entries": protection
+                    .entries
+                    .iter()
+                    .map(|entry| json!({
+                        "lane": entry.lane,
+                        "delay_samples": entry.delay,
+                        "polarity": entry.polarity,
+                        "gain_db": entry.gain_db,
+                        "peq_bands": entry.peq.len(),
+                    }))
+                    .collect::<Vec<_>>(),
+            })
+        });
+        let routing = plan.routing.as_ref().map(|routing| {
+            json!({
+                "dac_channels": routing.dac_channels,
+                "routes": routing
+                    .routes
+                    .iter()
+                    .map(|(lane, dac)| json!({ "lane": lane, "dac": dac }))
+                    .collect::<Vec<_>>(),
+            })
+        });
+        json!({
+            "available": true,
+            "source": "base_plan",
+            "sample_rate": plan.sample_rate,
+            "block_size": plan.block_size,
+            "content": content,
+            "crossover": crossover,
+            "matrix": matrix,
+            "protection": protection,
+            "routing": routing,
+        })
+    }
+
     fn status(&self) -> Value {
         let stats = self.engine.stats();
         let info = self.engine.graph_info();
@@ -1337,6 +1427,7 @@ impl ControlState {
             "actual_version": info.version,
             "format": format_json(&self.engine.config().clone()),
             "mode": self.mode.as_str(),
+            "readback": Self::plan_readback_json(self.base_plan.as_ref()),
             "wired": WIRED_OPS,
             "not_wired": not_wired,
             "surfaces": surfaces,

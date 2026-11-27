@@ -209,6 +209,9 @@ fn status_reports_snapshot_fields_capabilities_and_age() {
     assert_eq!(response["silent"], json!(false));
     assert_eq!(response["safe_mode"], json!(false));
     assert_eq!(response["mode"], json!("aes67"));
+    // 没有已 commit 方案：readback 可读性为 false + 原因，不拿默认布局冒充当前值。
+    assert_eq!(response["readback"]["available"], json!(false));
+    assert!(response["readback"]["reason"].is_string(), "{response}");
     assert_eq!(response["wired"], expected_wired());
     assert_calibration_disabled(&response);
     // 没有已生效方案：图字段为 null 且必须给原因，不允许编数。
@@ -401,11 +404,13 @@ fn prepare_then_commit_switches_graph_at_block_boundary() {
     assert_eq!(committed["all_ack"], json!(true));
     assert_eq!(committed["graph_id"], prepared["graph_id"]);
 
-    // 块边界前：图还没生效（status 如实报 null + switch_pending）。
+    // 块边界前：图还没生效（status 如实报 null + switch_pending；readback 说明还没有已生效方案）。
     harness.publish();
     let status = harness.call_json(&json!({"op": "status"}));
     assert_eq!(status["actual_version"], Value::Null);
     assert_eq!(status["switch_pending"], json!(true));
+    assert_eq!(status["readback"]["available"], json!(true));
+    assert_eq!(status["readback"]["source"], json!("base_plan"));
 
     // 跑一块 -> 图在本块入口生效。
     harness.run_blocks(1);
@@ -415,6 +420,39 @@ fn prepare_then_commit_switches_graph_at_block_boundary() {
     assert_eq!(status["epoch"], json!(1));
     assert_eq!(status["blocks"], json!(1));
     assert_eq!(status["switch_pending"], json!(false));
+
+    // readback：已生效方案的只读语义（不是系数确认）；只暴露 UI 当前值需要的小字段。
+    let readback = &status["readback"];
+    assert_eq!(readback["available"], json!(true), "{status}");
+    assert_eq!(readback["source"], json!("base_plan"));
+    assert_eq!(readback["sample_rate"], json!(SAMPLE_RATE));
+    assert_eq!(readback["block_size"], json!(BLOCK_FRAMES));
+    assert_eq!(readback["content"]["in_channels"], json!(CHANNELS));
+    assert_eq!(readback["content"]["out_lanes"], json!(CHANNELS));
+    assert_eq!(
+        readback["content"]["folds"].as_array().map(Vec::len),
+        Some(CHANNELS)
+    );
+    assert_eq!(readback["crossover"]["lanes"], json!(CHANNELS));
+    assert_eq!(readback["crossover"]["filters"][0]["taps"], json!(1));
+    assert_eq!(readback["matrix"]["rows"], json!(CHANNELS));
+    assert_eq!(readback["matrix"]["cols"], json!(CHANNELS));
+    assert_eq!(readback["matrix"]["decimation"], json!(1));
+    assert_eq!(readback["protection"]["lanes"], json!(CHANNELS));
+    assert_eq!(readback["protection"]["entries"][0]["gain_db"], json!(0.0));
+    assert_eq!(readback["routing"]["dac_channels"], json!(CHANNELS));
+    assert_eq!(
+        readback["routing"]["routes"][0],
+        json!({"lane": 0, "dac": 0})
+    );
+    assert!(
+        readback["matrix"].get("coeffs").is_none(),
+        "readback must not copy matrix coeffs"
+    );
+    assert!(
+        readback["crossover"]["filters"][0].get("coeffs").is_none(),
+        "readback must not copy FIR coeffs"
+    );
 
     // coeff 报真实版本与可回滚列表。
     let coeff = harness.call_json(&json!({"op": "coeff"}));
