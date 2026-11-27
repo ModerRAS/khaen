@@ -344,8 +344,15 @@ pub const JOB_KIND_SINGLE_POINT_RT_HOST: &str = "single_point_rt_host";
 pub const OFFLINE_JOB_STEPS: [&str; 5] = ["validate", "compile", "levels", "closed_loop", "bundle"];
 
 /// rt-host 真实测量 job 的步骤顺序（如实映射 khaen_calibration::job::SINGLE_POINT_RT_HOST_PLAN：
-/// validate -> sweep_capture -> quality_check -> bundle；本切片不包含 solve/apply）。
-pub const RT_HOST_JOB_STEPS: [&str; 4] = ["validate", "sweep_capture", "quality_check", "bundle"];
+/// validate -> sweep_capture -> quality_check -> solve_g -> bundle；C3b2a 只产出 design，
+/// plan compile/apply 属 C3b2b）。
+pub const RT_HOST_JOB_STEPS: [&str; 5] = [
+    "validate",
+    "sweep_capture",
+    "quality_check",
+    "solve_g",
+    "bundle",
+];
 
 /// 按 job 种类取步骤名（REST 步骤/索引重建共用；未知 kind 按离线步骤，调用方各自校验 kind）。
 pub fn job_step_names(kind: &str) -> &'static [&'static str] {
@@ -1046,7 +1053,13 @@ mod tests {
         );
         assert_eq!(
             RT_HOST_JOB_STEPS,
-            ["validate", "sweep_capture", "quality_check", "bundle"]
+            [
+                "validate",
+                "sweep_capture",
+                "quality_check",
+                "solve_g",
+                "bundle"
+            ]
         );
         assert_eq!(
             job_step_names(JOB_KIND_SINGLE_POINT_RT_HOST),

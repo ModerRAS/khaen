@@ -32,16 +32,18 @@ pub const MAX_UPLOAD_BYTES: u64 = 64 * 1024 * 1024;
 /// 上传接受的 Content-Type（去掉参数后的小写 essence）。
 pub const UPLOAD_CONTENT_TYPES: [&str; 2] = ["application/octet-stream", "audio/wav"];
 /// 产物白名单：REST 只暴露这些名字（其余 404）。
-pub const ARTIFACT_WHITELIST: [&str; 8] = [
+pub const ARTIFACT_WHITELIST: [&str; 9] = [
     "report.json",
     "artifacts.manifest.json",
     "plan.bin",
     "levels.json",
     "predicted.json",
     "observed.json",
-    // C3b1：rt-host 真实测量 job 的证据产物（offline job 不会产生这两个名字）。
+    // C3b1：rt-host 真实测量 job 的证据产物（offline job 不会产生这些名字）。
     "measurement.json",
     "quality.json",
+    // C3b2a：rt-host cal_solve 的单点设计回执（predicted-only，不是可应用 plan）。
+    "design.json",
 ];
 
 /// 上传 id / 内容 sha256 是否是合法的 64 位小写十六进制。
@@ -324,6 +326,9 @@ mod tests {
         assert!(!is_whitelisted_artifact("../../auth.json"));
         assert!(!is_safe_artifact_name("../report.json"));
         assert!(!is_safe_artifact_name("sub/report.json"));
+        // C3b2a：cal_solve 的设计证据可下载（offline job 不会产生这个名字）。
+        assert!(is_whitelisted_artifact("design.json"));
+        assert_eq!(artifact_content_type("design.json"), "application/json");
         assert_eq!(artifact_content_type("report.json"), "application/json");
         assert_eq!(
             artifact_content_type("plan.bin"),

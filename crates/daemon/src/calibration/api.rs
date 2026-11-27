@@ -1065,7 +1065,7 @@ fn job_reasons(record: &JobRecord) -> Map<String, Value> {
         record.verdict.is_none(),
         if rt_host {
             format!(
-                "job is {state}: a real measurement job reports no PASS in this slice (quality/verdict arrive with C3b2); quality.json records available:false with the reason"
+                "job is {state}: a real measurement job reports no PASS (a closed-loop quality verdict is not wired yet; quality.json records available:false with the reason); design.json is a predicted-only design, never a measured PASS"
             )
         } else {
             format!("job is {state}: the verdict is produced by the closed_loop stage")
@@ -1129,7 +1129,7 @@ fn job_reasons(record: &JobRecord) -> Map<String, Value> {
         record.result.is_none(),
         if rt_host {
             format!(
-                "job is {state}: rt-host measurement jobs have no closed-loop comparison result in this slice (solve/apply arrive with C3b2); measurement evidence is in measurement.json/quality.json/report.json"
+                "job is {state}: rt-host measurement jobs have no closed-loop comparison result (a solve design is in design.json; plan compile/apply is not wired — C3b2b); measurement evidence is in measurement.json/quality.json/design.json/report.json"
             )
         } else {
             format!(

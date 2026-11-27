@@ -50,7 +50,8 @@ use khaen_core::plan::Plan;
 
 use super::mic::{MicProfile, MicProfileStore};
 use super::rt_host_backend::{
-    RtHostJobBackend, RtHostJobConfig, MEASUREMENT_ARTIFACT, QUALITY_ARTIFACT, REPORT_ARTIFACT,
+    RtHostJobBackend, RtHostJobConfig, DESIGN_ARTIFACT, MEASUREMENT_ARTIFACT, QUALITY_ARTIFACT,
+    REPORT_ARTIFACT,
 };
 use super::service::{
     job_step_names, AppliedVersion, ApplyPlan, ApplyState, ArtifactInfo, BandResult,
@@ -103,10 +104,14 @@ const EXPOSED_ARTIFACTS_OFFLINE: [(&str, &str); 4] = [
     ("report.json", CLOSED_LOOP_REPORT_FILE),
 ];
 
-/// 白名单产物：REST 名字 -> rt-host 真实测量 job 相对路径（C3b1）。
-const EXPOSED_ARTIFACTS_RT_HOST: [(&str, &str); 3] = [
+/// 白名单产物：REST 名字 -> rt-host 真实测量 job 相对路径（C3b1 测量 + C3b2a solve）。
+///
+/// design.json 是 cal_solve 的真实回执（predicted-only 设计，不是可应用 plan），
+/// 单独暴露给 REST；plan compile/apply 属 C3b2b。
+const EXPOSED_ARTIFACTS_RT_HOST: [(&str, &str); 4] = [
     ("measurement.json", MEASUREMENT_ARTIFACT),
     ("quality.json", QUALITY_ARTIFACT),
+    ("design.json", DESIGN_ARTIFACT),
     ("report.json", REPORT_ARTIFACT),
 ];
 
@@ -837,7 +842,7 @@ impl JobManagerCalibration {
             );
             reasons.insert(
                 "result".to_string(),
-                "this job records a real rt-host measurement only: no closed-loop comparison result exists in this slice (solve/apply and the quality verdict arrive with C3b2)".to_string(),
+                "this job records a real rt-host measurement plus a single-point design (design.json, verdict PREDICTED_ONLY); it does not run a closed-loop comparison and produces no applicable plan (plan compile/apply is C3b2b), so result stays null".to_string(),
             );
             if job.verdict.is_none() {
                 reasons.insert(
@@ -1186,7 +1191,7 @@ impl CalibrationService for JobManagerCalibration {
         if job.kind == JOB_KIND_SINGLE_POINT_RT_HOST {
             return Err(CalibrationError::plan_unavailable(
                 job_id,
-                "rt-host measurement jobs record measurement evidence only (measurement.json/quality.json/report.json); solve/apply is not wired in this slice (C3b2), so there is no applicable plan",
+                "rt-host measurement jobs now record a predicted-only design (design.json), but plan compile/apply (an applicable plan) is not wired in this slice (C3b2b), so there is no applicable plan",
             ));
         }
         let plan = job.plan.as_ref().ok_or_else(|| {
@@ -1334,7 +1339,7 @@ impl CalibrationService for JobManagerCalibration {
 /// （不产生可应用方案），任何真实调用仍 fail-closed，绝不静默假装恢复。
 struct RemoteCalibrationSafety;
 
-const REMOTE_CALIBRATION_DEVICE_ERROR: &str = "rt-host measurement jobs never apply a plan: restore_last_good/safe mute are not available in this slice (C3b2)";
+const REMOTE_CALIBRATION_DEVICE_ERROR: &str = "rt-host measurement jobs never apply a plan: plan compile/apply is not wired in this slice (C3b2b), so restore_last_good/safe mute cannot be reached";
 
 impl SafeOutputController for RemoteCalibrationSafety {
     fn acquire_calibration_owner(&self) -> Result<(), SafetyError> {
@@ -1769,6 +1774,7 @@ fn stage_sha(job: &PersistedJob, step: &str) -> Option<String> {
         match step {
             "sweep_capture" => MEASUREMENT_ARTIFACT,
             "quality_check" => QUALITY_ARTIFACT,
+            "solve_g" => DESIGN_ARTIFACT,
             "bundle" => REPORT_ARTIFACT,
             _ => return None,
         }

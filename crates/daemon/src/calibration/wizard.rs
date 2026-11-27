@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
+use super::rt_host_backend::DESIGN_ARTIFACT;
 use super::service::{
     CalibrationError, CalibrationStatus, JobRecord, JobState, JOB_KIND_SINGLE_POINT_RT_HOST,
 };
@@ -1013,21 +1014,28 @@ pub(crate) fn derive_state(inputs: WizardStateInputs<'_>) -> Value {
         let last = inputs.last_job;
         steps.push(measurement_step(last, inputs.measurement));
         if last.is_some_and(|job| job.kind == JOB_KIND_SINGLE_POINT_RT_HOST) {
-            // C3b1 只做真实测量：solve/design/apply 属 C3b2。这里必须如实报能力缺口，
-            // 不能因为测量成功就把分析/设计/应用标成 passed（那会假装有可应用 plan）。
-            for (step_number, key, label) in [
-                (6usize, "analysis", "analysis"),
-                (7, "design", "design"),
-                (8, "review_apply", "apply"),
+            // C3b2a：solve_g 已接线，succeeded 的 rt-host job 会产出 design.json（predicted-only
+            // 设计，不是实测 PASS）；plan compile/apply 仍属 C3b2b，所以第 7/8 步保持
+            // not_available——不能因为测量成功就假装有可应用 plan，也不能把设计当成 PASS。
+            steps.push(rt_host_analysis_step(last));
+            for (step_number, key, reason) in [
+                (
+                    7usize,
+                    "design",
+                    "the real rt-host job produces a predicted-only design (design.json), but plan compile (turning the design into an applicable plan) is not implemented yet (C3b2b); nothing applicable exists to review",
+                ),
+                (
+                    8,
+                    "review_apply",
+                    "there is no applicable plan in this slice (plan compile/apply: C3b2b); design.json is predicted-only and must not be applied, so there is nothing to review or apply",
+                ),
             ] {
                 steps.push(step(
                     step_number,
                     key,
                     "not_available",
-                    json!(format!(
-                        "real rt-host measurement is wired, but {label} (solve/plan/apply) is not implemented yet (C3b2); no plan exists to review or apply"
-                    )),
-                    json!("C3b2"),
+                    json!(reason),
+                    json!("C3b2b"),
                 ));
             }
         } else {
@@ -1160,6 +1168,65 @@ fn measurement_step(last_job: Option<&JobRecord>, measurement: &MeasurementDraft
                 job.job_id,
                 job.state.as_str()
             )),
+            Value::Null,
+        ),
+    }
+}
+
+/// rt-host 真实测量 job 的第 6 步（analysis）。
+///
+/// C3b2a 的 solve_g 在真实测量成功后调用 rt-host cal_solve，并落 design.json（真实的
+/// predicted-only 单点设计）。只有 job succeeded 且 design artifact 真实存在才 passed；
+/// reason 必须说明「PREDICTED_ONLY 不是实测 PASS」且 plan compile/apply 仍属 C3b2b。
+/// job 未成功 -> blocked（可重试）；succeeded 却没有 design.json -> not_available（如实
+/// 报证据缺口，不拿测量成功冒充分析结果）。
+fn rt_host_analysis_step(last_job: Option<&JobRecord>) -> Value {
+    match last_job {
+        Some(job) if job.state == JobState::Succeeded => {
+            if job
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.name == DESIGN_ARTIFACT)
+            {
+                step(
+                    6,
+                    "analysis",
+                    "passed",
+                    json!(format!(
+                        "job {} produced design.json (a single-point FIR design from the real measurement); its verdict is PREDICTED_ONLY, which is not a measured PASS, and plan compile/apply (C3b2b) is still missing",
+                        job.job_id
+                    )),
+                    Value::Null,
+                )
+            } else {
+                step(
+                    6,
+                    "analysis",
+                    "not_available",
+                    json!(format!(
+                        "job {} succeeded but has no design.json artifact: solve_g produced no design evidence, so the analysis stays unavailable instead of claiming a result",
+                        job.job_id
+                    )),
+                    json!("C3b2b"),
+                )
+            }
+        }
+        Some(job) => step(
+            6,
+            "analysis",
+            "blocked",
+            json!(format!(
+                "job {} is {}: analysis requires a succeeded real-measurement job (its solve_g stage produces design.json)",
+                job.job_id,
+                job.state.as_str()
+            )),
+            Value::Null,
+        ),
+        None => step(
+            6,
+            "analysis",
+            "blocked",
+            json!("no calibration job yet: the analysis is produced by the solve_g stage of a real-measurement job"),
             Value::Null,
         ),
     }
@@ -1507,7 +1574,7 @@ mod tests {
     }
 
     #[test]
-    fn rt_host_measurement_job_passes_step5_and_marks_solve_steps_not_available() {
+    fn rt_host_measurement_job_passes_step5_and_shows_design_evidence() {
         let status = json!({
             "device": {"state": "present"},
             "format": {"rate_asserted": true, "channels": 22},
@@ -1544,7 +1611,12 @@ mod tests {
             progress: Some(1.0),
             engine: Some("real_audio".into()),
             steps: Vec::new(),
-            artifacts: Vec::new(),
+            artifacts: vec![super::super::service::ArtifactInfo {
+                name: "design.json".into(),
+                sha256: "d".repeat(64),
+                bytes: 2048,
+                content_type: None,
+            }],
             inputs: None,
             result: None,
             error: None,
@@ -1565,15 +1637,60 @@ mod tests {
         assert!(state["steps"][4]["reason"]
             .as_str()
             .is_some_and(|reason| reason.contains("real rt-host measurement job")));
-        // C3b1 只做测量：solve/design/apply 必须如实是能力缺口，不能因为 job succeeded 就放行。
-        for index in 5..8 {
+        // C3b2a：第 6 步（analysis）只在 job succeeded 且 design.json 真实存在时放行，
+        // 且必须写明 PREDICTED_ONLY 不是实测 PASS。
+        assert_eq!(state["steps"][5]["status"], json!("passed"), "{state}");
+        let reason = state["steps"][5]["reason"]
+            .as_str()
+            .expect("analysis reason");
+        assert!(reason.contains("design.json"), "{reason}");
+        assert!(reason.contains("PREDICTED_ONLY"), "{reason}");
+        assert_eq!(state["steps"][5]["task"], Value::Null, "{state}");
+        // 第 7/8 步（plan compile/apply）仍是能力缺口（C3b2b），不因测量/设计成功而放行。
+        for index in 6..8 {
             assert_eq!(
                 state["steps"][index]["status"],
                 json!("not_available"),
                 "{state}"
             );
-            assert_eq!(state["steps"][index]["task"], json!("C3b2"), "{state}");
+            assert_eq!(state["steps"][index]["task"], json!("C3b2b"), "{state}");
         }
+
+        // job succeeded 但没有 design.json：第 6 步如实 not_available（不拿测量成功冒充分析）。
+        let mut without_design = job.clone();
+        without_design.artifacts.clear();
+        let state = derive_state(WizardStateInputs {
+            status: &status,
+            control_status: &control,
+            calibration: &calibration,
+            last_job: Some(&without_design),
+            stored: &stored,
+            measurement: &measurement,
+            updated_at: "2026-01-01T00:00:00Z",
+        });
+        assert_eq!(
+            state["steps"][5]["status"],
+            json!("not_available"),
+            "{state}"
+        );
+        assert_eq!(state["steps"][5]["task"], json!("C3b2b"), "{state}");
+        assert!(state["steps"][5]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("no design.json")));
+
+        // job 未成功：第 6 步 blocked（可重试），不提前放行。
+        let mut running = job.clone();
+        running.state = JobState::Running;
+        let state = derive_state(WizardStateInputs {
+            status: &status,
+            control_status: &control,
+            calibration: &calibration,
+            last_job: Some(&running),
+            stored: &stored,
+            measurement: &measurement,
+            updated_at: "2026-01-01T00:00:00Z",
+        });
+        assert_eq!(state["steps"][5]["status"], json!("blocked"), "{state}");
     }
 
     #[test]

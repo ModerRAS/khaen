@@ -1,14 +1,17 @@
-//! C3b1：daemon rt-host 真实测量 job（single_point_rt_host）端到端测试。
+//! C3b1 + C3b2a：daemon rt-host 真实测量 job（single_point_rt_host）端到端测试。
 //!
 //! 走真实 TCP + 真实 axum 服务 + 真实 JobManager/daemon 审计索引；rt-host 侧用脚本化
 //! FakeTransport（逐 op 断言 daemon 到底发了什么），因此不需要设备、不出声、可并行跑。
 //!
 //! 覆盖：
 //! - 成功：validate 预检 -> cal_enter（带 MicProfile 的 mic 覆盖）-> cal_measure（异步
-//!   accepted）-> 轮询 cal_status（measuring -> done）-> cal_leave，job succeeded；
-//!   measurement.json/quality.json/report.json 内容与 sha 真实（verdict 不伪造 PASS）、
-//!   cal_leave 恰好一次、请求顺序可断言；
+//!   accepted）-> 轮询 cal_status（measuring -> done）-> cal_solve（C3b2a，落 design.json）
+//!   -> bundle 里 cal_leave，job succeeded；measurement.json/quality.json/design.json/
+//!   report.json 内容与 sha 真实（design 逐字段拷贝 cal_solve 回执、verdict 是
+//!   PREDICTED_ONLY 不是 PASS）、成功路径 cal_leave 恰好一次、请求顺序可断言；
 //! - measurement failed -> job failed + cal_leave；
+//! - cal_solve 被 rt-host 拒绝 -> job failed + 原业务码 + cal_leave + 无 design.json；
+//! - cal_solve 回执畸形（缺 design 对象）-> job failed + 稳定码 E_CAL_SOLVE + cal_leave；
 //! - 取消 -> job cancelled + cal_leave；
 //! - cal_status 回执畸形 -> job failed + 稳定码 E_CAL_STATUS + cal_leave；
 //! - 无 MicProfile -> 创建 409 mic_profile_missing，不排队假 job、不发任何 cal op；
@@ -163,6 +166,62 @@ fn leave_reply() -> Value {
     json!({ "ok": true, "left": true, "mode": "playback" })
 }
 
+/// rt-host cal_solve 回执（形状与 crates/rt-host/src/control/cal/mod.rs::solve 同源）：
+/// 不提交、applied=false、verdict=PREDICTED_ONLY；design 是真实设计对象（测试只做拷贝断言）。
+fn solve_reply() -> Value {
+    json!({
+        "ok": true,
+        "applied": false,
+        "verdict": "PREDICTED_ONLY",
+        "design": {
+            "schema": "khaen-rt-host.cal-design/v1",
+            "ok": true,
+            "applied": false,
+            "verdict": "PREDICTED_ONLY",
+            "measure_id": MEASURE_ID,
+            "pass": 1,
+            "session_id": SESSION,
+            "simulated": false,
+            "mode": "single_point_fir",
+            "layout": "single_point",
+            "channels": 2,
+            "target": "flat",
+            "engine": "in-process",
+            "measurement_quality": measurement_summary(),
+            "lanes": [
+                {
+                    "label": "L",
+                    "slot": 0,
+                    "lane": 0,
+                    "playback_channel": 0,
+                    "ir_samples": 256,
+                    "ir_peak_index": 12,
+                    "repeats_averaged": 1,
+                    "taps": 128,
+                    "discarded_peq_sections": 0,
+                }
+            ],
+            "plan": {
+                "path": "/var/lib/khaen/cal/cal-000001-pass01/solve/plan.bin",
+                "report_path": "/var/lib/khaen/cal/cal-000001-pass01/solve/plan-report.json",
+                "sha256": "b".repeat(64),
+                "graph_id": "rt-cal-solve-1",
+                "bytes": 4096,
+                "block_size": 128,
+                "sample_rate": 48_000,
+                "channels": 2,
+            },
+            "admission": { "accepted": true, "summary": "accepted" },
+            "graph_compile": "ok",
+            "apply": {
+                "supported": false,
+                "reason": "cal_solve never commits: load plan.bin through the prepare/commit control channel when you decide to apply it",
+            },
+        },
+        "note": "design artifacts were written next to the measurement; nothing was committed to the running data plane",
+    })
+}
+
 fn failed_status_doc() -> Value {
     let mut document = status_doc("failed", Some(MEASURE_ID), Some(SESSION));
     document["measure"]["error"] = json!({
@@ -301,6 +360,7 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
     transport.push_reply(measure_accepted_reply()); // cal_measure
     transport.push_reply(status_doc("measuring", Some(MEASURE_ID), Some(SESSION))); // poll 1
     transport.push_reply(status_doc("done", Some(MEASURE_ID), Some(SESSION))); // poll 2
+    transport.push_reply(solve_reply()); // cal_solve (C3b2a)
     transport.push_reply(leave_reply()); // cal_leave
     let (server, _dir) = spawn_with_rt_host(&transport).await;
     let profile = save_mic_profile(&server).await;
@@ -327,7 +387,7 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
         json!({ "audible": true, "channels": [0, 1], "level_dbfs": -12.0 })
     );
 
-    // 4 个真实步骤 + 产物 sha（不编造时间戳，sha 来自 artifact ledger）。
+    // 5 个真实步骤（C3b2a 多了 solve_g）+ 产物 sha（不编造时间戳，sha 来自 artifact ledger）。
     let steps = job["steps"].as_array().expect("steps");
     let names: Vec<&str> = steps
         .iter()
@@ -335,7 +395,13 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
         .collect();
     assert_eq!(
         names,
-        ["validate", "sweep_capture", "quality_check", "bundle"],
+        [
+            "validate",
+            "sweep_capture",
+            "quality_check",
+            "solve_g",
+            "bundle"
+        ],
         "{body}"
     );
     assert!(
@@ -346,13 +412,16 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
     );
     let measurement = artifact(&body, "measurement.json");
     let quality = artifact(&body, "quality.json");
+    let design = artifact(&body, "design.json");
     let report = artifact(&body, "report.json");
     assert_eq!(steps[1]["sha256"], measurement["sha256"]);
     assert_eq!(steps[2]["sha256"], quality["sha256"]);
-    assert_eq!(steps[3]["sha256"], report["sha256"]);
+    assert_eq!(steps[3]["sha256"], design["sha256"]);
+    assert_eq!(steps[4]["sha256"], report["sha256"]);
     for name in [
         "measurement.json",
         "quality.json",
+        "design.json",
         "report.json",
         "artifacts.manifest.json",
     ] {
@@ -412,7 +481,29 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
         measurement["sha256"].clone()
     );
 
-    // report.json：真实 job id/measure_id/artifact sha；verdict 恒 null（solve/apply 属 C3b2）。
+    // design.json：cal_solve 回执逐字段拷贝（design/verdict/note），身份是 daemon 写的
+    // job_id + 本次测量的 measure_id；verdict=PREDICTED_ONLY，绝不伪造 PASS/可应用方案。
+    let response = download(&server, &job_id, "design.json").await;
+    assert_eq!(response.status, 200, "{}", response.body_text());
+    assert_eq!(
+        response.header("x-khaen-artifact-sha256"),
+        design["sha256"].as_str()
+    );
+    let design_json = response.json();
+    assert_eq!(
+        design_json["schema"],
+        json!("khaen-calibration-rt-host-design/v1")
+    );
+    assert_eq!(design_json["job_id"], json!(job_id));
+    assert_eq!(design_json["measure_id"], json!(MEASURE_ID));
+    let solve = solve_reply();
+    assert_eq!(design_json["design"], solve["design"]);
+    assert_eq!(design_json["verdict"], json!("PREDICTED_ONLY"));
+    assert_eq!(design_json["note"], solve["note"]);
+    assert_eq!(design_json["design"]["applied"], json!(false));
+
+    // report.json：真实 job id/measure_id/artifact sha；verdict 恒 null（design 只是
+    // predicted-only 证据，plan compile/apply 属 C3b2b）。
     let response = download(&server, &job_id, "report.json").await;
     assert_eq!(response.status, 200, "{}", response.body_text());
     let report_json = response.json();
@@ -430,13 +521,20 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
     );
     assert_eq!(report_json["artifacts"][0]["sha256"], measurement["sha256"]);
     assert_eq!(report_json["artifacts"][1]["sha256"], quality["sha256"]);
+    assert_eq!(report_json["artifacts"][2]["name"], json!("design.json"));
+    assert_eq!(report_json["artifacts"][2]["sha256"], design["sha256"]);
+    // design 只汇总真实回执的 sha/verdict/applied；verdict 仍不是 job 级 PASS。
+    assert_eq!(report_json["design"]["available"], json!(true));
+    assert_eq!(report_json["design"]["sha256"], design["sha256"]);
+    assert_eq!(report_json["design"]["verdict"], json!("PREDICTED_ONLY"));
+    assert_eq!(report_json["design"]["applied"], json!(false));
+    // 成功路径的 leave 只在 bundle 发生一次。
     assert_eq!(report_json["cal_leave"]["ok"], json!(true));
-    assert_eq!(
-        report_json["cal_leave"]["issued_by"],
-        json!("sweep_capture")
-    );
+    assert_eq!(report_json["cal_leave"]["issued_by"], json!("bundle"));
+    assert_eq!(report_json["cal_leave"]["issued_in_bundle"], json!(true));
 
-    // 请求顺序与 cal_leave 次数：成功路径只 leave 一次，参数带真实 MicProfile。
+    // 请求顺序与 cal_leave 次数：cal_solve 在校准模式内、leave 之前；成功路径只 leave
+    // 一次，参数带真实 MicProfile。
     assert_eq!(
         ops(&transport),
         [
@@ -445,6 +543,7 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
             "cal_measure",
             "cal_status",
             "cal_status",
+            "cal_solve",
             "cal_leave"
         ]
     );
@@ -463,8 +562,13 @@ async fn success_job_records_real_measurement_and_leaves_exactly_once() {
     assert_eq!(enter["channels"], json!([0, 1]));
     assert_eq!(enter["level_dbfs"], json!(-12.0));
     assert_eq!(calls[2]["audible"], json!(true));
+    // cal_solve 在 measurement done 之后、cal_leave 之前，且显式给 rt-host 的默认目标 flat。
+    assert_eq!(calls[5]["op"], json!("cal_solve"));
+    assert_eq!(calls[5]["target"], json!("flat"));
+    assert_eq!(calls[6]["op"], json!("cal_leave"));
 
-    // apply 在本切片必须如实拒绝（没有可应用方案；不冒充已接 solve/apply）。
+    // apply 在本切片必须如实拒绝（只产 predicted-only design，没有可应用 plan；
+    // plan compile/apply 属 C3b2b）。
     let response =
         support::request_json(&server, "POST", &format!("{JOBS}/{job_id}/apply"), "{}").await;
     assert_eq!(response.status, 409, "{}", response.body_text());
@@ -561,15 +665,17 @@ async fn cancel_during_polling_cancels_job_and_leaves() {
         ops(&transport).last().map(String::as_str),
         Some("cal_leave")
     );
-    // 取消没有产生伪造测量证据。
-    assert!(
-        job["artifacts"]
-            .as_array()
-            .expect("artifacts")
-            .iter()
-            .all(|artifact| artifact["name"] != json!("measurement.json")),
-        "{job}"
-    );
+    // 取消发生在轮询阶段（solve 之前）：没有伪造测量/设计证据。
+    for name in ["measurement.json", "design.json"] {
+        assert!(
+            job["artifacts"]
+                .as_array()
+                .expect("artifacts")
+                .iter()
+                .all(|artifact| artifact["name"] != json!(name)),
+            "{name}: {job}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -595,6 +701,102 @@ async fn malformed_cal_status_fails_job_with_stable_code_and_leaves() {
     assert_eq!(job["status"], json!("failed"), "{body}");
     assert_eq!(job["error"]["code"], json!("E_CAL_STATUS"), "{body}");
     assert_eq!(count_op(&transport, "cal_leave"), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cal_solve_error_fails_job_and_still_leaves_without_design() {
+    let transport = FakeTransport::new();
+    transport.push_reply(status_doc("idle", None, None)); // validate probe
+    transport.push_reply(status_doc("idle", None, None)); // cal_enter
+    transport.push_reply(measure_accepted_reply()); // cal_measure
+    transport.push_reply(status_doc("done", Some(MEASURE_ID), Some(SESSION))); // poll -> done
+                                                                               // cal_solve 被 rt-host 拒绝：业务错误码原样进 job.error.code，不伪造 design。
+    transport.push_error_reply("solve_failed", "target FIR design failed for L (channel 0)");
+    transport.push_reply(leave_reply()); // solve_g 失败路径尽早 cal_leave
+    let (server, _dir) = spawn_with_rt_host(&transport).await;
+    save_mic_profile(&server).await;
+    let created = create_job(&server, create_body()).await;
+    assert_eq!(created.status, 202, "{}", created.body_text());
+    let job_id = created.json()["job_id"]
+        .as_str()
+        .expect("job_id")
+        .to_string();
+
+    let body = wait_terminal(&server, &job_id).await;
+    let job = &body["job"];
+    assert_eq!(job["status"], json!("failed"), "{body}");
+    assert_eq!(job["error"]["code"], json!("solve_failed"), "{body}");
+    let message = job["error"]["message"].as_str().expect("error message");
+    assert!(message.contains("target FIR"), "{message}");
+    // 步骤如实：measurement 成功，solve_g 失败，bundle 未跑。
+    let steps = job["steps"].as_array().expect("steps");
+    assert_eq!(steps.len(), 5, "{steps:?}");
+    assert_eq!(steps[1]["status"], json!("succeeded"));
+    assert_eq!(steps[2]["status"], json!("succeeded"));
+    assert_eq!(steps[3]["name"], json!("solve_g"));
+    assert_eq!(steps[3]["status"], json!("failed"), "{steps:?}");
+    assert_eq!(steps[4]["status"], json!("pending"));
+    // 失败路径同样交还设备且只 leave 一次（solve_g 之后、job 结束前）。
+    assert_eq!(count_op(&transport, "cal_leave"), 1);
+    assert_eq!(
+        ops(&transport).last().map(String::as_str),
+        Some("cal_leave")
+    );
+    // 没有设计证据被伪造；真实测量证据保留。
+    assert!(
+        job["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .all(|artifact| artifact["name"] != json!("design.json")),
+        "{job}"
+    );
+    assert!(
+        job["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .any(|artifact| artifact["name"] == json!("measurement.json")),
+        "{job}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_cal_solve_reply_fails_with_e_cal_solve_without_design() {
+    let transport = FakeTransport::new();
+    transport.push_reply(status_doc("idle", None, None)); // validate probe
+    transport.push_reply(status_doc("idle", None, None)); // cal_enter
+    transport.push_reply(measure_accepted_reply()); // cal_measure
+    transport.push_reply(status_doc("done", Some(MEASURE_ID), Some(SESSION))); // poll -> done
+                                                                               // 回执是 ok，但缺 design 对象：稳定码 E_CAL_SOLVE，不补一个假 design。
+    transport.push_reply(json!({ "ok": true, "applied": false, "verdict": "PREDICTED_ONLY" }));
+    transport.push_reply(leave_reply()); // solve_g 失败路径尽早 cal_leave
+    let (server, _dir) = spawn_with_rt_host(&transport).await;
+    save_mic_profile(&server).await;
+    let created = create_job(&server, create_body()).await;
+    assert_eq!(created.status, 202, "{}", created.body_text());
+    let job_id = created.json()["job_id"]
+        .as_str()
+        .expect("job_id")
+        .to_string();
+
+    let body = wait_terminal(&server, &job_id).await;
+    let job = &body["job"];
+    assert_eq!(job["status"], json!("failed"), "{body}");
+    assert_eq!(job["error"]["code"], json!("E_CAL_SOLVE"), "{body}");
+    let message = job["error"]["message"].as_str().expect("error message");
+    assert!(message.contains("design"), "{message}");
+    assert_eq!(job["steps"][3]["name"], json!("solve_g"));
+    assert_eq!(job["steps"][3]["status"], json!("failed"), "{body}");
+    assert_eq!(count_op(&transport, "cal_leave"), 1);
+    assert!(
+        job["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .all(|artifact| artifact["name"] != json!("design.json")),
+        "{job}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -684,7 +886,9 @@ async fn leave_failure_after_successful_measurement_fails_job_with_e_cal_leave()
     transport.push_reply(status_doc("idle", None, None)); // cal_enter
     transport.push_reply(measure_accepted_reply()); // cal_measure
     transport.push_reply(status_doc("done", Some(MEASURE_ID), Some(SESSION))); // poll -> done
-                                                                               // cal_leave 被 rt-host 拒绝（业务错误不重试）：测量成功也不能声称设备已交还。
+    transport.push_reply(solve_reply()); // cal_solve succeeds (design.json is written)
+                                         // bundle 的 cal_leave 被 rt-host 拒绝（业务错误不重试）：
+                                         // 测量/设计成功也不能声称设备已交还。
     transport.push_error_reply("cal_internal", "cannot leave calibration mode right now");
     let (server, _dir) = spawn_with_rt_host(&transport).await;
     save_mic_profile(&server).await;
@@ -704,15 +908,17 @@ async fn leave_failure_after_successful_measurement_fails_job_with_e_cal_leave()
     assert!(message.contains("cal_internal"), "{message}");
     // cal_leave 不重试（C3a）：只尝试一次。
     assert_eq!(count_op(&transport, "cal_leave"), 1);
-    // 测量证据本身是真实的（done 之后才失败），但 job 不因测量成功而成功。
-    assert!(
-        job["artifacts"]
-            .as_array()
-            .expect("artifacts")
-            .iter()
-            .any(|artifact| artifact["name"] == json!("measurement.json")),
-        "{job}"
-    );
+    // 测量/设计证据本身是真实的（solve 成功后才在 bundle 失败），但 job 不因它们成功而成功。
+    for name in ["measurement.json", "design.json"] {
+        assert!(
+            job["artifacts"]
+                .as_array()
+                .expect("artifacts")
+                .iter()
+                .any(|artifact| artifact["name"] == json!(name)),
+            "{name}: {job}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

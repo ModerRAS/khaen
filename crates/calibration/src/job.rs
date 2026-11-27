@@ -100,10 +100,11 @@ impl fmt::Display for JobId {
 /// - `SinglePointOffline`（T70h-b）：离线闭环证据 job（PLAN §4.7）。输入是已上传的方案 +
 ///   两段 WAV（基线/施加），步骤 `validate -> compile -> levels -> closed_loop -> bundle`，
 ///   不打开设备、不跑 RT 图（真实测量采集属 T70f-c）。
-/// - `SinglePointRtHost`（C3b1）：真实单点测量 job。daemon 经 host link 驱动 rt-host 的
-///   `cal_enter -> cal_measure -> cal_status -> cal_leave`（真实设备/UMIK 采集），步骤
-///   `validate -> sweep_capture -> quality_check -> bundle`；本切片只产出真实测量证据，
-///   solve/apply（方案设计/应用）属 C3b2，job 不产出可应用方案、不报 PASS。
+/// - `SinglePointRtHost`（C3b1 + C3b2a）：真实单点测量 job。daemon 经 host link 驱动 rt-host 的
+///   `cal_enter -> cal_measure -> cal_status -> cal_solve -> cal_leave`（真实设备/UMIK 采集），
+///   步骤 `validate -> sweep_capture -> quality_check -> solve_g -> bundle`；本切片在测量成功后
+///   产出真实单点设计（design.json，verdict 恒 PREDICTED_ONLY），但不编译/应用方案（C3b2b），
+///   job 不产出可应用 plan、不报 PASS。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobKind {
     Full,
@@ -143,15 +144,18 @@ pub const SINGLE_POINT_OFFLINE_PLAN: [JobStage; 5] = [
     JobStage::Bundle,
 ];
 
-/// SinglePointRtHost 的 stage 顺序（C3b1：真实测量证据链，不跳步）。
+/// SinglePointRtHost 的 stage 顺序（C3b1 测量 + C3b2a solve：真实测量证据链，不跳步）。
 ///
 /// `validate`（MicProfile/rt-host 可用性/可闻授权）-> `sweep_capture`（rt-host cal_enter +
 /// cal_measure + 轮询 cal_status）-> `quality_check`（只搬 rt-host 真实质量字段；没有就写
-/// unavailable）-> `bundle`（报告 + manifest）。这里没有 compile/apply：本切片不产出可应用方案。
-pub const SINGLE_POINT_RT_HOST_PLAN: [JobStage; 4] = [
+/// unavailable）-> `solve_g`（校准模式下 `cal_solve`，落 predicted-only 的 design.json）
+/// -> `bundle`（幂等 cal_leave + 报告 + manifest）。这里没有 compile/apply：本切片只产出
+/// 设计证据，不产出可应用方案，也不报 PASS。
+pub const SINGLE_POINT_RT_HOST_PLAN: [JobStage; 5] = [
     JobStage::Validate,
     JobStage::SweepCapture,
     JobStage::QualityCheck,
+    JobStage::SolveG,
     JobStage::Bundle,
 ];
 
@@ -4131,9 +4135,16 @@ mod tests {
             .iter()
             .map(|stage| stage.as_str())
             .collect();
+        // C3b2a：测量成功后多一个 solve_g（cal_solve -> design.json），再 bundle（leave）。
         assert_eq!(
             names,
-            ["validate", "sweep_capture", "quality_check", "bundle"]
+            [
+                "validate",
+                "sweep_capture",
+                "quality_check",
+                "solve_g",
+                "bundle"
+            ]
         );
         // 真实测量会出声/采音：P08 要求显式可闻授权，缺少授权必须拒绝（fail-closed）。
         rt_host_request(true)
@@ -4151,6 +4162,7 @@ mod tests {
         assert!(JobStage::SweepCapture.needs_calibration_device());
         assert!(!JobStage::Validate.needs_calibration_device());
         assert!(!JobStage::QualityCheck.needs_calibration_device());
+        assert!(!JobStage::SolveG.needs_calibration_device());
         assert!(!JobStage::Bundle.needs_calibration_device());
     }
 
