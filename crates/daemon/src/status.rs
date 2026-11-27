@@ -331,8 +331,8 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
     // 不把状态文件/本地默认值当前值（文件 schema 没有，process 目标没有 rt-host）。
     let readback = readback_value(sources.link, &mut reasons);
 
-    // 只读能力/数据源固定缺口：与 rt-host 在不在线无关。
-    insert_reason(&mut reasons, "format.encoding", ENCODING_REASON);
+    // 编码：socket 主路径读 rt-host 自报的 format.encoding；file/process/旧 rt-host → null + 原因。
+    let format_encoding = format_encoding_value(source, sources.link, &mut reasons);
     for path in [
         "format.aes67.channels",
         "format.aes67.map",
@@ -534,7 +534,7 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
             "rate_asserted": rt.rate_asserted,
             "block_frames": block_frames,
             "channels": channels,
-            "encoding": Value::Null,
+            "encoding": format_encoding,
             "aes67": {
                 "channels": Value::Null,
                 "map": Value::Null,
@@ -559,6 +559,42 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         "not_wired": not_wired_entries(sources, socket_source, calibration_wired, &calibration_reason),
         "reasons": reasons,
     })
+}
+
+/// `format.encoding`：socket 主路径读 rt-host 自报的编码；其余来源 null + 原因。
+///
+/// 编码不是 daemon 能推断的（daemon 不打开 ALSA），状态文件 schema 也不落它；只有 rt-host
+/// 控制 status 的 format.encoding 是真实来源。拿不到就不编（不把 S24_3LE 写死成本地默认）。
+fn format_encoding_value(
+    source: Source,
+    link: &LinkSnapshot,
+    reasons: &mut Map<String, Value>,
+) -> Value {
+    if source == Source::Socket {
+        if let LinkSnapshot::Socket { status, .. } = link {
+            if let Some(encoding) = status
+                .get("format")
+                .and_then(|format| format.get("encoding"))
+                .and_then(Value::as_str)
+            {
+                return json!(encoding);
+            }
+            insert_reason(
+                reasons,
+                "format.encoding",
+                "rt-host control status does not report format.encoding (older rt-host?); update or restart rt-host",
+            );
+        }
+    } else if source == Source::File {
+        insert_reason(
+            reasons,
+            "format.encoding",
+            "rt-host status file (khaen-rt-status/v1) does not report the output encoding; only the control status op reports it",
+        );
+    } else {
+        insert_reason(reasons, "format.encoding", ENCODING_REASON);
+    }
+    Value::Null
 }
 
 /// 数据面块长/通道数：socket status 的 `format.block_size/channels` 是权威（rt-host 真正驱动
@@ -1750,7 +1786,7 @@ mod tests {
             "safe_mode": false,
             "actual_version": 7,
             "mode": "aes67",
-            "format": { "sample_rate": 48_000, "block_size": 256, "channels": 24 },
+            "format": { "sample_rate": 48_000, "block_size": 256, "channels": 24, "encoding": "S24_3LE" },
             "control_format": { "sample_rate": 48_000, "block_size": 256, "channels": 24 },
             "format_mismatch": false,
             "device_restart_required": false,
@@ -2048,7 +2084,11 @@ mod tests {
         assert_eq!(at(&body, "format.device_rate"), &json!(48_000));
         assert_eq!(at(&body, "format.rate_asserted"), &json!(true));
         assert_eq!(at(&body, "format.encoding"), &Value::Null);
-        assert_eq!(reason_of(&body, "format.encoding"), ENCODING_REASON);
+        assert!(
+            reason_of(&body, "format.encoding").contains("status file"),
+            "file 来源必须说明状态文件不落编码: {}",
+            reason_of(&body, "format.encoding")
+        );
         for path in [
             "format.aes67.channels",
             "format.aes67.map",
@@ -2394,6 +2434,12 @@ mod tests {
         assert_eq!(at(&body, "format.plan_rate"), &json!(48_000));
         assert_eq!(at(&body, "format.device_rate"), &json!(48_000));
         assert_eq!(at(&body, "format.rate_asserted"), &json!(true));
+        assert_eq!(at(&body, "format.encoding"), &json!("S24_3LE"));
+        assert!(
+            body["reasons"].get("format.encoding").is_none(),
+            "socket status 拿到真实编码，不该再登记缺口原因: {}",
+            body["reasons"]
+        );
 
         // counters：socket 模式还能拿到 output.out_errors（文件模式拿不到）。
         assert_eq!(at(&body, "input.packets"), &json!(111));

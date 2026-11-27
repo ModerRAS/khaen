@@ -879,6 +879,19 @@ impl ControlCore {
     // status / coeff
     // ---------------------------------------------------------------
 
+    /// status.format 的输出编码。
+    ///
+    /// rt-host 的 ALSA 输出后端固定把内部 f32 帧编码成 S24_3LE（见 host::alsa_backend）；
+    /// 这是数据面真实的线格式，不是从设备回读的“协商结果”。设备缺失时仍描述运行时会用的编码，
+    /// 但设备是否真的以该格式打开由 device/rate 字段另行如实上报。
+    fn status_format_json(config: &EngineConfig) -> Value {
+        let mut format = format_json(config);
+        if let Some(object) = format.as_object_mut() {
+            object.insert("encoding".to_string(), json!("S24_3LE"));
+        }
+        format
+    }
+
     fn status(&self) -> Value {
         let Some(snapshot) = self.snapshot() else {
             let mut reasons = Map::new();
@@ -902,8 +915,8 @@ impl ControlCore {
                 "actual_version": Value::Null,
                 "mode": self.mode.as_str(),
                 "readback": ControlState::plan_readback_json(self.base_plan.as_ref()),
-                "format": format_json(&self.engine_config),
-                "control_format": format_json(&self.engine_config),
+                "format": Self::status_format_json(&self.engine_config),
+                "control_format": Self::status_format_json(&self.engine_config),
                 "format_mismatch": false,
                 "device_restart_required": false,
                 "switch_pending": Value::Null,
@@ -993,8 +1006,8 @@ impl ControlCore {
             "actual_version": graph.version,
             "mode": self.mode.as_str(),
             "readback": ControlState::plan_readback_json(self.base_plan.as_ref()),
-            "format": format_json(&snapshot.format),
-            "control_format": format_json(&self.engine_config),
+            "format": Self::status_format_json(&snapshot.format),
+            "control_format": Self::status_format_json(&self.engine_config),
             "format_mismatch": format_mismatch,
             "device_restart_required": format_mismatch,
             "switch_pending": status.switch_pending,

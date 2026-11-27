@@ -228,6 +228,7 @@ fn status_reports_snapshot_fields_capabilities_and_age() {
     assert_eq!(response["format"]["sample_rate"], json!(SAMPLE_RATE));
     assert_eq!(response["format"]["block_size"], json!(BLOCK_FRAMES));
     assert_eq!(response["format"]["channels"], json!(CHANNELS));
+    assert_eq!(response["format"]["encoding"], json!("S24_3LE"));
     assert_eq!(response["control_format"], response["format"]);
     assert_eq!(response["format_mismatch"], json!(false));
     assert_eq!(response["device_restart_required"], json!(false));
