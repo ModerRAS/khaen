@@ -407,11 +407,23 @@ fn parse_rejects_request_shape_errors() {
         "device": { "channels": 8 },
         "inputs": { "sources": [{
             "kind": "device",
+            "enabled": true,
             "channels": [{ "channel": 8, "role": "L" }]
         }] }
     }))
-    .expect_err("input channel");
+    .expect_err("enabled input channel out of range");
     assert!(error.message.contains("outside"), "{error}");
+    // 禁用源不参与 plan：其通道标签可以暂时超出 inputs.channels（启用时再收敛）。
+    let parsed = AudioProfile::parse(&json!({
+        "device": { "channels": 8 },
+        "inputs": { "sources": [{
+            "kind": "device",
+            "enabled": false,
+            "channels": [{ "channel": 8, "role": "L" }]
+        }] }
+    }))
+    .expect("disabled source channels may exceed the input width");
+    assert_eq!(parsed.sources[1].channels[0].channel, 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -562,7 +574,31 @@ fn default_profile_generates_a_two_lane_plan_with_full_device_routing() {
 fn split_input_output_profile_generates_two_in_twenty_two_out_plan() {
     let profile = AudioProfile::parse(&json!({
         "device": { "channels": 22 },
-        "inputs": { "channels": 2 },
+        "inputs": {
+            "channels": 2,
+            "sources": [
+                {
+                    "kind": "aes67",
+                    "enabled": true,
+                    "channels": [
+                        { "channel": 0, "role": "L" },
+                        { "channel": 1, "role": "R" },
+                    ],
+                },
+                // 禁用的 device 源保留 4 个通道标签（> inputs.channels=2）：不参与 plan，
+                // 因此不应让 profile 失效（启用时 UI 会把通道收敛到输入宽度）。
+                {
+                    "kind": "device",
+                    "enabled": false,
+                    "channels": [
+                        { "channel": 0, "role": "None" },
+                        { "channel": 1, "role": "None" },
+                        { "channel": 2, "role": "None" },
+                        { "channel": 3, "role": "None" },
+                    ],
+                },
+            ],
+        },
         "outputs": [
             { "dac": 0, "enabled": true, "role": "L" },
             { "dac": 1, "enabled": true, "role": "R" },

@@ -285,11 +285,22 @@ function capabilityChannels(kind: AudioSourceKind): number {
 }
 
 function syncSourceChannels(source: AudioInputSource, count: number): void {
+  const width = Number.isInteger(edit.value.inputs.channels) && edit.value.inputs.channels > 0 ? edit.value.inputs.channels : count
+  const bounded = Math.min(count, width)
   const next: typeof source.channels = []
-  for (let channel = 0; channel < count; channel += 1) {
+  for (let channel = 0; channel < bounded; channel += 1) {
     next.push(source.channels[channel] ?? { channel, role: 'None' })
   }
   source.channels = next
+}
+
+function setInputChannels(value: number | undefined): void {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return
+  }
+  const next = Math.trunc(value)
+  edit.value.inputs.channels = Math.min(256, Math.max(1, next))
+  markDirty()
 }
 
 function setSourceEnabled(index: number, value: boolean): void {
@@ -546,6 +557,20 @@ onBeforeUnmount(() => {
 
     <!-- 输入区 -->
     <PanelCard title-key="speakerLayout.source.aes67" :truth="inputsTruth">
+      <div class="inline-fields">
+        <label>
+          {{ t('speakerLayout.inputChannels') }}
+          <el-input-number
+            :model-value="edit.inputs.channels"
+            :min="1"
+            :max="256"
+            size="small"
+            :disabled="busy !== null"
+            @update:model-value="(value: number | undefined) => setInputChannels(value)"
+          />
+        </label>
+        <span class="aux-text">{{ t('speakerLayout.inputChannelsHint') }}</span>
+      </div>
       <div v-for="(source, index) in sourceOrder" :key="source.kind" class="source-block">
         <header class="source-block__head">
           <strong>{{ source.kind === 'aes67' ? t('speakerLayout.source.aes67') : t('speakerLayout.source.device') }}</strong>

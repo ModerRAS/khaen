@@ -787,6 +787,10 @@ impl AudioProfile {
             ));
         }
         for source in &self.sources {
+            if !source.enabled {
+                // 禁用源不参与 plan；保留其通道标签供以后启用（启用时 UI/校验再按输入宽度收敛）。
+                continue;
+            }
             for channel in &source.channels {
                 if channel.channel >= self.input_channels {
                     errors.push(Issue::new(
@@ -1317,7 +1321,7 @@ fn parse_sources(inputs: &Value, input_channels: u16) -> Result<Vec<InputSource>
                 let channel = u16::try_from(channel).map_err(|_| {
                     ParseError::new(&channel_field, "input channel index out of range")
                 })?;
-                if channel >= input_channels || channel >= MAX_INPUT_CHANNEL {
+                if (enabled && channel >= input_channels) || channel >= MAX_INPUT_CHANNEL {
                     return Err(ParseError::new(
                         &channel_field,
                         format!(

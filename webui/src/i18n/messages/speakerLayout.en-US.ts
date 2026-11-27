@@ -14,6 +14,7 @@ const messages = {
   reload: "Reload",
   saved: "Saved",
   inputChannels: "Input channels",
+  inputChannelsHint: "Plan content input width; enabled source channel IDs must stay below it.",
   deviceChannels: "Device channels",
   planLanes: "Plan lanes",
   graphId: "Plan graph",

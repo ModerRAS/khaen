@@ -14,6 +14,7 @@ const messages = {
   reload: "重新读取",
   saved: "已保存",
   inputChannels: "输入通道数",
+  inputChannelsHint: "plan content 的输入容器宽度；启用源的通道号必须小于它。",
   deviceChannels: "设备通道数",
   planLanes: "方案 lane 数",
   graphId: "当前方案 graph",
