@@ -600,7 +600,7 @@ mod tests {
                 .ok_or(PcmError::Fatal("fake pcm not open"))?;
             assert_eq!(
                 bytes.len(),
-                config.samples_per_block() * BYTES_PER_SAMPLE,
+                config.output_samples_per_block() * BYTES_PER_SAMPLE,
                 "scripted pcm block bytes"
             );
             // fail-closed 验证点：设备 absent 期间任何一次写都会在这里 panic。
@@ -732,13 +732,15 @@ mod tests {
             engine: EngineConfig {
                 block_frames: BLOCK_FRAMES,
                 sample_rate: SAMPLE_RATE,
-                channels: 1,
+                input_channels: 1,
+                output_channels: 1,
             },
             device: DeviceConfig {
                 device: DeviceId::new(device),
                 sample_rate: SAMPLE_RATE,
                 block_frames: BLOCK_FRAMES,
-                channels: 1,
+                input_channels: 1,
+                output_channels: 1,
             },
             safety: SafetyPolicy {
                 max_consecutive_underruns: 10_000,

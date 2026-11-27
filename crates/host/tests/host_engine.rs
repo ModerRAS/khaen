@@ -9,8 +9,34 @@ fn config() -> EngineConfig {
     EngineConfig {
         block_frames: 128,
         sample_rate: 96_000,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     }
+}
+
+#[test]
+fn split_engine_accepts_different_input_and_output_block_lengths() {
+    let config = EngineConfig {
+        block_frames: 128,
+        sample_rate: 96_000,
+        input_channels: 2,
+        output_channels: 22,
+    };
+    let mut engine = BlockEngine::new(config, Silent).expect("split engine");
+    assert_eq!(engine.config().input_samples_per_block(), 256);
+    assert_eq!(engine.output_samples_per_block(), 2816);
+    let input = vec![0.0f32; 256];
+    let output = engine.run_block(&input).expect("run split block");
+    assert_eq!(output.len(), 2816);
+    // 错误长度按输入宽度拒绝，不按输出宽度兜底。
+    let error = engine.run_block(&vec![0.0f32; 2816]).unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::WrongBlockLength {
+            expected: 256,
+            actual: 2816
+        }
+    ));
 }
 
 #[test]
@@ -25,11 +51,19 @@ fn config_validation_names_the_problem() {
     );
     assert_eq!(
         EngineConfig {
-            channels: 0,
+            input_channels: 0,
             ..config()
         }
         .validate(),
-        Err(EngineError::BadConfig("channels must be positive"))
+        Err(EngineError::BadConfig("input_channels must be positive"))
+    );
+    assert_eq!(
+        EngineConfig {
+            output_channels: 0,
+            ..config()
+        }
+        .validate(),
+        Err(EngineError::BadConfig("output_channels must be positive"))
     );
     assert!(EngineConfig {
         block_frames: 8193,
@@ -54,7 +88,7 @@ fn config_validation_names_the_problem() {
 #[test]
 fn passthrough_reproduces_input_and_counts_blocks() {
     let mut engine = BlockEngine::new(config(), Passthrough).expect("engine");
-    let input: Vec<f32> = (0..engine.samples_per_block())
+    let input: Vec<f32> = (0..engine.output_samples_per_block())
         .map(|index| (index as f32) * 1.0e-3 - 0.25)
         .collect();
     for _ in 0..5 {
@@ -81,7 +115,7 @@ fn wrong_block_length_is_rejected() {
 #[test]
 fn mute_takes_effect_at_the_next_block_boundary() {
     let mut engine = BlockEngine::new(config(), Passthrough).expect("engine");
-    let input = vec![0.25f32; engine.samples_per_block()];
+    let input = vec![0.25f32; engine.output_samples_per_block()];
 
     let receipt = engine.request_mute(true);
     assert!(!receipt.idempotent);
@@ -108,7 +142,7 @@ fn mute_takes_effect_at_the_next_block_boundary() {
 #[test]
 fn queued_mute_can_be_cancelled_before_the_boundary() {
     let mut engine = BlockEngine::new(config(), Silent).expect("engine");
-    let input = vec![0.5f32; engine.samples_per_block()];
+    let input = vec![0.5f32; engine.output_samples_per_block()];
 
     engine.request_mute(true);
     let cancel = engine.request_mute(false);
@@ -131,7 +165,7 @@ fn null_backend_round_trip_matches_input_sum() {
     let device = engine.device_config(DeviceId::new("null-device"));
     backend.start(&device).expect("start");
 
-    let mut scratch = vec![0.0f32; engine.samples_per_block()];
+    let mut scratch = vec![0.0f32; engine.output_samples_per_block()];
     let blocks: u64 = 10;
     for _ in 0..blocks {
         engine.pump(&mut backend, &mut scratch).expect("pump");
@@ -141,7 +175,7 @@ fn null_backend_round_trip_matches_input_sum() {
     assert_eq!(backend.played_blocks(), blocks);
 
     // 假后端输入是 mod 101 的确定性斜坡；直通输出的和应等于同长度斜坡之和。
-    let total_samples = blocks * engine.samples_per_block() as u64;
+    let total_samples = blocks * engine.output_samples_per_block() as u64;
     let expected_sum: f64 = (0..total_samples)
         .map(|index| ((index % 101) as f32 / 101.0 - 0.5) as f64)
         .sum();
@@ -170,7 +204,10 @@ fn device_config_matches_engine() {
     let engine = BlockEngine::new(config(), Passthrough).expect("engine");
     let device: DeviceConfig = engine.device_config(DeviceId::new("dev"));
     assert_eq!(device.block_frames, 128);
-    assert_eq!(device.channels, 2);
+    assert_eq!(device.output_channels, 2);
     assert_eq!(device.sample_rate, 96_000);
-    assert_eq!(device.samples_per_block(), engine.samples_per_block());
+    assert_eq!(
+        device.output_samples_per_block(),
+        engine.output_samples_per_block()
+    );
 }

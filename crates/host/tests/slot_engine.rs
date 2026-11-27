@@ -18,7 +18,8 @@ fn config() -> EngineConfig {
     EngineConfig {
         block_frames: 8,
         sample_rate: 96_000,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     }
 }
 
@@ -40,7 +41,7 @@ fn run(engine: &mut SlotEngine, block: u64) -> Vec<f32> {
 #[test]
 fn initial_processor_runs_without_graph_info() {
     let mut slot = engine(1.0);
-    assert_eq!(slot.samples_per_block(), 16);
+    assert_eq!(slot.output_samples_per_block(), 16);
     assert_eq!(slot.graph_info(), GraphInfo::default());
     assert!(!slot.switch_pending());
 

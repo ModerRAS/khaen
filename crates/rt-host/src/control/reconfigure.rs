@@ -104,7 +104,7 @@ impl ChannelsView {
     /// 从运行时配置构造视图。
     pub fn from_config(config: &RuntimeConfig) -> Self {
         Self {
-            channels: config.engine.channels,
+            channels: config.engine.output_channels,
             sample_rate: config.engine.sample_rate,
             block_frames: config.engine.block_frames,
             aes67_group: config.input.multicast_addr,
@@ -193,13 +193,15 @@ impl ChannelsView {
         config.engine = EngineConfig {
             block_frames: self.block_frames,
             sample_rate: self.sample_rate,
-            channels: self.channels,
+            input_channels: self.channels,
+            output_channels: self.channels,
         };
         config.device = DeviceConfig {
             device: DeviceId::new(self.device.clone()),
             sample_rate: self.sample_rate,
             block_frames: self.block_frames,
-            channels: self.channels,
+            input_channels: self.channels,
+            output_channels: self.channels,
         };
         // 设备监督器的方案速率：原来跟随引擎速率（含 0 = 未显式指定）时跟随新速率。
         if config.supervisor.plan_rate == 0

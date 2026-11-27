@@ -26,14 +26,21 @@ pub const DEFAULT_BLOCK_FRAMES: usize = 128;
 pub const MAX_BLOCK_FRAMES: usize = 8192;
 
 /// 引擎配置。
+///
+/// 输入与输出通道数分开（D-009）：应用可以从 2 路输入算出 22 路执行器/设备输出，
+/// 不再把“输入宽度 / 处理 lane 数 / 物理输出宽度”合成一个数。方案 ABI v3 里
+/// content.in_channels 对应 Self::input_channels，routing.dac_channels
+/// （缺 routing 时 matrix.rows）对应 Self::output_channels。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineConfig {
     /// 每块帧数。
     pub block_frames: usize,
     /// 采样率。
     pub sample_rate: u32,
-    /// 通道数。
-    pub channels: usize,
+    /// 输入通道数（喂给 content 段的实际输入宽度）。
+    pub input_channels: usize,
+    /// 输出通道数（routing 写出的物理 DAC 通道数）。
+    pub output_channels: usize,
 }
 
 impl Default for EngineConfig {
@@ -41,15 +48,21 @@ impl Default for EngineConfig {
         Self {
             block_frames: DEFAULT_BLOCK_FRAMES,
             sample_rate: 96_000,
-            channels: 2,
+            input_channels: 2,
+            output_channels: 2,
         }
     }
 }
 
 impl EngineConfig {
-    /// 每块样本数。
-    pub fn samples_per_block(&self) -> usize {
-        self.block_frames * self.channels
+    /// 输入块样本数（block_frames × input_channels）。
+    pub fn input_samples_per_block(&self) -> usize {
+        self.block_frames * self.input_channels
+    }
+
+    /// 输出块样本数（block_frames × output_channels）。
+    pub fn output_samples_per_block(&self) -> usize {
+        self.block_frames * self.output_channels
     }
 
     /// 校验配置；不合法时点名原因。
@@ -57,8 +70,11 @@ impl EngineConfig {
         if self.block_frames == 0 || self.block_frames > MAX_BLOCK_FRAMES {
             return Err(EngineError::BadConfig("block_frames out of range"));
         }
-        if self.channels == 0 {
-            return Err(EngineError::BadConfig("channels must be positive"));
+        if self.input_channels == 0 {
+            return Err(EngineError::BadConfig("input_channels must be positive"));
+        }
+        if self.output_channels == 0 {
+            return Err(EngineError::BadConfig("output_channels must be positive"));
         }
         if self.sample_rate == 0 {
             return Err(EngineError::BadConfig("sample_rate must be positive"));
@@ -178,7 +194,7 @@ impl<P: Processor> BlockEngine<P> {
     /// 新建引擎。缓冲在此一次分配完毕，之后不再分配。
     pub fn new(config: EngineConfig, processor: P) -> Result<Self, EngineError> {
         config.validate()?;
-        let output = vec![0.0f32; config.samples_per_block()];
+        let output = vec![0.0f32; config.output_samples_per_block()];
         Ok(Self {
             config,
             processor,
@@ -195,9 +211,9 @@ impl<P: Processor> BlockEngine<P> {
         &self.config
     }
 
-    /// 每块样本数。
-    pub fn samples_per_block(&self) -> usize {
-        self.config.samples_per_block()
+    /// 输出块样本数（= 调用方交给 `playout` 的长度）。
+    pub fn output_samples_per_block(&self) -> usize {
+        self.config.output_samples_per_block()
     }
 
     /// 统计快照。
@@ -215,7 +231,7 @@ impl<P: Processor> BlockEngine<P> {
 
     /// 原地处理一块：只更新内部输出缓冲与统计，不返回借用。
     fn process_in_place(&mut self, input: &[f32]) -> Result<(), EngineError> {
-        let expected = self.samples_per_block();
+        let expected = self.config.input_samples_per_block();
         if input.len() != expected {
             return Err(EngineError::WrongBlockLength {
                 expected,
@@ -272,9 +288,9 @@ impl<P: Processor> BlockEngine<P> {
         backend: &mut B,
         scratch: &mut [f32],
     ) -> Result<u64, EngineError> {
-        if scratch.len() != self.samples_per_block() {
+        if scratch.len() != self.config.input_samples_per_block() {
             return Err(EngineError::WrongBlockLength {
-                expected: self.samples_per_block(),
+                expected: self.config.input_samples_per_block(),
                 actual: scratch.len(),
             });
         }
@@ -291,7 +307,8 @@ impl<P: Processor> BlockEngine<P> {
             device,
             sample_rate: self.config.sample_rate,
             block_frames: self.config.block_frames,
-            channels: self.config.channels,
+            input_channels: self.config.input_channels,
+            output_channels: self.config.output_channels,
         }
     }
 }
@@ -384,7 +401,7 @@ impl SlotEngine {
         processor: Box<dyn Processor + Send>,
     ) -> Result<Self, EngineError> {
         config.validate()?;
-        let output = vec![0.0f32; config.samples_per_block()];
+        let output = vec![0.0f32; config.output_samples_per_block()];
         Ok(Self {
             config,
             processor,
@@ -405,9 +422,9 @@ impl SlotEngine {
         &self.config
     }
 
-    /// 每块样本数。
-    pub fn samples_per_block(&self) -> usize {
-        self.config.samples_per_block()
+    /// 输出块样本数（= 调用方交给 `playout` 的长度）。
+    pub fn output_samples_per_block(&self) -> usize {
+        self.config.output_samples_per_block()
     }
 
     /// 统计快照。
@@ -463,7 +480,7 @@ impl SlotEngine {
     /// 换图语义：pending 的图在本块入口换上，**本块从头就用新图处理**（`applied_block` 即本块）；
     /// stage 之后、本块之前的状态快照仍报告旧图，不谎报。
     pub fn run_block(&mut self, input: &[f32]) -> Result<&[f32], EngineError> {
-        let expected = self.samples_per_block();
+        let expected = self.config.input_samples_per_block();
         if input.len() != expected {
             // 块没有开始：待生效命令保持挂起，留给下一个合法块。
             return Err(EngineError::WrongBlockLength {
@@ -530,7 +547,8 @@ impl SlotEngine {
             device,
             sample_rate: self.config.sample_rate,
             block_frames: self.config.block_frames,
-            channels: self.config.channels,
+            input_channels: self.config.input_channels,
+            output_channels: self.config.output_channels,
         }
     }
 }

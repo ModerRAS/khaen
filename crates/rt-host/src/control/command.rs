@@ -369,7 +369,7 @@ pub fn execute_command<T: ControlTarget>(
                         "format": {
                             "block_frames": done.outcome.format.block_frames,
                             "sample_rate": done.outcome.format.sample_rate,
-                            "channels": done.outcome.format.channels,
+                            "channels": done.outcome.format.output_channels,
                         },
                         "engine_rebuilt": done.outcome.engine_rebuilt,
                         "graph_dropped": done.outcome.graph_dropped,
@@ -422,10 +422,10 @@ pub fn execute_command<T: ControlTarget>(
                         "prepared plan targets {} Hz / {} frames / {} ch, but the running rt-host data plane is {} Hz / {} frames / {} ch; draft not staged. Prepare the plan against the current data-plane format, or reconfigure the data plane first with channels_prepare/channels_commit (M3b hot reconfiguration; the plan format then follows the new engine format)",
                         format.sample_rate,
                         format.block_frames,
-                        format.channels,
+                        format.output_channels,
                         runtime_format.sample_rate,
                         runtime_format.block_frames,
-                        runtime_format.channels
+                        runtime_format.output_channels
                     ),
                 });
                 return;

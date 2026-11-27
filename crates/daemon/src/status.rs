@@ -627,7 +627,7 @@ fn format_dimensions(
     }
     (
         json!(sources.engine.block_frames as u64),
-        json!(sources.engine.channels as u64),
+        json!(sources.engine.output_channels as u64),
     )
 }
 
@@ -1637,7 +1637,8 @@ mod tests {
         EngineConfig {
             block_frames: 128,
             sample_rate: 48_000,
-            channels: 22,
+            input_channels: 22,
+            output_channels: 22,
         }
     }
 

@@ -381,7 +381,10 @@ pub fn format_json(config: &EngineConfig) -> Value {
     json!({
         "sample_rate": config.sample_rate,
         "block_size": config.block_frames,
-        "channels": config.channels,
+        // 向后兼容：channels 仍表示输出宽度；新增 input/output 明确拆分。
+        "channels": config.output_channels,
+        "input_channels": config.input_channels,
+        "output_channels": config.output_channels,
     })
 }
 
@@ -881,8 +884,8 @@ impl ControlState {
         self.pending_mode = None;
         let version = self.next_plan_version();
         let canonical = format!(
-            "format:{}:{}:{}",
-            target.sample_rate, target.block_frames, target.channels
+            "format:{}:{}:{}:{}",
+            target.sample_rate, target.block_frames, target.input_channels, target.output_channels
         );
         let token = engine_token(version, &sha256(canonical.as_bytes()));
         if let Some(draft) = &self.pending_format {

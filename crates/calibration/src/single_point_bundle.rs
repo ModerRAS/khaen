@@ -455,7 +455,8 @@ pub fn plan_config(options: &PlanCompileOptions) -> PlanConfig {
     PlanConfig {
         block_size: options.block_size,
         sample_rate: options.sample_rate,
-        channels: options.channels,
+        input_channels: options.channels,
+        output_channels: options.channels,
     }
 }
 

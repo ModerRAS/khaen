@@ -54,7 +54,8 @@ fn engine_config(channels: usize, block_frames: usize) -> EngineConfig {
     EngineConfig {
         block_frames,
         sample_rate: SAMPLE_RATE,
-        channels,
+        input_channels: channels,
+        output_channels: channels,
     }
 }
 

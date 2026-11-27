@@ -13,7 +13,8 @@ fn engine_config(channels: usize, block_frames: usize) -> EngineConfig {
     EngineConfig {
         block_frames,
         sample_rate: SAMPLE_RATE,
-        channels,
+        input_channels: channels,
+        output_channels: channels,
     }
 }
 
@@ -765,6 +766,131 @@ fn lane_chain_mismatch_is_rejected() {
             actual: 3,
         }
     );
+}
+
+// ===========================================================================
+// D-009 / IO I1：输入宽度与输出宽度解耦（2 输入 → 22 执行器/DAC）
+// ===========================================================================
+
+/// 2 路输入 → 22 个 lane/DAC 的完整图：content 只映射前两路，其余 lane 静音；
+/// matrix 为 22×22 恒等；routing lane i -> dac i。这是“输入少、输出多”的最小真实形态。
+fn split_2_to_22_plan(block_frames: u32) -> Plan {
+    let lanes = 22u16;
+    let count = usize::from(lanes);
+    let mut coeffs = vec![0.0f32; count * count];
+    for lane in 0..count {
+        coeffs[lane * count + lane] = 1.0;
+    }
+    Plan {
+        block_size: block_frames,
+        sample_rate: SAMPLE_RATE,
+        content: Some(ContentSection {
+            in_channels: 2,
+            out_lanes: lanes,
+            folds: vec![
+                Fold {
+                    src: 0,
+                    dst: 0,
+                    gain: 1.0,
+                },
+                Fold {
+                    src: 1,
+                    dst: 1,
+                    gain: 1.0,
+                },
+            ],
+        }),
+        crossover: None,
+        matrix: Some(MatrixSection {
+            rows: lanes,
+            cols: lanes,
+            decimation: 1,
+            interpolation: 1,
+            taps: 1,
+            coeffs,
+        }),
+        protection: None,
+        routing: Some(RoutingSection {
+            dac_channels: lanes,
+            routes: (0..lanes).map(|lane| (lane, lane)).collect(),
+        }),
+    }
+}
+
+fn split_engine_config(input_channels: usize, output_channels: usize) -> EngineConfig {
+    EngineConfig {
+        block_frames: 128,
+        sample_rate: SAMPLE_RATE,
+        input_channels,
+        output_channels,
+    }
+}
+
+#[test]
+fn two_input_twenty_two_output_plan_routes_without_faking_input_width() {
+    let plan = split_2_to_22_plan(128);
+    let mut graph = PlanGraph::compile(
+        &plan,
+        &split_engine_config(2, 22),
+        &AdmissionLimits::default(),
+    )
+    .expect("2-in / 22-out plan must compile");
+
+    let frames = 8usize;
+    let mut input = vec![0.0f32; frames * 2];
+    for frame in 0..frames {
+        input[frame * 2] = 0.25;
+        input[frame * 2 + 1] = -0.5;
+    }
+    let mut output = vec![0.0f32; frames * 22];
+    graph.process(&input, &mut output);
+
+    for frame in 0..frames {
+        assert_eq!(output[frame * 22], 0.25, "L must pass through to DAC 0");
+        assert_eq!(output[frame * 22 + 1], -0.5, "R must pass through to DAC 1");
+        for dac in 2..22 {
+            assert_eq!(
+                output[frame * 22 + dac],
+                0.0,
+                "lane {dac} has no content fold and must stay silent"
+            );
+        }
+    }
+}
+
+#[test]
+fn split_widths_are_checked_separately_at_compile_time() {
+    let plan = split_2_to_22_plan(128);
+    // 输出宽度错：PlanGraph 必须按 routing.dac_channels 拒绝。
+    let error = PlanGraph::compile(
+        &plan,
+        &split_engine_config(2, 21),
+        &AdmissionLimits::default(),
+    )
+    .expect_err("output width mismatch must be rejected");
+    assert!(matches!(
+        error,
+        CompileError::ChannelMismatch {
+            stage: "routing",
+            expected: 21,
+            actual: 22
+        }
+    ));
+    // 输入宽度错：必须按 content.in_channels 拒绝，不能用输出宽度兜底。
+    let error = PlanGraph::compile(
+        &plan,
+        &split_engine_config(4, 22),
+        &AdmissionLimits::default(),
+    )
+    .expect_err("input width mismatch must be rejected");
+    assert!(matches!(
+        error,
+        CompileError::ChannelMismatch {
+            stage: "content",
+            expected: 4,
+            actual: 2
+        }
+    ));
 }
 
 #[test]

@@ -1418,10 +1418,10 @@ impl ControlCore {
                 "control-plane format {} Hz / {} frames / {} ch differs from the running data plane {} Hz / {} frames / {} ch; draft not applied (rt-host restart required, device_restart_required=true)",
                 self.engine_config.sample_rate,
                 self.engine_config.block_frames,
-                self.engine_config.channels,
+                self.engine_config.output_channels,
                 self.data_plane_format.sample_rate,
                 self.data_plane_format.block_frames,
-                self.data_plane_format.channels
+                self.data_plane_format.output_channels
             );
             self.draft = Some(draft);
             return Err(not_applied(message));
@@ -1628,8 +1628,8 @@ impl ControlCore {
         self.pending_mode = None;
         let version = self.next_version();
         let canonical = format!(
-            "format:{}:{}:{}",
-            target.sample_rate, target.block_frames, target.channels
+            "format:{}:{}:{}:{}",
+            target.sample_rate, target.block_frames, target.input_channels, target.output_channels
         );
         let token = engine_token(version, &sha256(canonical.as_bytes()));
         if let Some(draft) = &self.pending_format {

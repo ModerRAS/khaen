@@ -370,7 +370,7 @@ fn channels_commit_applies_at_block_boundary_keeps_pid_and_audio() {
     );
     harness.run_blocks(2);
     assert_eq!(harness.blocks(), blocks_before + 2);
-    assert_eq!(harness.current_format().channels, 4);
+    assert_eq!(harness.current_format().output_channels, 4);
     // generation/last_gap 进追踪器与 status。
     assert_eq!(harness.generation(), 1);
     let status = call(&mut harness, json!({ "op": "channels_status" }));
@@ -470,7 +470,7 @@ fn channels_commit_failure_rolls_back_and_keeps_generation() {
         .expect("message")
         .contains("fake new device"));
     // 旧配置保持：块循环继续、格式不变、用户静音保持。
-    assert_eq!(harness.current_format().channels, 2);
+    assert_eq!(harness.current_format().output_channels, 2);
     assert!(
         !harness.user_mute_requested(),
         "the user mute request must be restored"
@@ -639,8 +639,8 @@ fn channels_commit_ack_lost_stays_busy_then_reconciles_instead_of_reapplying() {
 
     // 模拟块线程稍后执行并记录结果（ack 丢失但已生效）：控制面对账，不重复生效。
     let mut target = fake_runtime_config();
-    target.engine.channels = 4;
-    target.device.channels = 4;
+    target.engine.output_channels = 4;
+    target.device.output_channels = 4;
     target.input.channels = 4;
     target.input.output_channels = 4;
     target.input.channels_map = vec![0, 1, 2, 3];

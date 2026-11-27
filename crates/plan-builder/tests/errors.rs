@@ -586,7 +586,7 @@ fn lane_count_mismatch_is_rejected() {
 }
 
 #[test]
-fn content_absent_derived_lanes_must_match_channels() {
+fn content_absent_lanes_are_decoupled_from_input_but_output_width_still_checked() {
     let builder = PlanBuilder::new(config()).set_matrix(MatrixSection {
         rows: 3,
         cols: 3,
@@ -595,10 +595,12 @@ fn content_absent_derived_lanes_must_match_channels() {
         taps: 1,
         coeffs: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     });
+    // 没有 content 时 lane 数由 matrix.cols 推导，不再要求等于输入宽度；
+    // 但输出宽度仍由 routing（缺省 matrix.rows=3）决定，必须等于 config.output_channels=2。
     assert_error(
         &builder,
         PlanBuildErrorCode::ChannelCountMismatch,
-        BuildStage::Content,
+        BuildStage::Routing,
     );
 }
 

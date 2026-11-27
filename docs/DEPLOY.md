@@ -97,6 +97,7 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
     KHAEN_RUN_SECONDS=1800 KHAEN_STATS_EVERY_BLOCKS=4000 \
     /opt/khaen/current/bin/khaen-rt-host
 
+- **输入/输出宽度**：`KHAEN_CHANNELS` 同时作为输入与输出宽度的缺省值；IO I1 起可用 `KHAEN_INPUT_CHANNELS` / `KHAEN_OUTPUT_CHANNELS` 分开（例如 2 输入 → 22 路 MOTU 输出）。`KHAEN_AES67_MAP` 的槽位必须落在输入宽度内；方案里的 `content.in_channels` / `routing.dac_channels` 必须分别等于这两个宽度，否则 `prepare` fail-closed 拒绝。
 - **独占设备**：运行前确认没有 keeper / `prod_bridge.py` / aplay 占着 PCM；运行中不要从别的进程打开同一设备。
 - **方案**：手工直启时启动读一次 `KHAEN_PLAN`（ABI v3，`prepare` 的准入与图编译在这里复用）。运行期换图**已实现**（T70f-b/T70f-c）：rt-host 默认 `KHAEN_CONTROL=on` 开控制 socket（`/run/khaen/rt-host.sock`），daemon 在 `KHAEN_RT_TARGET=rt-host`（默认）时经 `KHAEN_RT_SOCKET` 把 `prepare/commit/abort/mute` 真实下发到 rt-host；若手工直启时设了 `KHAEN_CONTROL=off`，就没有运行期换图入口，脚本不要假设。
 - **未加载方案**时默认 `KHAEN_UNLOADED=silence`（fail-closed）；联调链路可用 `passthrough`。

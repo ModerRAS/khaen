@@ -20,6 +20,8 @@ pub const DEFAULT_MAX_MATRIX_TAPS_PER_CELL: u32 = 4096;
 pub const DEFAULT_MAX_LATENCY_SAMPLES: u64 = 8192;
 /// lane 数上限。
 pub const DEFAULT_MAX_LANES: u16 = 32;
+/// 输入通道数上限（2 输入 / 22 输出时只有 2）。
+pub const DEFAULT_MAX_INPUT_CHANNELS: u16 = 256;
 /// DAC 通道数上限。
 pub const DEFAULT_MAX_DAC_CHANNELS: u16 = 64;
 
@@ -38,6 +40,8 @@ pub struct AdmissionLimits {
     pub max_latency_samples: u64,
     /// lane 数上限。
     pub max_lanes: u16,
+    /// 输入通道数上限。
+    pub max_input_channels: u16,
     /// DAC 通道上限。
     pub max_dac_channels: u16,
 }
@@ -51,6 +55,7 @@ impl Default for AdmissionLimits {
             max_matrix_taps_per_cell: DEFAULT_MAX_MATRIX_TAPS_PER_CELL,
             max_latency_samples: DEFAULT_MAX_LATENCY_SAMPLES,
             max_lanes: DEFAULT_MAX_LANES,
+            max_input_channels: DEFAULT_MAX_INPUT_CHANNELS,
             max_dac_channels: DEFAULT_MAX_DAC_CHANNELS,
         }
     }
@@ -91,6 +96,8 @@ pub struct Budget {
     pub latency_samples: u64,
     /// lane 数。
     pub lanes: u16,
+    /// 输入通道数（content.in_channels）。
+    pub input_channels: u16,
     /// DAC 通道数。
     pub dac_channels: u16,
     /// 需要常驻的滤波器状态样本数。
@@ -181,6 +188,7 @@ pub fn admit(plan: &Plan, limits: &AdmissionLimits) -> Admission {
     let mut dac_channels = 0u16;
     if let Some(content) = &plan.content {
         lanes = lanes.max(content.out_lanes);
+        budget.input_channels = content.in_channels;
         if content.in_channels == 0 {
             rejections.push(Rejection::new("content", "in_channels = 0"));
         }
@@ -345,6 +353,15 @@ pub fn admit(plan: &Plan, limits: &AdmissionLimits) -> Admission {
         rejections.push(Rejection::new(
             "dac_channels",
             format!("{dac_channels} channels, limit {}", limits.max_dac_channels),
+        ));
+    }
+    if budget.input_channels > limits.max_input_channels {
+        rejections.push(Rejection::new(
+            "input_channels",
+            format!(
+                "{} input channels, limit {}",
+                budget.input_channels, limits.max_input_channels
+            ),
         ));
     }
     if coefficients > limits.max_coefficients {

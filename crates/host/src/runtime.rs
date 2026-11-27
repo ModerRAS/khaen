@@ -749,11 +749,16 @@ impl RuntimeConfig {
                 "sample_rate must match across input, engine and device config",
             ));
         }
-        if self.input.output_channels != self.engine.channels
-            || self.device.channels != self.engine.channels
+        if self.input.output_channels != self.engine.input_channels
+            || self.device.input_channels != self.engine.input_channels
         {
             return Err(RuntimeError::Config(
-                "channels must match across input.output_channels, engine and device config",
+                "input.output_channels, device.input_channels and engine.input_channels must match",
+            ));
+        }
+        if self.device.output_channels != self.engine.output_channels {
+            return Err(RuntimeError::Config(
+                "device.output_channels must match engine.output_channels",
             ));
         }
         let one_frame_bytes = self
@@ -1203,7 +1208,7 @@ impl<P: PcmOutput> Runtime<P> {
         let safety = SafetySupervisor::new(config.safety.clone());
         let receiver = Aes67Receiver::spawn(source, &config.receiver)?;
         let block = vec![0.0f32; input.samples_per_block()];
-        let out_block = vec![0.0f32; engine.samples_per_block()];
+        let out_block = vec![0.0f32; engine.output_samples_per_block()];
         let packet_buf = vec![0u8; config.receiver.packet_bytes];
         Ok(Self {
             config,
@@ -1661,13 +1666,7 @@ impl<P: PcmOutput> Runtime<P> {
         };
         let new_block = vec![0.0f32; new_input.samples_per_block()];
         let new_out_block = if engine_changed {
-            Some(vec![
-                0.0f32;
-                target
-                    .engine
-                    .block_frames
-                    .saturating_mul(target.engine.channels)
-            ])
+            Some(vec![0.0f32; target.engine.output_samples_per_block()])
         } else {
             None
         };
@@ -1747,7 +1746,7 @@ impl<P: PcmOutput> Runtime<P> {
                 ));
             }
         };
-        let target_channels = u32::try_from(target.device.channels).ok();
+        let target_channels = u32::try_from(target.device.output_channels).ok();
         let mismatch = if readback.sample_rate.is_none() || readback.channels.is_none() {
             Some(format!(
                 "hw params readback unavailable (rate {:?}, channels {:?}); hot reconfiguration is fail-closed without a real readback",
@@ -1915,7 +1914,7 @@ impl<P: PcmOutput> Runtime<P> {
                 "calibration playback block_frames does not match the runtime engine block size",
             ));
         }
-        if playback.channels() != self.config.engine.channels {
+        if playback.channels() != self.config.engine.output_channels {
             return Err(RuntimeError::Config(
                 "calibration playback channels do not match the runtime engine channels",
             ));

@@ -1085,7 +1085,7 @@ fn enter_mic_override_rolls_back_when_umik_probe_fails() {
 fn runtime_calibration_playback_writes_sweep_then_silence_and_keeps_graph() {
     let mut runtime = fake_runtime();
     let block_frames = runtime.config().engine.block_frames;
-    let channels = runtime.config().engine.channels;
+    let channels = runtime.config().engine.output_channels;
     let block_samples = block_frames * channels;
     let progress = Arc::new(CalibrationProgress::new(2));
     let mut data = vec![0.0f32; block_samples * 2];
@@ -1161,7 +1161,7 @@ fn runtime_calibration_playback_writes_sweep_then_silence_and_keeps_graph() {
 fn calibration_playback_commands_are_acked_by_runtime_target() {
     let mut runtime = fake_runtime();
     let block_frames = runtime.config().engine.block_frames;
-    let channels = runtime.config().engine.channels;
+    let channels = runtime.config().engine.output_channels;
     let progress = Arc::new(CalibrationProgress::new(1));
     let playback = CalibrationPlayback::new(
         vec![0.0f32; block_frames * channels],

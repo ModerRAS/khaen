@@ -249,7 +249,8 @@ async fn safety_latch_mutes_engine_through_daemon_poll() {
     let config = EngineConfig {
         block_frames: 128,
         sample_rate: PLAN_RATE,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     };
     let state = DaemonState::new(config)
         .expect("state")

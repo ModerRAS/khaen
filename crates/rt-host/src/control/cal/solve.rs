@@ -61,7 +61,7 @@ pub fn solve_design(
             ),
         ));
     }
-    let channels = u16::try_from(format.channels).map_err(|_| {
+    let channels = u16::try_from(format.output_channels).map_err(|_| {
         ControlError::new(
             error::FORMAT_UNSUPPORTED,
             "runtime channel count does not fit the plan ABI (u16)",
@@ -82,10 +82,10 @@ pub fn solve_design(
                 ir.playback_channel
             ))
         })?;
-        if u32::from(lane) >= format.channels as u32 {
+        if u32::from(lane) >= format.output_channels as u32 {
             return Err(solve_error(format!(
                 "IR channel {} is outside the running format ({} channels)",
-                ir.playback_channel, format.channels
+                ir.playback_channel, format.output_channels
             )));
         }
         let fitted = fit_target_fir_only(&ir.ir, target).map_err(|error| {
@@ -153,7 +153,7 @@ pub fn solve_design(
         "bytes": compiled.bytes().len(),
         "block_size": format.block_frames,
         "sample_rate": format.sample_rate,
-        "channels": format.channels,
+        "channels": format.output_channels,
         "admission": {
             "accepted": admission.accepted,
             "summary": admission.summary(),
@@ -186,7 +186,7 @@ pub fn solve_design(
             "bytes": compiled.bytes().len(),
             "block_size": format.block_frames,
             "sample_rate": format.sample_rate,
-            "channels": format.channels,
+            "channels": format.output_channels,
         },
         "admission": {
             "accepted": admission.accepted,

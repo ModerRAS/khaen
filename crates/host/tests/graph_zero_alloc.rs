@@ -135,7 +135,8 @@ fn graph_process_performs_no_heap_allocation() {
     let config = EngineConfig {
         block_frames: 128,
         sample_rate: 96_000,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     };
     let mut graph =
         PlanGraph::compile(&plan, &config, &AdmissionLimits::default()).expect("compile graph");

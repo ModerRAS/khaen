@@ -78,14 +78,14 @@ impl PcmOutput for FakePcm {
     fn open(config: &DeviceConfig) -> Result<Self, BackendError> {
         Ok(Self {
             config: Some(config.clone()),
-            captured: vec![0u8; config.samples_per_block() * BYTES_PER_SAMPLE],
+            captured: vec![0u8; config.output_samples_per_block() * BYTES_PER_SAMPLE],
             ..Self::blank()
         })
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, PcmError> {
         let bytes_per_frame = match self.config.as_ref() {
-            Some(config) => config.channels * BYTES_PER_SAMPLE,
+            Some(config) => config.output_channels * BYTES_PER_SAMPLE,
             None => return Err(PcmError::Fatal("fake pcm not open")),
         };
         assert_eq!(bytes.len(), self.captured.len(), "fake pcm block size");
@@ -185,13 +185,15 @@ fn runtime_config(output_channels: usize, block_frames: usize) -> RuntimeConfig 
         engine: EngineConfig {
             block_frames,
             sample_rate: SAMPLE_RATE,
-            channels: output_channels,
+            input_channels: output_channels,
+            output_channels,
         },
         device: DeviceConfig {
             device: DeviceId::new("fake-runtime-pcm"),
             sample_rate: SAMPLE_RATE,
             block_frames,
-            channels: output_channels,
+            input_channels: output_channels,
+            output_channels,
         },
         safety: SafetyPolicy::default(),
         receiver: ReceiverConfig::default(),
@@ -1068,7 +1070,7 @@ fn runtime_config_validation_fails_closed() {
     );
 
     let mut channel_mismatch = config.clone();
-    channel_mismatch.engine.channels = 4;
+    channel_mismatch.engine.output_channels = 4;
     assert_eq!(
         channel_mismatch.validate().expect_err("channels").code(),
         codes::CONFIG
@@ -1124,6 +1126,31 @@ fn runtime_config_validation_fails_closed() {
     assert!(
         !status.receiver.rcvbuf_applied,
         "SO_RCVBUF not wired on this platform"
+    );
+}
+
+#[test]
+fn runtime_config_allows_input_and_output_channel_widths_to_differ() {
+    // 2 输入 → 22 输出：输入/引擎/设备各自的宽度按方向分别校验，不再要求相等。
+    let mut split = runtime_config(2, 8);
+    split.engine.output_channels = 22;
+    split.device.output_channels = 22;
+    split.validate().expect("2-in / 22-out runtime config");
+
+    // 输入方向仍必须一致：engine.input_channels 改了但 Aes67/设备仍 2。
+    let mut input_mismatch = split.clone();
+    input_mismatch.engine.input_channels = 4;
+    assert_eq!(
+        input_mismatch.validate().expect_err("input width").code(),
+        codes::CONFIG
+    );
+
+    // 输出方向也必须一致：engine.output_channels 改了但设备仍 22。
+    let mut output_mismatch = split.clone();
+    output_mismatch.engine.output_channels = 21;
+    assert_eq!(
+        output_mismatch.validate().expect_err("output width").code(),
+        codes::CONFIG
     );
 }
 
@@ -1307,7 +1334,10 @@ impl PcmOutput for TogglePcm {
             .config
             .as_ref()
             .ok_or(PcmError::Fatal("toggle pcm not open"))?;
-        assert_eq!(bytes.len(), config.samples_per_block() * BYTES_PER_SAMPLE);
+        assert_eq!(
+            bytes.len(),
+            config.output_samples_per_block() * BYTES_PER_SAMPLE
+        );
         self.state.writes.fetch_add(1, Ordering::SeqCst);
         if !self.state.connected.load(Ordering::SeqCst) {
             return Err(PcmError::Fatal("alsa pcm disconnected"));

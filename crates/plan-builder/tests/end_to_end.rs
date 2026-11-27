@@ -63,14 +63,14 @@ impl PcmOutput for FakePcm {
     fn open(config: &DeviceConfig) -> Result<Self, BackendError> {
         Ok(Self {
             config: Some(config.clone()),
-            captured: vec![0u8; config.samples_per_block() * BYTES_PER_SAMPLE],
+            captured: vec![0u8; config.output_samples_per_block() * BYTES_PER_SAMPLE],
             writes: 0,
         })
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, PcmError> {
         let channels = match self.config.as_ref() {
-            Some(config) => config.channels,
+            Some(config) => config.output_channels,
             None => return Err(PcmError::Fatal("fake pcm not open")),
         };
         assert_eq!(bytes.len(), self.captured.len(), "fake PCM block size");
@@ -165,13 +165,15 @@ fn runtime_config() -> RuntimeConfig {
         engine: EngineConfig {
             block_frames: BLOCK_FRAMES,
             sample_rate: SAMPLE_RATE,
-            channels: CHANNELS,
+            input_channels: CHANNELS,
+            output_channels: CHANNELS,
         },
         device: DeviceConfig {
             device: DeviceId::new("fake-e2e-pcm"),
             sample_rate: SAMPLE_RATE,
             block_frames: BLOCK_FRAMES,
-            channels: CHANNELS,
+            input_channels: CHANNELS,
+            output_channels: CHANNELS,
         },
         safety: SafetyPolicy::default(),
         receiver: ReceiverConfig::default(),

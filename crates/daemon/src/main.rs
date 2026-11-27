@@ -49,17 +49,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(2);
         }
     };
-    let config = match (
-        std::env::var("KHAEN_BLOCK_FRAMES").ok(),
-        std::env::var("KHAEN_SAMPLE_RATE").ok(),
-        std::env::var("KHAEN_CHANNELS").ok(),
-    ) {
-        (Some(frames), Some(rate), Some(channels)) => EngineConfig {
-            block_frames: frames.parse().unwrap_or(128),
-            sample_rate: rate.parse().unwrap_or(96_000),
-            channels: channels.parse().unwrap_or(2),
-        },
-        _ => EngineConfig::default(),
+    // daemon 的 EngineConfig 只用于控制面格式回退与 audio-profile 方案生成；
+    // 输入/输出宽度分开解析（IO I1），KHAEN_CHANNELS 仍同时作为两者缺省值。
+    let channels: usize = std::env::var("KHAEN_CHANNELS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(2);
+    let config = EngineConfig {
+        block_frames: std::env::var("KHAEN_BLOCK_FRAMES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(128),
+        sample_rate: std::env::var("KHAEN_SAMPLE_RATE")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(96_000),
+        input_channels: std::env::var("KHAEN_INPUT_CHANNELS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(channels),
+        output_channels: std::env::var("KHAEN_OUTPUT_CHANNELS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(channels),
     };
     let plan_rate = config.sample_rate;
     // 控制通道配置：默认 rt-host（真数据面）；非法值启动即失败（与 bind 同样的 fail-closed 策略）。

@@ -46,11 +46,18 @@ pub(crate) fn validate_config(config: PlanConfig) -> Result<(), PlanBuildError> 
             ),
         ));
     }
-    if config.channels == 0 {
+    if config.input_channels == 0 {
         return Err(err(
             PlanBuildErrorCode::ZeroChannelCount,
             BuildStage::Config,
-            "channels must be positive",
+            "input_channels must be positive",
+        ));
+    }
+    if config.output_channels == 0 {
+        return Err(err(
+            PlanBuildErrorCode::ZeroChannelCount,
+            BuildStage::Config,
+            "output_channels must be positive",
         ));
     }
     Ok(())
@@ -390,38 +397,30 @@ fn validate_routing(routing: &RoutingSection, lanes: u16) -> Result<(), PlanBuil
 /// lane 链校验：与 khaen_host::graph::PlanGraph::compile 的一致性检查同构，
 /// 保证 build 产出的方案不会在 host 编译期因段间不衔接被拒。
 fn validate_chain(builder: &PlanBuilder, matrix: &MatrixSection) -> Result<(), PlanBuildError> {
-    let channels = usize::from(builder.config().channels);
+    let input_channels = usize::from(builder.config().input_channels);
+    let output_channels = usize::from(builder.config().output_channels);
 
     let lanes_after_content: u16 = match builder.content() {
         Some(content) => {
             let declared = usize::from(content.in_channels);
-            if declared != channels {
+            if declared != input_channels {
                 return Err(err(
                     PlanBuildErrorCode::ChannelCountMismatch,
                     BuildStage::Content,
-                    format!("runtime channels = {channels}, content.in_channels = {declared}"),
+                    format!(
+                        "runtime input_channels = {input_channels}, content.in_channels = {declared}"
+                    ),
                 ));
             }
             content.out_lanes
         }
         None => {
-            // content 缺席时 host 用 crossover.lanes（再缺则 matrix.cols）当 lane 数，
-            // 并要求它等于运行时通道数。
-            let derived = match builder.crossover() {
+            // content 缺席时 host 用 crossover.lanes（再缺则 matrix.cols）当 lane 数；
+            // 输入宽度与 lane 数已经是两个独立的量，不再要求它等于输入通道数。
+            match builder.crossover() {
                 Some(crossover) => crossover.lanes,
                 None => matrix.cols,
-            };
-            let declared = usize::from(derived);
-            if declared != channels {
-                return Err(err(
-                    PlanBuildErrorCode::ChannelCountMismatch,
-                    BuildStage::Content,
-                    format!(
-                        "runtime channels = {channels}, derived lane count without content = {declared} (crossover.lanes or matrix.cols)"
-                    ),
-                ));
             }
-            derived
         }
     };
 
@@ -470,12 +469,12 @@ fn validate_chain(builder: &PlanBuilder, matrix: &MatrixSection) -> Result<(), P
         Some(routing) => usize::from(routing.dac_channels),
         None => usize::from(matrix.rows),
     };
-    if out_channels != channels {
+    if out_channels != output_channels {
         return Err(err(
             PlanBuildErrorCode::ChannelCountMismatch,
             BuildStage::Routing,
             format!(
-                "runtime channels = {channels}, plan output channels = {out_channels} (routing.dac_channels when present, otherwise matrix.rows)"
+                "runtime output_channels = {output_channels}, plan output channels = {out_channels} (routing.dac_channels when present, otherwise matrix.rows)"
             ),
         ));
     }

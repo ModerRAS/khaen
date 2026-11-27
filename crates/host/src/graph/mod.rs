@@ -334,8 +334,10 @@ impl std::error::Error for CompileError {}
 /// 构造见 `PlanGraph::compile`；构造完成后 `process` 只读写预分配缓冲，零分配、零锁、无 IO。
 #[derive(Debug)]
 pub struct PlanGraph {
-    /// 帧交错输入 / 输出通道数（= 方案输入通道数 = DAC 通道数）。
-    channels: usize,
+    /// 帧交错输入通道数（= content.in_channels 或 EngineConfig.input_channels）。
+    input_channels: usize,
+    /// 帧交错输出通道数（= routing.dac_channels 或 matrix.rows）。
+    output_channels: usize,
     /// 子块帧数上限：`min(config.block_frames, DIRECT_MAX_BLOCK)`。
     chunk_frames: usize,
     /// 解交错后的输入平面（`channels * chunk_frames`）。
@@ -407,9 +409,12 @@ impl PlanGraph {
             .matrix
             .as_ref()
             .ok_or(CompileError::InvalidSection("matrix section is required"))?;
-        let channels = config.channels;
+        let input_channels = config.input_channels;
+        let output_channels = config.output_channels;
 
         // lane 链：content -> crossover -> matrix -> protection -> routing；缺段按恒等段处理。
+        // 输入宽度（content.in_channels）与输出宽度（routing.dac_channels）分别校验；
+        // 中间 lane 宽度由各段自行衔接（D-009：三个宽度不合并成一个数）。
         let (in_channels, lanes_after_content) = match &plan.content {
             Some(content) => (content.in_channels as usize, content.out_lanes as usize),
             None => {
@@ -417,21 +422,14 @@ impl PlanGraph {
                     Some(crossover) => crossover.lanes as usize,
                     None => matrix_section.cols as usize,
                 };
-                (channels, lanes)
+                (input_channels, lanes)
             }
         };
-        if in_channels != channels {
+        if in_channels != input_channels {
             return Err(CompileError::ChannelMismatch {
                 stage: "content",
-                expected: channels,
+                expected: input_channels,
                 actual: in_channels,
-            });
-        }
-        if plan.content.is_none() && lanes_after_content != channels {
-            return Err(CompileError::ChannelMismatch {
-                stage: "content",
-                expected: channels,
-                actual: lanes_after_content,
             });
         }
         let lanes_after_crossover = match &plan.crossover {
@@ -468,10 +466,10 @@ impl PlanGraph {
             Some(routing) => routing.dac_channels as usize,
             None => rows,
         };
-        if out_channels != channels {
+        if out_channels != output_channels {
             return Err(CompileError::ChannelMismatch {
                 stage: "routing",
-                expected: channels,
+                expected: output_channels,
                 actual: out_channels,
             });
         }
@@ -498,7 +496,8 @@ impl PlanGraph {
         let planes_b = vec![0.0f32; lanes_after_crossover * chunk_frames];
         let planes_c = vec![0.0f32; rows * chunk_frames];
         Ok(Self {
-            channels,
+            input_channels,
+            output_channels,
             chunk_frames,
             planes_in,
             planes_a,
@@ -552,9 +551,12 @@ impl PlanGraph {
 
 impl Processor for PlanGraph {
     fn process(&mut self, input: &[f32], output: &mut [f32]) {
-        let channels = self.channels;
-        let usable = core::cmp::min(input.len(), output.len());
-        let mut frames_left = usable / channels;
+        let input_channels = self.input_channels;
+        let output_channels = self.output_channels;
+        // 输入块与输出块的样本总数不同（2 输入 / 22 输出时），帧数取两侧都能容纳的最小值。
+        let input_frames = input.len() / input_channels;
+        let output_frames = output.len() / output_channels;
+        let mut frames_left = core::cmp::min(input_frames, output_frames);
         if frames_left == 0 {
             return;
         }
@@ -562,16 +564,17 @@ impl Processor for PlanGraph {
         let mut cursor = 0usize;
         while frames_left > 0 {
             let frames = core::cmp::min(frames_left, stride);
-            let in_chunk = &input[cursor * channels..(cursor + frames) * channels];
-            let out_chunk = &mut output[cursor * channels..(cursor + frames) * channels];
+            let in_chunk = &input[cursor * input_channels..(cursor + frames) * input_channels];
+            let out_chunk =
+                &mut output[cursor * output_channels..(cursor + frames) * output_channels];
 
             // 先解交错：帧交错输入 -> 每通道一个 planar 平面。
             let mut channel = 0;
-            while channel < channels {
+            while channel < input_channels {
                 let plane = &mut self.planes_in[channel * stride..channel * stride + frames];
                 let mut frame = 0;
                 while frame < frames {
-                    plane[frame] = in_chunk[frame * channels + channel];
+                    plane[frame] = in_chunk[frame * input_channels + channel];
                     frame += 1;
                 }
                 channel += 1;
@@ -586,7 +589,7 @@ impl Processor for PlanGraph {
             self.protection.process(&mut self.planes_c, stride, frames);
             // 再交错回写：routing 直接写帧交错输出块。
             self.routing
-                .process(&self.planes_c, out_chunk, channels, stride, frames);
+                .process(&self.planes_c, out_chunk, output_channels, stride, frames);
 
             cursor += frames;
             frames_left -= frames;

@@ -91,19 +91,21 @@ pub const MAX_PEQ_SECTIONS: usize = u16::MAX as usize;
 /// routing 区段路由表项数上限（ABI v3 的计数域是 u16）。
 pub const MAX_ROUTES: usize = u16::MAX as usize;
 
-/// 方案级配置：字段与 Plan 的头部对齐，channels 是运行时通道数。
+/// 方案级配置：字段与 Plan 的头部对齐，输入/输出通道数分开。
 ///
 /// Plan 本身不存通道数：输入通道数在 content.in_channels，输出 DAC 通道数在
-/// routing.dac_channels，host 的 EngineConfig::channels 必须同时等于它们。组装器把
-/// channels 放在配置里，build 时校验两者一致（缺 content 时按 host 的推导规则校验）。
+/// routing.dac_channels；host 的 EngineConfig.input_channels / output_channels 必须分别
+/// 等于它们。build 时按这两个宽度分别校验，不再要求输入宽度 == DAC 宽度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlanConfig {
     /// 每块帧数（必须落在 khaen_core::rt::BLOCK_SIZES 里）。
     pub block_size: u32,
     /// 采样率（Hz，必须落在 khaen_core::rt::SAMPLE_RATES_HZ 里）。
     pub sample_rate: u32,
-    /// 运行时通道数（输入通道数与 DAC 通道数必须相等，host 的约束）。
-    pub channels: u16,
+    /// 输入通道数（对应 content.in_channels）。
+    pub input_channels: u16,
+    /// 输出 DAC 通道数（对应 routing.dac_channels，缺 routing 时为 matrix.rows）。
+    pub output_channels: u16,
 }
 
 impl Default for PlanConfig {
@@ -111,18 +113,35 @@ impl Default for PlanConfig {
         Self {
             block_size: u32::from(khaen_core::rt::DEFAULT_BLOCK_SIZE),
             sample_rate: 96_000,
-            channels: 2,
+            input_channels: 2,
+            output_channels: 2,
         }
     }
 }
 
 impl PlanConfig {
-    /// 显式构造配置。
+    /// 显式构造等宽配置（输入 = 输出；旧调用方保持原行为）。
     pub const fn new(block_size: u32, sample_rate: u32, channels: u16) -> Self {
         Self {
             block_size,
             sample_rate,
-            channels,
+            input_channels: channels,
+            output_channels: channels,
+        }
+    }
+
+    /// 显式构造输入/输出宽度不同的配置（例如 2 输入 → 22 执行器/DAC）。
+    pub const fn new_split(
+        block_size: u32,
+        sample_rate: u32,
+        input_channels: u16,
+        output_channels: u16,
+    ) -> Self {
+        Self {
+            block_size,
+            sample_rate,
+            input_channels,
+            output_channels,
         }
     }
 
@@ -170,13 +189,27 @@ impl PlanBuilder {
     ///
     /// 注意：矩阵是 O(channels^2) 个 f32，通道数很大时请改用显式 setter 以节省内存。
     pub fn identity(config: PlanConfig) -> Self {
-        let channels = config.channels;
+        let input_channels = config.input_channels;
+        let output_channels = config.output_channels;
+        // 等宽时就是原来的逐样本直通；不等宽时 content 把前 min(in,out) 路直通，
+        // 其余输出 lane 由 content 填静音，matrix/crossover/protection 仍按输出宽度。
+        let folds = (0..input_channels.min(output_channels))
+            .map(|channel| khaen_core::plan::Fold {
+                src: channel,
+                dst: channel,
+                gain: 1.0,
+            })
+            .collect();
         Self::new(config)
-            .set_content_identity(channels)
-            .set_crossover_identity(channels)
-            .set_matrix_identity(channels)
-            .set_protection_identity(channels)
-            .set_routing_identity(channels)
+            .set_content(ContentSection {
+                in_channels: input_channels,
+                out_lanes: output_channels,
+                folds,
+            })
+            .set_crossover_identity(output_channels)
+            .set_matrix_identity(output_channels)
+            .set_protection_identity(output_channels)
+            .set_routing_identity(output_channels)
     }
 
     /// 方案级配置。
@@ -246,12 +279,13 @@ impl PlanBuilder {
         self
     }
 
-    /// 追加一条折叠；content 缺席时以 config.channels 建恒等布局再追加。
+    /// 追加一条折叠；content 缺席时以 config 的输入/输出宽度建布局再追加。
     pub fn add_fold(mut self, fold: Fold) -> Self {
-        let channels = self.config.channels;
+        let input_channels = self.config.input_channels;
+        let output_channels = self.config.output_channels;
         let content = self.content.get_or_insert_with(|| ContentSection {
-            in_channels: channels,
-            out_lanes: channels,
+            in_channels: input_channels,
+            out_lanes: output_channels,
             folds: Vec::new(),
         });
         content.folds.push(fold);
@@ -295,7 +329,7 @@ impl PlanBuilder {
     ///
     /// 同一 lane 重复追加会在 build 报 DuplicateCrossoverLane。
     pub fn add_crossover_filter(mut self, lane: u16, coeffs: impl Into<Vec<f32>>) -> Self {
-        let channels = self.config.channels;
+        let channels = self.config.output_channels;
         let crossover = self.crossover.get_or_insert_with(|| CrossoverSection {
             lanes: channels,
             filters: Vec::new(),
@@ -358,7 +392,7 @@ impl PlanBuilder {
     ///
     /// 同一 lane 重复追加会在 build 报 DuplicateProtectionLane。
     pub fn add_protection(mut self, entry: ProtectionEntry) -> Self {
-        let channels = self.config.channels;
+        let channels = self.config.output_channels;
         let protection = self
             .protection
             .get_or_insert_with(|| identity_protection(channels));
@@ -370,7 +404,7 @@ impl PlanBuilder {
     ///
     /// protection 缺席时以 config.channels 为 lanes 建 identity 段；lane 越界的错误由 build 报出。
     pub fn set_protection_gain_db(mut self, lane: u16, gain_db: f32) -> Self {
-        let channels = self.config.channels;
+        let channels = self.config.output_channels;
         let protection = self
             .protection
             .get_or_insert_with(|| identity_protection(channels));
@@ -421,7 +455,7 @@ impl PlanBuilder {
 
     /// 追加一条路由；routing 缺席时以 config.channels 为 dac_channels 建恒等段再追加。
     pub fn add_route(mut self, lane: u16, dac: u16) -> Self {
-        let channels = self.config.channels;
+        let channels = self.config.output_channels;
         let routing = self.routing.get_or_insert_with(|| RoutingSection {
             dac_channels: channels,
             routes: Vec::new(),

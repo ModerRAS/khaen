@@ -58,7 +58,8 @@ pub(crate) fn test_config() -> EngineConfig {
     EngineConfig {
         block_frames: BLOCK_FRAMES,
         sample_rate: SAMPLE_RATE,
-        channels: CHANNELS,
+        input_channels: CHANNELS,
+        output_channels: CHANNELS,
     }
 }
 
@@ -284,7 +285,7 @@ impl FakeTarget {
 
     /// 跑一块静音输入。
     pub(crate) fn run_block(&mut self) {
-        let input = vec![0.0f32; self.engine.samples_per_block()];
+        let input = vec![0.0f32; self.engine.output_samples_per_block()];
         self.run_block_input(&input);
     }
 
@@ -412,7 +413,7 @@ impl ControlTarget for FakeTarget {
         self.last_reconfigure_target = Some(target.clone());
         let hw = HwReadback {
             sample_rate: Some(self.config.sample_rate),
-            channels: Some(u32::try_from(self.config.channels).unwrap_or(0)),
+            channels: Some(u32::try_from(self.config.output_channels).unwrap_or(0)),
         };
         Ok(ReconfigureDone {
             outcome: ReconfigureOutcome {
@@ -858,7 +859,7 @@ impl PcmOutput for FakePcm {
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<usize, PcmError> {
-        let expected = self.config.samples_per_block() * BYTES_PER_SAMPLE;
+        let expected = self.config.output_samples_per_block() * BYTES_PER_SAMPLE;
         assert_eq!(bytes.len(), expected, "fake pcm block bytes");
         Ok(self.config.block_frames)
     }
@@ -903,7 +904,8 @@ pub(crate) fn fake_runtime() -> Runtime<FakePcm> {
             device: DeviceId::new("khaen-rt-host-control-fake-pcm"),
             sample_rate: SAMPLE_RATE,
             block_frames: BLOCK_FRAMES,
-            channels: CHANNELS,
+            input_channels: CHANNELS,
+            output_channels: CHANNELS,
         },
         safety: SafetyPolicy {
             max_consecutive_underruns: 10_000,
@@ -1010,7 +1012,8 @@ pub(crate) fn fake_runtime_config() -> RuntimeConfig {
             device: khaen_host::DeviceId::new("khaen-rt-host-control-fake-pcm"),
             sample_rate: SAMPLE_RATE,
             block_frames: BLOCK_FRAMES,
-            channels: CHANNELS,
+            input_channels: CHANNELS,
+            output_channels: CHANNELS,
         },
         safety: SafetyPolicy::default(),
         receiver: ReceiverConfig::default(),

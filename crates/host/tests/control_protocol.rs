@@ -11,7 +11,8 @@ fn state() -> ControlState {
     ControlState::new(EngineConfig {
         block_frames: 128,
         sample_rate: 96_000,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     })
     .expect("state")
 }

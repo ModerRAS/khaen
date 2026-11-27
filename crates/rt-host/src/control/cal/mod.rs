@@ -1006,7 +1006,7 @@ impl CalibrationCore {
                 "runtime_format": {
                     "block_frames": self.runtime_format.block_frames,
                     "sample_rate": self.runtime_format.sample_rate,
-                    "channels": self.runtime_format.channels,
+                    "channels": self.runtime_format.output_channels,
                 },
                 "sweep": sweep_json(),
             },
@@ -1063,7 +1063,7 @@ impl CalibrationCore {
                 self.runtime_format.block_frames
             );
         }
-        if self.runtime_format.channels == 0 {
+        if self.runtime_format.output_channels == 0 {
             return "the runtime data-plane format declares zero channels".to_string();
         }
         String::new()
@@ -1603,12 +1603,12 @@ impl CalibrationCore {
         }
         let mut seen = Vec::new();
         for channel in &channels {
-            if *channel >= self.runtime_format.channels as u32 {
+            if *channel >= self.runtime_format.output_channels as u32 {
                 return Err(ControlError::new(
                     error::CONFIG_INVALID,
                     format!(
                         "calibration channel {channel} is outside the running format ({} channels)",
-                        self.runtime_format.channels
+                        self.runtime_format.output_channels
                     ),
                 ));
             }
@@ -1666,12 +1666,14 @@ impl CalibrationCore {
             // 播放设备由 rt-host 块线程持有（校准播放 seam）；这里只是 T67 配置字段，
             // 真实设备名不属于校准配置（不抢 owner）。
             playback_device: "rt-host-owned".to_string(),
-            playback_channels: u16::try_from(self.runtime_format.channels).map_err(|_| {
-                ControlError::new(
-                    error::FORMAT_UNSUPPORTED,
-                    "runtime channel count does not fit u16",
-                )
-            })?,
+            playback_channels: u16::try_from(self.runtime_format.output_channels).map_err(
+                |_| {
+                    ControlError::new(
+                        error::FORMAT_UNSUPPORTED,
+                        "runtime channel count does not fit u16",
+                    )
+                },
+            )?,
             capture_device: self.effective_capture_device().to_string(),
             capture_channels: self.config.capture_channels,
             capture_channel: self.config.capture_channel,

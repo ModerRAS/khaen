@@ -58,10 +58,11 @@ fn slot_engine_audio_path_performs_no_heap_allocation() {
     let config = EngineConfig {
         block_frames: 128,
         sample_rate: 96_000,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     };
     let mut engine = SlotEngine::new(config, Box::new(Gain(0.5))).expect("engine");
-    let input: Vec<f32> = (0..engine.samples_per_block())
+    let input: Vec<f32> = (0..engine.output_samples_per_block())
         .map(|index| (index as f32) * 1.0e-3 - 0.25)
         .collect();
 

@@ -19,7 +19,8 @@ fn host_config(channels: u16) -> EngineConfig {
     EngineConfig {
         block_frames: BLOCK_SIZE as usize,
         sample_rate: SAMPLE_RATE,
-        channels: usize::from(channels),
+        input_channels: usize::from(channels),
+        output_channels: usize::from(channels),
     }
 }
 

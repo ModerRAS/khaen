@@ -291,7 +291,8 @@ pub fn compile_peq_design(
     let builder = PlanBuilder::new(PlanConfig {
         block_size: options.block_size,
         sample_rate: options.sample_rate,
-        channels: options.channels,
+        input_channels: options.channels,
+        output_channels: options.channels,
     })
     .set_content_identity(options.channels)
     .set_crossover_identity(options.channels)

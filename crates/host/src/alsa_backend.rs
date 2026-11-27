@@ -224,7 +224,7 @@ impl<P: PcmOutput> AudioBackend for AlsaOutputBackend<P> {
 
     fn capture(&mut self, out: &mut [f32]) -> Result<(), BackendError> {
         let expected = match self.config.as_ref() {
-            Some(config) => config.samples_per_block(),
+            Some(config) => config.input_samples_per_block(),
             None => return Err(BackendError::NotStarted),
         };
         if out.len() != expected {
@@ -241,8 +241,8 @@ impl<P: PcmOutput> AudioBackend for AlsaOutputBackend<P> {
     fn playout(&mut self, block: &[f32]) -> Result<(), BackendError> {
         let (expected_samples, bytes_per_frame) = match self.config.as_ref() {
             Some(config) => (
-                config.samples_per_block(),
-                config.channels * BYTES_PER_SAMPLE,
+                config.output_samples_per_block(),
+                config.output_channels * BYTES_PER_SAMPLE,
             ),
             None => return Err(BackendError::NotStarted),
         };
@@ -337,12 +337,12 @@ fn validate_config(config: &DeviceConfig) -> Result<usize, BackendError> {
     if config.block_frames == 0 {
         return Err(BackendError::BadConfig("block_frames must be positive"));
     }
-    if config.channels == 0 {
-        return Err(BackendError::BadConfig("channels must be positive"));
+    if config.output_channels == 0 {
+        return Err(BackendError::BadConfig("output_channels must be positive"));
     }
     let samples = config
         .block_frames
-        .checked_mul(config.channels)
+        .checked_mul(config.output_channels)
         .ok_or(BackendError::BadConfig("block size overflow"))?;
     samples
         .checked_mul(BYTES_PER_SAMPLE)
@@ -433,7 +433,7 @@ mod linux {
     impl PcmOutput for AlsaPcm {
         fn open(config: &DeviceConfig) -> Result<Self, BackendError> {
             let device = config.device.as_str();
-            let channels = u32::try_from(config.channels)
+            let channels = u32::try_from(config.output_channels)
                 .map_err(|_| BackendError::BadConfig("channels does not fit in u32"))?;
             let period = Frames::try_from(config.block_frames)
                 .map_err(|_| BackendError::BadConfig("block_frames does not fit in i64"))?;

@@ -30,7 +30,8 @@ fn engine() -> EngineConfig {
     EngineConfig {
         block_frames: BLOCK_SIZE as usize,
         sample_rate: SAMPLE_RATE,
-        channels: CHANNELS as usize,
+        input_channels: CHANNELS as usize,
+        output_channels: CHANNELS as usize,
     }
 }
 
@@ -377,4 +378,53 @@ fn header_fields_participate_in_graph_id() {
     assert_eq!(plan_96k.content, plan_48k.content);
     assert_eq!(plan_96k.matrix, plan_48k.matrix);
     assert_eq!(plan_96k.routing, plan_48k.routing);
+}
+
+// f) IO I1 / D-009：PlanConfig 的输入与输出宽度分开，identity 组装器可表达
+//    2 输入 → 22 lane/DAC；host 图按这两个宽度分别编译。
+#[test]
+fn split_input_output_widths_build_and_compile() {
+    let plan_config = PlanConfig::new_split(BLOCK_SIZE, SAMPLE_RATE, 2, 22);
+    let builder = PlanBuilder::identity(plan_config);
+    let plan = builder.build().expect("split-width identity plan");
+    let content = plan.content.as_ref().expect("content");
+    assert_eq!(content.in_channels, 2, "input width stays 2");
+    assert_eq!(content.out_lanes, 22, "22 output lanes/DACs");
+    assert_eq!(plan.matrix.as_ref().expect("matrix").rows, 22);
+    assert_eq!(plan.routing.as_ref().expect("routing").dac_channels, 22);
+
+    let engine = EngineConfig {
+        block_frames: BLOCK_SIZE as usize,
+        sample_rate: SAMPLE_RATE,
+        input_channels: 2,
+        output_channels: 22,
+    };
+    let mut graph = PlanGraph::compile(&plan, &engine, &AdmissionLimits::default())
+        .expect("2-in / 22-out identity graph must compile");
+    let mut input = vec![0.0f32; 8 * 2];
+    for frame in 0..8 {
+        input[frame * 2] = 0.25;
+        input[frame * 2 + 1] = -0.5;
+    }
+    let mut output = vec![0.0f32; 8 * 22];
+    graph.process(&input, &mut output);
+    for frame in 0..8 {
+        assert_eq!(output[frame * 22], 0.25);
+        assert_eq!(output[frame * 22 + 1], -0.5);
+        assert!(output[frame * 22 + 2..(frame + 1) * 22]
+            .iter()
+            .all(|sample| *sample == 0.0));
+    }
+
+    // 宽度不匹配时 build 仍 fail-closed：content.in_channels 对应输入宽度。
+    let mismatched = PlanBuilder::identity(PlanConfig::new_split(BLOCK_SIZE, SAMPLE_RATE, 4, 22))
+        .set_content(ContentSection {
+            in_channels: 2,
+            out_lanes: 22,
+            folds: Vec::new(),
+        });
+    assert!(
+        mismatched.build().is_err(),
+        "input width mismatch must fail"
+    );
 }

@@ -174,7 +174,8 @@ impl BenchConfig {
         EngineConfig {
             block_frames: self.block_frames,
             sample_rate: self.sample_rate,
-            channels: self.lanes,
+            input_channels: self.lanes,
+            output_channels: self.lanes,
         }
     }
 

@@ -86,6 +86,23 @@
 
 **传输**：Unix socket，一行 JSON 请求 / 一行 JSON 响应；UTF-8、无 BOM、单行。
 
+### A.5 输入/输出宽度解耦（IO I1）
+
+- plan ABI v3 本来就用两个字段表达宽度：输入在 `content.in_channels`，输出在
+  `routing.dac_channels`（缺 routing 时取 `matrix.rows`）；中间 lane 数由
+  `content.out_lanes` / `matrix.cols` / `protection.lanes` 自己衔接。
+- host 运行时 `EngineConfig` 自 IO I1 起把 `channels` 拆成 `input_channels` 与
+  `output_channels`：`PlanGraph::compile` 分别要求 `content.in_channels == input_channels`、
+  `routing.dac_channels == output_channels`，不再要求两者相等；`process` 的输入块长度是
+  `block_frames × input_channels`，输出块长度是 `block_frames × output_channels`。
+- `RuntimeConfig::validate` 分别校验：`input.output_channels == device.input_channels ==
+  engine.input_channels`，以及 `device.output_channels == engine.output_channels`。
+- plan-builder 的 `PlanConfig` 对应拆成 `input_channels` / `output_channels`
+  （`PlanConfig::new` 保持等宽旧行为，`new_split` 构造不等宽配置）。
+- **边界**：输入宽度和输出宽度仍是两个独立预算；不等宽不是“自动上混/下混”，content folds
+  必须显式写出映射，未映射的 lane 输出 +0.0。daemon 的 audio profile 目前仍用
+  `device.channels` 描述物理输出行数，输入通道号也沿用同一上限（见 docs/API.md §12）。
+
 ### B.1 op 列表
 
 | op | 请求字段 | 响应要点 |
@@ -148,6 +165,7 @@
 - 第一阶段（`format`）：只校验并准备草稿，返回 `engine_token` / `planned_version` / `format{}` / `changed`；**不改变正在跑的引擎**。同 token 重复请求幂等。若当前已有方案草稿，会被丢弃（草稿按旧格式编译，禁止混用）。
 - 第二阶段（`commit`）：若目标格式与当前一致 → `changed=false`、`applied_block=null`，不重建；若不同 → 用新配置重建 `SlotEngine`（保留用户静音状态），**丢弃正在跑的图**（`graph_dropped=true`）、清空可回滚历史（`history_cleared`），`applied_block=1` 表示新执行器从第 1 块开始。之后必须 prepare 一份与新格式一致的方案才能恢复图。
 - `abort` 可丢弃格式草稿（回执 `aborted_surface="format"`）；错 token 不销毁草稿。
+- **通道字段（IO I1 加法）**：`format{}` 保留 `channels`（= 输出宽度，旧读方兼容），并新增 `input_channels` / `output_channels`；热重配的 `channels_prepare/commit` 仍以单值同时改两者（独立改输入宽度属于后续 IO 工作）。
 - **设备边界**：本控制面不碰设备；响应里的 `device_restart_required=true` 是给上层的明确信号（真实播放进程需要重开 PCM 流）。不把控制面重建声称为设备已换格式。
 
 ### B.1.5 模式（mode）

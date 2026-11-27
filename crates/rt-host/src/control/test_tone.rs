@@ -136,7 +136,7 @@ impl TestToneRequest {
     pub fn parse(object: &Map<String, Value>, format: &EngineConfig) -> Result<Self, ControlError> {
         require_true(object, "audible")?;
         require_true(object, "confirm")?;
-        let channels = format.channels.max(1) as u64;
+        let channels = format.output_channels.max(1) as u64;
         let dac = integer_field(object, "dac")?;
         if dac >= channels {
             return Err(bad_request(format!(
@@ -305,7 +305,7 @@ pub fn render_buffer(
 ) -> Result<RenderedToneBuffer, ControlError> {
     let sample_rate = u64::from(format.sample_rate);
     let block_frames = format.block_frames as u64;
-    let channels = format.channels as u64;
+    let channels = format.output_channels as u64;
     if sample_rate == 0 || block_frames == 0 || channels == 0 {
         return Err(ControlError::new(
             error::NOT_APPLIED,
@@ -395,7 +395,7 @@ pub fn render(
     let playback = CalibrationPlayback::new(
         buffer.data,
         format.block_frames,
-        format.channels,
+        format.output_channels,
         Arc::clone(&progress),
     )
     .map_err(|err| {
@@ -587,7 +587,8 @@ mod tests {
         EngineConfig {
             block_frames: 128,
             sample_rate: 48_000,
-            channels,
+            input_channels: channels,
+            output_channels: channels,
         }
     }
 
@@ -747,7 +748,8 @@ mod tests {
         let format = EngineConfig {
             block_frames: 128,
             sample_rate: 96_000,
-            channels: 22,
+            input_channels: 22,
+            output_channels: 22,
         };
         let request = request(TestToneKind::Noise, 21, 500);
         let first = render_buffer(&format, &request).expect("noise buffer");

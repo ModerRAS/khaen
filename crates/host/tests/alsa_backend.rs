@@ -80,7 +80,7 @@ impl PcmOutput for FakePcm {
         }
         Ok(Self {
             config: Some(config.clone()),
-            captured: vec![0u8; config.samples_per_block() * BYTES_PER_SAMPLE],
+            captured: vec![0u8; config.output_samples_per_block() * BYTES_PER_SAMPLE],
             open_count: 1,
             available_frames: config.block_frames * BUFFER_PERIODS,
             ..Self::blank()
@@ -102,7 +102,7 @@ impl PcmOutput for FakePcm {
             return Err(PcmError::Fatal("fake write before prepare"));
         }
         let bytes_per_frame = match self.config.as_ref() {
-            Some(config) => config.channels * BYTES_PER_SAMPLE,
+            Some(config) => config.output_channels * BYTES_PER_SAMPLE,
             None => return Err(PcmError::Fatal("fake not open")),
         };
         if self.stall {
@@ -160,12 +160,13 @@ fn config() -> DeviceConfig {
         device: DeviceId::new("fake-pcm"),
         sample_rate: 48_000,
         block_frames: 8,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     }
 }
 
 fn silent_block(config: &DeviceConfig) -> Vec<f32> {
-    vec![0.0f32; config.samples_per_block()]
+    vec![0.0f32; config.output_samples_per_block()]
 }
 
 fn started(config: &DeviceConfig) -> AlsaOutputBackend<FakePcm> {
@@ -277,7 +278,7 @@ fn start_opens_device_and_allocates_block_buffer() {
     assert_eq!(backend.config(), Some(&config));
     assert_eq!(
         backend.block_bytes(),
-        config.samples_per_block() * BYTES_PER_SAMPLE
+        config.output_samples_per_block() * BYTES_PER_SAMPLE
     );
     assert_eq!(
         backend.available_frames().expect("available"),
@@ -318,14 +319,14 @@ fn start_rejects_bad_config() {
         BackendError::BadConfig("block_frames must be positive")
     );
     let mut zero_channels = config();
-    zero_channels.channels = 0;
+    zero_channels.output_channels = 0;
     assert_eq!(
         backend.start(&zero_channels).unwrap_err(),
-        BackendError::BadConfig("channels must be positive")
+        BackendError::BadConfig("output_channels must be positive")
     );
     let mut overflow = config();
     overflow.block_frames = usize::MAX / 2;
-    overflow.channels = 3;
+    overflow.output_channels = 3;
     assert_eq!(
         backend.start(&overflow).unwrap_err(),
         BackendError::BadConfig("block size overflow")
@@ -366,7 +367,7 @@ fn playout_writes_converted_block_and_updates_stats() {
 
     backend.playout(&samples).expect("playout");
 
-    let mut expected = vec![0u8; config.samples_per_block() * BYTES_PER_SAMPLE];
+    let mut expected = vec![0u8; config.output_samples_per_block() * BYTES_PER_SAMPLE];
     encode_s24_3le_block(&samples, &mut expected).expect("encode");
     let stats = backend.stats();
     assert_eq!(stats.blocks_written, 1);
@@ -395,7 +396,7 @@ fn playout_requires_start_and_full_block() {
     assert_eq!(
         backend.playout(&samples[..3]).unwrap_err(),
         BackendError::WrongBlockLength {
-            expected: config.samples_per_block(),
+            expected: config.output_samples_per_block(),
             actual: 3
         }
     );
@@ -415,7 +416,7 @@ fn playout_completes_block_across_short_writes() {
 
     backend.playout(&samples).expect("playout");
 
-    let mut expected = vec![0u8; config.samples_per_block() * BYTES_PER_SAMPLE];
+    let mut expected = vec![0u8; config.output_samples_per_block() * BYTES_PER_SAMPLE];
     encode_s24_3le_block(&samples, &mut expected).expect("encode");
     let fake = backend.output().expect("output");
     // 8 帧、每次最多 3 帧 → 3 次写：3 + 3 + 2。
@@ -434,10 +435,11 @@ fn handles_motu_ultralite_topology() {
         device: DeviceId::new("hw:CARD=UltraLite-mk5,DEV=0"),
         sample_rate: 48_000,
         block_frames: 128,
-        channels: 22,
+        input_channels: 22,
+        output_channels: 22,
     };
     let mut backend = started(&config);
-    let mut samples = vec![0.0f32; config.samples_per_block()];
+    let mut samples = vec![0.0f32; config.output_samples_per_block()];
     for (index, sample) in samples.iter_mut().enumerate() {
         *sample = ((index % 201) as f32 / 201.0) - 0.5;
     }
@@ -600,7 +602,7 @@ fn over_reported_write_is_rejected() {
 fn capture_fills_silence_and_validates_length() {
     let config = config();
     let mut backend = AlsaOutputBackend::<FakePcm>::new();
-    let mut out = vec![0.0f32; config.samples_per_block()];
+    let mut out = vec![0.0f32; config.output_samples_per_block()];
     assert_eq!(
         backend.capture(&mut out).unwrap_err(),
         BackendError::NotStarted
@@ -615,7 +617,7 @@ fn capture_fills_silence_and_validates_length() {
     assert_eq!(
         backend.capture(&mut out[..3]).unwrap_err(),
         BackendError::WrongBlockLength {
-            expected: config.samples_per_block(),
+            expected: config.output_samples_per_block(),
             actual: 3
         }
     );
@@ -794,7 +796,8 @@ fn linux_adapter_reports_missing_device_without_panicking() {
         device: DeviceId::new("hw:CARD=KhaenNoSuchCard,DEV=0"),
         sample_rate: 48_000,
         block_frames: 128,
-        channels: 22,
+        input_channels: 22,
+        output_channels: 22,
     };
     let mut backend = LinuxAlsaBackend::new();
     let error = backend

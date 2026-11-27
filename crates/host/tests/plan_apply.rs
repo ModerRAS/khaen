@@ -25,7 +25,8 @@ fn engine_config() -> EngineConfig {
     EngineConfig {
         block_frames: BLOCK_FRAMES as usize,
         sample_rate: SAMPLE_RATE,
-        channels: CHANNELS as usize,
+        input_channels: CHANNELS as usize,
+        output_channels: CHANNELS as usize,
     }
 }
 

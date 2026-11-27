@@ -52,7 +52,8 @@ fn audio_path_performs_no_heap_allocation() {
     let config = EngineConfig {
         block_frames: 128,
         sample_rate: 96_000,
-        channels: 2,
+        input_channels: 2,
+        output_channels: 2,
     };
     let mut engine = BlockEngine::new(config.clone(), Gain(0.5)).expect("engine");
     let (producer, consumer) = channel::<u32>(256);
@@ -60,8 +61,8 @@ fn audio_path_performs_no_heap_allocation() {
     let device = engine.device_config(khaen_host::DeviceId::new("null"));
     backend.start(&device).expect("start");
 
-    let mut input = vec![0.0f32; engine.samples_per_block()];
-    let mut scratch = vec![0.0f32; engine.samples_per_block()];
+    let mut input = vec![0.0f32; engine.output_samples_per_block()];
+    let mut scratch = vec![0.0f32; engine.output_samples_per_block()];
 
     // 预热：让首次触碰的懒惰初始化（TLS 等）发生在计量窗口之外。
     let _ = engine.run_block(&input).expect("warmup");

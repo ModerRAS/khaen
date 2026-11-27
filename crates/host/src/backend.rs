@@ -6,6 +6,10 @@
 use crate::owner::DeviceId;
 
 /// 打开后端所需的参数。
+///
+/// 输入/输出通道数分开：采集侧用 `input_channels` 校验 `capture` 的块长，播放侧用
+/// `output_channels` 编码/校验 `playout` 的块长。物理设备可能只提供其中一侧的能力，
+/// 后端应按自己实际使用的方向取值。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceConfig {
     /// 设备标识。
@@ -14,14 +18,21 @@ pub struct DeviceConfig {
     pub sample_rate: u32,
     /// 每块帧数。
     pub block_frames: usize,
-    /// 通道数（设备通道，不是 lane 数）。
-    pub channels: usize,
+    /// 采集输入通道数。
+    pub input_channels: usize,
+    /// 播放输出通道数。
+    pub output_channels: usize,
 }
 
 impl DeviceConfig {
-    /// 每块样本数。
-    pub fn samples_per_block(&self) -> usize {
-        self.block_frames * self.channels
+    /// 输入块样本数（`block_frames × input_channels`）。
+    pub fn input_samples_per_block(&self) -> usize {
+        self.block_frames * self.input_channels
+    }
+
+    /// 输出块样本数（`block_frames × output_channels`）。
+    pub fn output_samples_per_block(&self) -> usize {
+        self.block_frames * self.output_channels
     }
 }
 
@@ -119,10 +130,10 @@ impl AudioBackend for NullBackend {
         if config.block_frames == 0 {
             return Err(BackendError::BadConfig("block_frames must be positive"));
         }
-        if config.channels == 0 {
+        if config.input_channels == 0 || config.output_channels == 0 {
             return Err(BackendError::BadConfig("channels must be positive"));
         }
-        let echo = vec![0.0f32; config.samples_per_block()];
+        let echo = vec![0.0f32; config.output_samples_per_block()];
         self.echo = echo;
         self.config = Some(config.clone());
         self.blocks = 0;
@@ -135,9 +146,9 @@ impl AudioBackend for NullBackend {
 
     fn capture(&mut self, out: &mut [f32]) -> Result<(), BackendError> {
         let config = self.config.as_ref().ok_or(BackendError::NotStarted)?;
-        if out.len() != config.samples_per_block() {
+        if out.len() != config.input_samples_per_block() {
             return Err(BackendError::WrongBlockLength {
-                expected: config.samples_per_block(),
+                expected: config.input_samples_per_block(),
                 actual: out.len(),
             });
         }
@@ -151,9 +162,9 @@ impl AudioBackend for NullBackend {
 
     fn playout(&mut self, block: &[f32]) -> Result<(), BackendError> {
         let config = self.config.as_ref().ok_or(BackendError::NotStarted)?;
-        if block.len() != config.samples_per_block() {
+        if block.len() != config.output_samples_per_block() {
             return Err(BackendError::WrongBlockLength {
-                expected: config.samples_per_block(),
+                expected: config.output_samples_per_block(),
                 actual: block.len(),
             });
         }
@@ -182,7 +193,8 @@ mod tests {
             device: DeviceId::new("null"),
             sample_rate: 96_000,
             block_frames: 128,
-            channels: 2,
+            input_channels: 2,
+            output_channels: 2,
         }
     }
 
@@ -190,7 +202,7 @@ mod tests {
     fn starts_and_reports_blocks() {
         let mut backend = NullBackend::new();
         backend.start(&config()).expect("start");
-        let mut input = vec![0.0f32; config().samples_per_block()];
+        let mut input = vec![0.0f32; config().input_samples_per_block()];
         backend.capture(&mut input).expect("capture");
         backend.playout(&input).expect("playout");
         assert_eq!(backend.blocks(), 1);

@@ -442,6 +442,9 @@ mod app {
         let sample_rate: u32 = env_parse("KHAEN_SAMPLE_RATE", 48_000)?;
         let block_frames: usize = env_parse("KHAEN_BLOCK_FRAMES", 128)?;
         let channels: usize = env_parse("KHAEN_CHANNELS", 2)?;
+        // IO I1：输入/输出宽度可分开启动；KHAEN_CHANNELS 仍同时设置两者（向后兼容）。
+        let input_channels: usize = env_parse("KHAEN_INPUT_CHANNELS", channels)?;
+        let output_channels: usize = env_parse("KHAEN_OUTPUT_CHANNELS", channels)?;
 
         let group: Ipv4Addr = env_string("KHAEN_AES67_GROUP", "239.69.0.1")?
             .parse()
@@ -480,7 +483,7 @@ mod app {
             sample_rate,
             channels: rtp_channels,
             channels_map,
-            output_channels: channels,
+            output_channels: input_channels,
             block_frames,
             jitter_target_frames: jitter_frames,
         };
@@ -489,13 +492,15 @@ mod app {
             engine: EngineConfig {
                 block_frames,
                 sample_rate,
-                channels,
+                input_channels,
+                output_channels,
             },
             device: DeviceConfig {
                 device: DeviceId::new(alsa_device.clone()),
                 sample_rate,
                 block_frames,
-                channels,
+                input_channels,
+                output_channels,
             },
             safety: SafetyPolicy::default(),
             receiver: ReceiverConfig::default(),
@@ -591,7 +596,10 @@ mod app {
             Some(format) => serde_json::json!({
                 "block_frames": format.block_frames,
                 "sample_rate": format.sample_rate,
-                "channels": format.channels,
+                // 向后兼容：channels 仍表示输出宽度；新增 input/output 明确拆分。
+                "channels": format.output_channels,
+                "input_channels": format.input_channels,
+                "output_channels": format.output_channels,
             })
             .to_string(),
             None => "null".to_string(),
@@ -731,11 +739,12 @@ mod app {
             }
         };
         println!(
-            "khaen-rt-host: device={} rate={} block={} channels={} aes67={}:{} plan={:?}",
+            "khaen-rt-host: device={} rate={} block={} in_channels={} out_channels={} aes67={}:{} plan={:?}",
             settings.alsa_device,
             settings.config.engine.sample_rate,
             settings.config.engine.block_frames,
-            settings.config.engine.channels,
+            settings.config.engine.input_channels,
+            settings.config.engine.output_channels,
             settings.config.input.multicast_addr,
             settings.config.input.port,
             settings.plan_path
@@ -1053,7 +1062,8 @@ mod tests {
         let format = khaen_host::engine::EngineConfig {
             block_frames: 128,
             sample_rate: 48_000,
-            channels: 4,
+            input_channels: 4,
+            output_channels: 4,
         };
         // 测试音会话槽（active 状态）：状态文件同样要上报 speaker_test 增量字段。
         let test_tone = crate::control::test_tone::TestToneSlot::shared();

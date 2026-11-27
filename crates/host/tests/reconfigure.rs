@@ -102,7 +102,7 @@ impl PcmOutput for ReconfigPcm {
     fn write(&mut self, bytes: &[u8]) -> Result<usize, PcmError> {
         assert_eq!(
             bytes.len(),
-            self.config.samples_per_block() * BYTES_PER_SAMPLE,
+            self.config.output_samples_per_block() * BYTES_PER_SAMPLE,
             "fake pcm block bytes",
         );
         self.state.writes.fetch_add(1, Ordering::SeqCst);
@@ -183,13 +183,15 @@ fn base_config(device: &str) -> RuntimeConfig {
         engine: EngineConfig {
             block_frames: BLOCK_FRAMES,
             sample_rate: SAMPLE_RATE,
-            channels: 2,
+            input_channels: 2,
+            output_channels: 2,
         },
         device: DeviceConfig {
             device: DeviceId::new(device),
             sample_rate: SAMPLE_RATE,
             block_frames: BLOCK_FRAMES,
-            channels: 2,
+            input_channels: 2,
+            output_channels: 2,
         },
         safety: SafetyPolicy {
             max_consecutive_underruns: 10_000,
@@ -219,13 +221,15 @@ fn derive_config(
     target.engine = EngineConfig {
         block_frames: BLOCK_FRAMES,
         sample_rate,
-        channels,
+        input_channels: channels,
+        output_channels: channels,
     };
     target.device = DeviceConfig {
         device: DeviceId::new(device),
         sample_rate,
         block_frames: BLOCK_FRAMES,
-        channels,
+        input_channels: channels,
+        output_channels: channels,
     };
     target
 }
@@ -341,7 +345,7 @@ fn reconfigure_format_change_rebuilds_engine_receiver_and_keeps_blocks() {
     assert!(outcome.graph_dropped);
     assert!(!outcome.device_was_absent);
     assert_eq!(outcome.format.sample_rate, 96_000);
-    assert_eq!(outcome.format.channels, 4);
+    assert_eq!(outcome.format.output_channels, 4);
     assert_eq!(
         outcome.hw,
         HwReadback {
@@ -481,7 +485,7 @@ fn reconfigure_rejects_invalid_target_before_touching_handles() {
     let opens_before = state.opens.load(Ordering::SeqCst);
     let creates_before = factory_state.created.load(Ordering::SeqCst);
     let mut target = config.clone();
-    target.engine.channels = 4; // 与 device/input 不一致：validate 失败
+    target.engine.output_channels = 4; // 与 device/input 不一致：validate 失败
     let failure = runtime
         .reconfigure(target, None, || Ok(HwReadback::default()))
         .expect_err("invalid target must be rejected");
