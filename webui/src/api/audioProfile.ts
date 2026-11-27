@@ -178,6 +178,8 @@ export interface AlsaCaptureDevice {
   device: number | null
   channels_min: number | null
   channels_max: number | null
+  rate_min: number | null
+  rate_max: number | null
   open_error: string | null
 }
 
@@ -833,6 +835,8 @@ export function parseDeviceInputs(value: unknown): DeviceInputsCapability {
           device: readNumber(deviceRecord, 'device', path),
           channels_min: readNumber(deviceRecord, 'channels_min', path),
           channels_max: readNumber(deviceRecord, 'channels_max', path),
+          rate_min: readNumber(deviceRecord, 'rate_min', path),
+          rate_max: readNumber(deviceRecord, 'rate_max', path),
           open_error: readString(deviceRecord, 'open_error', path)
         }
       })

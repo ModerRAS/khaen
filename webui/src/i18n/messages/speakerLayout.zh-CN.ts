@@ -45,6 +45,7 @@ const messages = {
     alsaCapture: "ALSA capture 设备（{count}）",
     alsaCaptureEmpty: "ALSA 枚举成功，但没有发现 capture PCM 设备。",
     captureChannels: "通道 {min}–{max}",
+    captureRates: "采样率 {min}–{max} Hz",
   },
   outputs: {
     title: "物理输出 ↔ 角色",

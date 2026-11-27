@@ -104,6 +104,16 @@ function captureChannelsText(device: AlsaCaptureDevice): string {
     max: device.channels_max ?? '?'
   })
 }
+
+function captureRatesText(device: AlsaCaptureDevice): string | null {
+  if (device.rate_min === null && device.rate_max === null) {
+    return null
+  }
+  return t('speakerLayout.deviceInputs.captureRates', {
+    min: device.rate_min ?? '?',
+    max: device.rate_max ?? '?'
+  })
+}
 const deviceInputsText = computed(() => {
   const raw = deviceInputs.value?.reason ?? t('speakerLayout.deviceInputs.unavailable')
   if (deviceInputs.value?.available === true) {
@@ -654,6 +664,7 @@ onBeforeUnmount(() => {
         <ul v-if="alsaCaptureDevices.length > 0" class="plain-list mono">
           <li v-for="device in alsaCaptureDevices" :key="device.name">
             {{ device.name }} · {{ device.description ?? t('common.dash') }} · {{ captureChannelsText(device) }}
+            <template v-if="captureRatesText(device) !== null"> · {{ captureRatesText(device) }}</template>
             <span v-if="device.open_error"> · {{ device.open_error }}</span>
           </li>
         </ul>

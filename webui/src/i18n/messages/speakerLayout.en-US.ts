@@ -45,6 +45,7 @@ const messages = {
     alsaCapture: "ALSA capture devices ({count})",
     alsaCaptureEmpty: "ALSA enumeration succeeded but found no capture PCM devices.",
     captureChannels: "channels {min}–{max}",
+    captureRates: "rates {min}–{max} Hz",
   },
   outputs: {
     title: "Physical outputs ↔ roles",

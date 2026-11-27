@@ -28,6 +28,10 @@ pub struct CaptureDevice {
     pub channels_min: Option<u32>,
     /// hw_params 报告的通道数上限（null = 未打开/未知）。
     pub channels_max: Option<u32>,
+    /// hw_params 报告的采样率下限 Hz（null = 未打开/未知）。
+    pub rate_min: Option<u32>,
+    /// hw_params 报告的采样率上限 Hz（null = 未打开/未知）。
+    pub rate_max: Option<u32>,
     /// 打开/查询失败原因（null = 成功）。
     pub open_error: Option<String>,
 }
@@ -42,6 +46,8 @@ impl CaptureDevice {
             "device": self.device,
             "channels_min": self.channels_min,
             "channels_max": self.channels_max,
+            "rate_min": self.rate_min,
+            "rate_max": self.rate_max,
             "open_error": self.open_error,
         })
     }
@@ -88,6 +94,8 @@ fn platform_enumerate() -> Result<Vec<CaptureDevice>, String> {
             device: None,
             channels_min: None,
             channels_max: None,
+            rate_min: None,
+            rate_max: None,
             open_error: None,
         };
         match PCM::new(&name, Direction::Capture, true) {
@@ -99,6 +107,8 @@ fn platform_enumerate() -> Result<Vec<CaptureDevice>, String> {
                 if let Ok(params) = HwParams::any(&pcm) {
                     device.channels_min = params.get_channels_min().ok();
                     device.channels_max = params.get_channels_max().ok();
+                    device.rate_min = params.get_rate_min().ok();
+                    device.rate_max = params.get_rate_max().ok();
                 }
                 // 没 start 过，直接析构即可；显式 drop 让“这里不播放”在代码里可见。
                 let _ = pcm.drop();
@@ -133,11 +143,15 @@ mod tests {
             device: Some(0),
             channels_min: Some(2),
             channels_max: Some(18),
+            rate_min: Some(44_100),
+            rate_max: Some(96_000),
             open_error: None,
         }];
         let value = devices_json(&devices);
         assert_eq!(value[0]["name"], json!("hw:CARD=UltraLitemk5,DEV=0"));
         assert_eq!(value[0]["channels_max"], json!(18));
+        assert_eq!(value[0]["rate_min"], json!(44_100));
+        assert_eq!(value[0]["rate_max"], json!(96_000));
         assert!(value[0]["open_error"].is_null());
         assert_eq!(devices_json(&[]), json!([]));
     }
@@ -151,11 +165,15 @@ mod tests {
             device: None,
             channels_min: None,
             channels_max: None,
+            rate_min: None,
+            rate_max: None,
             open_error: Some("device busy".to_string()),
         }
         .to_json();
         assert_eq!(value["channels_min"], Value::Null);
         assert_eq!(value["channels_max"], Value::Null);
+        assert_eq!(value["rate_min"], Value::Null);
+        assert_eq!(value["rate_max"], Value::Null);
         assert_eq!(value["open_error"], json!("device busy"));
         assert!(value.get("kind").is_none());
         assert!(value.get("channels").is_none());

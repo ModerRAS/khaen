@@ -155,8 +155,8 @@ test('parseAudioProfileSnapshot normalizes a full document', () => {
         channels: [{ index: 0, label: 'Analog 1', kind: 'analog' }, { index: 1, label: null, kind: 'optical' }],
         source: 'motu-alsa',
         alsa_capture: [
-          { name: 'hw:CARD=UltraLitemk5,DEV=0', description: 'UltraLite-mk5', card: 0, device: 0, channels_min: 2, channels_max: 18, open_error: null },
-          { name: 'default', description: null, card: null, device: null, channels_min: null, channels_max: null, open_error: 'Device or resource busy' }
+          { name: 'hw:CARD=UltraLitemk5,DEV=0', description: 'UltraLite-mk5', card: 0, device: 0, channels_min: 2, channels_max: 18, rate_min: 44100, rate_max: 96000, open_error: null },
+          { name: 'default', description: null, card: null, device: null, channels_min: null, channels_max: null, rate_min: null, rate_max: null, open_error: 'Device or resource busy' }
         ]
       }
     },
@@ -172,6 +172,9 @@ test('parseAudioProfileSnapshot normalizes a full document', () => {
     'default'
   ])
   assert.equal(snapshot.capability.device_inputs.alsa_capture?.[0].channels_max, 18)
+  assert.equal(snapshot.capability.device_inputs.alsa_capture?.[0].rate_min, 44100)
+  assert.equal(snapshot.capability.device_inputs.alsa_capture?.[0].rate_max, 96000)
+  assert.equal(snapshot.capability.device_inputs.alsa_capture?.[1].rate_min, null)
   assert.equal(snapshot.capability.device_inputs.alsa_capture?.[1].open_error, 'Device or resource busy')
   assert.equal(snapshot.plan.lanes, 2)
   assert.deepEqual(snapshot.validation.warnings.map((issue) => issue.message), ['missing center'])
