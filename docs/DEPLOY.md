@@ -116,7 +116,7 @@ daemon 进程是设备生命周期状态机的**唯一 owner**（`Absent → Enu
 | `KHAEN_RT_TARGET` | daemon | 控制 op 目标：`rt-host`（默认，经 UNIX socket）或 `process`（仅离线测试） | `rt-host` |
 | `KHAEN_RT_SOCKET` | daemon | rt-host 控制 socket 路径，必须与 rt-host 的 `KHAEN_CONTROL_SOCKET` 一致 | `/run/khaen/rt-host.sock` |
 | `KHAEN_RT_TIMEOUT_MS` | daemon | 单次往返超时（毫秒），必须大于 5 s 块边界 ack 上限 | `10000` |
-| `KHAEN_CAL_BACKEND` | daemon | 校准 job 后端开关；`off/0` 关闭后如实 `not_wired` | 开 |
+| `KHAEN_CAL_BACKEND` | daemon | 校准 job 后端：`off/0` 关闭（如实 `not_wired`）；`offline` 只跑离线闭环 job；`rt-host` 真实 rt-host 测量 job；`auto` 启动时探测一次，失败降级 offline 并写真实原因。生产真实测量建议显式 `rt-host`（需 `KHAEN_RT_TARGET=rt-host` 且 control socket 可用） | `offline` |
 | `KHAEN_ALLOW_RESTART` | daemon | 允许 `/api/system/restart` 经 systemctl 重启 rt-host | 关（403） |
 | `KHAEN_SPEAKER_TEST` | daemon | 通道识别测试音开关；`on` 才允许 `/api/speaker-test` | 关 |
 | `KHAEN_SOUND_WINDOW` | daemon | 测试音出声窗口（`HH:MM-HH:MM` 逗号分隔，本地时间） | 不限（仍受开关约束） |
