@@ -47,6 +47,12 @@ const messages = {
     captureChannels: "channels {min}–{max}",
     captureRates: "rates {min}–{max} Hz",
   },
+  deviceOutputs: {
+    title: "ALSA playback devices (read-only)",
+    unavailable: "Playback device enumeration is unavailable",
+    empty: "Enumeration succeeded but found no playback PCM devices.",
+    hint: "Read-only device capability; the actual current output device still comes from rt-host status / deployment config.",
+  },
   outputs: {
     title: "Physical outputs ↔ roles",
     step1: "Step 1: choose roles and counts",

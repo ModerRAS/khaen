@@ -30,6 +30,7 @@ import {
   type AudioSourceKind,
   type CommitPlanAck,
   type DeviceInputsCapability,
+  type DeviceOutputsCapability,
   type GeneratedPlan,
   type PreparePlanDraft,
   type ProfileValidation,
@@ -39,7 +40,17 @@ import {
 import { apiClient } from './session.ts'
 
 /** 当前进行中的操作（互斥）。 */
-export type AudioProfileBusy = 'profile' | 'inputs' | 'prepare' | 'commit' | 'abort' | 'apply' | 'test' | 'stop' | null
+export type AudioProfileBusy =
+  | 'profile'
+  | 'inputs'
+  | 'outputs'
+  | 'prepare'
+  | 'commit'
+  | 'abort'
+  | 'apply'
+  | 'test'
+  | 'stop'
+  | null
 
 export type ApplyStepName = 'plan' | 'inspect' | 'prepare' | 'commit'
 
@@ -83,6 +94,10 @@ export interface AudioProfileState {
   deviceInputs: DeviceInputsCapability | null
   deviceInputsPhase: 'idle' | 'loading' | 'ready' | 'error'
   deviceInputsError: AudioProfileErrorInfo | null
+  /** ALSA playback 设备能力（GET /api/device/outputs）。 */
+  deviceOutputs: DeviceOutputsCapability | null
+  deviceOutputsPhase: 'idle' | 'loading' | 'ready' | 'error'
+  deviceOutputsError: AudioProfileErrorInfo | null
   /** 已 prepare 未 decided 的 profile 草稿。 */
   draft: AudioProfileDraft | null
   /** 最近一次 commit 成功回执。 */
@@ -106,6 +121,9 @@ export function createInitialAudioProfileState(): AudioProfileState {
     deviceInputs: null,
     deviceInputsPhase: 'idle',
     deviceInputsError: null,
+    deviceOutputs: null,
+    deviceOutputsPhase: 'idle',
+    deviceOutputsError: null,
     draft: null,
     lastCommit: null,
     lastCommitAt: null,
@@ -157,6 +175,7 @@ export interface AudioProfileDeps {
 export interface AudioProfileController {
   loadProfile(force?: boolean): Promise<AudioProfileSnapshot | null>
   loadDeviceInputs(force?: boolean): Promise<DeviceInputsCapability | null>
+  loadDeviceOutputs(force?: boolean): Promise<DeviceOutputsCapability | null>
   prepare(profile: AudioProfile): Promise<AudioProfileDraft | null>
   commit(): Promise<AudioProfileCommitAck | null>
   abort(): Promise<boolean>
@@ -173,6 +192,7 @@ export function createAudioProfileController(state: AudioProfileState, deps: Aud
   const now = deps.now ?? (() => Date.now())
   let profileInflight: Promise<AudioProfileSnapshot | null> | null = null
   let inputsInflight: Promise<DeviceInputsCapability | null> | null = null
+  let outputsInflight: Promise<DeviceOutputsCapability | null> | null = null
 
   function begin(action: AudioProfileBusy): boolean {
     if (state.busy !== null) {
@@ -252,6 +272,36 @@ export function createAudioProfileController(state: AudioProfileState, deps: Aud
       }
     })()
     return inputsInflight
+  }
+
+  async function loadDeviceOutputs(force = false): Promise<DeviceOutputsCapability | null> {
+    if (!force && state.deviceOutputs !== null) {
+      return state.deviceOutputs
+    }
+    if (outputsInflight !== null) {
+      return outputsInflight
+    }
+    if (!begin('outputs')) {
+      return null
+    }
+    state.deviceOutputsPhase = 'loading'
+    outputsInflight = (async () => {
+      try {
+        const outputs = await deps.api.fetchDeviceOutputs()
+        state.deviceOutputs = outputs
+        state.deviceOutputsPhase = 'ready'
+        state.deviceOutputsError = null
+        return outputs
+      } catch (error) {
+        state.deviceOutputsPhase = 'error'
+        state.deviceOutputsError = fail(error)
+        return null
+      } finally {
+        outputsInflight = null
+        end()
+      }
+    })()
+    return outputsInflight
   }
 
   async function prepare(profile: AudioProfile): Promise<AudioProfileDraft | null> {
@@ -448,6 +498,7 @@ export function createAudioProfileController(state: AudioProfileState, deps: Aud
   return {
     loadProfile,
     loadDeviceInputs,
+    loadDeviceOutputs,
     prepare,
     commit,
     abort,
@@ -476,6 +527,10 @@ export function loadAudioProfile(force = false): Promise<AudioProfileSnapshot | 
 
 export function loadDeviceInputs(force = false): Promise<DeviceInputsCapability | null> {
   return controller.loadDeviceInputs(force)
+}
+
+export function loadDeviceOutputs(force = false): Promise<DeviceOutputsCapability | null> {
+  return controller.loadDeviceOutputs(force)
 }
 
 export function prepareAudioProfile(profile: AudioProfile): Promise<AudioProfileDraft | null> {

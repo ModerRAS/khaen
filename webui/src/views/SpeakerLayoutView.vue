@@ -56,6 +56,7 @@ import {
   editingProfile,
   loadAudioProfile,
   loadDeviceInputs,
+  loadDeviceOutputs,
   mergedValidation,
   prepareAudioProfile,
   speakerTestRemainingMs,
@@ -69,6 +70,7 @@ const { t, locale } = useI18n({ useScope: 'global' })
 
 const snapshot = computed(() => audioProfileState.snapshot)
 const deviceInputs = computed(() => audioProfileState.deviceInputs)
+const deviceOutputs = computed(() => audioProfileState.deviceOutputs)
 const busy = computed(() => audioProfileState.busy)
 const error = computed(() => audioProfileState.error)
 
@@ -94,6 +96,11 @@ const notWiredReason = computed<string | null>(() => {
 const profileTruth = computed<TruthKind>(() => (snapshot.value?.profile != null ? 'actual' : 'notWired'))
 const inputsTruth = computed<TruthKind>(() => (deviceInputs.value?.available === true ? 'actual' : 'notWired'))
 const alsaCaptureDevices = computed(() => deviceInputs.value?.alsa_capture ?? null)
+const playbackDevices = computed(() => deviceOutputs.value?.devices ?? null)
+const outputsTruth = computed<TruthKind>(() => (playbackDevices.value !== null ? 'actual' : 'notWired'))
+const outputsText = computed(
+  () => deviceOutputs.value?.reason ?? t('speakerLayout.deviceOutputs.unavailable')
+)
 
 function captureChannelsText(device: AlsaCaptureDevice): string {
   if (device.channels_min === null && device.channels_max === null) {
@@ -527,7 +534,7 @@ async function onStopTest(): Promise<void> {
 /* ------------------------------------------------------------------ 生命周期 */
 
 async function reload(): Promise<void> {
-  await Promise.all([loadAudioProfile(true), loadDeviceInputs(true)])
+  await Promise.all([loadAudioProfile(true), loadDeviceInputs(true), loadDeviceOutputs(true)])
   resetEdit(editingProfile(snapshot.value))
 }
 
@@ -680,6 +687,21 @@ onBeforeUnmount(() => {
           {{ channel.index + 1 }} · {{ channel.label ?? t('common.dash') }} · {{ channel.kind }}
         </li>
       </ul>
+    </PanelCard>
+
+    <PanelCard title-key="speakerLayout.deviceOutputs.title" :truth="outputsTruth">
+      <div v-if="playbackDevices === null" class="banner banner--warn" role="status">
+        {{ outputsText }}
+      </div>
+      <ul v-else-if="playbackDevices.length > 0" class="plain-list mono">
+        <li v-for="device in playbackDevices" :key="device.name">
+          {{ device.name }} · {{ device.description ?? t('common.dash') }} · {{ captureChannelsText(device) }}
+          <template v-if="captureRatesText(device) !== null"> · {{ captureRatesText(device) }}</template>
+          <span v-if="device.open_error"> · {{ device.open_error }}</span>
+        </li>
+      </ul>
+      <p v-else class="aux-text">{{ t('speakerLayout.deviceOutputs.empty') }}</p>
+      <p class="aux-text">{{ t('speakerLayout.deviceOutputs.hint') }}</p>
     </PanelCard>
 
     <!-- 输出区 -->

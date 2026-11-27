@@ -18,6 +18,7 @@ import {
   deriveLayoutLabel,
   enabledOutputs,
   parseAudioProfileSnapshot,
+  parseDeviceOutputs,
   parseGeneratedPlan,
   parsePrepareResponse,
   parseSpeakerTestAck,
@@ -246,6 +247,9 @@ test('audio profile API uses the documented paths, methods and bodies', async ()
     if (path === AUDIO_PROFILE_PATHS.deviceInputs) {
       return jsonResponse(200, { ok: true, available: false, reason: 'no device' })
     }
+    if (path === AUDIO_PROFILE_PATHS.deviceOutputs) {
+      return jsonResponse(200, { ok: true, alsa_playback: [], reason: null })
+    }
     if (path === AUDIO_PROFILE_PATHS.plan) {
       return jsonResponse(200, { ok: true, plan_path: '/p.bin', sha256: 'b'.repeat(64), lane_count: 2 })
     }
@@ -282,6 +286,7 @@ test('audio profile API uses the documented paths, methods and bodies', async ()
   await api.abortPlan('engine-token')
   await api.startSpeakerTest({ dac: 2, ms: 1000, kind: 'noise', db: -30, audible: true, confirm: true })
   await api.stopSpeakerTest()
+  await api.fetchDeviceOutputs()
 
   assert.deepEqual(paths, [
     AUDIO_PROFILE_PATHS.profile,
@@ -295,7 +300,8 @@ test('audio profile API uses the documented paths, methods and bodies', async ()
     AUDIO_PROFILE_PATHS.planCommit,
     AUDIO_PROFILE_PATHS.planAbort,
     AUDIO_PROFILE_PATHS.speakerTest,
-    AUDIO_PROFILE_PATHS.speakerTestStop
+    AUDIO_PROFILE_PATHS.speakerTestStop,
+    AUDIO_PROFILE_PATHS.deviceOutputs
   ])
   assert.deepEqual(methods.filter((method) => method === 'PUT').length, 3)
   // PUT prepare/commit/abort body 形状
@@ -316,6 +322,24 @@ test('audio profile API uses the documented paths, methods and bodies', async ()
   assert.equal(testBody.dac, 2)
   assert.equal(testBody.db, -30)
   assert.deepEqual(bodies[11], {})
+})
+
+test('parseDeviceOutputs keeps the real playback list and reports unavailable as null + reason', () => {
+  const list = parseDeviceOutputs({
+    ok: true,
+    alsa_playback: [
+      { name: 'hw:CARD=UltraLitemk5,DEV=0', description: 'UltraLite-mk5', card: 0, device: 0, channels_min: 2, channels_max: 22, rate_min: 44100, rate_max: 96000, open_error: null }
+    ],
+    reason: null
+  })
+  assert.equal(list.devices?.length, 1)
+  assert.equal(list.devices?.[0].channels_max, 22)
+  assert.equal(list.devices?.[0].rate_max, 96000)
+  assert.equal(list.reason, null)
+  const unavailable = parseDeviceOutputs({ ok: true, alsa_playback: null, reason: 'ALSA playback enumeration is Linux-only' })
+  assert.equal(unavailable.devices, null)
+  assert.equal(unavailable.reason, 'ALSA playback enumeration is Linux-only')
+  assert.throws(() => parseDeviceOutputs(null), /invalid_response|unexpected/)
 })
 
 test('audio profile errors are classified into stable UI categories', () => {

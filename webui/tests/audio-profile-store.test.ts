@@ -52,6 +52,10 @@ function createFakeApi(calls: Calls, overrides: Partial<AudioProfileApi> = {}): 
       calls.order.push('inputs')
       return DEVICE_INPUTS
     },
+    fetchDeviceOutputs: async () => {
+      calls.order.push('outputs')
+      return { devices: [], reason: null }
+    },
     prepareProfile: async (profile) => {
       calls.order.push('prepare')
       return {
@@ -135,6 +139,18 @@ test('profile controller loads a snapshot and degrades honestly on failure', asy
   assert.equal(state.profilePhase, 'error')
   assert.equal(state.profileError?.category, 'not_wired')
   assert.equal(state.snapshot?.plan.graph_id, 'graph-1')
+})
+
+test('device outputs load once and cache the real list', async () => {
+  const calls: Calls = { order: [] }
+  const state = createInitialAudioProfileState()
+  const controller = createAudioProfileController(state, { api: createFakeApi(calls) })
+  const outputs = await controller.loadDeviceOutputs()
+  assert.deepEqual(outputs?.devices, [])
+  assert.equal(outputs?.reason, null)
+  assert.equal(state.deviceOutputsPhase, 'ready')
+  await controller.loadDeviceOutputs()
+  assert.equal(calls.order.filter((item) => item === 'outputs').length, 1)
 })
 
 test('two-step save: prepare -> draft, commit applies and clears the draft', async () => {

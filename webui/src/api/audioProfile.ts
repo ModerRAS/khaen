@@ -28,6 +28,7 @@ export const AUDIO_PROFILE_PATHS = {
   profile: '/api/audio-profile',
   plan: '/api/audio-profile/plan',
   deviceInputs: '/api/device/inputs',
+  deviceOutputs: '/api/device/outputs',
   speakerTest: '/api/speaker-test',
   speakerTestStop: '/api/speaker-test/stop',
   // 方案生成后走现有方案接口（不自动提交）
@@ -181,6 +182,12 @@ export interface AlsaCaptureDevice {
   rate_min: number | null
   rate_max: number | null
   open_error: string | null
+}
+
+/** GET /api/device/outputs：真实 ALSA playback 设备能力（不表示当前正在用哪张卡）。 */
+export interface DeviceOutputsCapability {
+  devices: AlsaCaptureDevice[] | null
+  reason: string | null
 }
 
 export interface DeviceInputsCapability {
@@ -803,6 +810,42 @@ function parseAes67Capability(value: unknown): Aes67Capability {
   }
 }
 
+function parseAlsaPcmDevice(item: unknown, path: string): AlsaCaptureDevice {
+  const deviceRecord = asRecord(item, path)
+  if (deviceRecord === null) {
+    throw invalidResponse(path, 'must be an object')
+  }
+  return {
+    name: readString(deviceRecord, 'name', path) ?? '',
+    description: readString(deviceRecord, 'description', path),
+    card: readNumber(deviceRecord, 'card', path),
+    device: readNumber(deviceRecord, 'device', path),
+    channels_min: readNumber(deviceRecord, 'channels_min', path),
+    channels_max: readNumber(deviceRecord, 'channels_max', path),
+    rate_min: readNumber(deviceRecord, 'rate_min', path),
+    rate_max: readNumber(deviceRecord, 'rate_max', path),
+    open_error: readString(deviceRecord, 'open_error', path)
+  }
+}
+
+/**
+ * 解析 GET /api/device/outputs。
+ * `alsa_playback` 为 null = 枚举不可用（reason 必填）；数组（含空数组）= 真实枚举结果。
+ */
+export function parseDeviceOutputs(value: unknown): DeviceOutputsCapability {
+  const record = asRecord(value, 'device_outputs')
+  if (record === null) {
+    throw invalidResponse('device_outputs', 'body must be an object')
+  }
+  const devices: AlsaCaptureDevice[] | null = Array.isArray(record.alsa_playback)
+    ? record.alsa_playback.map((item, index) => parseAlsaPcmDevice(item, 'device_outputs.alsa_playback[' + String(index) + ']'))
+    : null
+  return {
+    devices,
+    reason: readString(record, 'reason', 'device_outputs')
+  }
+}
+
 export function parseDeviceInputs(value: unknown): DeviceInputsCapability {
   const record = asRecord(value, 'device_inputs') ?? {}
   const optical = readString(record, 'optical_mode', 'device_inputs')
@@ -822,24 +865,9 @@ export function parseDeviceInputs(value: unknown): DeviceInputsCapability {
       })
     : null
   const alsaCapture: AlsaCaptureDevice[] | null = Array.isArray(record.alsa_capture)
-    ? record.alsa_capture.map((item, index) => {
-        const path = 'device_inputs.alsa_capture[' + String(index) + ']'
-        const deviceRecord = asRecord(item, path)
-        if (deviceRecord === null) {
-          throw invalidResponse(path, 'must be an object')
-        }
-        return {
-          name: readString(deviceRecord, 'name', path) ?? '',
-          description: readString(deviceRecord, 'description', path),
-          card: readNumber(deviceRecord, 'card', path),
-          device: readNumber(deviceRecord, 'device', path),
-          channels_min: readNumber(deviceRecord, 'channels_min', path),
-          channels_max: readNumber(deviceRecord, 'channels_max', path),
-          rate_min: readNumber(deviceRecord, 'rate_min', path),
-          rate_max: readNumber(deviceRecord, 'rate_max', path),
-          open_error: readString(deviceRecord, 'open_error', path)
-        }
-      })
+    ? record.alsa_capture.map((item, index) =>
+        parseAlsaPcmDevice(item, 'device_inputs.alsa_capture[' + String(index) + ']')
+      )
     : null
   return {
     available: readBoolean(record, 'available', 'device_inputs'),
@@ -1089,6 +1117,7 @@ export interface CommitPlanAck {
 export interface AudioProfileApi {
   fetchProfile(options?: { signal?: AbortSignal }): Promise<AudioProfileSnapshot>
   fetchDeviceInputs(options?: { signal?: AbortSignal }): Promise<DeviceInputsCapability>
+  fetchDeviceOutputs(options?: { signal?: AbortSignal }): Promise<DeviceOutputsCapability>
   prepareProfile(profile: AudioProfile): Promise<AudioProfileDraft>
   commitProfile(token: string): Promise<AudioProfileCommitAck>
   abortProfile(token: string): Promise<AudioProfileAbortAck>
@@ -1149,6 +1178,13 @@ export function createAudioProfileApi(client: ApiClient): AudioProfileApi {
         throw invalidResponse(AUDIO_PROFILE_PATHS.deviceInputs, 'body must be an object')
       }
       return parseDeviceInputs(record)
+    },
+    async fetchDeviceOutputs(options = {}) {
+      const body = await client.get<unknown>(AUDIO_PROFILE_PATHS.deviceOutputs, {
+        signal: options.signal,
+        timeoutMs: AUDIO_PROFILE_FETCH_TIMEOUT_MS
+      })
+      return parseDeviceOutputs(body)
     },
     async prepareProfile(profile) {
       const body = await client.put<unknown>(AUDIO_PROFILE_PATHS.profile, { stage: 'prepare', profile })

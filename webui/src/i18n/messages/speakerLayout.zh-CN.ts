@@ -47,6 +47,12 @@ const messages = {
     captureChannels: "通道 {min}–{max}",
     captureRates: "采样率 {min}–{max} Hz",
   },
+  deviceOutputs: {
+    title: "ALSA 播放设备（只读）",
+    unavailable: "播放设备枚举不可用",
+    empty: "枚举成功，但没有发现 playback PCM 设备。",
+    hint: "只读设备能力；当前实际输出设备仍以 rt-host status / 部署配置为准。",
+  },
   outputs: {
     title: "物理输出 ↔ 角色",
     step1: "第 1 步：选择角色与数量",
