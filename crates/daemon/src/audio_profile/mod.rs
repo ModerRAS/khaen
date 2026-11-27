@@ -11,6 +11,7 @@
 //! 不写 CueMix、不给未使用 DAC 做任何操作（§12.4）。
 
 pub mod api;
+pub mod capture;
 pub mod model;
 pub mod plan;
 pub mod store;

@@ -517,11 +517,16 @@ async fn device_inputs_is_read_only_and_honest_when_no_probe_exists() {
     assert_eq!(response.status, 200, "{}", response.body_text());
     let body = response.json();
     assert_eq!(body["ok"], json!(true));
-    // daemon 没有采集通道枚举：available:false + reason，不编通道列表。
+    // 设备级 ALSA capture 枚举可能成功，但逐通道 analog/optical 角色仍不可用：
+    // available:false + channels:null，不编通道列表；alsa_capture 是真实枚举（非 Linux 为 null）。
     assert_eq!(body["available"], json!(false));
     assert_eq!(body["optical_mode"], Value::Null);
     assert_eq!(body["channels"], Value::Null);
     assert_eq!(body["source"], json!("motu-alsa"));
+    assert!(
+        body.get("alsa_capture").is_some(),
+        "alsa_capture additive field must be present: {body}"
+    );
     assert!(body["reason"]
         .as_str()
         .is_some_and(|reason| reason.contains("capture")));

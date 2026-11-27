@@ -24,6 +24,10 @@ argon2 = { version = "0.5", default-features = false, features = ["std"] }
 # 会话 token / CSRF / 盐的 OS 随机源（本机 cargo 缓存已有 0.2.17）。
 getrandom = "0.2"
 
+# ALSA capture 枚举（R/IO，/api/device/inputs）：仅 Linux 目标编译；非 Linux 走纯函数/假数据测试。
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "0.12"
+
 [dev-dependencies]
 # 校准产物 → 控制面两阶段下发的端到端测试：编译真实校准方案并通过 REST 下发/回滚。
 khaen-designer = { path = "../designer" }

@@ -432,6 +432,7 @@ version = "0.1.14"
 name = "khaen-daemon"
 version = "0.1.14"
 dependencies = [
+ "alsa",
  "argon2",
  "axum",
  "getrandom",

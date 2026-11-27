@@ -283,8 +283,27 @@ pub(crate) fn device_inputs_probe(state: &DaemonState) -> Value {
             crate::motu::api::detection_reason_text(detection.reason)
         );
     }
+    // ALSA capture 设备枚举（加法字段）：真实设备名/方向/通道范围；逐通道 analog/optical
+    // 角色 ALSA 不暴露，所以 channels 仍保持 null + 原因，不把设备名猜成通道角色。
+    let (alsa_capture, capture_detail) = match crate::audio_profile::capture::enumerate_capture() {
+        Ok(devices) => {
+            let count = devices.len();
+            let note = if count == 0 {
+                "ALSA capture enumeration succeeded but reported no capture PCM devices".to_string()
+            } else {
+                format!(
+                    "ALSA capture enumeration reported {count} capture PCM device(s); per-channel analog/optical roles are not exposed by ALSA, so the input channel list is not fabricated"
+                )
+            };
+            (crate::audio_profile::capture::devices_json(&devices), note)
+        }
+        Err(error) => (
+            Value::Null,
+            format!("ALSA capture enumeration is unavailable: {error}"),
+        ),
+    };
     let reason = format!(
-        "the daemon has no sound-card capture-channel enumeration (ALSA capture probing is not implemented); the device input channel list (analog + optical) is not reported and is not fabricated. {detail}"
+        "the daemon can enumerate sound-card capture devices but cannot map each channel to analog/optical without a device-specific metadata source; {capture_detail}. {detail}"
     );
     json!({
         "available": false,
@@ -292,6 +311,7 @@ pub(crate) fn device_inputs_probe(state: &DaemonState) -> Value {
         "sample_rate": sample_rate,
         "channels": Value::Null,
         "source": "motu-alsa",
+        "alsa_capture": alsa_capture,
         "reason": reason,
     })
 }
