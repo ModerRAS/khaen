@@ -124,6 +124,7 @@
 - `wired`：已实现 op 的名字数组，例如 `["status","mute"]`。
 - `not_wired`：对象数组 `{"op": "...", "reason": "..."}`，reason 不得为空。
 - `reasons`：`status` 的附加字段；凡是当前没有数据来源的字段（值为 null）必须在这里给出原因，禁止编造数值。
+- `input_source`：`channels_status` 的加法字段 `{source:"sdp"|"manual", sdp_sha256}`，描述启动时 AES67 输入配置来源（SDP 文件附原文 sha256；手工 env 时 `sdp_sha256:null`）；旧 rt-host 不报时 daemon 给 null + 原因，不编造。
 - `readback`：`status` 的加法字段，控制面 `base_plan`（启动时加载或最近一次 commit）的只读回读（`available/source:"base_plan"/sample_rate/block_size/content{in_channels,out_lanes,folds}/crossover{lanes,filters[{lane,taps}]}/matrix{rows,cols,decimation,interpolation,taps}/protection{lanes,entries[{lane,delay_samples,polarity,gain_db,peq_bands}]}/routing{dac_channels,routes[{lane,dac}]}`）。只给控制面语义，不复制 FIR/矩阵系数；没有已加载方案时 `available:false` + `reason`，不返回默认布局。
 
 ### B.1.2 语义界面（surface）

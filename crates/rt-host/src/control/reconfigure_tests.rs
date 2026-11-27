@@ -25,7 +25,8 @@ use crate::control::core::{ControlCore, ControlCoreConfig};
 use crate::control::reconfigure::error as hot_error;
 use crate::control::reconfigure::CHANNELS_OPS;
 use crate::control::reconfigure::{
-    shared_tracker, AppliedReconfigure, ChannelsConfig, ChannelsView,
+    shared_tracker, Aes67InputSource, AppliedReconfigure, ChannelsConfig, ChannelsState,
+    ChannelsView,
 };
 use crate::control::snapshot::SharedSnapshot;
 use crate::control::test_support::{fake_runtime_config, FakeProbe, FakeProbeState, Harness};
@@ -33,6 +34,45 @@ use crate::control::test_support::{fake_runtime_config, FakeProbe, FakeProbeStat
 // ===========================================================================
 // 夹具
 // ===========================================================================
+
+#[test]
+fn channels_status_reports_aes67_input_source_provenance() {
+    let sdp = ChannelsState::new(
+        fake_runtime_config(),
+        Some(Aes67InputSource::Sdp {
+            sha256: "0123456789abcdef".to_string(),
+        }),
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    let status = sdp.status_json(None);
+    assert_eq!(status["input_source"]["source"], json!("sdp"));
+    assert_eq!(
+        status["input_source"]["sdp_sha256"],
+        json!("0123456789abcdef")
+    );
+
+    let manual = ChannelsState::new(
+        fake_runtime_config(),
+        Some(Aes67InputSource::Manual),
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    let status = manual.status_json(None);
+    assert_eq!(status["input_source"]["source"], json!("manual"));
+    assert!(status["input_source"]["sdp_sha256"].is_null());
+
+    let unknown = ChannelsState::new(
+        fake_runtime_config(),
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    assert!(unknown.status_json(None)["input_source"].is_null());
+}
 
 /// 临时校准产物目录（Drop 删除；文件名带进程号 + 原子计数）。
 struct TempDir {
@@ -614,6 +654,7 @@ fn channels_commit_ack_lost_stays_busy_then_reconciles_instead_of_reapplying() {
         channels: Some(ChannelsConfig {
             config: fake_runtime_config(),
             probe: Arc::new(FakeProbe::new(FakeProbeState::default())),
+            input_source: None,
         }),
         reconfigure: Some(Arc::clone(&tracker)),
     });

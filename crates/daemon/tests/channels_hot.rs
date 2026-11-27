@@ -154,6 +154,42 @@ async fn get_channels_reports_the_live_channels_status_shape() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn get_channels_reports_the_rt_host_aes67_input_provenance() {
+    let (_, graph_id) = plan_bytes();
+    let mut channels = channels_status_document();
+    channels["input_source"] = json!({
+        "source": "sdp",
+        "sdp_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    });
+    let fake = FakeTransport::with_rt_status_and_channels(rt_status(&graph_id, 4), channels);
+    let link = support::injected_link(Arc::clone(&fake));
+    let server = support::spawn_with_link(link, None).await;
+
+    let response = support::request(&server, "GET", "/api/channels").await;
+    assert_eq!(response.status, 200, "{}", response.body_text());
+    let body = response.json();
+    assert_eq!(body["input"]["source"], json!("sdp"));
+    assert_eq!(
+        body["input"]["sdp_sha256"],
+        json!("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    );
+    assert!(
+        !body["reasons"]
+            .as_object()
+            .expect("reasons")
+            .contains_key("input.source"),
+        "provenance must remove the input.source reason: {body}"
+    );
+    assert!(
+        !body["reasons"]
+            .as_object()
+            .expect("reasons")
+            .contains_key("input.sdp_sha256"),
+        "provenance must remove the input.sdp_sha256 reason: {body}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn get_channels_uses_readback_routing_for_a_plan_loaded_by_another_daemon() {
     // rt-host 已经加载了一份方案（例如重启前/别的 daemon 准备），本 daemon 的方案库没有记录；
     // control status 的 readback.routing 是当前 lane -> DAC 的真实来源。

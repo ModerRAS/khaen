@@ -16,7 +16,8 @@
 //!   运行图被上一次 channels_commit 丢弃（graph_dropped）或 routing 与数据面通道数不一致时
 //!   如实 null + 原因（不拿旧 routing 冒充当前）；
 //! - input.{channels,map}：channels_status.current.{aes67_channels,aes67_map}（AES67 输入的真实配置）；
-//!   input.source（sdp/manual）与 input.sdp_sha256 控制通道不报 -> null + reasons；
+//!   input.source（sdp/manual）与 input.sdp_sha256 来自 channels_status 的 input_source
+//!   （rt-host 启动配置来源）；旧 rt-host 不报 -> null + reasons；
 //! - applied：daemon 本地镜像（最近一次经本 daemon 成功的 channels_commit；快照 + 记录时刻）；
 //! - hot_reconfigure：能力上报（true / false + reason / null = 无法核实）；not_wired 只列
 //!   确认的能力缺口（rt-host 报 unsupported/unknown_op、process 目标）。
@@ -81,10 +82,12 @@ pub const HOT_RECONFIG_UNSUPPORTED_REASON: &str = "the connected rt-host has no 
 pub const MAPPING_PLAN_OWNED_REASON: &str = "the lane -> DAC mapping is the plan routing section (ABI v3 routing), not a field of the rt-host channels op: channels_commit applies the output channel count / sample rate / AES67 input configuration at a block boundary and cannot rewrite the running plan graph; when the engine format changes rt-host drops the graph (graph_dropped=true), so the mapping takes effect again only after a plan whose routing section matches the new format is prepared and committed";
 /// rt-host 控制 status 不报 AES67 输入参数时（channels_status 也不可用）的原因。
 const AES67_INPUT_REASON: &str = "the rt-host channels status is unavailable: AES67 input parameters (KHAEN_AES67_*) are rt-host process inputs and the contract-B status op does not report them";
-/// 输入来源（sdp/manual）没有数据源。
-const AES67_SOURCE_REASON: &str = "the rt-host control channel reports the AES67 receive parameters but not whether they came from an SDP descriptor or a manual configuration; source is not fabricated";
-/// 输入 SDP sha256 没有数据源。
-const AES67_SDP_REASON: &str = "the rt-host channels status reports the AES67 input configuration but not its SDP descriptor; sdp_sha256 is not fabricated";
+/// 输入来源（sdp/manual）没有数据源（旧 rt-host 不报 input_source）。
+const AES67_SOURCE_REASON: &str = "the rt-host channels status does not report input_source (older rt-host?); whether the AES67 input came from an SDP descriptor or a manual configuration is not fabricated";
+/// 手工配置时没有 SDP 摘要（不是“缺失”，而是本来就没有 SDP）。
+const AES67_MANUAL_SDP_REASON: &str = "the rt-host reports the AES67 input was configured manually (input_source=manual): no SDP file was used, so sdp_sha256 is null";
+/// SDP 来源但没有 sha256 数据源。
+const AES67_SDP_REASON: &str = "the rt-host reports an SDP-sourced AES67 input but does not report the descriptor sha256; sdp_sha256 is not fabricated";
 /// 一次 prepare 允许的 mapping 条目上限（防御性；DAC 通道数本身远小于它）。
 const MAX_MAPPING_ENTRIES: usize = 128;
 /// 最大请求体（JSON 控制面）。
@@ -557,8 +560,29 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
     if input_map.is_none() {
         reasons.insert("input.map".to_string(), AES67_INPUT_REASON.to_string());
     }
-    reasons.insert("input.source".to_string(), AES67_SOURCE_REASON.to_string());
-    reasons.insert("input.sdp_sha256".to_string(), AES67_SDP_REASON.to_string());
+    // input.source / input.sdp_sha256：rt-host channels_status 的加法字段 input_source
+    // `{source:"sdp"|"manual", sdp_sha256}`；旧 rt-host / 手工配置分别给原因。
+    let input_source = channels_status
+        .and_then(|body| body.get("input_source"))
+        .filter(|value| value.is_object());
+    let input_source_value = input_source
+        .and_then(|value| value.get("source"))
+        .and_then(Value::as_str)
+        .filter(|source| *source == "sdp" || *source == "manual");
+    let input_sdp_sha256 = input_source
+        .and_then(|value| value.get("sdp_sha256"))
+        .and_then(Value::as_str);
+    if input_source_value.is_none() {
+        reasons.insert("input.source".to_string(), AES67_SOURCE_REASON.to_string());
+    }
+    if input_sdp_sha256.is_none() {
+        let reason = if input_source_value == Some("manual") {
+            AES67_MANUAL_SDP_REASON
+        } else {
+            AES67_SDP_REASON
+        };
+        reasons.insert("input.sdp_sha256".to_string(), reason.to_string());
+    }
     // format：channels_status.current 的格式字段（引擎/设备口径）；拿不到时退回契约 B
     // status 的 data-plane format（仍是真的，但只有 flat 视图，block_frames 来自 block_size）。
     let format = match current {
@@ -706,8 +730,8 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
         "input": {
             "channels": input_channels,
             "map": input_map,
-            "source": Value::Null,
-            "sdp_sha256": Value::Null,
+            "source": input_source_value,
+            "sdp_sha256": input_sdp_sha256,
         },
         "mapping": mapping,
         "plan": {

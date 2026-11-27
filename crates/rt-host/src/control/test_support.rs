@@ -506,6 +506,7 @@ impl Harness {
         let channels_config = channels.map(|(config, probe)| ChannelsConfig {
             config,
             probe: Arc::new(FakeProbe::new(probe)),
+            input_source: None,
         });
         let loop_target = Arc::clone(&target);
         let loop_snapshot = Arc::clone(&snapshot);

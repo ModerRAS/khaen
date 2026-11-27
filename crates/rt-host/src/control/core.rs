@@ -232,6 +232,7 @@ impl ControlCore {
         let channels = config.channels.map(|channels| {
             ChannelsState::new(
                 channels.config,
+                channels.input_source,
                 channels.probe,
                 Arc::clone(&reconfigure),
                 config.limits.clone(),

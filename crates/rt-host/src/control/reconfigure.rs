@@ -541,12 +541,39 @@ impl ReconfigGate {
     }
 }
 
+/// AES67 输入配置的来源（启动时确定；channels_status 的 `input_source`）。
+///
+/// 只描述“启动配置是怎么来的”：SDP 文件解析（附原文 sha256）或手工 env。
+/// 运行期 channels_commit 改的是 receiver 参数，不改变这个来源描述。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Aes67InputSource {
+    /// 手工 env（KHAEN_AES67_*）。
+    Manual,
+    /// SDP 文件（KHAEN_AES67_SDP）；sha256 是 SDP 原文的十六进制摘要。
+    Sdp {
+        /// SDP 原文 sha256（hex）。
+        sha256: String,
+    },
+}
+
+impl Aes67InputSource {
+    /// 协议 JSON：`{source:"manual"|"sdp", sdp_sha256}`。
+    pub fn to_json(&self) -> Value {
+        match self {
+            Self::Manual => json!({ "source": "manual", "sdp_sha256": Value::Null }),
+            Self::Sdp { sha256 } => json!({ "source": "sdp", "sdp_sha256": sha256 }),
+        }
+    }
+}
+
 /// 热重配协议上下文（ControlCore 构造参数）：初始运行时配置 + 只读设备探测。
 pub struct ChannelsConfig {
     /// 启动时的完整运行时配置（prepare 从它派生目标配置）。
     pub config: RuntimeConfig,
     /// 只读设备探测（prepare 校验；提交后的 hw 回读校验也用它）。
     pub probe: Arc<dyn DeviceProbe>,
+    /// 启动时 AES67 输入配置的来源（SDP/手工）；旧调用方可给 None（channels_status 不编）。
+    pub input_source: Option<Aes67InputSource>,
 }
 
 impl std::fmt::Debug for ChannelsConfig {
@@ -673,6 +700,7 @@ pub struct ReconcileOutcome {
 pub struct ChannelsState {
     base_config: RuntimeConfig,
     current: ChannelsView,
+    input_source: Option<Aes67InputSource>,
     probe: Arc<dyn DeviceProbe>,
     tracker: SharedReconfigure,
     limits: AdmissionLimits,
@@ -700,6 +728,7 @@ impl ChannelsState {
     /// 新建（初始配置来自启动时的 RuntimeConfig）。
     pub fn new(
         config: RuntimeConfig,
+        input_source: Option<Aes67InputSource>,
         probe: Arc<dyn DeviceProbe>,
         tracker: SharedReconfigure,
         limits: AdmissionLimits,
@@ -707,6 +736,7 @@ impl ChannelsState {
         Self {
             current: ChannelsView::from_config(&config),
             base_config: config,
+            input_source,
             probe,
             tracker,
             limits,
@@ -766,6 +796,7 @@ impl ChannelsState {
             "ok": true,
             "op": "channels_status",
             "generation": generation,
+            "input_source": self.input_source.as_ref().map(Aes67InputSource::to_json),
             "current": self.current.to_json(),
             "format": {
                 "block_frames": self.current.block_frames,

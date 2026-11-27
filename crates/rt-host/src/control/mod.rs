@@ -67,7 +67,9 @@ mod tests;
 pub use bridge::ControlBridge;
 pub use cal::{CalibrationConfig, CalibrationSetup};
 pub use core::{ControlCore, ControlCoreConfig};
-pub use reconfigure::{shared_tracker, AlsaDeviceProbe, ChannelsConfig, ReconfigureTracker};
+pub use reconfigure::{
+    shared_tracker, Aes67InputSource, AlsaDeviceProbe, ChannelsConfig, ReconfigureTracker,
+};
 
 /// 控制通道开关环境变量：off / 0 / false 关闭，on / 1 / true 或不设 = 打开。
 pub const CONTROL_ENV: &str = "KHAEN_CONTROL";
