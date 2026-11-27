@@ -133,6 +133,10 @@ mod recovery;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod control;
 
+// IO I2a：从 SDP 解析 AES67 单流参数（纯解析，无设备/网络；Windows 也参与单测）。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod sdp_config;
+
 // Windows 上 main 不实例化 app（没有 ALSA），但模块仍参与编译以检查逻辑类型；
 // 因此非 Linux 目标允许这些“只被 Linux 调用者使用”的项为 dead_code。
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -190,6 +194,30 @@ mod app {
 
     fn env_optional(key: &str) -> Option<String> {
         std::env::var(key).ok().filter(|value| !value.is_empty())
+    }
+
+    /// 读 SDP 文件（启动期一次；限制 64 KiB，避免误指大文件）。
+    fn read_sdp_file(path: &str) -> Result<String, ConfigError> {
+        const MAX_SDP_BYTES: u64 = 64 * 1024;
+        let metadata = std::fs::metadata(path).map_err(|error| {
+            ConfigError::new(format!("KHAEN_AES67_SDP cannot stat {path}: {error}"))
+        })?;
+        if !metadata.is_file() {
+            return Err(ConfigError::new(format!(
+                "KHAEN_AES67_SDP {path} is not a regular file"
+            )));
+        }
+        if metadata.len() > MAX_SDP_BYTES {
+            return Err(ConfigError::new(format!(
+                "KHAEN_AES67_SDP {path} is {} bytes, limit {MAX_SDP_BYTES}",
+                metadata.len()
+            )));
+        }
+        let bytes = std::fs::read(path).map_err(|error| {
+            ConfigError::new(format!("KHAEN_AES67_SDP cannot read {path}: {error}"))
+        })?;
+        String::from_utf8(bytes)
+            .map_err(|_| ConfigError::new(format!("KHAEN_AES67_SDP {path} is not valid UTF-8")))
     }
 
     fn parse_channels_map(text: &str) -> Result<Vec<u16>, ConfigError> {
@@ -446,19 +474,95 @@ mod app {
         let input_channels: usize = env_parse("KHAEN_INPUT_CHANNELS", channels)?;
         let output_channels: usize = env_parse("KHAEN_OUTPUT_CHANNELS", channels)?;
 
-        let group: Ipv4Addr = env_string("KHAEN_AES67_GROUP", "239.69.0.1")?
-            .parse()
-            .map_err(|_| ConfigError::new("KHAEN_AES67_GROUP must be an IPv4 address"))?;
-        let port: u16 = env_parse("KHAEN_AES67_PORT", 5004)?;
-        let payload_type: u8 = env_parse("KHAEN_AES67_PAYLOAD_TYPE", 96)?;
-        let rtp_channels: usize = env_parse("KHAEN_AES67_CHANNELS", 2)?;
-        let channels_map = parse_channels_map(&env_string("KHAEN_AES67_MAP", "0,1")?)?;
-        if channels_map.len() != rtp_channels {
-            return Err(ConfigError::new(format!(
-                "KHAEN_AES67_MAP has {} entries but KHAEN_AES67_CHANNELS is {rtp_channels}",
-                channels_map.len()
-            )));
-        }
+        // IO I2a：可选 SDP 文件作为 AES67 单流参数来源。显式 env 与 SDP 冲突时
+        // fail-closed，不静默让其中一边获胜。SDP 只解析；设备/网络动作仍由 host 接收器做。
+        let (group, port, payload_type, rtp_channels, channels_map) = match env_optional(
+            "KHAEN_AES67_SDP",
+        ) {
+            Some(path) => {
+                let text = read_sdp_file(&path)?;
+                let sdp = crate::sdp_config::parse_sdp_input(&text, sample_rate, input_channels)
+                    .map_err(|message| {
+                        ConfigError::new(format!("KHAEN_AES67_SDP {path}: {message}"))
+                    })?;
+                if let Some(raw) = env_optional("KHAEN_AES67_GROUP") {
+                    let value: Ipv4Addr = raw.parse().map_err(|_| {
+                        ConfigError::new("KHAEN_AES67_GROUP must be an IPv4 address")
+                    })?;
+                    if value != sdp.multicast_addr {
+                        return Err(ConfigError::new(format!(
+                                "KHAEN_AES67_GROUP={value} conflicts with SDP group {}; remove the env override or use a matching SDP",
+                                sdp.multicast_addr
+                            )));
+                    }
+                }
+                if let Some(raw) = env_optional("KHAEN_AES67_PORT") {
+                    let value: u16 = raw
+                        .parse()
+                        .map_err(|_| ConfigError::new("KHAEN_AES67_PORT must be a port number"))?;
+                    if value != sdp.port {
+                        return Err(ConfigError::new(format!(
+                            "KHAEN_AES67_PORT={value} conflicts with SDP port {}",
+                            sdp.port
+                        )));
+                    }
+                }
+                if let Some(raw) = env_optional("KHAEN_AES67_PAYLOAD_TYPE") {
+                    let value: u8 = raw.parse().map_err(|_| {
+                        ConfigError::new("KHAEN_AES67_PAYLOAD_TYPE must be a number")
+                    })?;
+                    if value != sdp.payload_type {
+                        return Err(ConfigError::new(format!(
+                            "KHAEN_AES67_PAYLOAD_TYPE={value} conflicts with SDP payload type {}",
+                            sdp.payload_type
+                        )));
+                    }
+                }
+                if let Some(raw) = env_optional("KHAEN_AES67_CHANNELS") {
+                    let value: usize = raw.parse().map_err(|_| {
+                        ConfigError::new("KHAEN_AES67_CHANNELS must be a positive integer")
+                    })?;
+                    if value != sdp.channels {
+                        return Err(ConfigError::new(format!(
+                            "KHAEN_AES67_CHANNELS={value} conflicts with SDP {} channel(s)",
+                            sdp.channels
+                        )));
+                    }
+                }
+                if let Some(raw) = env_optional("KHAEN_AES67_MAP") {
+                    let value = parse_channels_map(&raw)?;
+                    if value != sdp.channels_map {
+                        return Err(ConfigError::new(format!(
+                            "KHAEN_AES67_MAP={raw} conflicts with the SDP implied channel map {:?}",
+                            sdp.channels_map
+                        )));
+                    }
+                }
+                (
+                    sdp.multicast_addr,
+                    sdp.port,
+                    sdp.payload_type,
+                    sdp.channels,
+                    sdp.channels_map,
+                )
+            }
+            None => {
+                let group: Ipv4Addr = env_string("KHAEN_AES67_GROUP", "239.69.0.1")?
+                    .parse()
+                    .map_err(|_| ConfigError::new("KHAEN_AES67_GROUP must be an IPv4 address"))?;
+                let port: u16 = env_parse("KHAEN_AES67_PORT", 5004)?;
+                let payload_type: u8 = env_parse("KHAEN_AES67_PAYLOAD_TYPE", 96)?;
+                let rtp_channels: usize = env_parse("KHAEN_AES67_CHANNELS", 2)?;
+                let channels_map = parse_channels_map(&env_string("KHAEN_AES67_MAP", "0,1")?)?;
+                if channels_map.len() != rtp_channels {
+                    return Err(ConfigError::new(format!(
+                        "KHAEN_AES67_MAP has {} entries but KHAEN_AES67_CHANNELS is {rtp_channels}",
+                        channels_map.len()
+                    )));
+                }
+                (group, port, payload_type, rtp_channels, channels_map)
+            }
+        };
         let jitter_frames: usize = env_parse("KHAEN_JITTER_FRAMES", 192)?;
         let run_seconds: u64 = env_parse("KHAEN_RUN_SECONDS", 0)?;
         let stats_every: u64 = env_parse("KHAEN_STATS_EVERY_BLOCKS", 4000)?;

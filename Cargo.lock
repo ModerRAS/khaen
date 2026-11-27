@@ -501,6 +501,7 @@ name = "khaen-rt-host"
 version = "0.1.16"
 dependencies = [
  "alsa",
+ "khaen-aoip-aes67",
  "khaen-calibration",
  "khaen-core",
  "khaen-host",

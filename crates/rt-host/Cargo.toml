@@ -11,6 +11,8 @@ khaen-host = { path = "../host" }
 # 进程内校准（T70f-c）：复用已回迁的测量链路（T61 时间轴 / T62 采集时基 / T67 stage 后端），
 # 不在 rt-host 里重写扫频/时基/质量门数学。
 khaen-calibration = { path = "../calibration" }
+# IO I2：启动时从 SDP 解析 AES67 流参数（纯 std 协议栈，不进实时路径）。
+khaen-aoip-aes67 = { path = "../aoip-aes67" }
 # 控制通道（T70f-a）的行 JSON 协议：解析已有依赖 serde_json（与 host/daemon 同一版本，
 # 不引入新 crate；状态文件仍手写 JSON，不在 RT 路径上加依赖）。
 serde_json = "1"
