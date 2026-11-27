@@ -1,6 +1,6 @@
 //! 音频通道 profile 数据模型（docs/API.md §12.1，schema khaen-audio-profile/v1）。
 //!
-//! - outputs 固定 22 行（dac 0..21）：{dac, enabled, role, gain_db, custom_label}；
+//! - outputs 行数 = device.channels（缺省 22；1..=22）：{dac, enabled, role, gain_db, custom_label}；
 //!   enabled=false 的行在规范化时把 role 收成 None（禁用行不产生 lane）。
 //! - inputs.sources：aes67（RTP 流）与 device（声卡采集：模拟 + 光口都算）两类，
 //!   各自可启用、每通道一个角色标签，引擎按角色自动 fan-out / 求和。
@@ -16,11 +16,17 @@ use serde_json::{json, Map, Value};
 
 /// profile schema（GET 顶层 schema 与 profile.schema 同源）。
 pub const SCHEMA: &str = "khaen-audio-profile/v1";
-/// 设备通道数（MOTU UltraLite-mk5 的 plan.content.in_channels / routing.dac_channels）。
+/// 默认/兼容设备通道数（MOTU UltraLite-mk5 的 22 路）。
+///
+/// 这是默认值，不是固定上限：profile 的 device.channels 可以在 1..=MAX_DEVICE_CHANNELS
+/// 内选择，plan 的 content.in_channels / routing.dac_channels 跟随该值。plan ABI v3 的
+/// 输出通道上限仍是 22（见 khaen_core::rt::MAX_OUTPUT_CHANNELS）。
 pub const DEVICE_CHANNELS: u16 = 22;
+/// plan ABI v3 允许的最大输出通道数（= khaen_core::rt::MAX_OUTPUT_CHANNELS）。
+pub const MAX_DEVICE_CHANNELS: u16 = 22;
 /// downmix 默认增益（dB）。
 pub const DEFAULT_DOWNMIX_GAIN_DB: f32 = -3.0;
-/// 输入源通道默认上限（fold.src 必须 < content.in_channels=22）。
+/// 输入源通道上限（source.channels / fold.src 必须 < 设备通道数，且 <= ABI 输入上限）。
 pub const MAX_INPUT_CHANNEL: u16 = DEVICE_CHANNELS;
 
 /// 角色枚举（canonical 19 个；顺序即 §12.1 的 lane 排序：地面 -> 低频 -> 天空 -> 其它）。
@@ -378,9 +384,9 @@ pub struct Lane {
 /// 完整 profile。
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioProfile {
-    /// 设备通道数（本 daemon 固定 22）。
+    /// 设备通道数（1..=22；缺省 22）。
     pub device_channels: u16,
-    /// 22 行物理输出。
+    /// device_channels 行物理输出。
     pub outputs: Vec<OutputRow>,
     /// 输入源（aes67 + device，各自一条）。
     pub sources: Vec<InputSource>,
@@ -410,7 +416,7 @@ impl Default for AudioProfile {
         Self {
             device_channels: DEVICE_CHANNELS,
             outputs,
-            sources: default_sources(),
+            sources: default_sources(DEVICE_CHANNELS),
             downmix: Downmix::default(),
             fanout: FanoutMode::Unity,
         }
@@ -418,44 +424,53 @@ impl Default for AudioProfile {
 }
 
 /// 某个来源的默认配置。
-fn default_source(kind: SourceKind, enabled: bool) -> InputSource {
+///
+/// 默认输入通道数不能超过当前设备通道数：plan 的 content.in_channels 跟随
+/// profile.device.channels，越界的默认通道会让 profile 自身不合法。
+fn default_source(kind: SourceKind, enabled: bool, device_channels: u16) -> InputSource {
     match kind {
-        SourceKind::Aes67 => InputSource {
-            kind,
-            enabled,
-            gain_db: 0.0,
-            channels: vec![
-                InputChannel {
-                    channel: 0,
-                    role: SpeakerRole::L,
-                },
-                InputChannel {
-                    channel: 1,
-                    role: SpeakerRole::R,
-                },
-            ],
-            preset: Some("stereo".to_string()),
-        },
-        SourceKind::Device => InputSource {
-            kind,
-            enabled,
-            gain_db: 0.0,
-            channels: (0..4)
-                .map(|channel| InputChannel {
-                    channel,
-                    role: SpeakerRole::None,
-                })
-                .collect(),
-            preset: None,
-        },
+        SourceKind::Aes67 => {
+            let count = device_channels.min(2);
+            InputSource {
+                kind,
+                enabled,
+                gain_db: 0.0,
+                channels: (0..count)
+                    .map(|channel| InputChannel {
+                        channel,
+                        role: if channel == 0 {
+                            SpeakerRole::L
+                        } else {
+                            SpeakerRole::R
+                        },
+                    })
+                    .collect(),
+                preset: Some("stereo".to_string()),
+            }
+        }
+        SourceKind::Device => {
+            let count = device_channels.min(4);
+            InputSource {
+                kind,
+                enabled,
+                gain_db: 0.0,
+                channels: (0..count)
+                    .map(|channel| InputChannel {
+                        channel,
+                        role: SpeakerRole::None,
+                    })
+                    .collect(),
+                preset: None,
+            }
+        }
     }
 }
 
 /// 首次运行的两个输入源（AES67 启用、声卡输入关闭）。
-fn default_sources() -> Vec<InputSource> {
+fn default_sources(device_channels: u16) -> Vec<InputSource> {
     vec![
-        default_source(SourceKind::Aes67, true),
-        default_source(SourceKind::Device, false),
+        default_source(SourceKind::Aes67, true, device_channels),
+        default_source(SourceKind::Device, false, device_channels),
     ]
 }
 
@@ -583,10 +598,12 @@ impl AudioProfile {
             }
         }
         let device_channels = parse_device_channels(object.get("device"))?;
-        let outputs = canonical_outputs(parse_outputs(object.get("outputs"))?);
+        let outputs = canonical_outputs(parse_outputs(object.get("outputs"))?, device_channels);
         let sources = match object.get("inputs") {
-            None => default_sources(),
-            Some(inputs) => canonical_sources(parse_sources(inputs)?),
+            None => default_sources(device_channels),
+            Some(inputs) => {
+                canonical_sources(parse_sources(inputs, device_channels)?, device_channels)
+            }
         };
         let downmix = parse_downmix(object.get("downmix"))?;
         let fanout = parse_fanout(object.get("fanout"))?;
@@ -599,7 +616,7 @@ impl AudioProfile {
         })
     }
 
-    /// REST 形状（GET / prepare 回执里的 profile；固定 22 行）。
+    /// REST 形状（GET / prepare 回执里的 profile；行数 = device_channels）。
     pub fn to_json(&self) -> Value {
         json!({
             "schema": SCHEMA,
@@ -966,15 +983,21 @@ fn parse_device_channels(value: Option<&Value>) -> Result<u16, ParseError> {
         return Ok(DEVICE_CHANNELS);
     };
     let channels = integer_field(channels, "profile.device.channels")?;
-    if channels != u64::from(DEVICE_CHANNELS) {
+    let channels = u16::try_from(channels).map_err(|_| {
+        ParseError::new(
+            "profile.device.channels",
+            "device channel count does not fit u16",
+        )
+    })?;
+    if channels == 0 || channels > MAX_DEVICE_CHANNELS {
         return Err(ParseError::new(
             "profile.device.channels",
             format!(
-                "unsupported device channel count {channels}: this daemon's plan ABI uses {DEVICE_CHANNELS} channels"
+                "device channel count {channels} is outside 1..={MAX_DEVICE_CHANNELS} (plan ABI v3 output limit; {DEVICE_CHANNELS} is only the MOTU default)"
             ),
         ));
     }
-    Ok(DEVICE_CHANNELS)
+    Ok(channels)
 }
 
 fn integer_field(value: &Value, field: &str) -> Result<u64, ParseError> {
@@ -1107,8 +1130,8 @@ fn parse_outputs(value: Option<&Value>) -> Result<Vec<OutputRow>, ParseError> {
     Ok(rows)
 }
 
-/// 规范化 outputs：禁用行 role 归 None、非 Custom 行丢 label、补齐 22 行、按 dac 排序。
-fn canonical_outputs(rows: Vec<OutputRow>) -> Vec<OutputRow> {
+/// 规范化 outputs：禁用行 role 归 None、非 Custom 行丢 label、补齐 device_channels 行、按 dac 排序。
+fn canonical_outputs(rows: Vec<OutputRow>, device_channels: u16) -> Vec<OutputRow> {
     let mut by_dac: BTreeMap<u16, OutputRow> = BTreeMap::new();
     let mut extra: Vec<OutputRow> = Vec::new();
     for mut row in rows {
@@ -1118,13 +1141,13 @@ fn canonical_outputs(rows: Vec<OutputRow>) -> Vec<OutputRow> {
         if row.role != SpeakerRole::Custom {
             row.custom_label = None;
         }
-        if row.dac < DEVICE_CHANNELS {
+        if row.dac < device_channels {
             by_dac.insert(row.dac, row);
         } else {
             extra.push(row);
         }
     }
-    let mut outputs: Vec<OutputRow> = (0..DEVICE_CHANNELS)
+    let mut outputs: Vec<OutputRow> = (0..device_channels)
         .map(|dac| {
             by_dac.remove(&dac).unwrap_or(OutputRow {
                 dac,
@@ -1140,7 +1163,7 @@ fn canonical_outputs(rows: Vec<OutputRow>) -> Vec<OutputRow> {
     outputs
 }
 
-fn parse_sources(inputs: &Value) -> Result<Vec<InputSource>, ParseError> {
+fn parse_sources(inputs: &Value, device_channels: u16) -> Result<Vec<InputSource>, ParseError> {
     let object = inputs
         .as_object()
         .ok_or_else(|| ParseError::new("profile.inputs", "inputs must be an object"))?;
@@ -1214,12 +1237,12 @@ fn parse_sources(inputs: &Value) -> Result<Vec<InputSource>, ParseError> {
                 let channel = u16::try_from(channel).map_err(|_| {
                     ParseError::new(&channel_field, "input channel index out of range")
                 })?;
-                if channel >= MAX_INPUT_CHANNEL {
+                if channel >= device_channels || channel >= MAX_INPUT_CHANNEL {
                     return Err(ParseError::new(
                         &channel_field,
                         format!(
-                            "input channel {channel} is outside 0..{}: folds index the {MAX_INPUT_CHANNEL}-channel content container",
-                            MAX_INPUT_CHANNEL.saturating_sub(1)
+                            "input channel {channel} is outside 0..{}: the plan content container has {device_channels} channel(s) (device.channels), and the ABI input cap is {MAX_INPUT_CHANNEL}",
+                            device_channels.min(MAX_INPUT_CHANNEL).saturating_sub(1)
                         ),
                     ));
                 }
@@ -1248,7 +1271,7 @@ fn parse_sources(inputs: &Value) -> Result<Vec<InputSource>, ParseError> {
 }
 
 /// 规范化 sources：两类来源各一条（缺的补默认禁用配置）、按 kind 排序、通道按序号排序。
-fn canonical_sources(sources: Vec<InputSource>) -> Vec<InputSource> {
+fn canonical_sources(sources: Vec<InputSource>, device_channels: u16) -> Vec<InputSource> {
     let mut by_kind: BTreeMap<SourceKind, InputSource> = BTreeMap::new();
     for source in sources {
         by_kind.insert(source.kind, source);
@@ -1257,7 +1280,7 @@ fn canonical_sources(sources: Vec<InputSource>) -> Vec<InputSource> {
     for kind in SourceKind::ALL {
         let mut source = by_kind
             .remove(&kind)
-            .unwrap_or_else(|| default_source(kind, false));
+            .unwrap_or_else(|| default_source(kind, false, device_channels));
         source.channels.sort_by_key(|channel| channel.channel);
         canonical.push(source);
     }

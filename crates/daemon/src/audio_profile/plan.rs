@@ -34,9 +34,7 @@ use crate::api_error::ApiError;
 use crate::host_link::{Target, WireReply};
 use crate::DaemonState;
 
-use super::model::{
-    db_to_gain, lfe_downmix_targets, AudioProfile, Lane, SpeakerRole, DEVICE_CHANNELS,
-};
+use super::model::{db_to_gain, lfe_downmix_targets, AudioProfile, Lane, SpeakerRole};
 use super::store::CurrentProfile;
 
 /// 方案生成失败（handler 翻成 M1 错误；都是内部/配置问题，不是请求字段错误）。
@@ -250,10 +248,10 @@ pub fn generate(
     let builder = PlanBuilder::new(PlanConfig::new(
         u32::try_from(config.block_frames).unwrap_or(u32::MAX),
         config.sample_rate,
-        DEVICE_CHANNELS,
+        profile.device_channels,
     ))
     .set_content(ContentSection {
-        in_channels: DEVICE_CHANNELS,
+        in_channels: profile.device_channels,
         out_lanes: lane_count,
         folds,
     })
@@ -281,7 +279,7 @@ pub fn generate(
             .collect(),
     })
     .set_routing(RoutingSection {
-        dac_channels: DEVICE_CHANNELS,
+        dac_channels: profile.device_channels,
         routes,
     });
     let plan = builder
