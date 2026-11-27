@@ -74,7 +74,9 @@ const refreshing = computed(() => routingState.refreshing || statusState.refresh
 
 const chain = computed(() => buildRoutingChain(data.value, channels.value))
 const plan = computed(() => buildPlanSummary(data.value, channels.value, history.value))
-const currentSource = computed(() => currentRoutingSource(channels.value))
+const currentSource = computed(() =>
+  currentRoutingSource(channels.value, data.value?.readback ?? null)
+)
 
 const statusFatal = computed(() => statusState.phase === 'error' && data.value === null)
 const channelsFatal = computed(
@@ -280,15 +282,24 @@ const routingKnownText = computed(() => {
 
 const currentRows = computed<KvRow[]>(() => {
   const source = currentSource.value
+  const readbackSource = data.value?.readback?.source ?? t('common.dash')
   return [
     {
       label: t('routingEdit.current.source'),
-      value: source.known ? t('routingEdit.current.sourceValue') : t('routingEdit.current.sourceUnknown'),
+      value: source.known
+        ? source.source === 'base_plan'
+          ? t('routingEdit.current.sourceBasePlan', { source: readbackSource })
+          : t('routingEdit.current.sourceValue')
+        : t('routingEdit.current.sourceUnknown'),
       reason: source.known ? null : currentUnknownReason.value
     },
     {
       label: t('routingEdit.current.semantics'),
-      value: source.known ? t('routingEdit.current.semanticsValue') : null,
+      value: source.known
+        ? source.source === 'base_plan'
+          ? t('routingEdit.current.semanticsBasePlan')
+          : t('routingEdit.current.semanticsValue')
+        : null,
       reason: source.known ? null : currentUnknownReason.value
     },
     {

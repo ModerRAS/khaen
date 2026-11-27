@@ -37,6 +37,7 @@ import {
 } from './control.ts'
 import {
   reasonForPath,
+  type StatusReadback,
   type StatusResponse
 } from './status.ts'
 
@@ -767,8 +768,8 @@ export function nextRoutingLane(rows: readonly RoutingDraftRow[]): number {
 export interface RoutingCurrentSource {
   /** 可预填的草稿行（mapping，按 lane 升序）；null = 当前值未知。 */
   rows: RoutingDraftRow[] | null
-  /** 'mapping' = /api/channels 记录的方案 routing 镜像（lane → 0-based DAC）；null = 没有来源。 */
-  source: 'mapping' | null
+  /** 'base_plan' = /api/status.readback；'mapping' = /api/channels 的方案 routing 镜像；null = 没有来源。 */
+  source: 'base_plan' | 'mapping' | null
   /** true = mapping 已上报（含空数组）；false = 未知（mapping:null / /api/channels 不可用）。 */
   known: boolean
   /** 当前方案 DAC 声道数（/api/channels.output.channels，回退 dac_map 长度；不是实时回读）。 */
@@ -782,8 +783,31 @@ export interface RoutingCurrentSource {
   reason: string | null
 }
 
-/** 组合「当前值」来源快照（纯函数；null 输入 = /api/channels 不可用，不猜任何值）。 */
-export function currentRoutingSource(info: RoutingChannelsInfo | null): RoutingCurrentSource {
+/** 组合「当前值」来源快照（纯函数）。
+ *
+ * 优先级：/api/status.readback（base_plan 的控制面语义，rt-host socket 主路径）> 
+ * /api/channels.mapping（daemon 的 routing 镜像）> 未知。readback 没有 routing 段或不可用时
+ * 才退回 mapping；两者都没有就如实未知，不猜任何值。
+ */
+export function currentRoutingSource(
+  info: RoutingChannelsInfo | null,
+  readback?: StatusReadback | null
+): RoutingCurrentSource {
+  if (readback !== null && readback !== undefined && readback.available && readback.routing !== null) {
+    const rows = readback.routing.routes
+      .map((entry) => ({ lane: entry.lane, dac: entry.dac }))
+      .sort((left, right) => left.lane - right.lane || left.dac - right.dac)
+    return {
+      rows,
+      source: 'base_plan',
+      known: true,
+      dacChannels: readback.routing.dac_channels ?? info?.output.channels ?? null,
+      planVersion: info?.plan.version ?? null,
+      planGraphId: info?.plan.graph_id ?? null,
+      routingKnown: true,
+      reason: null
+    }
+  }
   if (info === null) {
     return {
       rows: null,

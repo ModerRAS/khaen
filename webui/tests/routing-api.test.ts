@@ -369,6 +369,29 @@ test('routing: currentRoutingSource prefills from /api/channels.mapping with sou
   assert.equal(partial.dacChannels, 4)
 })
 
+test('routing: currentRoutingSource prefers status.readback base_plan over channels.mapping', () => {
+  const readback = parseStatusResponse(buildStatusFixture('present')).readback
+  assert.ok(readback)
+  const source = currentRoutingSource(wiredChannels(), readback)
+  assert.equal(source.source, 'base_plan')
+  assert.equal(source.known, true)
+  assert.equal(source.reason, null)
+  assert.deepEqual(source.rows, [{ lane: 0, dac: 0 }])
+  assert.equal(source.dacChannels, 22)
+
+  // readback 不可用/没有 routing 段时退回 mapping，不丢已有来源。
+  const unavailable = { ...readback, available: false, routing: null }
+  const fallback = currentRoutingSource(wiredChannels(), unavailable)
+  assert.equal(fallback.source, 'mapping')
+  assert.equal(fallback.known, true)
+
+  // /api/channels 不可用但 readback 可用：当前值仍可读（来源标 base_plan）。
+  const noChannels = currentRoutingSource(null, readback)
+  assert.equal(noChannels.source, 'base_plan')
+  assert.equal(noChannels.known, true)
+  assert.deepEqual(noChannels.rows, [{ lane: 0, dac: 0 }])
+})
+
 test('routing: currentRoutingSource reports unknown when mapping is null (never substitutes dac_map/old values)', () => {
   const degraded = currentRoutingSource(parseRoutingChannels(clone(buildRealChannelsDocument('degraded'))))
   assert.equal(degraded.known, false)
