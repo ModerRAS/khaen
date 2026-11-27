@@ -43,6 +43,13 @@ import {
   type WizardTargetMode
 } from '@/api/calibration'
 import {
+  micState,
+  loadMicProfile,
+  loadMicStatus,
+  saveMicProfile,
+  uploadMicCalibration
+} from '@/stores/mic'
+import {
   calibrationState,
   cancelCalibrationJob,
   createCalibrationJob,
@@ -54,8 +61,7 @@ import {
   stopCalibrationJobPolling,
   pauseCalibrationJobPolling,
   resumeCalibrationJobPolling,
-  uploadCalibrationMeasurement,
-  uploadCalibrationMicCal
+  uploadCalibrationMeasurement
 } from '@/stores/calibration'
 import { reasonForPath, runStateLabelKey } from '@/api/status'
 import {
@@ -227,6 +233,10 @@ const channelFacts = computed<FactRow[]>(() => {
 /* -------------------------------------------------------------- 第 3 步表单 */
 
 interface SettingsForm {
+  /** UMIK ALSA 采集设备（如 hw:CARD=U18dB,DEV=0）；用户可编辑，不写死 22/卡号。 */
+  device: string
+  /** UMIK 序列号（与校准文件 SERNO 一致，daemon 校验）。 */
+  serial: string
   micCalSha256: string | null
   micCalFilename: string | null
   /** '' = 未选择（Element Plus 的 radio-group 模型不接受 null）。 */
@@ -237,7 +247,12 @@ interface SettingsForm {
   minBands: number
 }
 
+/** UMIK 默认采集设备只做输入框初值，用户可改；不是从设备枚举伪造的结果。 */
+const DEFAULT_UMIK_DEVICE = 'hw:CARD=U18dB,DEV=0'
+
 const form = reactive<SettingsForm>({
+  device: DEFAULT_UMIK_DEVICE,
+  serial: '',
   micCalSha256: null,
   micCalFilename: null,
   orientation: '',
@@ -251,6 +266,9 @@ const formError = ref<string | null>(null)
 const micError = ref<string | null>(null)
 
 function resetForm(config: WizardConfig): void {
+  // 麦克风 profile 是设备/序列号的权威来源；向导配置只存校准文件与目标参数。
+  form.device = micState.profile?.device ?? form.device ?? DEFAULT_UMIK_DEVICE
+  form.serial = micState.profile?.serial ?? form.serial ?? ''
   form.micCalSha256 = config.mic_cal_sha256
   form.micCalFilename = config.mic_cal_filename
   form.orientation = config.orientation ?? ''
@@ -277,7 +295,23 @@ function markDirty(): void {
 }
 
 const savedShaText = computed(() => shortenId(form.micCalSha256, 16, 12) ?? t('common.dash'))
-const micUploadResult = computed(() => state.uploads.micCal)
+const micUploadResult = computed(() => micState.upload)
+const micParsedText = computed(() => {
+  const parsed = micState.profile?.parsed ?? micState.upload?.parsed ?? null
+  if (parsed === null) {
+    return null
+  }
+  return t('calibration.wizard.mic.parsedValue', { serno: parsed.serno, points: parsed.points })
+})
+const micRtHostText = computed(() => {
+  const rt = micState.status?.rt_host ?? null
+  if (rt === null) {
+    return micState.statusError !== null
+      ? t(micState.statusError.i18nKey) + (micState.statusError.detail ? ' — ' + micState.statusError.detail : '')
+      : null
+  }
+  return rt.available ? t('calibration.wizard.mic.rtHostAvailable') : rt.reason
+})
 
 async function onMicFile(file: File): Promise<void> {
   micError.value = null
@@ -286,14 +320,14 @@ async function onMicFile(file: File): Promise<void> {
     return
   }
   const buffer = await file.arrayBuffer()
-  const result = await uploadCalibrationMicCal({
-    bytes: buffer,
-    filename: file.name,
-    contentType: 'application/octet-stream'
-  })
+  const result = await uploadMicCalibration({ bytes: buffer, filename: file.name })
   if (result.ok === true) {
     form.micCalSha256 = result.value.sha256
-    form.micCalFilename = file.name
+    form.micCalFilename = result.value.filename
+    if (form.serial.trim() === '') {
+      // 预填服务端从 SERNO 解析出的序列号；用户仍可修改，保存时 daemon 会校验一致。
+      form.serial = result.value.serial
+    }
     markDirty()
     ElMessage.success(t('calibration.wizard.toast.uploaded'))
   } else {
@@ -317,6 +351,14 @@ function parseCenters(text: string): number[] | null {
 }
 
 function validateForm(): boolean {
+  if (form.device.trim() === '') {
+    formError.value = t('calibration.wizard.mic.validation.deviceRequired')
+    return false
+  }
+  if (form.serial.trim() === '') {
+    formError.value = t('calibration.wizard.mic.validation.serialRequired')
+    return false
+  }
   if (form.micCalSha256 === null) {
     formError.value = t('calibration.wizard.mic.validation.micRequired')
     return false
@@ -354,6 +396,22 @@ async function saveSettings(): Promise<void> {
   if (!validateForm()) {
     return
   }
+  micError.value = null
+  // 先把麦克风 profile 持久化到 daemon（设备/序列号/朝向/校准文件 sha）；失败则整个保存失败，
+  // 避免向导说“已保存”但真实测量仍拿不到 MicProfile。
+  const profileResult = await saveMicProfile({
+    device: form.device.trim(),
+    serial: form.serial.trim(),
+    orientation: form.orientation === '' ? undefined : form.orientation,
+    cal_sha256: form.micCalSha256 ?? undefined
+  })
+  if (profileResult.ok !== true) {
+    micError.value =
+      t(profileResult.error.i18nKey) + (profileResult.error.detail ? ' — ' + profileResult.error.detail : '')
+    return
+  }
+  form.micCalSha256 = profileResult.value.cal_sha256
+  form.micCalFilename = profileResult.value.cal_filename
   const centers = parseCenters(form.centersText) ?? []
   const config: WizardConfig = {
     mic_cal_sha256: form.micCalSha256,
@@ -634,6 +692,8 @@ const gateFacts = computed<Array<{ label: string; value: string }>>(() => {
     facts.push({ label: t('calibration.wizard.channels.channels'), value: statusData.value?.format.channels === null || statusData.value?.format.channels === undefined ? t('common.dash') : String(statusData.value?.format.channels) })
     facts.push({ label: t('calibration.wizard.channels.encoding'), value: statusData.value?.format.encoding ?? t('common.dash') })
   } else if (currentStep.value === 3) {
+    facts.push({ label: t('calibration.wizard.mic.device'), value: form.device.trim() === '' ? t('common.dash') : form.device.trim() })
+    facts.push({ label: t('calibration.wizard.mic.serial'), value: form.serial.trim() === '' ? t('common.dash') : form.serial.trim() })
     facts.push({ label: t('calibration.wizard.mic.savedSha'), value: form.micCalSha256 === null ? t('common.dash') : shortenId(form.micCalSha256, 12, 8) ?? t('common.dash') })
     facts.push({ label: t('calibration.wizard.mic.orientation'), value: form.orientation === '' ? t('common.dash') : t('calibration.wizard.mic.orientation' + (form.orientation === '0deg' ? '0' : '90')) })
   } else if (currentStep.value === 4) {
@@ -659,6 +719,20 @@ const gateFacts = computed<Array<{ label: string; value: string }>>(() => {
 
 onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityChange)
+  // MicProfile / rt-host UMIK 状态是第 3 步的真实来源；失败只影响本步骤的 NOT_AVAILABLE 提示。
+  const [profileResult] = await Promise.all([loadMicProfile(), loadMicStatus()])
+  const profile = profileResult.ok === true ? profileResult.value : null
+  if (profile !== null && !formDirty.value) {
+    form.device = profile.device
+    form.serial = profile.serial
+    if (form.orientation === '') {
+      form.orientation = profile.orientation
+    }
+    if (form.micCalSha256 === null) {
+      form.micCalSha256 = profile.cal_sha256
+      form.micCalFilename = profile.cal_filename
+    }
+  }
   await refreshAll()
   applyInitialStep()
 })
@@ -811,12 +885,25 @@ watch(
             <h2 class="step-panel__title">{{ t('calibration.step.names.mic_settings') }}</h2>
             <p class="step-panel__desc">{{ t('calibration.wizard.mic.desc') }}</p>
 
+            <div class="form-grid">
+              <div class="form-field">
+                <label class="form-field__label" for="wizard-mic-device">{{ t('calibration.wizard.mic.device') }}</label>
+                <el-input id="wizard-mic-device" v-model="form.device" @input="markDirty" />
+                <span class="form-field__hint">{{ t('calibration.wizard.mic.deviceHint') }}</span>
+              </div>
+              <div class="form-field">
+                <label class="form-field__label" for="wizard-mic-serial">{{ t('calibration.wizard.mic.serial') }}</label>
+                <el-input id="wizard-mic-serial" v-model="form.serial" @input="markDirty" />
+                <span class="form-field__hint">{{ t('calibration.wizard.mic.serialHint') }}</span>
+              </div>
+            </div>
+
             <UploadCard
               :label="t('calibration.wizard.mic.file')"
               :hint="t('calibration.wizard.mic.fileHint')"
               accept=".txt,.json,.cal"
               :action-label="t('calibration.wizard.mic.fileSelect')"
-              :busy="state.busy.upload"
+              :busy="micState.busy.upload"
               :result="micUploadResult"
               :error-text="micError"
               @select="onMicFile"
@@ -829,6 +916,14 @@ watch(
               <div class="fact-list__row">
                 <dt class="fact-list__label">{{ t('calibration.wizard.mic.filename') }}</dt>
                 <dd class="fact-list__value mono">{{ form.micCalFilename ?? t('common.dash') }}</dd>
+              </div>
+              <div class="fact-list__row">
+                <dt class="fact-list__label">{{ t('calibration.wizard.mic.parsed') }}</dt>
+                <dd class="fact-list__value mono">{{ micParsedText ?? t('common.dash') }}</dd>
+              </div>
+              <div class="fact-list__row">
+                <dt class="fact-list__label">{{ t('calibration.wizard.mic.rtHost') }}</dt>
+                <dd class="fact-list__value">{{ micRtHostText ?? t('common.dash') }}</dd>
               </div>
             </dl>
 
@@ -864,8 +959,13 @@ watch(
 
             <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
             <div class="step-actions">
-              <el-button type="primary" :loading="state.busy.saveWizard" :disabled="state.busy.saveWizard" @click="saveSettings">
-                {{ state.busy.saveWizard ? t('calibration.wizard.mic.saving') : t('calibration.wizard.mic.save') }}
+              <el-button
+                type="primary"
+                :loading="state.busy.saveWizard || micState.busy.save"
+                :disabled="state.busy.saveWizard || micState.busy.save"
+                @click="saveSettings"
+              >
+                {{ state.busy.saveWizard || micState.busy.save ? t('calibration.wizard.mic.saving') : t('calibration.wizard.mic.save') }}
               </el-button>
               <span class="aux-text">
                 {{ settingsSaved ? t('calibration.wizard.mic.savedAt', { time: timeText(wizard?.updated_at ?? null) }) : t('calibration.wizard.mic.notSaved') }}

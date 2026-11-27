@@ -8,7 +8,11 @@ import { useI18n } from 'vue-i18n'
 import { UploadFilled } from '@element-plus/icons-vue'
 import TruthTag from '@/components/TruthTag.vue'
 import { shortenId } from '@/utils/format'
-import type { CalibrationUploadResult } from '@/api/calibration'
+/** 只展示服务端事实的字段；校准上传与麦克风 profile 上传的回执都满足。 */
+interface UploadResultFact {
+  sha256: string
+  bytes: number
+}
 
 export interface UploadDetail {
   label: string
@@ -22,7 +26,7 @@ const props = defineProps<{
   actionLabel: string
   busy?: boolean
   disabled?: boolean
-  result?: CalibrationUploadResult | null
+  result?: UploadResultFact | null
   details?: UploadDetail[]
   errorText?: string | null
 }>()
