@@ -25,7 +25,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
-use super::service::{CalibrationError, CalibrationStatus, JobRecord, JobState};
+use super::service::{
+    CalibrationError, CalibrationStatus, JobRecord, JobState, JOB_KIND_SINGLE_POINT_RT_HOST,
+};
 use super::store::{is_safe_artifact_name, is_sha256_hex, write_atomic, UploadStore};
 
 /// 向导配置文件（状态目录下）。
@@ -1010,9 +1012,29 @@ pub(crate) fn derive_state(inputs: WizardStateInputs<'_>) -> Value {
     } else {
         let last = inputs.last_job;
         steps.push(measurement_step(last, inputs.measurement));
-        steps.push(analysis_step(last));
-        steps.push(design_step(last));
-        steps.push(review_step(last));
+        if last.is_some_and(|job| job.kind == JOB_KIND_SINGLE_POINT_RT_HOST) {
+            // C3b1 只做真实测量：solve/design/apply 属 C3b2。这里必须如实报能力缺口，
+            // 不能因为测量成功就把分析/设计/应用标成 passed（那会假装有可应用 plan）。
+            for (step_number, key, label) in [
+                (6usize, "analysis", "analysis"),
+                (7, "design", "design"),
+                (8, "review_apply", "apply"),
+            ] {
+                steps.push(step(
+                    step_number,
+                    key,
+                    "not_available",
+                    json!(format!(
+                        "real rt-host measurement is wired, but {label} (solve/plan/apply) is not implemented yet (C3b2); no plan exists to review or apply"
+                    )),
+                    json!("C3b2"),
+                ));
+            }
+        } else {
+            steps.push(analysis_step(last));
+            steps.push(design_step(last));
+            steps.push(review_step(last));
+        }
     }
 
     // current_step：第一个 blocked 的步骤（not_available 不阻塞）；没有 blocked 时停在 8。
@@ -1057,6 +1079,46 @@ fn step(number: usize, key: &str, status: &str, reason: Value, task: Value) -> V
 }
 
 fn measurement_step(last_job: Option<&JobRecord>, measurement: &MeasurementDraft) -> Value {
+    // C3b1：真实测量 job 的 gate 与离线 WAV 不同——它不需要两段上传，只看真实 job 是否完成。
+    // 还没有 job 时 blocked（用户仍可在第 5 步点击开始测量），完成后 passed。
+    if last_job.is_some_and(|job| job.kind == JOB_KIND_SINGLE_POINT_RT_HOST) {
+        let job = last_job.expect("checked above");
+        return match job.state {
+            JobState::Succeeded => step(
+                5,
+                "measurement",
+                "passed",
+                json!(format!(
+                    "real rt-host measurement job {} finished; measurement/quality/report artifacts are available from GET /api/calibration/jobs/{}",
+                    job.job_id, job.job_id
+                )),
+                Value::Null,
+            ),
+            JobState::Failed | JobState::Cancelled => step(
+                5,
+                "measurement",
+                "blocked",
+                json!(format!(
+                    "real rt-host measurement job {} ended as {}: inspect job.error and the calibration mode was restored; retry from step 5",
+                    job.job_id,
+                    job.state.as_str()
+                )),
+                Value::Null,
+            ),
+            _ => step(
+                5,
+                "measurement",
+                "blocked",
+                json!(format!(
+                    "real rt-host measurement job {} is {}: wait for it to finish (poll GET /api/calibration/jobs/{})",
+                    job.job_id,
+                    job.state.as_str(),
+                    job.job_id
+                )),
+                Value::Null,
+            ),
+        };
+    }
     let mut missing: Vec<&str> = Vec::new();
     if measurement.baseline_upload_id.is_none() {
         missing.push("baseline_upload_id");
@@ -1442,6 +1504,76 @@ mod tests {
         }
         assert!(state["snapshot"].is_null());
         assert!(state["reasons"]["snapshot"].is_string());
+    }
+
+    #[test]
+    fn rt_host_measurement_job_passes_step5_and_marks_solve_steps_not_available() {
+        let status = json!({
+            "device": {"state": "present"},
+            "format": {"rate_asserted": true, "channels": 22},
+            "host_link": {"connected": true},
+        });
+        let control = json!({"actual_version": Value::Null});
+        let calibration = CalibrationStatus {
+            wired: true,
+            engine: Some("real_audio".into()),
+            active_job: None,
+            last_job_id: Some("job-0001".into()),
+            last_verdict: None,
+            reason: None,
+        };
+        let stored = WizardStored {
+            mic_cal_sha256: Some("a".repeat(64)),
+            mic_cal_filename: Some("umik.txt".into()),
+            orientation: Some("90deg".into()),
+            ..WizardStored::default()
+        };
+        let measurement = MeasurementDraft::default();
+        let job = JobRecord {
+            job_id: "job-0001".into(),
+            kind: JOB_KIND_SINGLE_POINT_RT_HOST.into(),
+            state: JobState::Succeeded,
+            active_step: None,
+            verdict: None,
+            created_at: None,
+            created_unix: None,
+            started_at: None,
+            finished_at: None,
+            updated_unix: None,
+            duration_ms: None,
+            progress: Some(1.0),
+            engine: Some("real_audio".into()),
+            steps: Vec::new(),
+            artifacts: Vec::new(),
+            inputs: None,
+            result: None,
+            error: None,
+            apply: Default::default(),
+            reasons: Default::default(),
+        };
+        let state = derive_state(WizardStateInputs {
+            status: &status,
+            control_status: &control,
+            calibration: &calibration,
+            last_job: Some(&job),
+            stored: &stored,
+            measurement: &measurement,
+            updated_at: "2026-01-01T00:00:00Z",
+        });
+        // 第 5 步以真实 job 状态为准（不要求两段离线 WAV）。
+        assert_eq!(state["steps"][4]["status"], json!("passed"), "{state}");
+        assert!(state["steps"][4]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("real rt-host measurement job")));
+        // C3b1 只做测量：solve/design/apply 必须如实是能力缺口，不能因为 job succeeded 就放行。
+        for index in 5..8 {
+            assert_eq!(
+                state["steps"][index]["status"],
+                json!("not_available"),
+                "{state}"
+            );
+            assert_eq!(state["steps"][index]["task"], json!("C3b2"), "{state}");
+        }
     }
 
     #[test]

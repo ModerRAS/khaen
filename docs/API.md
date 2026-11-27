@@ -174,6 +174,7 @@
 
 - **inputs 校验（400 `invalid_request`，`details.field` 指向字段）**：`audible` 必须存在且为 `true`（P08：真实测量会出声/采音，静默请求一律拒绝）；`channels` 可选，非空、≤22 项、非负整数、不重复（缺省=rt-host 自己的 `KHAEN_CAL_CHANNELS`）；`level_dbfs` 可选，有限且在 `[-60, -1]`（缺省=rt-host 自己的电平）；未知字段 400（不静默忽略）。
 - **创建期校验（不排队假 job）**：后端必须是 rt-host 模式且控制通道可用，否则 503 `not_wired` + 稳定 reason；`MicProfile` 必须已保存（否则 **409 `mic_profile_missing`**，message 带缺失/损坏原因）；同一时刻已有 active job → 409 `switch_busy`。
+- **wizard/state 联动**：最近 job 为 `single_point_rt_host` 时，第 5 步不再要求两段离线 WAV——job allocated/running 时 `blocked`（可在第 5 步启动并轮询），`succeeded` 时 `passed`；第 6–8 步（analysis/design/apply）在 C3b1 阶段固定 `not_available` + task `C3b2`，**不因测量成功而放行**。
 - **job steps（4 步，顺序固定）**：`validate` → `sweep_capture` → `quality_check` → `bundle`。详情 `steps[].name` 就是这四个机器名（与离线 job 的 5 步不同）。
   - `validate`：目标必须是 rt-host；MicProfile 必须可用且校准文件可读、sha256 与声明一致；`audible_sweep_authorized` 必须 true；再做一次只读 `cal_status` 预检（设备缺失/未启动/静音/合成引擎(simulated)/rt-host 未接线都在进入校准模式前失败）。失败稳定码：`E_MIC_PROFILE` / `E_RT_HOST` / `E_AUDIBLE` / `UNAVAILABLE`。
   - `sweep_capture`：`cal_enter{audible:true, mic:{device,serial,cal_path,cal_sha256,orientation}, channels?, level_dbfs?}`（`mic` 来自已保存的 MicProfile，C2 的 per-session 覆盖）→ `cal_measure{audible:true}`（异步 accepted，取 `measure_id`/`session_id`）→ 每 **250 ms** 轮询一次 `cal_status`（总超时默认 **30 min**，可配置），每轮检查取消令牌；`done` 时写 `measurement.json`。**任何退出路径（成功/失败/取消）都会调用 `cal_leave`**（C3a 已定：`cal_enter/cal_measure/cal_leave` 不重试）。
