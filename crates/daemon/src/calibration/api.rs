@@ -42,7 +42,9 @@ use super::{StagedControlKind, StagedControlOp};
 use crate::calibration::mic;
 use crate::calibration::service::{
     AppliedVersion, CalibrationError, JobApply, JobInputs, JobQuery, JobRecord, JobResult,
-    JobState, JobStep, NewJob, OFFLINE_JOB_STEPS,
+    JobState, JobStep, NewJob, RtHostJobInputs, JOB_KIND_SINGLE_POINT_OFFLINE,
+    JOB_KIND_SINGLE_POINT_RT_HOST, RT_HOST_MAX_CHANNELS, RT_HOST_MAX_LEVEL_DBFS,
+    RT_HOST_MIN_LEVEL_DBFS,
 };
 use crate::calibration::store::{self, MAX_UPLOAD_BYTES};
 use crate::calibration::wizard::{self, MeasurementDraft, WizardStateInputs, WIZARD_SCHEMA};
@@ -498,57 +500,196 @@ pub(crate) async fn create_job(
         Ok(kind) => kind,
         Err(error) => return error.into_response(),
     };
-    if kind != crate::calibration::service::JOB_KIND_SINGLE_POINT_OFFLINE {
-        return CalibrationError::invalid_request(
+    match kind.as_str() {
+        JOB_KIND_SINGLE_POINT_OFFLINE => {
+            let inputs_object = match required_object(&object, "inputs") {
+                Ok(inputs) => inputs,
+                Err(error) => return error.into_response(),
+            };
+            if let Err(error) = reject_unknown_fields(
+                inputs_object,
+                &[
+                    "plan_sha",
+                    "baseline_upload_id",
+                    "applied_upload_id",
+                    "centers_hz",
+                    "tolerance_db",
+                    "min_bands",
+                ],
+                "inputs",
+            ) {
+                return error.into_response();
+            }
+            let inputs = match parse_job_inputs(state.calibration(), inputs_object) {
+                Ok(inputs) => inputs,
+                Err(error) => return error.into_response(),
+            };
+            let new_job = match resolve_uploads(state.calibration(), &inputs) {
+                Ok(new_job) => new_job,
+                Err(error) => return error.into_response(),
+            };
+            match state.calibration().service().start_job(&new_job) {
+                Ok(record) => accepted_job_response(record),
+                Err(error) => error.into_response(),
+            }
+        }
+        // C3b1：真实测量 job。创建期由服务层校验 MicProfile/rt-host 可用性；这里只做
+        // REST 输入形状校验（P08 可闻授权必须显式 true；未知字段 400）。
+        JOB_KIND_SINGLE_POINT_RT_HOST => {
+            let inputs_object = match required_object(&object, "inputs") {
+                Ok(inputs) => inputs,
+                Err(error) => return error.into_response(),
+            };
+            if let Err(error) = reject_unknown_fields(
+                inputs_object,
+                &["audible", "channels", "level_dbfs"],
+                "inputs",
+            ) {
+                return error.into_response();
+            }
+            let inputs = match parse_rt_host_inputs(inputs_object) {
+                Ok(inputs) => inputs,
+                Err(error) => return error.into_response(),
+            };
+            match state
+                .calibration()
+                .service()
+                .start_rt_host_job(&inputs)
+            {
+                Ok(record) => accepted_job_response(record),
+                Err(error) => error.into_response(),
+            }
+        }
+        other => CalibrationError::invalid_request(
             "kind",
             format!(
-                "unsupported job kind {kind:?}: only single_point_offline is defined (PLAN §4.7)"
+                "unsupported job kind {other:?}: defined kinds are {JOB_KIND_SINGLE_POINT_OFFLINE:?} (offline closed-loop evidence) and {JOB_KIND_SINGLE_POINT_RT_HOST:?} (real rt-host measurement)"
             ),
         )
-        .into_response();
+        .into_response(),
     }
-    let inputs_object = match required_object(&object, "inputs") {
-        Ok(inputs) => inputs,
-        Err(error) => return error.into_response(),
-    };
-    if let Err(error) = reject_unknown_fields(
-        inputs_object,
-        &[
-            "plan_sha",
-            "baseline_upload_id",
-            "applied_upload_id",
-            "centers_hz",
-            "tolerance_db",
-            "min_bands",
-        ],
-        "inputs",
-    ) {
-        return error.into_response();
-    }
-    let inputs = match parse_job_inputs(state.calibration(), inputs_object) {
-        Ok(inputs) => inputs,
-        Err(error) => return error.into_response(),
-    };
-    let new_job = match resolve_uploads(state.calibration(), &inputs) {
-        Ok(new_job) => new_job,
-        Err(error) => return error.into_response(),
-    };
-    match state.calibration().service().start_job(&new_job) {
-        Ok(record) => {
-            let location = format!("/api/calibration/jobs/{}", record.job_id);
-            (
-                StatusCode::ACCEPTED,
-                Json(json!({
-                    "ok": true,
-                    "job_id": record.job_id,
-                    "state": record.state.as_str(),
-                    "location": location,
-                })),
-            )
-                .into_response()
+}
+
+/// 202 创建回执（离线/rt-host job 共用同一形状）。
+fn accepted_job_response(record: JobRecord) -> Response {
+    let location = format!("/api/calibration/jobs/{}", record.job_id);
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "ok": true,
+            "job_id": record.job_id,
+            "state": record.state.as_str(),
+            "location": location,
+        })),
+    )
+        .into_response()
+}
+
+/// 解析 rt-host 真实测量 job 的 inputs（{audible:true, channels?,[u32], level_dbfs?:f64}）。
+fn parse_rt_host_inputs(object: &Map<String, Value>) -> Result<RtHostJobInputs, CalibrationError> {
+    let audible = match object.get("audible") {
+        Some(Value::Bool(value)) => *value,
+        Some(_) => {
+            return Err(CalibrationError::invalid_request(
+                "inputs.audible",
+                "inputs.audible must be a boolean",
+            ))
         }
-        Err(error) => error.into_response(),
+        None => {
+            return Err(CalibrationError::invalid_request(
+                "inputs.audible",
+                "missing required field \"audible\": a real measurement plays an audible sweep, so the request must explicitly authorize it (audible:true)",
+            ))
+        }
+    };
+    if !audible {
+        return Err(CalibrationError::invalid_request(
+            "inputs.audible",
+            "inputs.audible must be true: a real rt-host measurement plays an audible sweep (P08); the daemon never starts a silent measurement",
+        ));
     }
+    let channels = match object.get("channels") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(values)) => {
+            if values.is_empty() {
+                return Err(CalibrationError::invalid_request(
+                    "inputs.channels",
+                    "inputs.channels must not be empty when provided",
+                ));
+            }
+            if values.len() > RT_HOST_MAX_CHANNELS {
+                return Err(CalibrationError::invalid_request(
+                    "inputs.channels",
+                    format!(
+                        "inputs.channels has {} entries; at most {RT_HOST_MAX_CHANNELS} are supported",
+                        values.len()
+                    ),
+                ));
+            }
+            let mut channels = Vec::with_capacity(values.len());
+            let mut seen = Vec::with_capacity(values.len());
+            for value in values {
+                let number = value.as_u64().ok_or_else(|| {
+                    CalibrationError::invalid_request(
+                        "inputs.channels",
+                        "inputs.channels entries must be non-negative integers",
+                    )
+                })?;
+                let channel = u32::try_from(number).map_err(|_| {
+                    CalibrationError::invalid_request(
+                        "inputs.channels",
+                        format!("inputs.channels entry {number} does not fit in u32"),
+                    )
+                })?;
+                if seen.contains(&channel) {
+                    return Err(CalibrationError::invalid_request(
+                        "inputs.channels",
+                        format!("inputs.channels contains duplicate channel {channel}"),
+                    ));
+                }
+                seen.push(channel);
+                channels.push(channel);
+            }
+            Some(channels)
+        }
+        Some(_) => {
+            return Err(CalibrationError::invalid_request(
+                "inputs.channels",
+                "inputs.channels must be an array of non-negative integers",
+            ))
+        }
+    };
+    let level_dbfs = match object.get("level_dbfs") {
+        None | Some(Value::Null) => None,
+        Some(Value::Number(_)) => {
+            let level = object
+                .get("level_dbfs")
+                .and_then(Value::as_f64)
+                .expect("number is f64");
+            if !level.is_finite()
+                || !(RT_HOST_MIN_LEVEL_DBFS..=RT_HOST_MAX_LEVEL_DBFS).contains(&level)
+            {
+                return Err(CalibrationError::invalid_request(
+                    "inputs.level_dbfs",
+                    format!(
+                        "inputs.level_dbfs must be a finite number in [{RT_HOST_MIN_LEVEL_DBFS}, {RT_HOST_MAX_LEVEL_DBFS}] dBFS"
+                    ),
+                ));
+            }
+            Some(level)
+        }
+        Some(_) => {
+            return Err(CalibrationError::invalid_request(
+                "inputs.level_dbfs",
+                "inputs.level_dbfs must be a number",
+            ))
+        }
+    };
+    Ok(RtHostJobInputs {
+        audible,
+        channels,
+        level_dbfs,
+    })
 }
 
 fn parse_job_inputs(
@@ -721,7 +862,7 @@ pub(crate) async fn job_detail(
     match hub.service().job(&job_id) {
         Ok(record) => {
             let job = job_json(&record);
-            ok_json(json!({
+            let mut body = json!({
                 "schema": JOB_SCHEMA,
                 "job": job,
                 // docs/API.md §7 加法：详情顶层也暴露 result/artifacts/error（与 job 内同源）。
@@ -729,7 +870,18 @@ pub(crate) async fn job_detail(
                 "artifacts": job["artifacts"].clone(),
                 "error": job["error"].clone(),
                 "reasons": job_reasons(&record),
-            }))
+            });
+            // C3b1 加法：rt-host 真实测量 job 的会话输入（离线 job 无此字段；离线输入仍走 inputs）。
+            if record.kind == JOB_KIND_SINGLE_POINT_RT_HOST {
+                if let Some(inputs) = hub.service().rt_host_inputs(&record.job_id) {
+                    body["inputs_rt_host"] = json!({
+                        "audible": inputs.audible,
+                        "channels": inputs.channels,
+                        "level_dbfs": inputs.level_dbfs,
+                    });
+                }
+            }
+            ok_json(body)
         }
         Err(error) => error.into_response(),
     }
@@ -755,7 +907,10 @@ pub(crate) async fn cancel_job(
 
 /// 单个 job 的 REST JSON（job 对象；缺失字段 null，原因在 job_reasons）。
 fn job_json(record: &JobRecord) -> Value {
-    let steps: Vec<Value> = OFFLINE_JOB_STEPS
+    // 步骤名按 job 种类取（离线 5 步 / rt-host 4 步）：固定用离线步骤会把 rt-host 的
+    // sweep_capture/quality_check 抹成 compile/levels 占位（不诚实）。
+    let step_names = crate::calibration::service::job_step_names(&record.kind);
+    let steps: Vec<Value> = step_names
         .iter()
         .map(|name| {
             let step = record
@@ -903,11 +1058,18 @@ fn apply_json(apply: &JobApply) -> Value {
 fn job_reasons(record: &JobRecord) -> Map<String, Value> {
     let mut reasons: BTreeMap<String, String> = record.reasons.clone();
     let state = record.state.as_str();
+    let rt_host = record.kind == crate::calibration::service::JOB_KIND_SINGLE_POINT_RT_HOST;
     insert_reason_if_null(
         &mut reasons,
         "verdict",
         record.verdict.is_none(),
-        format!("job is {state}: the verdict is produced by the closed_loop stage"),
+        if rt_host {
+            format!(
+                "job is {state}: a real measurement job reports no PASS in this slice (quality/verdict arrive with C3b2); quality.json records available:false with the reason"
+            )
+        } else {
+            format!("job is {state}: the verdict is produced by the closed_loop stage")
+        },
     );
     insert_reason_if_null(
         &mut reasons,
@@ -945,19 +1107,35 @@ fn job_reasons(record: &JobRecord) -> Map<String, Value> {
         &mut reasons,
         "engine",
         record.engine.is_none(),
-        "offline single-point jobs do not open an audio engine in the daemon process; engine is reported by the job backend when it has one",
+        if rt_host {
+            "the rt-host engine name is copied from the cal_status reply once the measurement completes; the daemon does not invent an engine"
+        } else {
+            "offline single-point jobs do not open an audio engine in the daemon process; engine is reported by the job backend when it has one"
+        },
     );
     insert_reason_if_null(
         &mut reasons,
         "inputs",
         record.inputs.is_none(),
-        "the calibration backend did not persist the job inputs; the daemon only echoes what the backend reports",
+        if rt_host {
+            "rt-host measurement jobs take no uploaded recordings: session inputs (audible/channels/level_dbfs) are echoed as inputs_rt_host"
+        } else {
+            "the calibration backend did not persist the job inputs; the daemon only echoes what the backend reports"
+        },
     );
     insert_reason_if_null(
         &mut reasons,
         "result",
         record.result.is_none(),
-        format!("job is {state}: analysis results exist after the closed_loop and bundle stages"),
+        if rt_host {
+            format!(
+                "job is {state}: rt-host measurement jobs have no closed-loop comparison result in this slice (solve/apply arrive with C3b2); measurement evidence is in measurement.json/quality.json/report.json"
+            )
+        } else {
+            format!(
+                "job is {state}: analysis results exist after the closed_loop and bundle stages"
+            )
+        },
     );
     insert_reason_if_null(
         &mut reasons,

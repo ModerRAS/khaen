@@ -7,6 +7,8 @@
 //! - [`service`]：服务抽象（`CalibrationService` + `JobSink`）与稳定错误；
 //! - [`backend`]：生产实现（khaen-calibration JobManager + 离线 OfflineJobBackend +
 //!   daemon 侧 job 审计索引；main 注入）；
+//! - [`rt_host_backend`]：真实测量 job backend（C3b1：daemon 经 host link 驱动 rt-host 的
+//!   `cal_enter/cal_measure/cal_status/cal_leave`，只落真实测量证据，不伪造 PASS）；
 //! - [`not_wired`]：未接线/初始化失败时的诚实降级（503 `not_wired` / 空列表 + reason）；
 //! - [`store`]：上传文件存储（内容寻址 + 原子写 + 0600）、产物白名单与 Content-Type；
 //! - [`mic`]：麦克风 profile（真实校准桥接 C1）：UMIK txt 校验 + 内容寻址存储 +
@@ -36,6 +38,7 @@ pub mod api;
 pub mod backend;
 pub mod mic;
 pub mod not_wired;
+pub mod rt_host_backend;
 pub mod service;
 pub mod store;
 pub mod wizard;

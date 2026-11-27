@@ -32,13 +32,16 @@ pub const MAX_UPLOAD_BYTES: u64 = 64 * 1024 * 1024;
 /// 上传接受的 Content-Type（去掉参数后的小写 essence）。
 pub const UPLOAD_CONTENT_TYPES: [&str; 2] = ["application/octet-stream", "audio/wav"];
 /// 产物白名单：REST 只暴露这些名字（其余 404）。
-pub const ARTIFACT_WHITELIST: [&str; 6] = [
+pub const ARTIFACT_WHITELIST: [&str; 8] = [
     "report.json",
     "artifacts.manifest.json",
     "plan.bin",
     "levels.json",
     "predicted.json",
     "observed.json",
+    // C3b1：rt-host 真实测量 job 的证据产物（offline job 不会产生这两个名字）。
+    "measurement.json",
+    "quality.json",
 ];
 
 /// 上传 id / 内容 sha256 是否是合法的 64 位小写十六进制。

@@ -109,7 +109,7 @@
 | POST | `/api/plan/upload` | 二进制 plan 与 sha 校验头（见 daemon 实现） | 201 首次、200 已存在（dedup）、400 sha 不符；响应 `{ok, stored_path, sha256, dedup}` |
 
 ## 7. 校准（calibration）——实际形状（backend 已实现并被测试锁定，本表即 canonical）
-现状：uploads/wizard/jobs/artifacts 已可用；生产后端为 JobManager + OfflineJobBackend（`KHAEN_CAL_BACKEND=off` 可关；初始化失败 → not_wired + 真实 reason）。**下表是前端必须适配的实际形状**；标【加法】的字段是已落地的增量。
+现状：uploads/wizard/jobs/artifacts 已可用；生产后端为 JobManager + OfflineJobBackend（`KHAEN_CAL_BACKEND=off` 可关；初始化失败 → not_wired + 真实 reason）。C3b1 起同一 JobManager 也能驱动 **rt-host 真实测量 job**（kind `single_point_rt_host`，见 §7.2；solve/apply 尚未接线，属 C3b2）。**下表是前端必须适配的实际形状**；标【加法】的字段是已落地的增量。
 
 **字段命名（2026-11-26 裁决 H）**：job 对象用 `id`/`status`（crates/daemon tests 已锁定）；只有创建响应与 cancel 回执用 `job_id`，cancel 同时回 `status` 和 `state` 两字段（同源别名）。前端解析可对 job_id|id、state|status 双接受做防御，但契约测试必须断言本表的实际 canonical 形状。
 
@@ -135,7 +135,7 @@
 - 状态枚举（canonical）：`queued|running|succeeded|failed|cancelled`（双 l，与实现/现有测试一致；旧文档的 `canceled` 作废）。
 - job 审计字段：`job_id, kind, state, created_at/started_at/finished_at`（RFC3339）、`duration_ms, steps, apply, error`；【加法】`created_unix, updated_unix, progress`。
 - `measured`/`simulated` 必须如实标记；**模拟结果不得写成实测**。
-- 离线 job（`single_point_offline`）不开设备、不出声：JobRequest 对它的 `audible_sweep_authorized` 要求为 false（诚实标注）；真实 UMIK 采集 job 属 T70f-c，NOT_RUN。
+- 离线 job（`single_point_offline`）不开设备、不出声：JobRequest 对它的 `audible_sweep_authorized` 要求为 false（诚实标注）；真实 UMIK 采集 job 是 §7.2 的 `single_point_rt_host`（daemon 侧已接线；真机窗口实测 NOT_RUN）。
 - 离线 job 输入校验（2026-11-27 真 daemon 实测）：plan 的 `sample_rate` 必须等于两段 WAV 的采样率，否则 job failed + 稳定码 `E_OFFLINE_JOB_ALIGNMENT`；WAV 接受 PCM16/24/32 或 float32、1–8 通道（多通道按均值折单声道）、任意非零采样率。
 - 预测电平范围：只覆盖 **identity content/matrix/routing + protection PEQ**；plan 带 folds/非恒等段时 job failed + `E_OFFLINE_JOB_LEVELS`（detail 内是 `E_PLAN_LEVELS_*` 稳定码），不静默少算——所以校准 job 的 plan 必须用 identity 方案，不能直接拿 22 通道 audio-profile 生成的折叠方案。
 - succeeded job artifacts 至少含 `plan.bin / predicted.json / observed.json / report.json / artifacts.manifest.json`；下载响应头 `x-khaen-artifact-sha256` == 列表 sha == body sha（report schema `khaen-closed-loop-report/v1`，manifest schema `khaen-calibration-artifacts/v1`）。
@@ -161,6 +161,31 @@
 - **存储与安全**：磁盘文件名只由字节 sha256 决定，客户端文件名不参与路径拼接；`mic.json` 与校准文件/回执均 0600 原子写（同目录 `.tmp-*` → rename）；文件不存在/hash 不符 400，不拿默认值冒充。
 - **status 实时段（C3a，2026-11-28）**：`rt_host` 的字段逐个映射 rt-host `cal_status` 回执，daemon 不重算、不补值：`mode` ← 顶层 `mode`（`playback`/`calibration`）；`declared`/`open`/`device`/`declaration_source` ← `umik.declared`/`umik.open`/`umik.device`/`umik.declaration_source`；`calibration.{simulated,engine}` ← 顶层 `simulated`/`engine`；`reasons` ← 顶层 `reasons.mic`（UMIK 声明缺失原因，字符串或 null）。字段缺失/显式 null 时如实 null；回执缺 `umik` 或字段类型不符按畸形回执降级，不当成功。`declaration_source` 的来源是 rt-host：`cal_enter_override`（该会话 `cal_enter` 请求内的 mic 覆盖）/ `env`（rt-host 环境变量声明）/ `missing`（没有 UMIK 声明）。
 - **status 降级语义（C3a）**：只有 `rt-host` 目标有实时状态——daemon 经既有 host link 发 `{op:"cal_status"}`（合法 op 表 `CAL_OPS` 与 `crates/rt-host/src/control/cal/mod.rs` 同源；`cal_status` 只读可重试，其余 `cal_*` 非幂等不重试）。`process` 目标没有校准能力 → `available:false` + `code:"process_target"`；rt-host 未接线（`KHAEN_CAL=off`）→ `code:"unsupported"`；socket 不可用 → `code:"host_link_unavailable"`；畸形回执 → `code:"malformed_cal_status_reply"`。这些降级**不改变 HTTP 200**，也**不影响** `profile`/`reasons`（仍来自 `<state_dir>/calibration/mic.json`）。
+
+### 7.2 rt-host 真实测量 job（`single_point_rt_host`，C3b1，2026-11-28）
+
+真实测量由 rt-host 在真实设备上播放扫频、由 UMIK 采集；daemon 只经既有 host link（C2/C3a 同一个控制通道）驱动 `cal_enter -> cal_measure -> cal_status -> cal_leave`，并把 **rt-host 真实回执**落成证据产物。本切片**只做测量**：solve/apply（方案设计、两阶段应用）与闭环质量判定属 C3b2，**job 不报 PASS、没有可应用 plan**。
+
+后端选择（`KHAEN_CAL_BACKEND`；`off`/`0` 仍由 main 关停）：未设置/`offline` = 现状离线 job；`rt-host` = 真实测量模式（离线 job 仍可用）；`auto` = 启动时做一次只读 `cal_status` 探测，成功进 rt-host，失败**降级 offline** 并把真实原因写进 `/api/status` 的 calibration reason 与创建错误（不静默）。真实测量还要求 `KHAEN_RT_TARGET=rt-host`（process 目标没有校准数据面）。
+
+| 方法 | 路径 | 请求 | 成功响应 |
+|---|---|---|---|
+| POST | `/api/calibration/jobs` | `{kind:"single_point_rt_host", inputs:{audible:true, channels?:[u32], level_dbfs?:f64}}` | 202 `{ok, job_id, state, location}`（与离线 job 同形） |
+
+- **inputs 校验（400 `invalid_request`，`details.field` 指向字段）**：`audible` 必须存在且为 `true`（P08：真实测量会出声/采音，静默请求一律拒绝）；`channels` 可选，非空、≤22 项、非负整数、不重复（缺省=rt-host 自己的 `KHAEN_CAL_CHANNELS`）；`level_dbfs` 可选，有限且在 `[-60, -1]`（缺省=rt-host 自己的电平）；未知字段 400（不静默忽略）。
+- **创建期校验（不排队假 job）**：后端必须是 rt-host 模式且控制通道可用，否则 503 `not_wired` + 稳定 reason；`MicProfile` 必须已保存（否则 **409 `mic_profile_missing`**，message 带缺失/损坏原因）；同一时刻已有 active job → 409 `switch_busy`。
+- **job steps（4 步，顺序固定）**：`validate` → `sweep_capture` → `quality_check` → `bundle`。详情 `steps[].name` 就是这四个机器名（与离线 job 的 5 步不同）。
+  - `validate`：目标必须是 rt-host；MicProfile 必须可用且校准文件可读、sha256 与声明一致；`audible_sweep_authorized` 必须 true；再做一次只读 `cal_status` 预检（设备缺失/未启动/静音/合成引擎(simulated)/rt-host 未接线都在进入校准模式前失败）。失败稳定码：`E_MIC_PROFILE` / `E_RT_HOST` / `E_AUDIBLE` / `UNAVAILABLE`。
+  - `sweep_capture`：`cal_enter{audible:true, mic:{device,serial,cal_path,cal_sha256,orientation}, channels?, level_dbfs?}`（`mic` 来自已保存的 MicProfile，C2 的 per-session 覆盖）→ `cal_measure{audible:true}`（异步 accepted，取 `measure_id`/`session_id`）→ 每 **250 ms** 轮询一次 `cal_status`（总超时默认 **30 min**，可配置），每轮检查取消令牌；`done` 时写 `measurement.json`。**任何退出路径（成功/失败/取消）都会调用 `cal_leave`**（C3a 已定：`cal_enter/cal_measure/cal_leave` 不重试）。
+  - `quality_check`：读 `measurement.json`，只搬运 rt-host 真实给出的 `quality`/`verdict` 字段。rt-host 当前 `cal_status` 只提供测量摘要（`snr_db`/`capture_peak_dbfs`/`xruns`/`clipped_samples`/`valid_slots`/`total_slots`），没有闭环质量门对象 → `quality.json` 写 `available:false` + `verdict:null` + 原因，**绝不写假 PASS**。
+  - `bundle`：`cal_leave` 幂等（成功路径只调用一次；restart 后 resume 到 bundle 时补一次）→ 写 `report.json`（真实 job id/`measure_id`/artifact sha256；`verdict` 恒 null 并在 notes 说明 solve/apply 属 C3b2）。
+- **artifacts（白名单 + manifest sha 重算校验，均可下载）**：`measurement.json`（schema `khaen-calibration-rt-host-measurement/v1`；逐字段拷贝 rt-host `cal_status` 的 `measure` 对象与 `engine/simulated/real_capture/umik` 快照，缺失即 null，不补默认值）；`quality.json`（schema `khaen-calibration-rt-host-quality/v1`）；`report.json`（schema `khaen-calibration-rt-host-report/v1`）；`artifacts.manifest.json`（JobManager 终态写，schema `khaen-calibration-artifacts/v1`）。
+- **详情加法字段**：`inputs_rt_host:{audible, channels, level_dbfs}` 回显会话输入；`inputs` 为 null（rt-host job 不读上传录音），`reasons` 说明；`result`/`verdict` 为 null + `reasons` 说明本切片不做闭环判定（`engine` 来自 rt-host 回执）。
+- **取消**：`POST /api/calibration/jobs/{id}/cancel` 协作式推进；轮询循环每 250 ms 检查取消，随后 `cal_leave`，job 终态 `cancelled`（不产生 `measurement.json`）。
+- **失败语义**：rt-host 业务错误码原样进 job `error.code`（如 `measure_failed`、`E_QUALITY_SNR`、`mic_declaration_invalid`、`mic_cal_file_invalid`、`device_absent`、`audio_blocked`、`format_unsupported`），`error.message` 同时保留 code/stage_code/人读原因；daemon 侧稳定码 `E_RT_HOST`（控制通道不可用/目标不对）、`E_CAL_STATUS`（`cal_status` 回执畸形）、`E_CAL_MEASURE`（`cal_measure` 回执缺 measure_id/session_id）、`E_MEASURE_TIMEOUT`、`E_CAL_LEAVE`（成功测量后 leave 失败）、`E_MIC_PROFILE`、`UNAVAILABLE`。`cal_leave` 失败不掩盖原错误：原错误保留，message 追加 leave 失败，并尽力写 `cal_leave.json` 证据。
+- **apply/rollback**：rt-host 测量 job 没有可应用 plan → `POST .../apply` 返回 409 `plan_unavailable`（message 说明 solve/apply 属 C3b2）；**不得显示 PASS**。
+- **daemon 重启**：rt-host 测量会话状态在 rt-host 内存里，不可跨进程 resume；重启时尽力 `cal_leave` 后把 pending job **abandon 成 failed** 并带真实原因（不假装还在跑）。
+- **设备/出声**：只有目标=rt-host、设备存在且未静音才会进入校准模式；可闻授权由请求显式给出。daemon 侧全链路用脚本化 rt-host 回执测过；**真机 UMIK/MOTU 窗口实测是 NOT_RUN**（需出声窗口与用户授权）。
 
 ## 8. 系统
 | 方法 | 路径 | 请求 | 响应 |

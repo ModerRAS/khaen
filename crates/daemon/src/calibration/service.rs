@@ -71,6 +71,8 @@ pub mod code {
     pub const ROLLBACK_UNAVAILABLE: &str = "rollback_unavailable";
     /// 向导应用时没有可应用的 job（409）。
     pub const NO_APPLICABLE_JOB: &str = "no_applicable_job";
+    /// 真实测量 job 需要已保存的麦克风 profile，但当前没有（409）。
+    pub const MIC_PROFILE_MISSING: &str = "mic_profile_missing";
     /// 两阶段 token 无效/已消费/不属于该 job（409）。
     pub const ENGINE_TOKEN_INVALID: &str = "engine_token_invalid";
     /// 内部错误（500）。
@@ -255,6 +257,21 @@ impl CalibrationError {
         )
     }
 
+    /// 真实测量 job 缺少已保存的麦克风 profile（409）。
+    ///
+    /// 这里是**创建期**拒绝：没有 mic 声明就没有真实测量的几何/校准依据，不能排队一个注定
+    /// 失败或会产生伪造数据的 job（C3b1 契约）。
+    pub fn mic_profile_missing(reason: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            code::MIC_PROFILE_MISSING,
+            format!(
+                "a saved microphone profile is required before a real rt-host measurement job: {}",
+                reason.into()
+            ),
+        )
+    }
+
     /// 内部错误（500）。
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(
@@ -316,12 +333,28 @@ impl IntoResponse for CalibrationError {
 // job 枚举与输入
 // ---------------------------------------------------------------------------
 
-/// 唯一已定义的 job 种类：离线单点校准（PLAN §4.7）。
+/// 离线单点校准 job 种类（PLAN §4.7）。
 pub const JOB_KIND_SINGLE_POINT_OFFLINE: &str = "single_point_offline";
+
+/// rt-host 真实单点测量 job 种类（C3b1：daemon 驱动 rt-host 的 cal_* op）。
+pub const JOB_KIND_SINGLE_POINT_RT_HOST: &str = "single_point_rt_host";
 
 /// 离线单点 job 的步骤顺序（如实映射 khaen_calibration::job::SINGLE_POINT_OFFLINE_PLAN：
 /// validate → compile → levels → closed_loop → bundle；不允许跳过步骤直接成功）。
 pub const OFFLINE_JOB_STEPS: [&str; 5] = ["validate", "compile", "levels", "closed_loop", "bundle"];
+
+/// rt-host 真实测量 job 的步骤顺序（如实映射 khaen_calibration::job::SINGLE_POINT_RT_HOST_PLAN：
+/// validate -> sweep_capture -> quality_check -> bundle；本切片不包含 solve/apply）。
+pub const RT_HOST_JOB_STEPS: [&str; 4] = ["validate", "sweep_capture", "quality_check", "bundle"];
+
+/// 按 job 种类取步骤名（REST 步骤/索引重建共用；未知 kind 按离线步骤，调用方各自校验 kind）。
+pub fn job_step_names(kind: &str) -> &'static [&'static str] {
+    if kind == JOB_KIND_SINGLE_POINT_RT_HOST {
+        &RT_HOST_JOB_STEPS
+    } else {
+        &OFFLINE_JOB_STEPS
+    }
+}
 
 /// job 状态机（PLAN §4.7：queued → running(步骤) → succeeded|failed|cancelled）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,6 +480,29 @@ pub struct JobInputs {
     /// 最少可比较带数（>= 1）。
     pub min_bands: u32,
 }
+
+/// rt-host 真实测量 job 的会话输入（C3b1）。
+///
+/// 真实测量不读上传录音：扫频由 rt-host 在真实设备上播放/采集，daemon 只传会话参数。
+/// 所有可选字段缺省时由 rt-host 自己的配置决定（daemon 不替换默认值、不猜）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RtHostJobInputs {
+    /// 用户是否显式授权可闻扫频（P08；本 kind 必须是 true）。
+    pub audible: bool,
+    /// 要测量的 DAC 通道（None = 用 rt-host 配置默认；给了就原样转发给 cal_enter）。
+    #[serde(default)]
+    pub channels: Option<Vec<u32>>,
+    /// 驱动电平（dBFS，[-60, -1]；None = 用 rt-host 配置默认）。
+    #[serde(default)]
+    pub level_dbfs: Option<f64>,
+}
+
+/// rt-host 测量的电平下限（与 crates/rt-host/src/control/cal/mod.rs 的 [-60, -1] 同源）。
+pub const RT_HOST_MIN_LEVEL_DBFS: f64 = -60.0;
+/// rt-host 测量的电平上限（-1 dBFS：比 JobRequest 的 0 dBFS 更保守，避免满刻度）。
+pub const RT_HOST_MAX_LEVEL_DBFS: f64 = -1.0;
+/// rt-host 会话最多允许的测量通道数（rt-host 运行时最多 22 个输出通道）。
+pub const RT_HOST_MAX_CHANNELS: usize = 22;
 
 /// REST 层解析后的上传引用（上传存在校验通过后才会传给服务）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -880,6 +936,24 @@ pub trait CalibrationService: Send + Sync {
     /// 创建 job（202）。互斥/校验失败返回稳定错误。
     fn start_job(&self, request: &NewJob) -> Result<JobRecord, CalibrationError>;
 
+    /// 创建 rt-host 真实测量 job（C3b1，202）。
+    ///
+    /// 默认实现如实返回 503 not_wired：只有接入了 rt-host 控制通道的生产后端才能执行真实
+    /// 测量；未接线实现/fake 不得排队一个永远不会真跑的 job（不假成功）。
+    fn start_rt_host_job(&self, _inputs: &RtHostJobInputs) -> Result<JobRecord, CalibrationError> {
+        Err(CalibrationError::not_wired(
+            "this calibration backend cannot run rt-host measurement jobs (kind single_point_rt_host); it is not wired to the rt-host control channel",
+        ))
+    }
+
+    /// rt-host job 的会话输入回显（离线 job/未知 job 返回 None）。
+    ///
+    /// 存在的意义：JobInputs（离线字段）不适用于真实测量，detail 用这个字段如实回显
+    /// audible/channels/level_dbfs，而不是把会话参数塞进上传录音字段里（不编造）。
+    fn rt_host_inputs(&self, _job_id: &str) -> Option<RtHostJobInputs> {
+        None
+    }
+
     /// 分页列表；未接线实现返回空页（REST 层加 available=false + reason）。
     fn list_jobs(&self, query: &JobQuery) -> Result<JobPage, CalibrationError>;
 
@@ -970,6 +1044,44 @@ mod tests {
             OFFLINE_JOB_STEPS,
             ["validate", "compile", "levels", "closed_loop", "bundle"]
         );
+        assert_eq!(
+            RT_HOST_JOB_STEPS,
+            ["validate", "sweep_capture", "quality_check", "bundle"]
+        );
+        assert_eq!(
+            job_step_names(JOB_KIND_SINGLE_POINT_RT_HOST),
+            RT_HOST_JOB_STEPS
+        );
+        assert_eq!(
+            job_step_names(JOB_KIND_SINGLE_POINT_OFFLINE),
+            OFFLINE_JOB_STEPS
+        );
+    }
+
+    #[test]
+    fn rt_host_job_inputs_roundtrip_without_inventing_optional_fields() {
+        let minimal = serde_json::from_str::<RtHostJobInputs>(r#"{"audible":true}"#)
+            .expect("minimal rt-host inputs parse");
+        assert_eq!(
+            minimal,
+            RtHostJobInputs {
+                audible: true,
+                channels: None,
+                level_dbfs: None,
+            }
+        );
+        let full = RtHostJobInputs {
+            audible: true,
+            channels: Some(vec![0, 1, 5]),
+            level_dbfs: Some(-12.0),
+        };
+        let json = serde_json::to_value(&full).expect("serialize");
+        assert_eq!(json["channels"], serde_json::json!([0, 1, 5]));
+        assert_eq!(json["level_dbfs"], serde_json::json!(-12.0));
+        assert_eq!(
+            serde_json::from_value::<RtHostJobInputs>(json).expect("parse"),
+            full
+        );
     }
 
     #[test]
@@ -1017,6 +1129,11 @@ mod tests {
                 CalibrationError::not_wired("x"),
                 StatusCode::SERVICE_UNAVAILABLE,
                 code::NOT_WIRED,
+            ),
+            (
+                CalibrationError::mic_profile_missing("no profile"),
+                StatusCode::CONFLICT,
+                code::MIC_PROFILE_MISSING,
             ),
             (
                 CalibrationError::switch_busy("job-0001"),

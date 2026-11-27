@@ -100,11 +100,16 @@ impl fmt::Display for JobId {
 /// - `SinglePointOffline`（T70h-b）：离线闭环证据 job（PLAN §4.7）。输入是已上传的方案 +
 ///   两段 WAV（基线/施加），步骤 `validate -> compile -> levels -> closed_loop -> bundle`，
 ///   不打开设备、不跑 RT 图（真实测量采集属 T70f-c）。
+/// - `SinglePointRtHost`（C3b1）：真实单点测量 job。daemon 经 host link 驱动 rt-host 的
+///   `cal_enter -> cal_measure -> cal_status -> cal_leave`（真实设备/UMIK 采集），步骤
+///   `validate -> sweep_capture -> quality_check -> bundle`；本切片只产出真实测量证据，
+///   solve/apply（方案设计/应用）属 C3b2，job 不产出可应用方案、不报 PASS。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobKind {
     Full,
     Retest,
     SinglePointOffline,
+    SinglePointRtHost,
 }
 
 /// Full 的 stage 顺序（DEC §2.6 冻结）。
@@ -138,6 +143,18 @@ pub const SINGLE_POINT_OFFLINE_PLAN: [JobStage; 5] = [
     JobStage::Bundle,
 ];
 
+/// SinglePointRtHost 的 stage 顺序（C3b1：真实测量证据链，不跳步）。
+///
+/// `validate`（MicProfile/rt-host 可用性/可闻授权）-> `sweep_capture`（rt-host cal_enter +
+/// cal_measure + 轮询 cal_status）-> `quality_check`（只搬 rt-host 真实质量字段；没有就写
+/// unavailable）-> `bundle`（报告 + manifest）。这里没有 compile/apply：本切片不产出可应用方案。
+pub const SINGLE_POINT_RT_HOST_PLAN: [JobStage; 4] = [
+    JobStage::Validate,
+    JobStage::SweepCapture,
+    JobStage::QualityCheck,
+    JobStage::Bundle,
+];
+
 impl JobKind {
     /// 机器名（REST 字段值）。
     pub const fn as_str(self) -> &'static str {
@@ -145,6 +162,7 @@ impl JobKind {
             JobKind::Full => "full",
             JobKind::Retest => "retest",
             JobKind::SinglePointOffline => "single_point_offline",
+            JobKind::SinglePointRtHost => "single_point_rt_host",
         }
     }
 
@@ -154,6 +172,7 @@ impl JobKind {
             "full" => Some(JobKind::Full),
             "retest" => Some(JobKind::Retest),
             "single_point_offline" => Some(JobKind::SinglePointOffline),
+            "single_point_rt_host" => Some(JobKind::SinglePointRtHost),
             _ => None,
         }
     }
@@ -164,6 +183,7 @@ impl JobKind {
             JobKind::Full => &FULL_PLAN,
             JobKind::Retest => &RETEST_PLAN,
             JobKind::SinglePointOffline => &SINGLE_POINT_OFFLINE_PLAN,
+            JobKind::SinglePointRtHost => &SINGLE_POINT_RT_HOST_PLAN,
         }
     }
 }
@@ -621,7 +641,7 @@ impl JobRequest {
             );
         }
         match self.kind {
-            JobKind::Full | JobKind::SinglePointOffline => {
+            JobKind::Full | JobKind::SinglePointOffline | JobKind::SinglePointRtHost => {
                 if self.expected_applied_version.is_some() {
                     return Err("expected_applied_version is only valid for retest".to_string());
                 }
@@ -4057,6 +4077,26 @@ mod tests {
         }
     }
 
+    fn rt_host_request(audible: bool) -> JobRequest {
+        JobRequest {
+            kind: JobKind::SinglePointRtHost,
+            label: "rt-host single-point measurement".to_string(),
+            layout: "single_point".to_string(),
+            sample_rate: 48_000,
+            design_points: 1,
+            holdout_points: 1,
+            repeats: 1,
+            drive_level_dbfs: -12.0,
+            audible_sweep_authorized: audible,
+            auto_apply: false,
+            expected_applied_version: None,
+            inputs: vec![InputHash {
+                name: "mic_cal".to_string(),
+                sha256: sha256_hex(b"umik-cal-file"),
+            }],
+        }
+    }
+
     #[test]
     fn single_point_offline_does_not_require_audible_sweep_authorization() {
         // 离线证据 job 不打开设备、不播放扫频：P08 的可闻授权不适用，传 false 才诚实；
@@ -4073,6 +4113,45 @@ mod tests {
         let mut retest = retest_request();
         retest.audible_sweep_authorized = false;
         assert!(retest.validate().is_err());
+    }
+
+    #[test]
+    fn single_point_rt_host_kind_name_plan_and_authorization_are_frozen() {
+        assert_eq!(JobKind::SinglePointRtHost.as_str(), "single_point_rt_host");
+        assert_eq!(
+            JobKind::parse("single_point_rt_host"),
+            Some(JobKind::SinglePointRtHost)
+        );
+        assert_eq!(
+            JobKind::SinglePointRtHost.plan(),
+            &SINGLE_POINT_RT_HOST_PLAN
+        );
+        let names: Vec<&str> = JobKind::SinglePointRtHost
+            .plan()
+            .iter()
+            .map(|stage| stage.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            ["validate", "sweep_capture", "quality_check", "bundle"]
+        );
+        // 真实测量会出声/采音：P08 要求显式可闻授权，缺少授权必须拒绝（fail-closed）。
+        rt_host_request(true)
+            .validate()
+            .expect("explicit audible authorization accepted");
+        let error = rt_host_request(false)
+            .validate()
+            .expect_err("real measurement without audible authorization must be rejected");
+        assert!(error.contains("audible_sweep_authorized"), "{error}");
+        // expected_applied_version 只属于 retest。
+        let mut request = rt_host_request(true);
+        request.expected_applied_version = Some("v1".to_string());
+        assert!(request.validate().is_err());
+        // 该计划里的采集 stage 需要设备交接（SweepCapture），其余不要。
+        assert!(JobStage::SweepCapture.needs_calibration_device());
+        assert!(!JobStage::Validate.needs_calibration_device());
+        assert!(!JobStage::QualityCheck.needs_calibration_device());
+        assert!(!JobStage::Bundle.needs_calibration_device());
     }
 
     fn wait_state(
