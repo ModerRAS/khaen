@@ -5,8 +5,9 @@
 //!   plan 摘要（lanes / enabled_outputs / dac_channels / graph_id）。拿不到的字段 null + reasons。
 //! - PUT /api/audio-profile：两阶段 prepare（校验+diff+一次性 token，不碰引擎）/ commit（原子落盘+
 //!   revision）/ abort（丢弃草稿）。结构性错误 400 bad_request（details.validation）。
-//! - GET /api/device/inputs：声卡采集通道能力。daemon 目前没有采集通道枚举实现，
-//!   available:false + reason（不编通道列表）；采样率能只读读到就如实给。
+//! - GET /api/device/inputs：声卡采集通道能力。ALSA capture 设备枚举已实现（`alsa_capture`
+//!   加法字段），但 ALSA 不给逐通道 analog/optical 角色，所以 `available:false` + reason，
+//!   不编通道列表；采样率能只读读到就如实给。
 //!
 //! 全是控制面路径（非实时路径）：socket / 设备 IO 都在 tokio blocking 线程池里做。
 
@@ -312,7 +313,10 @@ fn aes67_capability(state: &DaemonState, reasons: &mut BTreeMap<String, String>)
     }
 }
 
-/// 声卡输入能力探测（现有 MOTU 只读控制面；daemon 没有采集通道枚举 -> available:false + reason）。
+/// 声卡输入能力探测（现有 MOTU 只读控制面 + ALSA capture 设备枚举）。
+///
+/// `available` 仍为 false：ALSA 只暴露设备级 capture PCM，逐通道 analog/optical 角色没有
+/// 可靠元数据源；因此不编通道表，只给 `alsa_capture` 真实枚举 + reason。
 pub(crate) fn device_inputs_probe(state: &DaemonState) -> Value {
     let control = Arc::clone(state.motu().control());
     let detection = control.detection();
