@@ -9,6 +9,8 @@
 //!   daemon 侧 job 审计索引；main 注入）；
 //! - [`not_wired`]：未接线/初始化失败时的诚实降级（503 `not_wired` / 空列表 + reason）；
 //! - [`store`]：上传文件存储（内容寻址 + 原子写 + 0600）、产物白名单与 Content-Type；
+//! - [`mic`]：麦克风 profile（真实校准桥接 C1）：UMIK txt 校验 + 内容寻址存储 +
+//!   `calibration/mic.json`（0600 原子写）；rt-host 未接线时状态接口如实降级、不造假；
 //! - [`wizard`]：`wizard.json` 持久化、PUT 校验、向导状态推导；
 //! - [`api`]：axum 路由与 handler（登录会话 + 写操作 CSRF 由现有 auth 中间件统一守）。
 //!
@@ -32,6 +34,7 @@
 
 pub mod api;
 pub mod backend;
+pub mod mic;
 pub mod not_wired;
 pub mod service;
 pub mod store;
@@ -41,6 +44,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use mic::MicProfileStore;
 use service::{CalibrationStatus, JobEvent, JobSink};
 use store::UploadStore;
 use wizard::WizardStore;
@@ -56,6 +60,8 @@ pub struct CalibrationHub {
     state_dir: PathBuf,
     uploads: UploadStore,
     wizard: WizardStore,
+    /// 麦克风 profile 存储（`calibration/mic.json` + `calibration/mics/<sha256>.txt`）。
+    mic: MicProfileStore,
     /// apply/rollback 两阶段草稿（REST prepare 签发，commit/abort 消费；见 [`ApplyStaging`]）。
     staging: ApplyStaging,
 }
@@ -68,6 +74,7 @@ impl std::fmt::Debug for CalibrationHub {
             .field("state_dir", &self.state_dir)
             .field("uploads", &self.uploads.root())
             .field("wizard", &self.wizard.path())
+            .field("mic", &self.mic.root())
             .field("staged_ops", &self.staging.len())
             .finish()
     }
@@ -84,6 +91,7 @@ impl CalibrationHub {
             telemetry,
             uploads: UploadStore::new(&state_dir),
             wizard: WizardStore::new(&state_dir),
+            mic: MicProfileStore::new(&state_dir),
             staging: ApplyStaging::new(),
             state_dir,
         }
@@ -109,6 +117,11 @@ impl CalibrationHub {
     /// 向导配置存储。
     pub fn wizard(&self) -> &WizardStore {
         &self.wizard
+    }
+
+    /// 麦克风 profile 存储（GET/PUT /api/calibration/mic 与 status 的来源）。
+    pub fn mic(&self) -> &MicProfileStore {
+        &self.mic
     }
 
     /// 状态目录（auth.json / uploads / wizard.json 同源）。

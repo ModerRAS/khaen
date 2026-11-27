@@ -125,6 +125,10 @@
 | GET | `/api/calibration/jobs/{id}/artifacts/{name}` | — | 二进制/JSON 产物（白名单 + manifest sha 重算，校验失败 400/404） |
 | GET/PUT | `/api/calibration/wizard` | 配置对象（PUT 为部分字段 patch） | GET `{ok, schema, config, defaults, saved, updated_at, reasons}`；PUT 同形 + 【加法】`set_fields`（daemon 实际写入字段；未知字段 400） |
 | POST | `/api/calibration/wizard/apply` | `{job_id?}`（缺省用 last_job_id） | **apply 回执**（与 `/jobs/{id}/apply` 旧单发同形：`{ok, applied:true, job_id, applied_version?, applied_block?, graph_id?, sha256?, snapshot, ack, readback, applied_at, job, reasons}`）；无可用 job 409 `no_applicable_job`，未接线 503 not_wired |
+| POST | `/api/calibration/mic/calibration` | 原始 UMIK txt（不是 multipart；≤1 MiB；可选 `X-KHAEN-FILENAME`，默认 `umik.txt`） | 200 `{ok, sha256, filename, bytes, serial, parsed:{serno,sens_factor_db?,points}}`（内容寻址存 `<state_dir>/calibration/mics/<sha256>.txt`；详见 §7.1） |
+| GET | `/api/calibration/mic` | — | 200 `{ok, schema:"khaen-mic-profile/v1", profile\|null, reasons:[string]}`（无 profile 时 200 + null + reasons；详见 §7.1） |
+| PUT | `/api/calibration/mic` | `{device?, serial?, orientation?, cal_sha256?}`（部分更新；未知字段 400） | 同 GET（保存后的 profile；详见 §7.1） |
+| GET | `/api/calibration/mic/status` | — | 恒 200 `{ok, schema, profile\|null, reasons, rt_host:{available:false, reason}}`（C1 未接 rt-host，不造假；详见 §7.1） |
 
 - **wizard/state 第 2 步（`layout_channels`）**：`/api/channels` 已实现，daemon 不再固定返回 `not_available`/`task=M4`。daemon 按 `/api/status` 的 `format.channels` 判定：可读（非 null、>0）→ `passed`（只读步骤；reason 说明实时映射看 `/api/channels`、编辑用「方案与声道」页）；不可读 → `blocked` + 真实 reason（fail-closed）。
 
@@ -137,6 +141,24 @@
 - succeeded job artifacts 至少含 `plan.bin / predicted.json / observed.json / report.json / artifacts.manifest.json`；下载响应头 `x-khaen-artifact-sha256` == 列表 sha == body sha（report schema `khaen-closed-loop-report/v1`，manifest schema `khaen-calibration-artifacts/v1`）。
 - apply/rollback 必须按 `host_link.target` 路由（process=进程内、rt-host=控制通道），不得固定打到 daemon 进程内引擎。
 - 错误体：成功 2xx + 上述字段；失败 M1 错误体（见 §1）。
+
+### 7.1 麦克风 profile 与 UMIK 校准文件（真实校准桥接 C1，2026-11-27 新增）
+
+真实校准把“UMIK 序列号 + 校准文件 + 朝向”作为测量输入；C1 只做 daemon 侧的 **MicProfile 持久化 + UMIK txt 校验/存储**，**不接 rt-host `cal_*`**（C2），status 不造假实时 UMIK 状态，也不触发任何测量/出声。
+
+| 方法 | 路径 | 请求 | 成功响应 |
+|---|---|---|---|
+| POST | `/api/calibration/mic/calibration` | 原始 UMIK txt（不是 multipart；≤1 MiB；可选请求头 `X-KHAEN-FILENAME`，默认 `umik.txt`，只接受 bare filename，路径分隔符 400）。**不解析 Content-Type** | 200 `{ok, sha256, filename, bytes, serial, parsed:{serno, sens_factor_db\|null, points}}`；内容寻址存 `<state_dir>/calibration/mics/<sha256>.txt`（0600 原子写），同内容重复上传幂等 |
+| GET | `/api/calibration/mic` | — | 200 `{ok, schema:"khaen-mic-profile/v1", profile\|null, reasons:[string]}`；无 profile 时 profile=null 且 reasons 至少一条（`no microphone profile saved yet: PUT /api/calibration/mic`） |
+| PUT | `/api/calibration/mic` | `{device?, serial?, orientation?, cal_sha256?}`（部分更新；未知字段 400 `calibration_mic_unknown_field`） | 同 GET（保存后的 profile，reasons 为空） |
+| GET | `/api/calibration/mic/status` | — | **恒 200** `{ok, schema, profile\|null, reasons, rt_host:{available:false, reason}}`；C1 未接 rt-host，固定 `available:false` + `rt-host calibration bridge is not wired yet (C2); no live UMIK status is available`，不编 declared/open |
+
+- **MicProfile schema**（`<state_dir>/calibration/mic.json`，0600 原子写）：`{schema:"khaen-mic-profile/v1", device, serial, orientation, cal_sha256, cal_filename, cal_path, parsed:{serno, sens_factor_db|null, points}, updated_at}`；`cal_path` 是内容寻址的绝对路径；`cal_filename` 来自上传请求头（只做展示，不参与路径拼接）。
+- **REST `reasons` 是字符串数组**（本切片固定为数组；无 profile/损坏时至少一条原因，不冒充已保存）。
+- **UMIK txt 解析规则（保守，拒绝而不是猜）**：UTF-8/ASCII 无 BOM、≤1 MiB；**首行必须声明 SERNO**（真实 miniDSP 首行形如 `"Sens Factor =-0.0109999dB, SERNO: 7187696"`，也接受 `SERNO: 123` / `SERNO 123`）；首行 `Sens Factor=<f64>dB` 写入 `parsed.sens_factor_db`，缺失为 `null`；数据前允许空行与注释行（`"`/`#`/`;`/`*`/`'` 开头——真实文件第 2 行就是引号注释）；数据行必须恰好两列可解析 f64，频率有限且 >0、灵敏度有限；至少 1 点、至多 100000 点；不静默截断、不跳过坏行。
+- **PUT 语义**：首次保存必须给全 `device`/`orientation`/`cal_sha256`（`serial` 可省略，按文件 SERNO 填；给了就必须与 SERNO 完全一致）；`cal_sha256` 必须指向已上传文件（按内容寻址路径读取并复核字节 sha256）；`cal_filename`/`cal_path`/`parsed`/`updated_at` 由服务端写。`device` 是 ALSA 设备名（如 `hw:CARD=U18dB,DEV=0`）。
+- **稳定错误码（M1 错误体，见 §1）**：400 `calibration_mic_invalid`（文件/字段非法，details.field 指向坏行或字段）、400 `calibration_mic_unknown_field`（PUT 未知字段）、400 `calibration_mic_not_found`（PUT 引用的 cal_sha256 没有已上传文件）、400 `calibration_mic_serial_mismatch`（PUT serial 与文件 SERNO 不一致，details 给 serial/serno/cal_sha256）、400 `calibration_mic_orientation_invalid`（不是 `0deg`/`90deg`，details.allowed）、413 `calibration_mic_too_large`（>1 MiB：details.limit_bytes；>100000 点：details.limit_points）。
+- **存储与安全**：磁盘文件名只由字节 sha256 决定，客户端文件名不参与路径拼接；`mic.json` 与校准文件/回执均 0600 原子写（同目录 `.tmp-*` → rename）；文件不存在/hash 不符 400，不拿默认值冒充。
 
 ## 8. 系统
 | 方法 | 路径 | 请求 | 响应 |

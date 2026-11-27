@@ -15,6 +15,10 @@
 //! | GET/PUT | /api/calibration/wizard | 200 | 向导配置（wizard.json） |
 //! | GET | /api/calibration/wizard/state | 200 | 8 步向导状态（真实来源推导） |
 //! | POST | /api/calibration/wizard/apply | 200 | 内部转 job apply |
+//! | POST | /api/calibration/mic/calibration | 200 | 原始 UMIK txt（≤1 MiB）→ 校验 + 内容寻址存储 |
+//! | GET | /api/calibration/mic | 200 | 当前 MicProfile（无 → profile:null + reasons） |
+//! | PUT | /api/calibration/mic | 200 | 部分更新 device/serial/orientation/cal_sha256 |
+//! | GET | /api/calibration/mic/status | 200 | profile + rt_host（C1 未接线 → available:false + reason） |
 //!
 //! 所有 /api 路径都过现有 auth 中间件（登录会话；写方法额外 CSRF），错误体固定
 //! `{"error":{"code","message","details"}}`（PLAN §4.1）。缺失字段一律 null + `reasons`，
@@ -35,6 +39,7 @@ use serde_json::{json, Map, Value};
 use khaen_core::sha256::sha256_hex;
 
 use super::{StagedControlKind, StagedControlOp};
+use crate::calibration::mic;
 use crate::calibration::service::{
     AppliedVersion, CalibrationError, JobApply, JobInputs, JobQuery, JobRecord, JobResult,
     JobState, JobStep, NewJob, OFFLINE_JOB_STEPS,
@@ -77,6 +82,16 @@ pub fn routes() -> Router<std::sync::Arc<DaemonState>> {
         .route("/api/calibration/wizard", get(get_wizard).put(put_wizard))
         .route("/api/calibration/wizard/state", get(get_wizard_state))
         .route("/api/calibration/wizard/apply", post(wizard_apply))
+        // 真实校准桥接 C1：MicProfile + UMIK 校准文件（rt-host 未接线，status 如实降级）。
+        .route(
+            "/api/calibration/mic",
+            get(get_mic_profile).put(put_mic_profile),
+        )
+        .route(
+            "/api/calibration/mic/calibration",
+            post(upload_mic_calibration),
+        )
+        .route("/api/calibration/mic/status", get(get_mic_status))
 }
 
 // ---------------------------------------------------------------------------
@@ -1911,6 +1926,108 @@ fn measurement_draft(
         }
     }
     draft
+}
+
+// ---------------------------------------------------------------------------
+// 麦克风 profile（C1：UMIK 校准文件 + MicProfile；rt-host 未接线时 status 如实降级）
+// ---------------------------------------------------------------------------
+
+fn mic_profile_json(load: &mic::MicProfileLoad) -> Value {
+    json!({
+        "schema": mic::MIC_PROFILE_SCHEMA,
+        "profile": load.profile.as_ref().map(|profile| profile.to_json()),
+        "reasons": load.reasons,
+    })
+}
+
+/// GET /api/calibration/mic：当前 MicProfile + reasons（无 profile 时 200 + null + 原因）。
+pub(crate) async fn get_mic_profile(State(state): State<std::sync::Arc<DaemonState>>) -> Response {
+    let load = state.calibration().mic().load();
+    ok_json(mic_profile_json(&load))
+}
+
+/// PUT /api/calibration/mic：部分更新（未知字段 400 calibration_mic_unknown_field）。
+pub(crate) async fn put_mic_profile(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    body: Body,
+) -> Response {
+    let value = match read_json_body(body).await {
+        Ok(value) => value,
+        Err(error) => return error.into_response(),
+    };
+    let store = state.calibration().mic();
+    let current = store.load();
+    let profile = match mic::apply_profile_patch(current.profile.as_ref(), store, &value) {
+        Ok(profile) => profile,
+        Err(error) => return error.into_response(),
+    };
+    let load = mic::MicProfileLoad {
+        profile: Some(profile),
+        reasons: Vec::new(),
+        corruption: None,
+    };
+    ok_json(mic_profile_json(&load))
+}
+
+/// GET /api/calibration/mic/status：profile + rt-host 实时 UMIK 状态（恒 200，只读）。
+///
+/// C1 不接 rt-host `cal_*`：`available:false` + 固定 reason，绝不编造 declared/open。
+pub(crate) async fn get_mic_status(State(state): State<std::sync::Arc<DaemonState>>) -> Response {
+    let load = state.calibration().mic().load();
+    let mut body = mic_profile_json(&load);
+    body["rt_host"] = json!({
+        "available": false,
+        "reason": mic::RT_HOST_NOT_WIRED_REASON,
+    });
+    ok_json(body)
+}
+
+/// POST /api/calibration/mic/calibration：原始 UMIK txt body（≤1 MiB），校验后内容寻址存盘。
+pub(crate) async fn upload_mic_calibration(
+    State(state): State<std::sync::Arc<DaemonState>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    // 1) 文件名（X-KHAEN-FILENAME 可选；只接受 bare filename，缺省 umik.txt）。
+    let filename = match mic::calibration_filename_from_headers(&headers) {
+        Ok(filename) => filename,
+        Err(error) => return error.into_response(),
+    };
+    // 2) Content-Length 预检（超限直接 413，不读 body）。
+    if let Some(length) = content_length(&headers) {
+        if length > mic::MAX_CAL_BYTES {
+            return mic::too_large_bytes().into_response();
+        }
+    }
+    // 3) 读取 body（有上限；chunked 超限在读取阶段报错）。
+    let bytes = match axum::body::to_bytes(body, mic::MAX_CAL_BYTES as usize).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            if is_length_limit_error(&error) {
+                return mic::too_large_bytes().into_response();
+            }
+            return mic::invalid(format!("cannot read microphone calibration body: {error}"))
+                .into_response();
+        }
+    };
+    // 4) 解析 + 内容寻址写盘（阻塞 IO 放 spawn_blocking，不堵 async worker）。
+    let store = state.calibration().mic().clone();
+    let stored =
+        tokio::task::spawn_blocking(move || store.store_calibration(&filename, &bytes)).await;
+    match stored {
+        Ok(Ok(record)) => ok_json(json!({
+            "sha256": record.sha256,
+            "filename": record.filename,
+            "bytes": record.bytes,
+            "serial": record.parsed.serno,
+            "parsed": record.parsed.to_json(),
+        })),
+        Ok(Err(error)) => error.into_response(),
+        Err(join) => {
+            CalibrationError::internal(format!("microphone calibration worker failed: {join}"))
+                .into_response()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
