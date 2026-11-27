@@ -337,7 +337,14 @@ impl UdpPacketSource {
         input: &Aes67InputConfig,
         receiver: &ReceiverConfig,
     ) -> Result<Self, ReceiverError> {
-        let local = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, input.port);
+        // IO I2b：组播 → bind 任意地址再 join 组；单播 → 直接 bind 本端目的地址，
+        // 不 join（单播 SDP 的 c= 就是接收端本机地址）。两条路径都设置读超时/rcvbuf。
+        let multicast = input.multicast_addr.is_multicast();
+        let local = if multicast {
+            SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, input.port)
+        } else {
+            SocketAddrV4::new(input.multicast_addr, input.port)
+        };
         let socket = UdpSocket::bind(local).map_err(|err| {
             ReceiverError::new(
                 codes::RECEIVER_BIND,
@@ -351,18 +358,20 @@ impl UdpPacketSource {
                 format!("set udp read timeout {timeout:?} failed: {err}"),
             )
         })?;
-        let interface = receiver.interface.unwrap_or(Ipv4Addr::UNSPECIFIED);
-        socket
-            .join_multicast_v4(&input.multicast_addr, &interface)
-            .map_err(|err| {
-                ReceiverError::new(
-                    codes::RECEIVER_JOIN,
-                    format!(
-                        "join multicast group {} on interface {interface} failed: {err}",
-                        input.multicast_addr
-                    ),
-                )
-            })?;
+        if multicast {
+            let interface = receiver.interface.unwrap_or(Ipv4Addr::UNSPECIFIED);
+            socket
+                .join_multicast_v4(&input.multicast_addr, &interface)
+                .map_err(|err| {
+                    ReceiverError::new(
+                        codes::RECEIVER_JOIN,
+                        format!(
+                            "join multicast group {} on interface {interface} failed: {err}",
+                            input.multicast_addr
+                        ),
+                    )
+                })?;
+        }
         let rcvbuf_applied = receiver
             .rcvbuf_bytes
             .is_some_and(|bytes| apply_rcvbuf(&socket, bytes));

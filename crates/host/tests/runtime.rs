@@ -1022,17 +1022,15 @@ fn udp_source_reports_stable_socket_error_codes() {
     );
     drop(blocker);
 
-    // join 失败：用单播地址冒充组播组，setsockopt 在 OS 层必然拒绝（确定性错误）。
-    let mut invalid = runtime_config(1, 4).input;
-    invalid.port = 0;
-    invalid.multicast_addr = Ipv4Addr::new(192, 168, 1, 1);
-    let error = UdpPacketSource::bind(&invalid, &ReceiverConfig::default())
-        .expect_err("joining a unicast group must fail");
-    assert_eq!(error.code, codes::RECEIVER_JOIN);
-    assert!(
-        error.message.contains("join multicast"),
-        "unexpected message: {}",
-        error.message
+    // IO I2b：单播目的地址不 join 组播，直接 bind 该本端地址（端口 0 = 临时端口）。
+    let mut unicast = runtime_config(1, 4).input;
+    unicast.port = 0;
+    unicast.multicast_addr = Ipv4Addr::new(127, 0, 0, 1);
+    let source = UdpPacketSource::bind(&unicast, &ReceiverConfig::default())
+        .expect("unicast bind must succeed");
+    assert_eq!(
+        source.socket_addr().expect("local addr").ip().to_string(),
+        "127.0.0.1"
     );
 }
 

@@ -485,6 +485,9 @@ mod app {
                     .map_err(|message| {
                         ConfigError::new(format!("KHAEN_AES67_SDP {path}: {message}"))
                     })?;
+                for warning in &sdp.warnings {
+                    eprintln!("khaen-rt-host: SDP warning: {warning}");
+                }
                 if let Some(raw) = env_optional("KHAEN_AES67_GROUP") {
                     let value: Ipv4Addr = raw.parse().map_err(|_| {
                         ConfigError::new("KHAEN_AES67_GROUP must be an IPv4 address")

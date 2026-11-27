@@ -584,10 +584,11 @@ impl JobManagerCalibration {
             (changed, transition)
         };
         // 竞态：JobManager 先把状态置 Complete、再落 artifacts.manifest.json；首个读到的
-        // 终态快照可能还没有 manifest。这里短暂等待（最多 ~2s；负载高时 100ms 不够）
-        // 并补登一次，保证 REST 第一次看到终态时审计产物完整（不伪造：等不到就是没有）。
+        // 终态快照可能还没有 manifest。这里等待（最多 ~10s；并行跑整个 workspace 时
+        // worker 可能被 CPU 调度推迟，2s 仍不够）并补登一次，保证 REST 第一次看到终态时
+        // 审计产物完整（不伪造：等不到就是没有）。
         if snapshot.state.is_terminal() && !self.manifest_present(id) {
-            for _ in 0..1000 {
+            for _ in 0..5000 {
                 std::thread::sleep(Duration::from_millis(2));
                 if self.manifest_present(id) {
                     break;

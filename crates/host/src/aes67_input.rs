@@ -64,8 +64,9 @@
 //!
 //! # 未实现与 API 边界（TODO）
 //!
-//! - 组播 join、UDP socket、收包线程、SO_RCVBUF/IGMP：本任务不实现；
-//!   [Aes67InputConfig] 的 multicast_addr/port 只保存给接线层使用。
+//! - UDP socket/收包线程/SO_RCVBUF/IGMP：本任务不实现；[Aes67InputConfig] 的
+//!   multicast_addr/port 只保存给接线层使用（组播 join 或单播 bind 由 runtime 的
+//!   `UdpPacketSource` 决定）。
 //! - 收包线程 → RT 线程的无锁 SPSC 环：当前 [Aes67Input] 是单所有者对象，真实集成需
 //!   拆成 writer/reader 两半（参考 khaen-aoip-aes67::jitter 的原子游标 + 有效位图），
 //!   或在接线层用无锁环搬运解码后的帧。
@@ -112,9 +113,10 @@ const MISSING_TRACK_PACKETS: usize = 64;
 /// 校验见 [Aes67InputConfig::validate]；[Aes67Input::new] 会先校验再分配。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Aes67InputConfig {
-    /// 组播地址（如 239.69.0.1）。本任务只保存，socket 接线（join）时使用。
+    /// 目的地址：组播组（如 239.69.0.1）或单播本端地址（如 192.0.2.222）。
+    /// 本字段只保存，socket 接线时决定 join 组播还是 bind 单播本端地址。
     pub multicast_addr: Ipv4Addr,
-    /// 组播端口（RTP 目的端口，通常 5004）。
+    /// 目的端口（RTP 端口，通常 5004）。
     pub port: u16,
     /// 期望的 RTP 动态 payload type（AES67 使用 96..=127）；不匹配的包计为 foreign 并忽略。
     pub payload_type: u8,
@@ -154,9 +156,9 @@ impl Default for Aes67InputConfig {
 impl Aes67InputConfig {
     /// 校验配置；不合法时返回点名原因（fail-closed）。
     pub fn validate(&self) -> Result<(), InputError> {
-        if !self.multicast_addr.is_multicast() {
+        if self.multicast_addr.is_unspecified() {
             return Err(InputError::BadConfig(
-                "multicast_addr must be an IPv4 multicast address",
+                "multicast_addr must be a concrete IPv4 destination (multicast group or unicast local address, not 0.0.0.0)",
             ));
         }
         if self.port == 0 {

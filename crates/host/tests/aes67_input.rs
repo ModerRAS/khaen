@@ -463,7 +463,11 @@ fn config_validation_works_fail_closed() {
         assert!(Aes67Input::new(input_config).is_err());
     }
     assert!(config(2, 2, 128).validate().is_ok());
-    assert_invalid(|input_config| input_config.multicast_addr = Ipv4Addr::new(192, 168, 1, 10));
+    // IO I2b：单播目的地址是合法配置（接收器会 bind 本端地址，不 join 组播）。
+    let mut unicast = config(2, 2, 128);
+    unicast.multicast_addr = Ipv4Addr::new(192, 168, 1, 10);
+    assert!(unicast.validate().is_ok());
+    assert_invalid(|input_config| input_config.multicast_addr = Ipv4Addr::UNSPECIFIED);
     assert_invalid(|input_config| input_config.port = 0);
     assert_invalid(|input_config| input_config.payload_type = 95);
     assert_invalid(|input_config| input_config.payload_type = 128);

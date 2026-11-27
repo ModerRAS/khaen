@@ -5,15 +5,16 @@
 //! 接收器；真正的 SDP 驱动运行时发现/多流属于 I2/I3 后续。
 //!
 //! 边界：
-//! - 只接受 host 接收器当前支持的 **IPv4 组播**；单播 SDP 如实拒绝（I2 的宽松接收
-//!   尚未改 socket 绑定策略，不假装已经支持）。
-//! - 采样率必须与引擎一致；L24/48k/≤8 通道等 AES67 profile 规则由
-//!   `Session::validate_media_profile` 统一校验，不在这里重复。
-//! - 隐式通道映射：RTP 通道 i → 输出槽位 i。需要重排时仍走 `KHAEN_AES67_MAP`（I2 后续）。
+//! - 同时接受 **IPv4 组播与单播**：组播走 join 组，单播直接 bind 本端目的地址
+//!   （I2b 起 host 接收器支持两种绑定）。
+//! - 采样率必须与引擎一致；编码必须是 L24、PT 96..=127、通道 1..=8、端口非 0。
+//!   ptime 2ms/4ms、缺 ts-refclk、framecount 差异只给 conformance warning，不拒收。
+//! - 隐式通道映射：RTP 通道 i → 输出槽位 i；SDP 模式下不支持重排（`KHAEN_AES67_MAP`
+//!   必须与隐式映射一致，否则启动 fail-closed）。重排属于 I2 后续。
 
 use std::net::Ipv4Addr;
 
-use khaen_aoip_aes67::sdp::parse_sdp;
+use khaen_aoip_aes67::sdp::{parse_sdp, Encoding};
 
 /// 从 SDP 得到的输入参数（全部为 host `Aes67InputConfig` 的既有字段）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +29,8 @@ pub struct SdpInput {
     pub channels: usize,
     /// RTP 通道 → 输出槽位（隐式顺序映射）。
     pub channels_map: Vec<u16>,
+    /// 非致命 conformance 提示（不拒收；启动时打印）。
+    pub warnings: Vec<String>,
 }
 
 /// 解析 SDP 文本并校验它是否能交给当前 host 接收器。
@@ -39,19 +42,23 @@ pub fn parse_sdp_input(
     input_channels: usize,
 ) -> Result<SdpInput, String> {
     let session = parse_sdp(text).map_err(|error| format!("SDP parse failed: {error:?}"))?;
-    session
-        .validate_media_profile()
-        .map_err(|error| format!("SDP is not an AES67 media profile: {error:?}"))?;
     let connection = session
         .connection()
         .ok_or_else(|| "SDP has no connection (c=) line".to_string())?;
-    let multicast_addr = connection.ipv4();
-    if !multicast_addr.is_multicast() {
-        return Err(format!(
-            "SDP connection {multicast_addr} is unicast; the current host receiver only joins IPv4 multicast (unicast SDP reception is not implemented yet)"
-        ));
+    let destination = connection.ipv4();
+    if destination.is_unspecified() {
+        return Err("SDP connection address is 0.0.0.0 (unspecified)".to_string());
     }
     let media = &session.media;
+    // IO I2b 宽松接收：只拒绝当前接收器真的做不了的参数（编码/采样率/通道数/PT/端口），
+    // ptime 2ms/4ms、缺 ts-refclk、framecount 差异等只给 conformance warning，不拒收。
+    let mut warnings = Vec::new();
+    if media.rtpmap.encoding != Encoding::L24 {
+        return Err(format!(
+            "SDP encoding {} is not supported (the host receiver decodes L24 only)",
+            media.rtpmap.encoding.as_str()
+        ));
+    }
     if media.rtpmap.rate_hz != sample_rate {
         return Err(format!(
             "SDP media rate {} Hz does not match the engine sample rate {sample_rate} Hz",
@@ -64,16 +71,44 @@ pub fn parse_sdp_input(
             "SDP declares {channels} RTP channel(s), but the runtime input width is {input_channels}; increase KHAEN_INPUT_CHANNELS or split the stream"
         ));
     }
+    if !(96..=127).contains(&media.payload_type) {
+        return Err(format!(
+            "SDP payload type {} is outside the dynamic RTP range 96..=127",
+            media.payload_type
+        ));
+    }
     if media.port == 0 {
         return Err("SDP media port is 0".to_string());
     }
+    if media.ptime_us.is_some_and(|ptime| ptime > 1_000) {
+        warnings.push(format!(
+            "SDP ptime {} us is larger than the AES67 1 ms profile (accepted; jitter is configured separately)",
+            media.ptime_us.unwrap_or_default()
+        ));
+    }
+    if media.refclk.is_none() {
+        warnings.push(
+            "SDP has no a=ts-refclk (conformance warning; the receiver does not derive its clock from it yet)"
+                .to_string(),
+        );
+    }
+    if media
+        .framecount
+        .is_some_and(|frames| frames == 0 || frames > 192)
+    {
+        warnings.push(format!(
+            "SDP framecount {:?} is outside 1..=192 (accepted; ptime/framecount are informational here)",
+            media.framecount
+        ));
+    }
     let channels_map = (0..media.rtpmap.channels).collect();
     Ok(SdpInput {
-        multicast_addr,
+        multicast_addr: destination,
         port: media.port,
         payload_type: media.payload_type,
         channels,
         channels_map,
+        warnings,
     })
 }
 
@@ -103,6 +138,16 @@ a=ptime:1\r\n\
 a=sendonly\r\n\
 a=ts-refclk:ptp=IEEE1588-2008:0\r\n";
 
+    const LOOSE_PTIME_SDP: &str = "v=0\r\n\
+o=- 0 0 IN IP4 0.0.0.0\r\n\
+s=loose\r\n\
+c=IN IP4 239.69.16.147/32\r\n\
+t=0 0\r\n\
+m=audio 5004 RTP/AVP 97\r\n\
+a=rtpmap:97 L24/48000/2\r\n\
+a=ptime:4\r\n\
+a=sendonly\r\n";
+
     #[test]
     fn parses_multicast_sdp_into_host_input_fields() {
         let input = parse_sdp_input(H16_SDP, 48_000, 22).expect("valid SDP");
@@ -111,12 +156,34 @@ a=ts-refclk:ptp=IEEE1588-2008:0\r\n";
         assert_eq!(input.payload_type, 103);
         assert_eq!(input.channels, 8);
         assert_eq!(input.channels_map, (0..8).collect::<Vec<u16>>());
+        assert!(input.warnings.is_empty(), "{:?}", input.warnings);
     }
 
     #[test]
-    fn rejects_unicast_and_channel_width_mismatch() {
-        let unicast = parse_sdp_input(UNICAST_SDP, 48_000, 22).expect_err("unicast");
-        assert!(unicast.contains("unicast"), "{unicast}");
+    fn accepts_unicast_and_loose_ptime_with_warnings() {
+        let unicast = parse_sdp_input(UNICAST_SDP, 48_000, 22).expect("unicast SDP");
+        assert_eq!(unicast.multicast_addr.to_string(), "192.0.2.222");
+        assert_eq!(unicast.channels, 2);
+
+        let loose = parse_sdp_input(LOOSE_PTIME_SDP, 48_000, 22).expect("loose SDP");
+        assert_eq!(loose.payload_type, 97);
+        assert!(
+            loose
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ptime")),
+            "{:?}",
+            loose.warnings
+        );
+        assert!(
+            loose
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ts-refclk")),
+            "{:?}",
+            loose.warnings
+        );
+
         let too_wide = parse_sdp_input(H16_SDP, 48_000, 2).expect_err("channels");
         assert!(too_wide.contains("input width is 2"), "{too_wide}");
     }
