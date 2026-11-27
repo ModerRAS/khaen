@@ -492,10 +492,13 @@ async fn plan_endpoint_reports_downmix_preview_for_missing_roles() {
 #[tokio::test]
 async fn plan_endpoint_degrades_inspect_to_null_when_the_link_is_down() {
     let transport = FakeTransport::new();
-    transport.push_transport_error(TransportError::Connect("down".to_string()));
-    transport.push_transport_error(TransportError::Connect("down".to_string()));
+    // POST plan 现在会先只读 status.format.channels（决定默认 profile 的 device.channels），
+    // 再做 inspect；每次 call 连接失败会重试一次，所以两段各消耗 2 个连接错误。
+    for _ in 0..4 {
+        transport.push_transport_error(TransportError::Connect("down".to_string()));
+    }
     let server = support::spawn_with_link(support::injected_link(transport), None).await;
-    // 第一次 status 探测（GET 不在本测试里）——直接 POST plan：inspect 失败 -> null + reason。
+    // 直接 POST plan：默认 profile 的 status 探测失败（退回 22），inspect 也失败 -> null + reason。
     let response = support::request_json(&server, "POST", PLAN, "{}").await;
     assert_eq!(response.status, 200, "{}", response.body_text());
     let body = response.json();

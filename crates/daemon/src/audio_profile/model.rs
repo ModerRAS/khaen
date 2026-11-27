@@ -399,10 +399,21 @@ pub struct AudioProfile {
 impl Default for AudioProfile {
     /// 首次运行默认 = 2.0：DAC0=L、DAC1=R，其余禁用；只启用 AES67 ch0=L/ch1=R。
     fn default() -> Self {
-        let mut outputs: Vec<OutputRow> = (0..DEVICE_CHANNELS)
+        Self::for_device_channels(DEVICE_CHANNELS)
+    }
+}
+
+impl AudioProfile {
+    /// 首次运行默认（指定设备通道数 1..=22）。
+    ///
+    /// 默认布局仍是 2.0（DAC0=L、DAC1=R），但 outputs 行数与输入默认通道跟随
+    /// 真实设备通道数；device_channels 越界时 clamp 到 ABI 允许范围。
+    pub fn for_device_channels(device_channels: u16) -> Self {
+        let device_channels = device_channels.clamp(1, MAX_DEVICE_CHANNELS);
+        let mut outputs: Vec<OutputRow> = (0..device_channels)
             .map(|dac| OutputRow {
                 dac,
-                enabled: dac < 2,
+                enabled: dac < 2 && dac < device_channels,
                 role: match dac {
                     0 => SpeakerRole::L,
                     1 => SpeakerRole::R,
@@ -414,9 +425,9 @@ impl Default for AudioProfile {
             .collect();
         outputs.sort_by_key(|row| row.dac);
         Self {
-            device_channels: DEVICE_CHANNELS,
+            device_channels,
             outputs,
-            sources: default_sources(DEVICE_CHANNELS),
+            sources: default_sources(device_channels),
             downmix: Downmix::default(),
             fanout: FanoutMode::Unity,
         }

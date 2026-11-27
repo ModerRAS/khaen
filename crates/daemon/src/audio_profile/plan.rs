@@ -34,7 +34,10 @@ use crate::api_error::ApiError;
 use crate::host_link::{Target, WireReply};
 use crate::DaemonState;
 
-use super::model::{db_to_gain, lfe_downmix_targets, AudioProfile, Lane, SpeakerRole};
+use super::api::live_output_channels;
+use super::model::{
+    db_to_gain, lfe_downmix_targets, AudioProfile, Lane, SpeakerRole, DEVICE_CHANNELS,
+};
 use super::store::CurrentProfile;
 
 /// 方案生成失败（handler 翻成 M1 错误；都是内部/配置问题，不是请求字段错误）。
@@ -338,9 +341,13 @@ pub(crate) async fn generate_plan_endpoint(State(state): State<Arc<DaemonState>>
 }
 
 fn compose_generated_plan(state: &DaemonState) -> Result<Value, ApiError> {
+    let mut reasons: BTreeMap<String, String> = BTreeMap::new();
+    let live_channels = live_output_channels(state, &mut reasons);
     let current = state.audio_profile().current();
     let profile = match &current {
-        CurrentProfile::Default { .. } => AudioProfile::default(),
+        CurrentProfile::Default { .. } => {
+            AudioProfile::for_device_channels(live_channels.unwrap_or(DEVICE_CHANNELS))
+        }
         CurrentProfile::Saved(saved) => saved.profile.clone(),
         CurrentProfile::Unreadable { reason } => {
             return Err(ApiError::internal(format!(
@@ -359,7 +366,6 @@ fn compose_generated_plan(state: &DaemonState) -> Result<Value, ApiError> {
     let config = state.engine_config();
     let generated = generate_and_store(&profile, &config, state.plans().dir())
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let mut reasons: BTreeMap<String, String> = BTreeMap::new();
     let inspect = inspect_plan(state, &generated.plan_path, &generated.sha256, &mut reasons);
     let mut body = json!({
         "ok": true,

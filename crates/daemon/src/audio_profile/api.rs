@@ -26,7 +26,7 @@ use crate::api_error::{read_json_body, ApiError};
 use crate::host_link::{LinkSnapshot, Target, WireReply};
 use crate::{status, DaemonState};
 
-use super::model::{AudioProfile, SCHEMA};
+use super::model::{AudioProfile, DEVICE_CHANNELS, MAX_DEVICE_CHANNELS, SCHEMA};
 use super::store::CurrentProfile;
 
 /// 组装 audio-profile / device-inputs 路由（挂在全局 auth 中间件之下）。
@@ -56,16 +56,79 @@ pub(crate) async fn get_profile(State(state): State<Arc<DaemonState>>) -> Respon
     (StatusCode::OK, Json(body)).into_response()
 }
 
+/// rt-host 当前真实输出通道数（status.format.channels；1..=22）。
+///
+/// 首次运行默认 profile 不能写死 22：MOTU 是 22，但通用 ALSA 设备可能是 2/6/8 等。
+/// 只读 control status；process 目标/链路不可用/字段缺失时给 None + reasons，调用方退回默认 22。
+pub(crate) fn live_output_channels(
+    state: &DaemonState,
+    reasons: &mut BTreeMap<String, String>,
+) -> Option<u16> {
+    if state.host_link().target() == Target::Process {
+        reasons.insert(
+            "profile.device.channels".to_string(),
+            "KHAEN_RT_TARGET=process: the process-internal engine does not report the real output device channel count; the default profile uses the MOTU default 22".to_string(),
+        );
+        return None;
+    }
+    match state.host_link().status_snapshot() {
+        LinkSnapshot::Socket { status, .. } => {
+            let raw = status
+                .get("format")
+                .and_then(|format| format.get("channels"))
+                .and_then(Value::as_u64);
+            match raw {
+                Some(channels) if (1..=u64::from(MAX_DEVICE_CHANNELS)).contains(&channels) => {
+                    Some(channels as u16)
+                }
+                Some(channels) => {
+                    reasons.insert(
+                        "profile.device.channels".to_string(),
+                        format!(
+                            "rt-host reports {channels} output channels, outside the plan ABI range 1..={MAX_DEVICE_CHANNELS}; the default profile uses {DEVICE_CHANNELS}"
+                        ),
+                    );
+                    None
+                }
+                None => {
+                    reasons.insert(
+                        "profile.device.channels".to_string(),
+                        "the rt-host control status does not report format.channels; the default profile uses the MOTU default 22 instead of a fabricated count".to_string(),
+                    );
+                    None
+                }
+            }
+        }
+        LinkSnapshot::Unavailable { reason, .. } => {
+            reasons.insert(
+                "profile.device.channels".to_string(),
+                format!("cannot read the rt-host output channel count: {reason}; the default profile uses the MOTU default 22"),
+            );
+            None
+        }
+        LinkSnapshot::Process => None,
+    }
+}
+
 /// 合成 GET 快照（同步；调用方在 blocking 线程池里）。
 pub(crate) fn compose_profile_snapshot(state: &DaemonState) -> Value {
     let mut reasons: BTreeMap<String, String> = BTreeMap::new();
+    let live_channels = live_output_channels(state, &mut reasons);
     let current = state.audio_profile().current();
     if let Some(reason) = current.unreadable_reason() {
         reasons.insert("profile".to_string(), reason.to_string());
     }
     let (profile, saved, revision) = match &current {
         CurrentProfile::Default { revision } => {
-            (Some(AudioProfile::default()), false, Some(*revision))
+            // 首次运行默认布局仍 2.0，但 device.channels 跟随 rt-host 当前真实输出通道数；
+            // 读不到时退回 MOTU 默认 22，并在 reasons 里说明来源。
+            (
+                Some(AudioProfile::for_device_channels(
+                    live_channels.unwrap_or(DEVICE_CHANNELS),
+                )),
+                false,
+                Some(*revision),
+            )
         }
         CurrentProfile::Saved(saved) => (Some(saved.profile.clone()), true, Some(saved.revision)),
         CurrentProfile::Unreadable { .. } => (None, false, None),
