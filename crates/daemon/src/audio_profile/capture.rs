@@ -69,6 +69,7 @@ impl PcmDirection {
         }
     }
 
+    #[cfg(not(target_os = "linux"))]
     fn as_str(self) -> &'static str {
         match self {
             Self::Capture => "capture",
