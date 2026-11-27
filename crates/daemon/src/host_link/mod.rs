@@ -19,11 +19,14 @@
 //! # 重试语义（一次，且不掩盖歧义）
 //!
 //! 连接失败时请求肯定没送达，所有 op 都重试一次。读到超时/协议错误时请求可能已经被执行：
-//! - 只读 op（status/coeff/inspect/channels_status）与幂等/可替换 op
+//! - 只读 op（status/coeff/inspect/channels_status/cal_status）与幂等/可替换 op
 //!   （mute/prepare/surface/format/rollback/abort/channels_prepare）重试一次；
 //! - `commit`、`channels_commit`、`channels_abort` **不重试**：第一次请求若已生效，
 //!   重试只会得到 `engine_token_invalid` / `no_channels_draft` / `channels_busy`，
-//!   把“已生效”报成失败（比超时更糟）。这里如实返回 503 + 原因，不制造假的成功/失败。
+//!   把“已生效”报成失败（比超时更糟）。这里如实返回 503 + 原因，不制造假的成功/失败；
+//! - 校准 op（C3a）中 `cal_enter` / `cal_leave` / `cal_measure` / `cal_remeasure` /
+//!   `cal_solve` 改模式/起测量/写产物，超时后重放会产生重复副作用（`cal_busy` 或二次
+//!   测量/求解），**不重试**；`cal_status` 只读，按只读 op 重试一次。
 //!
 //! # 分层
 //!
@@ -82,6 +85,22 @@ pub const CHANNELS_OPS: &[&str] = &[
 /// `TEST_TONE_OPS` 同源。它们是 rt-host 控制层对契约 B 的增量能力（同一行 JSON 通道），
 /// 因此和 CHANNELS_OPS 一样单独成表，不并入与 `WIRED_OPS` 一一对应的 `FORWARDED_OPS`。
 pub const SPEAKER_TEST_OPS: &[&str] = &["test_tone", "test_tone_stop"];
+
+/// rt-host 进程内校准 op（T70f-c / C2）：与 `crates/rt-host/src/control/cal/mod.rs` 的
+/// `CAL_OPS` 同源。它们是 rt-host 控制层对契约 B 的增量能力（同一行 JSON 通道、同一份
+/// 传输与编解码），因此和 CHANNELS_OPS / SPEAKER_TEST_OPS 一样单独成表，**不并入**
+/// [`FORWARDED_OPS`]（那个断言必须与 `khaen_host::control::WIRED_OPS` 一一对应）。
+///
+/// C3a 只用到其中的只读 `cal_status`（daemon 的实时 UMIK 状态）；其余 op 由后续切片
+/// 按需转发。重试语义见 [`retry_after_ambiguous_failure`]。
+pub const CAL_OPS: &[&str] = &[
+    "cal_status",
+    "cal_enter",
+    "cal_leave",
+    "cal_measure",
+    "cal_remeasure",
+    "cal_solve",
+];
 
 /// 控制目标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -437,9 +456,20 @@ impl HostLink {
 /// - `channels_abort`：首笔若已丢弃草稿，重试会得到 `no_channels_draft`（把“已 abort”报成错误）。
 fn retry_after_ambiguous_failure(op: &str) -> bool {
     // 测试音起停不是可安全重放的 op：超时后重试可能再起一段或把"已停止"报成 stopped:false。
+    // 校准 op（CAL_OPS）里除只读 cal_status 外都改模式/起测量/写产物：超时后重放会得到
+    // cal_busy 或重复副作用，不能重试。
     !matches!(
         op,
-        "commit" | "channels_commit" | "channels_abort" | "test_tone" | "test_tone_stop"
+        "commit"
+            | "channels_commit"
+            | "channels_abort"
+            | "test_tone"
+            | "test_tone_stop"
+            | "cal_enter"
+            | "cal_leave"
+            | "cal_measure"
+            | "cal_remeasure"
+            | "cal_solve"
     )
 }
 
@@ -785,12 +815,81 @@ mod tests {
             .chain(std::iter::once(&STATUS_OP))
             .chain(CHANNELS_OPS.iter())
             .chain(SPEAKER_TEST_OPS.iter())
+            .chain(CAL_OPS.iter())
         {
             let expected = !matches!(
                 *op,
-                "commit" | "channels_commit" | "channels_abort" | "test_tone" | "test_tone_stop"
+                "commit"
+                    | "channels_commit"
+                    | "channels_abort"
+                    | "test_tone"
+                    | "test_tone_stop"
+                    | "cal_enter"
+                    | "cal_leave"
+                    | "cal_measure"
+                    | "cal_remeasure"
+                    | "cal_solve"
             );
             assert_eq!(retry_after_ambiguous_failure(op), expected, "{op}");
+        }
+    }
+
+    #[test]
+    fn cal_ops_are_a_separate_rt_host_extension_set() {
+        // 校准 op 是 rt-host 控制层（T70f-c/C2）对契约 B 的增量能力：必须与
+        // crates/rt-host/src/control/cal/mod.rs 的 CAL_OPS 同源，不能混进
+        // FORWARDED_OPS（那个断言必须与 khaen_host::control::WIRED_OPS 一一对应）。
+        assert_eq!(
+            CAL_OPS,
+            &[
+                "cal_status",
+                "cal_enter",
+                "cal_leave",
+                "cal_measure",
+                "cal_remeasure",
+                "cal_solve"
+            ]
+        );
+        for op in CAL_OPS {
+            assert!(op.starts_with("cal_"), "{op}");
+            assert!(
+                !FORWARDED_OPS.contains(op),
+                "{op} must not be in FORWARDED_OPS"
+            );
+            assert!(!CHANNELS_OPS.contains(op), "{op}");
+            assert!(!SPEAKER_TEST_OPS.contains(op), "{op}");
+        }
+        // 只读的 cal_status 是 C3a 唯一用到的 op，必须可重试。
+        assert!(retry_after_ambiguous_failure("cal_status"));
+    }
+
+    #[test]
+    fn cal_status_is_retried_but_non_idempotent_cal_ops_are_not() {
+        // cal_status 只读：超时后重试一次（与 status 同口径）。
+        let (status_link, status_transport) = link(
+            vec![
+                Err(TransportError::Timeout("slow cal_status".into())),
+                Ok(success()),
+            ],
+            50,
+        );
+        status_link
+            .call(json!({ "op": "cal_status" }))
+            .expect("cal_status retry succeeds");
+        assert_eq!(status_transport.call_count(), 2);
+
+        // 改模式/起测量/写产物的 cal op 超时后可能已生效：一条都不能重试。
+        for op in [
+            "cal_enter",
+            "cal_leave",
+            "cal_measure",
+            "cal_remeasure",
+            "cal_solve",
+        ] {
+            let (link, transport) = link(vec![Err(TransportError::Timeout("slow".into()))], 50);
+            let error = link.call(json!({ "op": op })).expect_err("timeout");
+            assert_eq!(error.code, HOST_LINK_UNAVAILABLE);
+            assert_eq!(transport.call_count(), 1, "{op} must not be retried");
         }
     }
 

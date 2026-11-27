@@ -2,9 +2,9 @@
 //!
 //! # 范围
 //!
-//! 只做 daemon 侧的 **MicProfile 持久化 + UMIK txt 校验/存储**，不接 rt-host 的
-//! `cal_*`（C2），不改 calibration job backend/service 语义；rt-host 未接线时
-//! [`RT_HOST_NOT_WIRED_REASON`] 由状态接口如实上报，不编实时 UMIK 数据。
+//! 只做 daemon 侧的 **MicProfile 持久化 + UMIK txt 校验/存储**，不改 calibration job
+//! backend/service 语义。实时 UMIK 状态由 `calibration::api::get_mic_status` 经 host
+//! link 的 `cal_status`（C3a）读取；本模块不碰 rt-host、也从不编造实时采集数据。
 //!
 //! # 存储（全部在 daemon 状态目录下）
 //!
@@ -83,9 +83,6 @@ pub const MAX_SERIAL_LEN: usize = 64;
 pub const MIC_FILE_MODE: u32 = 0o600;
 /// GET 无 profile 时的固定原因（200 + profile:null + 此原因）。
 pub const NO_PROFILE_REASON: &str = "no microphone profile saved yet: PUT /api/calibration/mic";
-/// rt-host 未接线时的固定降级原因（C1 不造假实时 UMIK 状态）。
-pub const RT_HOST_NOT_WIRED_REASON: &str =
-    "rt-host calibration bridge is not wired yet (C2); no live UMIK status is available";
 
 /// 稳定错误码（M1 错误体 `{error:{code,message,details}}`）。
 pub mod code {

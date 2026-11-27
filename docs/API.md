@@ -128,7 +128,7 @@
 | POST | `/api/calibration/mic/calibration` | 原始 UMIK txt（不是 multipart；≤1 MiB；可选 `X-KHAEN-FILENAME`，默认 `umik.txt`） | 200 `{ok, sha256, filename, bytes, serial, parsed:{serno,sens_factor_db?,points}}`（内容寻址存 `<state_dir>/calibration/mics/<sha256>.txt`；详见 §7.1） |
 | GET | `/api/calibration/mic` | — | 200 `{ok, schema:"khaen-mic-profile/v1", profile\|null, reasons:[string]}`（无 profile 时 200 + null + reasons；详见 §7.1） |
 | PUT | `/api/calibration/mic` | `{device?, serial?, orientation?, cal_sha256?}`（部分更新；未知字段 400） | 同 GET（保存后的 profile；详见 §7.1） |
-| GET | `/api/calibration/mic/status` | — | 恒 200 `{ok, schema, profile\|null, reasons, rt_host:{available:false, reason}}`（C1 未接 rt-host，不造假；详见 §7.1） |
+| GET | `/api/calibration/mic/status` | — | 恒 200 `{ok, schema, profile\|null, reasons, rt_host}`；`rt_host` 为 rt-host `cal_status` 的实时 UMIK 状态，未接线/不可用时 `available:false` + 稳定 code/reason（不造假；详见 §7.1） |
 
 - **wizard/state 第 2 步（`layout_channels`）**：`/api/channels` 已实现，daemon 不再固定返回 `not_available`/`task=M4`。daemon 按 `/api/status` 的 `format.channels` 判定：可读（非 null、>0）→ `passed`（只读步骤；reason 说明实时映射看 `/api/channels`、编辑用「方案与声道」页）；不可读 → `blocked` + 真实 reason（fail-closed）。
 
@@ -142,16 +142,16 @@
 - apply/rollback 必须按 `host_link.target` 路由（process=进程内、rt-host=控制通道），不得固定打到 daemon 进程内引擎。
 - 错误体：成功 2xx + 上述字段；失败 M1 错误体（见 §1）。
 
-### 7.1 麦克风 profile 与 UMIK 校准文件（真实校准桥接 C1，2026-11-27 新增）
+### 7.1 麦克风 profile 与 UMIK 校准文件（真实校准桥接 C1/C3a，2026-11-28 更新）
 
-真实校准把“UMIK 序列号 + 校准文件 + 朝向”作为测量输入；C1 只做 daemon 侧的 **MicProfile 持久化 + UMIK txt 校验/存储**，**不接 rt-host `cal_*`**（C2），status 不造假实时 UMIK 状态，也不触发任何测量/出声。
+真实校准把“UMIK 序列号 + 校准文件 + 朝向”作为测量输入；C1 做 daemon 侧的 **MicProfile 持久化 + UMIK txt 校验/存储**，C3a 把 `GET /api/calibration/mic/status` 的 `rt_host` 段接到 rt-host 的只读 `cal_status`（经既有 host link，仅 `rt-host` 目标）。status 只读，不触发任何测量/出声；拿不到实时状态时如实降级为 `available:false` + 原因，绝不编造 declared/open。
 
 | 方法 | 路径 | 请求 | 成功响应 |
 |---|---|---|---|
 | POST | `/api/calibration/mic/calibration` | 原始 UMIK txt（不是 multipart；≤1 MiB；可选请求头 `X-KHAEN-FILENAME`，默认 `umik.txt`，只接受 bare filename，路径分隔符 400）。**不解析 Content-Type** | 200 `{ok, sha256, filename, bytes, serial, parsed:{serno, sens_factor_db\|null, points}}`；内容寻址存 `<state_dir>/calibration/mics/<sha256>.txt`（0600 原子写），同内容重复上传幂等 |
 | GET | `/api/calibration/mic` | — | 200 `{ok, schema:"khaen-mic-profile/v1", profile\|null, reasons:[string]}`；无 profile 时 profile=null 且 reasons 至少一条（`no microphone profile saved yet: PUT /api/calibration/mic`） |
 | PUT | `/api/calibration/mic` | `{device?, serial?, orientation?, cal_sha256?}`（部分更新；未知字段 400 `calibration_mic_unknown_field`） | 同 GET（保存后的 profile，reasons 为空） |
-| GET | `/api/calibration/mic/status` | — | **恒 200** `{ok, schema, profile\|null, reasons, rt_host:{available:false, reason}}`；C1 未接 rt-host，固定 `available:false` + `rt-host calibration bridge is not wired yet (C2); no live UMIK status is available`，不编 declared/open |
+| GET | `/api/calibration/mic/status` | — | **恒 200** `{ok, schema, profile\|null, reasons, rt_host}`；可用 = `{available:true, reason:null, mode, declared, open, device, declaration_source, reasons, calibration:{simulated, engine}}`，不可用 = `{available:false, code, reason}`（`code` ∈ process_target / host_link_unavailable / unsupported / not_wired / unknown_op / malformed_cal_status_reply / internal_error；`reason` 含 code+message，不吞错） |
 
 - **MicProfile schema**（`<state_dir>/calibration/mic.json`，0600 原子写）：`{schema:"khaen-mic-profile/v1", device, serial, orientation, cal_sha256, cal_filename, cal_path, parsed:{serno, sens_factor_db|null, points}, updated_at}`；`cal_path` 是内容寻址的绝对路径；`cal_filename` 来自上传请求头（只做展示，不参与路径拼接）。
 - **REST `reasons` 是字符串数组**（本切片固定为数组；无 profile/损坏时至少一条原因，不冒充已保存）。
@@ -159,6 +159,8 @@
 - **PUT 语义**：首次保存必须给全 `device`/`orientation`/`cal_sha256`（`serial` 可省略，按文件 SERNO 填；给了就必须与 SERNO 完全一致）；`cal_sha256` 必须指向已上传文件（按内容寻址路径读取并复核字节 sha256）；`cal_filename`/`cal_path`/`parsed`/`updated_at` 由服务端写。`device` 是 ALSA 设备名（如 `hw:CARD=U18dB,DEV=0`）。
 - **稳定错误码（M1 错误体，见 §1）**：400 `calibration_mic_invalid`（文件/字段非法，details.field 指向坏行或字段）、400 `calibration_mic_unknown_field`（PUT 未知字段）、400 `calibration_mic_not_found`（PUT 引用的 cal_sha256 没有已上传文件）、400 `calibration_mic_serial_mismatch`（PUT serial 与文件 SERNO 不一致，details 给 serial/serno/cal_sha256）、400 `calibration_mic_orientation_invalid`（不是 `0deg`/`90deg`，details.allowed）、413 `calibration_mic_too_large`（>1 MiB：details.limit_bytes；>100000 点：details.limit_points）。
 - **存储与安全**：磁盘文件名只由字节 sha256 决定，客户端文件名不参与路径拼接；`mic.json` 与校准文件/回执均 0600 原子写（同目录 `.tmp-*` → rename）；文件不存在/hash 不符 400，不拿默认值冒充。
+- **status 实时段（C3a，2026-11-28）**：`rt_host` 的字段逐个映射 rt-host `cal_status` 回执，daemon 不重算、不补值：`mode` ← 顶层 `mode`（`playback`/`calibration`）；`declared`/`open`/`device`/`declaration_source` ← `umik.declared`/`umik.open`/`umik.device`/`umik.declaration_source`；`calibration.{simulated,engine}` ← 顶层 `simulated`/`engine`；`reasons` ← 顶层 `reasons.mic`（UMIK 声明缺失原因，字符串或 null）。字段缺失/显式 null 时如实 null；回执缺 `umik` 或字段类型不符按畸形回执降级，不当成功。`declaration_source` 的来源是 rt-host：`cal_enter_override`（该会话 `cal_enter` 请求内的 mic 覆盖）/ `env`（rt-host 环境变量声明）/ `missing`（没有 UMIK 声明）。
+- **status 降级语义（C3a）**：只有 `rt-host` 目标有实时状态——daemon 经既有 host link 发 `{op:"cal_status"}`（合法 op 表 `CAL_OPS` 与 `crates/rt-host/src/control/cal/mod.rs` 同源；`cal_status` 只读可重试，其余 `cal_*` 非幂等不重试）。`process` 目标没有校准能力 → `available:false` + `code:"process_target"`；rt-host 未接线（`KHAEN_CAL=off`）→ `code:"unsupported"`；socket 不可用 → `code:"host_link_unavailable"`；畸形回执 → `code:"malformed_cal_status_reply"`。这些降级**不改变 HTTP 200**，也**不影响** `profile`/`reasons`（仍来自 `<state_dir>/calibration/mic.json`）。
 
 ## 8. 系统
 | 方法 | 路径 | 请求 | 响应 |

@@ -18,7 +18,7 @@
 //! | POST | /api/calibration/mic/calibration | 200 | 原始 UMIK txt（≤1 MiB）→ 校验 + 内容寻址存储 |
 //! | GET | /api/calibration/mic | 200 | 当前 MicProfile（无 → profile:null + reasons） |
 //! | PUT | /api/calibration/mic | 200 | 部分更新 device/serial/orientation/cal_sha256 |
-//! | GET | /api/calibration/mic/status | 200 | profile + rt_host（C1 未接线 → available:false + reason） |
+//! | GET | /api/calibration/mic/status | 200 | profile + rt_host 实时 UMIK 状态（C3a：经 host link 的 cal_status；失败如实降级） |
 //!
 //! 所有 /api 路径都过现有 auth 中间件（登录会话；写方法额外 CSRF），错误体固定
 //! `{"error":{"code","message","details"}}`（PLAN §4.1）。缺失字段一律 null + `reasons`，
@@ -47,7 +47,7 @@ use crate::calibration::service::{
 use crate::calibration::store::{self, MAX_UPLOAD_BYTES};
 use crate::calibration::wizard::{self, MeasurementDraft, WizardStateInputs, WIZARD_SCHEMA};
 use crate::calibration::CalibrationHub;
-use crate::host_link::{LinkSnapshot, Target};
+use crate::host_link::{LinkSnapshot, Target, WireReply, HOST_LINK_UNAVAILABLE};
 use crate::{error_response, DaemonState};
 
 /// job 列表 schema。
@@ -1969,16 +1969,153 @@ pub(crate) async fn put_mic_profile(
     ok_json(mic_profile_json(&load))
 }
 
-/// GET /api/calibration/mic/status：profile + rt-host 实时 UMIK 状态（恒 200，只读）。
+// ---------------------------------------------------------------------------
+// 实时 rt-host UMIK 状态（C3a：GET /api/calibration/mic/status 的 rt_host 段）
+// ---------------------------------------------------------------------------
+
+/// process 目标下实时 UMIK 状态的固定降级原因（C3a；process 目标没有校准能力）。
+pub const PROCESS_TARGET_MIC_REASON: &str =
+    "rt-host control target required for live UMIK status (process target cannot calibrate)";
+/// rt-host `cal_status` 回执不是可用状态文档时的稳定码（缺 `umik`/字段类型不符）。
+pub const MALFORMED_CAL_STATUS: &str = "malformed_cal_status_reply";
+
+/// 不可用的 `rt_host` 段：稳定码 + 含 code/message 的原因（HTTP 仍 200）。
+fn rt_host_unavailable(code: &str, reason: impl Into<String>) -> Value {
+    json!({
+        "available": false,
+        "code": code,
+        "reason": reason.into(),
+    })
+}
+
+/// 字段读取：缺失/显式 null → null（不编），类型不符 → Err（由调用方按畸形回执降级）。
+fn cal_status_string_field(
+    object: &Map<String, Value>,
+    key: &str,
+    path: &str,
+) -> Result<Value, String> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(Value::Null),
+        Some(Value::String(text)) => Ok(Value::String(text.clone())),
+        Some(_) => Err(format!("{path} must be a string or null")),
+    }
+}
+
+fn cal_status_bool_field(
+    object: &Map<String, Value>,
+    key: &str,
+    path: &str,
+) -> Result<Value, String> {
+    match object.get(key) {
+        None | Some(Value::Null) => Ok(Value::Null),
+        Some(Value::Bool(value)) => Ok(Value::Bool(*value)),
+        Some(_) => Err(format!("{path} must be a boolean or null")),
+    }
+}
+
+/// 把 rt-host `cal_status` 回执映射成 status 的 `rt_host` 段（可用时）。
 ///
-/// C1 不接 rt-host `cal_*`：`available:false` + 固定 reason，绝不编造 declared/open。
+/// 只做加法映射：`mode` ← 顶层 `mode`；`declared`/`open`/`device`/
+/// `declaration_source` ← `umik.*`；`reasons` ← 顶层 `reasons.mic`（UMIK 声明缺失
+/// 原因）；`calibration.{simulated,engine}` ← 顶层 `simulated`/`engine`。
+/// 字段缺失/显式 null 如实 null（不编）；`umik` 缺失或字段类型不符 → Err（畸形回执）。
+fn cal_status_rt_host_fields(status: &Value) -> Result<Value, String> {
+    let object = status
+        .as_object()
+        .ok_or_else(|| "reply must be a JSON object".to_string())?;
+    if let Some(ok) = object.get("ok") {
+        if ok != &Value::Bool(true) {
+            return Err(format!("reply ok must be true, got {ok}"));
+        }
+    }
+    let umik = match object.get("umik") {
+        Some(Value::Object(umik)) => umik,
+        None | Some(Value::Null) => {
+            return Err(
+                "reply has no umik object (cal_status must report the UMIK declaration)"
+                    .to_string(),
+            )
+        }
+        Some(_) => return Err("umik must be a JSON object".to_string()),
+    };
+    let mode = cal_status_string_field(object, "mode", "mode")?;
+    let declared = cal_status_bool_field(umik, "declared", "umik.declared")?;
+    let open = cal_status_bool_field(umik, "open", "umik.open")?;
+    let device = cal_status_string_field(umik, "device", "umik.device")?;
+    let declaration_source =
+        cal_status_string_field(umik, "declaration_source", "umik.declaration_source")?;
+    // UMIK 声明缺失原因：rt-host 把它放在顶层 reasons.mic（字符串），daemon 原样透出。
+    let reasons = match object.get("reasons") {
+        None | Some(Value::Null) => Value::Null,
+        Some(Value::Object(reasons)) => match reasons.get("mic") {
+            None | Some(Value::Null) => Value::Null,
+            Some(Value::String(text)) => Value::String(text.clone()),
+            Some(_) => return Err("reasons.mic must be a string or null".to_string()),
+        },
+        Some(_) => return Err("reasons must be a JSON object or null".to_string()),
+    };
+    let simulated = cal_status_bool_field(object, "simulated", "simulated")?;
+    let engine = cal_status_string_field(object, "engine", "engine")?;
+    Ok(json!({
+        "available": true,
+        "reason": Value::Null,
+        "mode": mode,
+        "declared": declared,
+        "open": open,
+        "device": device,
+        "declaration_source": declaration_source,
+        "reasons": reasons,
+        "calibration": {
+            "simulated": simulated,
+            "engine": engine,
+        },
+    }))
+}
+
+/// 读取 rt-host 的实时 UMIK 状态（只读 `cal_status`；阻塞 socket 往返放 blocking 线程池）。
+///
+/// 只对 `rt-host` 目标发请求；process 目标没有校准能力，如实降级。任何失败（链路不可用、
+/// rt-host 未接线/拒绝、回执畸形）都映射成 `available:false` + 稳定 `code` + 含
+/// code/message 的 `reason`，不吞错、不编 declared/open；HTTP 状态由调用方保持 200。
+async fn live_rt_host_mic_status(state: &std::sync::Arc<DaemonState>) -> Value {
+    if state.host_link().target() == Target::Process {
+        return rt_host_unavailable("process_target", PROCESS_TARGET_MIC_REASON);
+    }
+    let link = std::sync::Arc::clone(state.host_link());
+    match tokio::task::spawn_blocking(move || link.call(json!({ "op": "cal_status" }))).await {
+        Ok(Ok(WireReply::Success(status))) => match cal_status_rt_host_fields(&status) {
+            Ok(fields) => fields,
+            Err(problem) => rt_host_unavailable(
+                MALFORMED_CAL_STATUS,
+                format!(
+                    "rt-host cal_status reply is malformed ({MALFORMED_CAL_STATUS}): {problem}"
+                ),
+            ),
+        },
+        Ok(Ok(WireReply::Failure { code, message, .. })) => rt_host_unavailable(
+            &code,
+            format!("rt-host rejected cal_status ({code}): {message}"),
+        ),
+        Ok(Err(error)) => rt_host_unavailable(
+            HOST_LINK_UNAVAILABLE,
+            format!("{HOST_LINK_UNAVAILABLE}: {}", error.message),
+        ),
+        Err(join_error) => rt_host_unavailable(
+            "internal_error",
+            format!("cal_status forwarding task failed (internal_error): {join_error}"),
+        ),
+    }
+}
+
+/// GET /api/calibration/mic/status：MicProfile + rt-host 实时 UMIK 状态（恒 200，只读）。
+///
+/// profile/reasons 仍来自 MicProfileStore（C1，不受 rt-host 状态影响）；`rt_host` 来自
+/// host link 的 `cal_status`（C3a）。rt-host 未接线/不可用/回执畸形时如实降级为
+/// `available:false` + 稳定 code/reason，**绝不编造 declared/open**。
 pub(crate) async fn get_mic_status(State(state): State<std::sync::Arc<DaemonState>>) -> Response {
     let load = state.calibration().mic().load();
     let mut body = mic_profile_json(&load);
-    body["rt_host"] = json!({
-        "available": false,
-        "reason": mic::RT_HOST_NOT_WIRED_REASON,
-    });
+    body["rt_host"] = live_rt_host_mic_status(&state).await;
     ok_json(body)
 }
 
