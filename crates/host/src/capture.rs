@@ -791,9 +791,11 @@ mod linux {
             };
             let read_frames = read_frames.min(frames);
             let samples = read_frames * channels;
-            for index in 0..samples {
-                let offset = index * BYTES_PER_SAMPLE;
-                out[index] = decode_s24_3le(&self.bytes[offset..offset + BYTES_PER_SAMPLE]);
+            for (sample, chunk) in out[..samples]
+                .iter_mut()
+                .zip(self.bytes[..samples * BYTES_PER_SAMPLE].chunks(BYTES_PER_SAMPLE))
+            {
+                *sample = decode_s24_3le(chunk);
             }
             Ok(read_frames)
         }
