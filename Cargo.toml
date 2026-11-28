@@ -21,13 +21,17 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.37"
+version = "0.1.38"
 edition = "2021"
 license = "GPL-3.0-only"
-# rubato 5.1（ASRC）要�?1.87；本机工具链 1.99 足够�?rust-version = "1.87"
+# rubato 5.1（ASRC）要求 1.87；本机工具链 1.99 足够。
+rust-version = "1.87"
 
 [workspace.dependencies]
 
-# 发布构建代码生成优化（LTO + �?codegen unit）�?# CPU 调优不写在这里：设备发布�?deploy/build-release.sh（x86_64 �?x86-64-v2�?# aarch64 �?generic）；AVX2/FMA/NEON 热点�?crates/core 运行时派发，无对应指令时回退标量�?[profile.release]
+# 发布构建代码生成优化（LTO + 单 codegen unit）。
+# CPU 调优不写在这里：设备发布用 deploy/build-release.sh（x86_64 → x86-64-v2，
+# aarch64 → generic）；AVX2/FMA/NEON 热点由 crates/core 运行时派发，无对应指令时回退标量。
+[profile.release]
 lto = "thin"
 codegen-units = 1
