@@ -1219,7 +1219,8 @@ export const CHANNELS_MAX_OUTPUT = 22
 /** AES67 RTP 通道上限（khaen_host::aes67_input::MAX_RTP_CHANNELS）。 */
 export const CHANNELS_MAX_AES67 = 8
 
-function isMulticastIpv4(value: string): boolean {
+/** IO I2b：目的地址可以是组播组或单播本端地址；0.0.0.0 与广播没有具体接收端。 */
+function isConcreteIpv4Destination(value: string): boolean {
   const parts = value.trim().split(".")
   if (parts.length !== 4) {
     return false
@@ -1235,14 +1236,16 @@ function isMulticastIpv4(value: string): boolean {
     }
     octets.push(octet)
   }
-  return octets[0] >= 224 && octets[0] <= 239
+  // 0.0.0.0/广播不是可 bind 的具体接收端；其余单播/组播都交给后端最终校验。
+  return !(octets.every((octet) => octet === 0) || octets.every((octet) => octet === 255))
 }
 
 /**
  * 校验 PUT /api/channels prepare 补丁（返回前端 error 码；null = 合法）。
  *
  * 前端只做「提交前的可见校验」；后端是权威（docs/API.md §5）。范围取真实常量：
- * 输出 1..=22、采样率 48k/96k、AES67 1..=8、PT 96..=127、组播 224.0.0.0/4。
+ * 输出 1..=22、采样率 48k/96k、AES67 1..=8、PT 96..=127、AES67 目的地址为具体单播或组播
+ * （IO I2b：单播 SDP 的 c= 是本端地址）。
  */
 export function validateChannelsPatch(patch: ChannelsPatch): string | null {
   const keys = Object.keys(patch).filter((key) => (patch as Record<string, unknown>)[key] !== undefined)
@@ -1259,7 +1262,7 @@ export function validateChannelsPatch(patch: ChannelsPatch): string | null {
   if (sampleRate !== undefined && !CHANNELS_SAMPLE_RATES_HZ.includes(sampleRate)) {
     return 'sample_rate_value'
   }
-  if (patch.aes67_group !== undefined && !isMulticastIpv4(patch.aes67_group)) {
+  if (patch.aes67_group !== undefined && !isConcreteIpv4Destination(patch.aes67_group)) {
     return 'aes67_group_value'
   }
   const port = patch.aes67_port

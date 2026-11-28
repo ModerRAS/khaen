@@ -64,7 +64,7 @@ const messages = {
       field: {
         channels: 'output channels',
         sampleRate: 'sample rate (Hz)',
-        aes67Group: 'AES67 multicast group',
+        aes67Group: 'AES67 destination (multicast or unicast)',
         aes67Port: 'AES67 port',
         payloadType: 'RTP payload type',
         aes67Channels: 'AES67 receive channels',
@@ -150,7 +150,7 @@ const messages = {
       validation: {
         channels_range: 'output channels must be an integer in 1–22',
         sample_rate_value: 'only 48000 / 96000 Hz are supported',
-        aes67_group_value: 'the AES67 group must be an IPv4 multicast address in 224.0.0.0/4',
+        aes67_group_value: 'the AES67 destination must be a concrete IPv4 address (multicast group or unicast local address; not 0.0.0.0/broadcast)',
         aes67_port_value: 'the AES67 port must be an integer in 1–65535',
         payload_type_value: 'the RTP payload type must be an integer in 96–127',
         aes67_channels_range: 'AES67 receive channels must be an integer in 1–8',

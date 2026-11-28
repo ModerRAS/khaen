@@ -265,7 +265,10 @@ test('validateChannelsPatch enforces the real ranges from khaen_core::rt / aes67
   assert.equal(validateChannelsPatch({ channels: CHANNELS_MAX_OUTPUT + 1 }), 'channels_range')
   assert.equal(validateChannelsPatch({ sample_rate: 44100 }), 'sample_rate_value')
   assert.equal(validateChannelsPatch({ sample_rate: 96000 }), null)
-  assert.equal(validateChannelsPatch({ aes67_group: '192.168.1.1' }), 'aes67_group_value')
+  // IO I2b：单播本端地址合法；0.0.0.0/广播没有具体接收端。
+  assert.equal(validateChannelsPatch({ aes67_group: '192.168.1.1' }), null)
+  assert.equal(validateChannelsPatch({ aes67_group: '0.0.0.0' }), 'aes67_group_value')
+  assert.equal(validateChannelsPatch({ aes67_group: '255.255.255.255' }), 'aes67_group_value')
   assert.equal(validateChannelsPatch({ aes67_group: '239.69.1.1' }), null)
   assert.equal(validateChannelsPatch({ aes67_port: 0 }), 'aes67_port_value')
   assert.equal(validateChannelsPatch({ aes67_port: 5004 }), null)

@@ -64,7 +64,7 @@ const messages = {
       field: {
         channels: '输出通道数',
         sampleRate: '采样率（Hz）',
-        aes67Group: 'AES67 组播地址',
+        aes67Group: 'AES67 目的地址（组播或单播）',
         aes67Port: 'AES67 端口',
         payloadType: 'RTP payload type',
         aes67Channels: 'AES67 接收通道数',
@@ -149,7 +149,7 @@ const messages = {
       validation: {
         channels_range: '输出通道数必须是 1–22 的整数',
         sample_rate_value: '采样率只支持 48000 / 96000 Hz',
-        aes67_group_value: 'AES67 组播地址必须是 224.0.0.0/4 范围内的 IPv4 地址',
+        aes67_group_value: 'AES67 目的地址必须是具体 IPv4 地址（组播组或单播本端地址；不能是 0.0.0.0/广播）',
         aes67_port_value: 'AES67 端口必须是 1–65535 的整数',
         payload_type_value: 'RTP payload type 必须是 96–127 的整数',
         aes67_channels_range: 'AES67 接收通道数必须是 1–8 的整数',
