@@ -169,6 +169,7 @@ fn source_factory(
 
 fn base_config(device: &str) -> RuntimeConfig {
     RuntimeConfig {
+        additional_inputs: Vec::new(),
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,

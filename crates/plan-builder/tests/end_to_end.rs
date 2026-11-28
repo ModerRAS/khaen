@@ -151,6 +151,7 @@ fn fake_source() -> (FakeSource, FakeSourceHandle) {
 
 fn runtime_config() -> RuntimeConfig {
     RuntimeConfig {
+        additional_inputs: Vec::new(),
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,

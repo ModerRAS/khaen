@@ -41,6 +41,25 @@ pub enum BusError {
     },
 }
 
+impl std::fmt::Display for BusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadConfig(message) => write!(f, "input bus config: {message}"),
+            Self::StreamOutOfRange { index, streams } => {
+                write!(
+                    f,
+                    "input bus stream index {index} is out of range ({streams} streams)"
+                )
+            }
+            Self::Stream { index, error } => {
+                write!(f, "input bus stream {index}: {}", error.name())
+            }
+        }
+    }
+}
+
+impl std::error::Error for BusError {}
+
 impl BusError {
     /// 稳定错误名。
     pub const fn name(self) -> &'static str {

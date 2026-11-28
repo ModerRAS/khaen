@@ -82,9 +82,9 @@ use std::time::Duration;
 use khaen_core::plan::{Plan, PlanError};
 
 use crate::admission::{Admission, AdmissionLimits};
+use crate::aes67_bus::{Aes67InputBus, Aes67InputBusStats};
 use crate::aes67_input::{
-    Aes67Input, Aes67InputConfig, Aes67InputStats, BlockStatus, FeedOutcome, InputError,
-    L24_SAMPLE_BYTES,
+    Aes67Input, Aes67InputConfig, Aes67InputStats, FeedOutcome, InputError, L24_SAMPLE_BYTES,
 };
 use crate::alsa_backend::{AlsaOutputBackend, AlsaStats, PcmOutput};
 use crate::backend::{AudioBackend, BackendError, DeviceConfig};
@@ -128,6 +128,8 @@ pub mod codes {
     pub const UNDERRUN: &str = "ERR_RUNTIME_INPUT_UNDERRUN";
     /// 输入连续溢出达到安全阈值。
     pub const OVERRUN: &str = "ERR_RUNTIME_INPUT_OVERRUN";
+    /// 多流输入总线配置错误。
+    pub const INPUT_BUS: &str = "ERR_RUNTIME_INPUT_BUS";
     /// 其它内部故障。
     pub const INTERNAL: &str = "ERR_RUNTIME_INTERNAL";
     /// UDP socket 绑定失败。
@@ -193,6 +195,8 @@ pub enum RuntimeError {
     Config(&'static str),
     /// AES67 输入配置/新建失败。
     Input(InputError),
+    /// 多流 AES67 输入总线配置错误。
+    Bus(crate::aes67_bus::BusError),
     /// 块引擎错误。
     Engine(EngineError),
     /// 输出后端错误。
@@ -215,6 +219,7 @@ impl RuntimeError {
         match self {
             RuntimeError::Config(_) => codes::CONFIG,
             RuntimeError::Input(err) => err.name(),
+            RuntimeError::Bus(_) => codes::INPUT_BUS,
             RuntimeError::Engine(_) => codes::ENGINE,
             RuntimeError::Backend(_) => codes::BACKEND,
             RuntimeError::Receiver(err) => err.code,
@@ -231,6 +236,7 @@ impl fmt::Display for RuntimeError {
         match self {
             RuntimeError::Config(message) => write!(f, "runtime config: {message}"),
             RuntimeError::Input(err) => write!(f, "aes67 input: {err}"),
+            RuntimeError::Bus(err) => write!(f, "aes67 input bus: {err}"),
             RuntimeError::Engine(err) => write!(f, "engine: {err}"),
             RuntimeError::Backend(err) => write!(f, "backend: {err}"),
             RuntimeError::Receiver(err) => write!(f, "receiver: {err}"),
@@ -719,8 +725,10 @@ pub struct SupervisorOptions {
 /// 这样不存在块长三处各说各话的可能。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
-    /// AES67 输入配置（组播地址/端口/通道映射/块长）。
+    /// 主 AES67 输入配置（组播地址/端口/通道映射/块长）。
     pub input: Aes67InputConfig,
+    /// 额外 AES67 流（多流稀疏混入同一条输入总线；空 = 单流旧行为）。
+    pub additional_inputs: Vec<Aes67InputConfig>,
     /// 块引擎配置（块长/速率/通道）。
     pub engine: EngineConfig,
     /// 输出设备配置（设备名/速率/块长/通道）。
@@ -740,6 +748,22 @@ impl RuntimeConfig {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         self.input.validate().map_err(RuntimeError::Input)?;
         self.engine.validate().map_err(RuntimeError::Engine)?;
+        if self.additional_inputs.len() > crate::aes67_bus::MAX_BUS_STREAMS - 1 {
+            return Err(RuntimeError::Config(
+                "additional_inputs exceeds the input bus stream limit",
+            ));
+        }
+        for stream in &self.additional_inputs {
+            stream.validate().map_err(RuntimeError::Input)?;
+            if stream.output_channels != self.input.output_channels
+                || stream.block_frames != self.input.block_frames
+                || stream.sample_rate != self.input.sample_rate
+            {
+                return Err(RuntimeError::Config(
+                    "additional_inputs must match the primary input's output_channels/block_frames/sample_rate",
+                ));
+            }
+        }
         self.receiver.validate().map_err(RuntimeError::Config)?;
         if self.device.device.as_str().is_empty() {
             return Err(RuntimeError::Config("device name must not be empty"));
@@ -1054,12 +1078,14 @@ pub struct RuntimeStatus {
 /// Windows 上也能编译并用假设备跑完整测试。
 pub struct Runtime<P: PcmOutput> {
     config: RuntimeConfig,
-    input: Aes67Input,
+    input: Aes67InputBus,
     engine: SlotEngine,
     backend: AlsaOutputBackend<P>,
     safety: SafetySupervisor,
     driver: Box<dyn DeviceDriver>,
     receiver: Aes67Receiver,
+    /// 额外流的收包线程（与 `config.additional_inputs` 同序；空 = 单流）。
+    additional_receivers: Vec<Aes67Receiver>,
     /// 输入块（block_frames × output_channels），构造期分配。
     block: Vec<f32>,
     /// 输出块（block_frames × channels），构造期分配；含安全静音后的最终写设备内容。
@@ -1109,9 +1135,12 @@ impl<P: PcmOutput> Runtime<P> {
     /// 失败时已启动的资源由 Drop 释放（收包线程若已启动会被 join）。
     pub fn new(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         config.validate()?;
-        let source = UdpPacketSource::bind(&config.input, &config.receiver)?;
+        let mut sources: Vec<Box<dyn PacketSource + Send>> = Vec::new();
+        for input in std::iter::once(&config.input).chain(config.additional_inputs.iter()) {
+            sources.push(Box::new(UdpPacketSource::bind(input, &config.receiver)?));
+        }
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, true, Some(udp_source_factory()))
+        Self::build_validated(config, sources, driver, true, Some(udp_source_factory()))
     }
 
     /// 构造运行时但**不打开输出设备**：设备缺失/掉线由控制路径 [`Runtime::open_device`] 重试。
@@ -1121,9 +1150,29 @@ impl<P: PcmOutput> Runtime<P> {
     /// 不写设备）。用于"声卡不在位也要保持进程运行"的宿主（rt-host）。
     pub fn new_deferred(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         config.validate()?;
-        let source = UdpPacketSource::bind(&config.input, &config.receiver)?;
+        let mut sources: Vec<Box<dyn PacketSource + Send>> = Vec::new();
+        for input in std::iter::once(&config.input).chain(config.additional_inputs.iter()) {
+            sources.push(Box::new(UdpPacketSource::bind(input, &config.receiver)?));
+        }
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, false, Some(udp_source_factory()))
+        Self::build_validated(config, sources, driver, false, Some(udp_source_factory()))
+    }
+
+    /// 用注入的多个包源构造运行时（测试/嵌入式接线用）：第一个是主流，其余与
+    /// `config.additional_inputs` 同序；数量必须等于 1 + additional_inputs.len()。
+    pub fn with_sources(
+        config: RuntimeConfig,
+        sources: Vec<Box<dyn PacketSource + Send>>,
+    ) -> Result<Self, RuntimeError> {
+        config.validate()?;
+        let expected = 1 + config.additional_inputs.len();
+        if sources.len() != expected {
+            return Err(RuntimeError::Config(
+                "with_sources needs one packet source per input stream (primary + additional_inputs)",
+            ));
+        }
+        let driver = build_device_driver(&config)?;
+        Self::build_validated(config, sources, driver, true, None)
     }
 
     /// 用注入的 PacketSource（假包源/其它 socket 实现）构造运行时。
@@ -1131,9 +1180,7 @@ impl<P: PcmOutput> Runtime<P> {
         config: RuntimeConfig,
         source: S,
     ) -> Result<Self, RuntimeError> {
-        config.validate()?;
-        let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, true, None)
+        Self::build_validated_one(config, Box::new(source), true, None)
     }
 
     /// 注入假包源 + 收包源工厂（热重配测试用）：工厂负责按新 input/收包配置再造一个
@@ -1152,9 +1199,7 @@ impl<P: PcmOutput> Runtime<P> {
             + Send
             + 'static,
     {
-        config.validate()?;
-        let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, true, Some(Box::new(factory)))
+        Self::build_validated_one(config, Box::new(source), true, Some(Box::new(factory)))
     }
 
     /// [`with_source_factory`] 的"设备延迟打开"版本（热重配 + 设备缺失测试用）。
@@ -1172,9 +1217,7 @@ impl<P: PcmOutput> Runtime<P> {
             + Send
             + 'static,
     {
-        config.validate()?;
-        let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, false, Some(Box::new(factory)))
+        Self::build_validated_one(config, Box::new(source), false, Some(Box::new(factory)))
     }
 
     /// [`Runtime::with_source`] 的"设备延迟打开"版本：构造期不碰设备（设备缺失模拟/重开测试用）。
@@ -1182,9 +1225,7 @@ impl<P: PcmOutput> Runtime<P> {
         config: RuntimeConfig,
         source: S,
     ) -> Result<Self, RuntimeError> {
-        config.validate()?;
-        let driver = build_device_driver(&config)?;
-        Self::build_validated(config, source, driver, false, None)
+        Self::build_validated_one(config, Box::new(source), false, None)
     }
 
     /// 用注入的包源 + 设备驱动构造运行时（测试/daemon 注入用）。
@@ -1193,18 +1234,45 @@ impl<P: PcmOutput> Runtime<P> {
         source: S,
         driver: Box<dyn DeviceDriver>,
     ) -> Result<Self, RuntimeError> {
-        config.validate()?;
-        Self::build_validated(config, source, driver, true, None)
+        let mut runtime = Self::build_validated_one(config, Box::new(source), true, None)?;
+        runtime.driver = driver;
+        Ok(runtime)
     }
 
-    fn build_validated<S: PacketSource + 'static>(
+    /// 单包源注入的统一入口：`additional_inputs` 必须为空（注入构造函数只能给主流一个源）。
+    fn build_validated_one(
         config: RuntimeConfig,
-        source: S,
+        source: Box<dyn PacketSource + Send>,
+        open_device: bool,
+        source_factory: Option<SourceFactory>,
+    ) -> Result<Self, RuntimeError> {
+        config.validate()?;
+        if !config.additional_inputs.is_empty() {
+            return Err(RuntimeError::Config(
+                "injected-source constructors cannot supply additional AES67 streams; use Runtime::new or Runtime::with_sources",
+            ));
+        }
+        let driver = build_device_driver(&config)?;
+        Self::build_validated(config, vec![source], driver, open_device, source_factory)
+    }
+
+    fn build_validated(
+        config: RuntimeConfig,
+        mut sources: Vec<Box<dyn PacketSource + Send>>,
         driver: Box<dyn DeviceDriver>,
         open_device: bool,
         source_factory: Option<SourceFactory>,
     ) -> Result<Self, RuntimeError> {
-        let input = Aes67Input::new(config.input.clone()).map_err(RuntimeError::Input)?;
+        let expected = 1 + config.additional_inputs.len();
+        if sources.len() != expected {
+            return Err(RuntimeError::Config(
+                "one packet source is required per input stream (primary + additional_inputs)",
+            ));
+        }
+        let streams: Vec<Aes67InputConfig> = std::iter::once(config.input.clone())
+            .chain(config.additional_inputs.iter().cloned())
+            .collect();
+        let input = Aes67InputBus::new(streams).map_err(RuntimeError::Bus)?;
         let initial = unloaded_processor(config.unloaded_policy);
         let engine =
             SlotEngine::new(config.engine.clone(), initial).map_err(RuntimeError::Engine)?;
@@ -1215,7 +1283,11 @@ impl<P: PcmOutput> Runtime<P> {
                 .map_err(RuntimeError::Backend)?;
         }
         let safety = SafetySupervisor::new(config.safety.clone());
-        let receiver = Aes67Receiver::spawn(source, &config.receiver)?;
+        let receiver = Aes67Receiver::spawn(BoxedSource(sources.remove(0)), &config.receiver)?;
+        let mut additional_receivers = Vec::with_capacity(sources.len());
+        for source in sources {
+            additional_receivers.push(Aes67Receiver::spawn(BoxedSource(source), &config.receiver)?);
+        }
         let block = vec![0.0f32; input.samples_per_block()];
         let out_block = vec![0.0f32; engine.output_samples_per_block()];
         let packet_buf = vec![0u8; config.receiver.packet_bytes];
@@ -1227,6 +1299,7 @@ impl<P: PcmOutput> Runtime<P> {
             safety,
             driver,
             receiver,
+            additional_receivers,
             block,
             out_block,
             packet_buf,
@@ -1249,9 +1322,21 @@ impl<P: PcmOutput> Runtime<P> {
         &self.config
     }
 
-    /// AES67 输入视图（诊断/测试用；RT 线程之外不要并发访问）。
+    /// 主流输入视图（诊断/测试用；RT 线程之外不要并发访问）。
     pub fn input(&self) -> &Aes67Input {
+        self.input
+            .stream_input(0)
+            .expect("runtime input bus always has a primary stream")
+    }
+
+    /// 多流输入总线视图（诊断/测试用；RT 线程之外不要并发访问）。
+    pub fn input_bus(&self) -> &Aes67InputBus {
         &self.input
+    }
+
+    /// 多流输入总线累计统计（控制面快照；会分配每路统计）。
+    pub fn input_bus_stats(&self) -> Aes67InputBusStats {
+        self.input.stats()
     }
 
     /// 块引擎视图。
@@ -1284,14 +1369,38 @@ impl<P: PcmOutput> Runtime<P> {
         self.blocks
     }
 
-    /// 停止收包线程并 join；幂等。返回停止后的收包统计。
+    /// 停止所有收包线程并 join；幂等。返回主流的收包统计。
     pub fn stop_receiver(&mut self) -> Result<ReceiverStats, RuntimeError> {
-        self.receiver.stop()
+        let stats = self.receiver.stop();
+        for receiver in &mut self.additional_receivers {
+            let _ = receiver.stop();
+        }
+        stats
     }
 
-    /// 收包线程是否在跑。
+    /// 某一路收包线程的统计快照（0 = 主流，1.. = additional_inputs；越界为 None）。
+    pub fn receiver_stats(&self, stream: usize) -> Option<ReceiverStats> {
+        if stream == 0 {
+            Some(self.receiver.stats())
+        } else {
+            self.additional_receivers
+                .get(stream - 1)
+                .map(Aes67Receiver::stats)
+        }
+    }
+
+    /// 主流收包线程是否在跑。
     pub fn receiver_running(&self) -> bool {
         self.receiver.is_running()
+    }
+
+    /// 所有流的收包线程是否都在跑（单流时等价于 [`Runtime::receiver_running`]）。
+    pub fn receivers_running(&self) -> bool {
+        self.receiver.is_running()
+            && self
+                .additional_receivers
+                .iter()
+                .all(Aes67Receiver::is_running)
     }
 
     /// 输出设备是否已打开（PCM 句柄在手；设备掉线/尚未打开时为 false）。
@@ -1312,14 +1421,19 @@ impl<P: PcmOutput> Runtime<P> {
             return Ok(());
         }
         // 先分配新的抖动缓冲再碰设备：配置已校验，分配失败只会是内部错误；失败时不改变旧状态。
-        let fresh_input =
-            Aes67Input::new(self.config.input.clone()).map_err(RuntimeError::Input)?;
+        let streams: Vec<Aes67InputConfig> = std::iter::once(self.config.input.clone())
+            .chain(self.config.additional_inputs.iter().cloned())
+            .collect();
+        let fresh_input = Aes67InputBus::new(streams).map_err(RuntimeError::Bus)?;
         self.backend
             .start(&self.config.device)
             .map_err(RuntimeError::Backend)?;
         // 设备打开后才丢弃断线期间的旧包：它们不属于恢复后的新抖动缓冲。
         while self.receiver.next_packet(&mut self.packet_buf).is_some() {
             // 收包统计仍在 receiver 侧累计；这里只把旧载荷从 SPSC 里抽走。
+        }
+        for receiver in &mut self.additional_receivers {
+            while receiver.next_packet(&mut self.packet_buf).is_some() {}
         }
         self.input = fresh_input;
         self.consecutive_underruns = 0;
@@ -1394,10 +1508,10 @@ impl<P: PcmOutput> Runtime<P> {
             // 控制路径用 open_device 重开成功后再恢复块循环（进程本身不退出）。
             return Err(RuntimeError::Backend(BackendError::NotStarted));
         }
-        // 1) 网络包 → 输入抖动缓冲。feed_packet 与 fill_block 都是 Aes67Input 声明的实时安全操作。
+        // 1) 网络包 → 各路输入抖动缓冲。feed_packet 与 fill_block 都是声明的实时安全操作。
         while let Some(len) = self.receiver.next_packet(&mut self.packet_buf) {
             if let Ok(FeedOutcome::Overflow { .. }) =
-                self.input.feed_packet(&self.packet_buf[..len])
+                self.input.feed_packet(0, &self.packet_buf[..len])
             {
                 self.consecutive_overruns = self.consecutive_overruns.saturating_add(1);
                 if self.consecutive_overruns >= self.config.safety.max_consecutive_overruns {
@@ -1405,10 +1519,31 @@ impl<P: PcmOutput> Runtime<P> {
                 }
             }
         }
+        for index in 0..self.additional_receivers.len() {
+            while let Some(len) = self.additional_receivers[index].next_packet(&mut self.packet_buf)
+            {
+                if let Ok(FeedOutcome::Overflow { .. }) =
+                    self.input.feed_packet(index + 1, &self.packet_buf[..len])
+                {
+                    self.consecutive_overruns = self.consecutive_overruns.saturating_add(1);
+                    if self.consecutive_overruns >= self.config.safety.max_consecutive_overruns {
+                        self.note_fault(FaultReason::Overrun);
+                    }
+                }
+            }
+        }
 
-        // 2) 取一块输入；非 Filled 即整块静音（fill_block 已把输入块清零）。
-        let outcome = self.input.fill_block(&mut self.block);
-        let input_filled = outcome.status == BlockStatus::Filled;
+        // 2) 取一块输入；至少一路有数据即视为已填（断流流按 0 贡献，不 gate 其它流）。
+        let input_filled = match self.input.fill_block(&mut self.block) {
+            Ok(outcome) => outcome.filled_streams > 0,
+            Err(_) => {
+                self.last_error = Some(codes::CONFIG);
+                self.note_fault(FaultReason::Underrun);
+                return Err(RuntimeError::Input(InputError::BadConfig(
+                    "input bus fill_block rejected its own preallocated block",
+                )));
+            }
+        };
         if input_filled {
             self.consecutive_underruns = 0;
             self.consecutive_overruns = 0;
@@ -1520,7 +1655,11 @@ impl<P: PcmOutput> Runtime<P> {
         RuntimeStatus {
             state: self.safety.state(),
             blocks: self.blocks,
-            input: self.input.stats(),
+            input: self
+                .input
+                .stream_input(0)
+                .map(Aes67Input::stats)
+                .unwrap_or_default(),
             output: self.backend.stats(),
             receiver: self.receiver.stats(),
             device_rate: device.device_rate,
@@ -1614,6 +1753,17 @@ impl<P: PcmOutput> Runtime<P> {
         let old = self.config.clone();
         let old_device_was_started = self.backend.is_started();
         let old_receiver_was_running = self.receiver.is_running();
+        // 多流输入的热重配（重绑/重建每路收包线程）尚未实现：fail-closed，不静默丢流。
+        if !old.additional_inputs.is_empty() || !target.additional_inputs.is_empty() {
+            return Err(ReconfigureFailure {
+                code: codes::RECONFIGURE_CONFIG,
+                stage: "multi_input",
+                message: "multi-stream AES67 input hot reconfiguration is not implemented yet; restart the runtime with the new input list instead (fail-closed, no stream is silently dropped)".to_string(),
+                rolled_back: true,
+                device_started: old_device_was_started,
+                receiver_running: old_receiver_was_running,
+            });
+        }
         // 1) 校验目标配置：失败时什么都没碰。
         if let Err(err) = target.validate() {
             return Err(ReconfigureFailure {
@@ -1626,7 +1776,7 @@ impl<P: PcmOutput> Runtime<P> {
             });
         }
         // 2) 先把新对象全部分配好（分配失败时也什么都没碰）。
-        let new_input = match Aes67Input::new(target.input.clone()) {
+        let new_input = match Aes67InputBus::new(vec![target.input.clone()]) {
             Ok(input) => input,
             Err(err) => {
                 return Err(ReconfigureFailure {

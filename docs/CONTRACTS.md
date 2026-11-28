@@ -99,6 +99,7 @@
   engine.input_channels`，以及 `device.output_channels == engine.output_channels`。
 - plan-builder 的 `PlanConfig` 对应拆成 `input_channels` / `output_channels`
   （`PlanConfig::new` 保持等宽旧行为，`new_split` 构造不等宽配置）。
+- **多路 AES67（host 运行时）**：`RuntimeConfig.additional_inputs` 是加法字段（空 = 单流旧行为）；每路独立抖动环，按各自 `channels_map` 稀疏混入同一条输入总线（f64 求和、断流贡献 0、不 gate）。所有流必须同 `output_channels`/`block_frames`/`sample_rate`，总线宽度 = `engine.input_channels`。**多流运行时的热重配尚未实现**：`Runtime::reconfigure` 遇 `additional_inputs` 非空会 fail-closed（返回多流未支持），不静默丢流；多流需要在启动时配置。rt-host/daemon 的配置面（env/API/UI）尚未暴露该字段。
 - **热重配**：`channels_prepare` 的 `content_channels` 显式改输入宽度，`channels` 只改输出宽度；
   只给 `channels` 时输入宽度跟随它（旧客户端兼容）。`channels_status.current` 同时上报
   `content_channels`（输入）与 `channels`（输出），`aes67_map` 槽位按 `content_channels` 校验。

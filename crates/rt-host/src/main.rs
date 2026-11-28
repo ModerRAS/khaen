@@ -612,6 +612,7 @@ mod app {
             jitter_target_frames: jitter_frames,
         };
         let config = RuntimeConfig {
+            additional_inputs: Vec::new(),
             input,
             engine: EngineConfig {
                 block_frames,

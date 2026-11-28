@@ -171,6 +171,7 @@ fn fake_source() -> (FakeSource, FakeSourceHandle) {
 
 fn runtime_config(output_channels: usize, block_frames: usize) -> RuntimeConfig {
     RuntimeConfig {
+        additional_inputs: Vec::new(),
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,
@@ -393,6 +394,112 @@ fn channel_map_places_rtp_channels_and_zero_fills() {
 // ===========================================================================
 // b) 欠载 → 整块静音 + 游标前进
 // ===========================================================================
+
+/// 等待某一路（0 = 主流，1.. = additional_inputs）收包线程推进到 expected 包。
+fn wait_for_stream_packets<P: PcmOutput>(runtime: &Runtime<P>, stream: usize, expected: u64) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let received = runtime
+            .receiver_stats(stream)
+            .map_or(0, |stats| stats.packets_received);
+        if received >= expected {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "input stream {stream} delivered only {received} of {expected} packets"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn additional_aes67_streams_mix_into_one_input_block() {
+    const SIGNAL_A: [i32; 16] = [
+        100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600,
+    ];
+    const SIGNAL_B: [i32; 16] = [
+        -100, -200, -300, -400, -500, -600, -700, -800, -900, -1000, -1100, -1200, -1300, -1400,
+        -1500, -1600,
+    ];
+    let mut config = runtime_config(4, 8);
+    config.input.channels = 2;
+    config.input.channels_map = vec![0, 1];
+    config.additional_inputs = vec![Aes67InputConfig {
+        multicast_addr: Ipv4Addr::new(239, 69, 0, 2),
+        port: 5006,
+        payload_type: PT,
+        sample_rate: SAMPLE_RATE,
+        channels: 2,
+        channels_map: vec![2, 3],
+        output_channels: 4,
+        block_frames: 8,
+        jitter_target_frames: 0,
+    }];
+    let (source_a, handle_a) = fake_source();
+    let (source_b, handle_b) = fake_source();
+    let mut runtime =
+        Runtime::<FakePcm>::with_sources(config, vec![Box::new(source_a), Box::new(source_b)])
+            .expect("multi-stream runtime");
+
+    handle_a.send(packet(0, 0, &SIGNAL_A));
+    handle_b.send(packet(0, 0, &SIGNAL_B));
+    wait_for_packets(&runtime, 1);
+    wait_for_stream_packets(&runtime, 1, 1);
+
+    let block = runtime.run_block().expect("block");
+    assert_eq!(block.len(), 8 * 4);
+    for frame in 0..8 {
+        let a_left = decoded(SIGNAL_A[frame * 2]);
+        let a_right = decoded(SIGNAL_A[frame * 2 + 1]);
+        let b_left = decoded(SIGNAL_B[frame * 2]);
+        let b_right = decoded(SIGNAL_B[frame * 2 + 1]);
+        let base = frame * 4;
+        assert_eq!(block[base].to_bits(), a_left.to_bits());
+        assert_eq!(block[base + 1].to_bits(), a_right.to_bits());
+        assert_eq!(block[base + 2].to_bits(), b_left.to_bits());
+        assert_eq!(block[base + 3].to_bits(), b_right.to_bits());
+    }
+    let bus = runtime.input_bus_stats();
+    assert_eq!(bus.streams.len(), 2);
+    assert_eq!(bus.streams[0].frames_filled, 8);
+    assert_eq!(bus.streams[1].frames_filled, 8);
+    assert_eq!(runtime.status().input.packets, 1);
+}
+
+#[test]
+fn additional_inputs_must_match_primary_width_block_and_rate() {
+    let mut config = runtime_config(4, 8);
+    config.input.channels = 2;
+    config.input.channels_map = vec![0, 1];
+    let mut extra = config.input.clone();
+    extra.multicast_addr = Ipv4Addr::new(239, 69, 0, 2);
+    extra.port = 5006;
+    extra.channels_map = vec![0, 1];
+    extra.output_channels = 2; // 与主流 4 不一致
+    config.additional_inputs = vec![extra];
+    let error = Runtime::<FakePcm>::new_deferred(config).expect_err("width mismatch");
+    assert!(
+        matches!(error, RuntimeError::Config(message) if message.contains("additional_inputs")),
+        "{error:?}"
+    );
+
+    // 注入单源构造函数不能偷偷丢 additional_inputs：必须显式用 with_sources/new。
+    let mut config = runtime_config(4, 8);
+    config.input.channels = 2;
+    config.input.channels_map = vec![0, 1];
+    let mut extra = config.input.clone();
+    extra.port = 5006;
+    extra.channels_map = vec![2, 3];
+    config.additional_inputs = vec![extra];
+    let (source, _handle) = fake_source();
+    let error =
+        Runtime::<FakePcm>::with_source(config, source).expect_err("injected single source");
+    assert!(
+        matches!(error, RuntimeError::Config(message) if message.contains("injected-source")),
+        "{error:?}"
+    );
+}
 
 #[test]
 fn underrun_outputs_silence_and_advances_play_cursor() {

@@ -889,6 +889,7 @@ impl PacketSource for IdleSource {
 /// 构造一个设备已打开（假 PCM）、无输入的 Runtime（用于 ControlTarget 适配层测试）。
 pub(crate) fn fake_runtime() -> Runtime<FakePcm> {
     let config = RuntimeConfig {
+        additional_inputs: Vec::new(),
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,
@@ -997,6 +998,7 @@ impl DeviceProbe for FakeProbe {
 /// 与 [`test_config`] 一致的完整运行时配置（Harness 的 channels 上下文用）。
 pub(crate) fn fake_runtime_config() -> RuntimeConfig {
     RuntimeConfig {
+        additional_inputs: Vec::new(),
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,
