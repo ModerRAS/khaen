@@ -1,0 +1,15 @@
+[Unit]
+Description=khaen PTP slave (linuxptp, software timestamping, observation-only)
+Documentation=file:/opt/khaen/current/docs/PTP.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/khaen/ptp4l-slave.conf
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/ptp4l -S -s -i %i -f /etc/khaen/ptp4l-slave.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

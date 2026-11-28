@@ -117,8 +117,9 @@ jobs:
                 cp "${binary}" "dist/${stage}/bin/"
               fi
             done
-            cp deploy/install.sh deploy/rollback.sh deploy/closed-loop-verdict.sh deploy/smoke-test.sh deploy/build-release.sh deploy/khaen-daemon.service deploy/khaen-rt-host.service deploy/daemon.env.example deploy/rt-host.env.example "dist/${stage}/deploy/"
-            cp docs/CLOSED-LOOP.md "dist/${stage}/docs/"
+            cp deploy/install.sh deploy/rollback.sh deploy/closed-loop-verdict.sh deploy/smoke-test.sh deploy/build-release.sh deploy/khaen-daemon.service deploy/khaen-rt-host.service deploy/daemon.env.example deploy/rt-host.env.example deploy/khaen-ptp-slave@.service "dist/${stage}/deploy/"
+            cp -r deploy/linuxptp "dist/${stage}/deploy/"
+            cp docs/CLOSED-LOOP.md docs/PTP.md "dist/${stage}/docs/"
             cp crates/cal-tools/README.md "dist/${stage}/docs/calibration-cli.md"
             cat > "dist/${stage}/BUILD" <<EOF
           schema: khaen-build/v1

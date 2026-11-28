@@ -485,6 +485,12 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         insert_reason(&mut reasons, "speaker_test", reason);
     }
 
+    // PTP（linuxptp）只读状态（加法字段）：后台探针缓存；探针没跑/没锁时给 null + 原因。
+    let (ptp, ptp_reason) = crate::system::ptp::status_value();
+    if let Some(reason) = ptp_reason {
+        insert_reason(&mut reasons, "ptp", reason);
+    }
+
     // 合同 §3 的顶层 muted/safe 别名（真实值来自 state 块，同源不重造）。
     let state_muted = rt.state_muted.clone();
     let state_safe = rt.state_safe.clone();
@@ -520,6 +526,8 @@ fn aggregate_at(sources: &StatusSources<'_>, now: SystemTime) -> Value {
         // 当前已生效方案的只读回读（加法字段）：volume/layout/routing 的“当前值”数据源。
         "readback": readback,
         "speaker_test": speaker_test,
+        // PTP（linuxptp）只读状态（加法字段）：见 crates/daemon/src/system/ptp.rs。
+        "ptp": ptp,
         "plan": {
             "graph_id": rt.graph_id,
             "sha256": Value::Null,
@@ -2018,6 +2026,7 @@ mod tests {
             "ok",
             "output",
             "plan",
+            "ptp",
             "readback",
             "reasons",
             "reconfigure",

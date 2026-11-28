@@ -26,6 +26,7 @@
 pub mod api;
 pub mod build_info;
 pub mod probe;
+pub mod ptp;
 
 use std::sync::Arc;
 

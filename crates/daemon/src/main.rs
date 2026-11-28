@@ -150,6 +150,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let state = Arc::new(state);
 
+    // PTP（linuxptp）只读探针：后台刷新 /api/status.ptp；非 Linux no-op。
+    khaen_daemon::system::ptp::start_background_probe();
+
     let poll_ms = std::env::var("KHAEN_DEVICE_POLL_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
