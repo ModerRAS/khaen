@@ -73,6 +73,7 @@
 //! - PTP/媒体时钟锚定（首块播放时刻 = origin_ns + latency）：拉取式 fill_block 只负责
 //!   数据；时钟策略与首块延迟由上层（T70c 设备监督器/主机时钟）决定。
 //! - 冗余流（AES67 双流热备）与丢包补偿/重传：只做单流，双流选择留待后续。
+//! - 多流混入同一条输入总线：见 [crate::aes67_bus]（I3a 原语；尚未接到 Runtime/rt-host）。
 
 use core::fmt;
 use std::net::Ipv4Addr;

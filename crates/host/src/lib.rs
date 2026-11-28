@@ -4,6 +4,7 @@
 //! 实时约束：`BlockEngine::run_block` 与 `AudioBackend::capture/playout` 不得分配、加锁或做 IO。
 
 pub mod admission;
+pub mod aes67_bus;
 pub mod aes67_input;
 pub mod alsa_backend;
 pub mod backend;
@@ -17,6 +18,9 @@ pub mod safety;
 pub mod supervisor;
 
 pub use admission::{admit, Admission, AdmissionLimits, Budget, Rejection};
+pub use aes67_bus::{
+    Aes67InputBus, Aes67InputBusStats, BusBlockOutcome, BusError, MAX_BUS_STREAMS,
+};
 pub use backend::{AudioBackend, BackendError, DeviceConfig, NullBackend};
 pub use control::{ControlError, ControlState, PROTOCOL_VERSION};
 pub use engine::{
