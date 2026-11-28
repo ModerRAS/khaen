@@ -17,7 +17,9 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/lib/khaen
+# linuxptp pmc 需要在 /run 下创建客户端 UDS；ProtectSystem=strict 会把它变成只读，
+# 否则 /api/status.ptp 恒 unavailable（pmc: uds: bind failed: Read-only file system）。
+ReadWritePaths=/var/lib/khaen /run
 
 [Install]
 WantedBy=multi-user.target
