@@ -587,7 +587,12 @@ impl JobManagerCalibration {
         // 终态快照可能还没有 manifest。这里等待（最多 ~10s；并行跑整个 workspace 时
         // worker 可能被 CPU 调度推迟，2s 仍不够）并补登一次，保证 REST 第一次看到终态时
         // 审计产物完整（不伪造：等不到就是没有）。
-        if snapshot.state.is_terminal() && !self.manifest_present(id) {
+        //
+        // 注意判据是"job 是否已登记 manifest"，不是"manifest 文件是否存在"：
+        // apply_snapshot 里的 fs::read 可能恰好落在 manifest 原子 rename 的前一刻而失败，
+        // 此时文件已存在但登记为空；若按文件存在跳过等待，终态记录就会永久缺 bundle 的
+        // sha256（CI 偶发 offline_pipeline 失败的根因）。
+        if snapshot.state.is_terminal() && !self.manifest_registered(id) {
             for _ in 0..5000 {
                 std::thread::sleep(Duration::from_millis(2));
                 if self.manifest_present(id) {
@@ -612,6 +617,15 @@ impl JobManagerCalibration {
             self.emit(&snapshot.job_id.to_string(), state, None);
         }
         changed
+    }
+
+    /// job 的产物登记里是否已经有 manifest（判据见 sync 的竞态注释）。
+    fn manifest_registered(&self, id: u64) -> bool {
+        self.lock().get(&id).is_some_and(|job| {
+            job.artifacts
+                .iter()
+                .any(|artifact| artifact.name == ARTIFACT_MANIFEST_FILE_NAME)
+        })
     }
 
     /// 启动时恢复 pending checkpoint（daemon 重启中断的 job）。
