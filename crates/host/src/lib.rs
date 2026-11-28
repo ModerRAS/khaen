@@ -8,6 +8,7 @@ pub mod aes67_bus;
 pub mod aes67_input;
 pub mod alsa_backend;
 pub mod backend;
+pub mod capture;
 pub mod control;
 pub mod engine;
 pub mod graph;
@@ -22,6 +23,10 @@ pub use aes67_bus::{
     Aes67InputBus, Aes67InputBusStats, BusBlockOutcome, BusError, MAX_BUS_STREAMS,
 };
 pub use backend::{AudioBackend, BackendError, DeviceConfig, NullBackend};
+pub use capture::{
+    CaptureConfig, CaptureError, CaptureFillOutcome, CaptureFillStatus, CaptureInput, CaptureStats,
+    PcmCapture,
+};
 pub use control::{ControlError, ControlState, PROTOCOL_VERSION};
 pub use engine::{
     BlockEngine, EngineConfig, EngineError, EngineStats, GraphInfo, MuteReceipt, Passthrough,
