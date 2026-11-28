@@ -1258,12 +1258,17 @@ const messages = {
         channels: '接收声道数',
         map: '通道映射',
         source: '输入来源',
-        sdpSha: 'SDP sha256'
+        sdpSha: 'SDP sha256',
+        streams: 'AES67 流数'
       },
       source: {
         sdp: 'SDP 描述符（sdp）',
         manual: '手工配置（manual）'
       },
+      streamsValue: '{count} 路',
+      streamLabel: 'AES67 流 {index}',
+      streamSummary: '{group}:{port} · {channels}ch · {packets} 包 / {underruns} 欠载',
+      streamSummaryNoStats: '{group}:{port} · {channels}ch · 统计未上报'
     },
     inspect: {
       title: '方案预览（/api/plan/inspect）',

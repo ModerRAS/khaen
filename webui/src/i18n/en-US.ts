@@ -1261,12 +1261,17 @@ const messages: Messages = {
         channels: 'Input channels',
         map: 'Channel map',
         source: 'Input source',
-        sdpSha: 'SDP sha256'
+        sdpSha: 'SDP sha256',
+        streams: 'AES67 streams'
       },
       source: {
         sdp: 'SDP descriptor (sdp)',
         manual: 'Manual configuration (manual)'
       },
+      streamsValue: '{count} stream(s)',
+      streamLabel: 'AES67 stream {index}',
+      streamSummary: '{group}:{port} · {channels}ch · {packets} packets / {underruns} underruns',
+      streamSummaryNoStats: '{group}:{port} · {channels}ch · counters not reported'
     },
     inspect: {
       title: 'Plan preview (/api/plan/inspect)',

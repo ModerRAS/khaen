@@ -340,6 +340,7 @@ impl ControlTarget for FakeTarget {
             },
             blocks: self.engine.stats().blocks,
             input: khaen_host::aes67_input::Aes67InputStats::default(),
+            input_streams: vec![khaen_host::aes67_input::Aes67InputStats::default()],
             output: khaen_host::alsa_backend::AlsaStats::default(),
             receiver: khaen_host::runtime::ReceiverStats::default(),
             device: SupervisorStatus {

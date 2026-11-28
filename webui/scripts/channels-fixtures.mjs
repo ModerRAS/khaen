@@ -82,6 +82,24 @@ function buildInspect(overrides = {}) {
 }
 
 /** rt-host channels_status 的 current 视图（数据面真实配置）。 */
+/** 多流流表（channels_status.input_streams）：主流程 + 可选附加流，stats 可缺省。 */
+export function buildInputStreams(extra = []) {
+  return [
+    {
+      primary: true,
+      group: '239.69.1.1',
+      port: 5004,
+      payload_type: 98,
+      channels: 2,
+      map: [0, 1],
+      output_channels: 2,
+      jitter_frames: 256,
+      stats: { packets: 1200, frames_received: 57600, frames_filled: 57344, underruns: 2, overruns: 0, lost: 0, late: 0, malformed: 0, foreign_payloads: 0, ssrc: 305419896, jitter_fill: 192, asrc_bypasses: 0 }
+    },
+    ...extra
+  ]
+}
+
 export function buildChannelsCurrent(overrides = {}) {
   const channels = overrides.channels ?? 22
   return {
@@ -195,7 +213,7 @@ export function buildChannelsSeed(fixture) {
         target: 'rt-host',
         runtime_mode: 'aes67',
         output: { channels: 4, dac_map: [0, null, 1, null], channels_source: 'rt-host-channels-status' },
-        input: { channels: 2, map: [0, 1], source: null, sdp_sha256: null },
+        input: { channels: 2, map: [0, 1], source: null, sdp_sha256: null, streams: buildInputStreams() },
         mapping: [
           { lane: 0, dac: 0 },
           { lane: 1, dac: 2 }
@@ -250,7 +268,7 @@ export function buildChannelsSeed(fixture) {
         dac_map: buildMapping(channels).map((entry) => entry.dac),
         channels_source: 'rt-host-channels-status'
       },
-      input: { channels: 2, map: [0, 1], source: null, sdp_sha256: null },
+      input: { channels: 2, map: [0, 1], source: null, sdp_sha256: null, streams: buildInputStreams() },
       mapping: buildMapping(channels),
       plan: {
         source: 'rt-host',

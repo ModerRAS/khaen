@@ -931,6 +931,30 @@ mod app {
             Some(tracker) => tracker.status_json().to_string(),
             None => "null".to_string(),
         };
+        // IO I3d：每路 AES67 输入统计（加法字段；顺序与 channels_status.input_streams 一致）。
+        let input_streams_json: serde_json::Value = serde_json::Value::Array(
+            status
+                .input_streams
+                .iter()
+                .map(|stream| {
+                    serde_json::json!({
+                        "packets": stream.packets,
+                        "frames_received": stream.frames_received,
+                        "frames_filled": stream.frames_filled,
+                        "underruns": stream.underruns,
+                        "overruns": stream.overruns,
+                        "lost": stream.lost,
+                        "late": stream.late,
+                        "malformed": stream.malformed,
+                        "foreign_payloads": stream.foreign_payloads,
+                        "ssrc": stream.ssrc,
+                        "jitter_fill": stream.jitter_fill,
+                        "asrc_bypasses": stream.asrc_bypasses,
+                    })
+                })
+                .collect(),
+        );
+        let input_streams_json = input_streams_json.to_string();
         // 通道识别测试音（加法字段；没有控制通道时为 null，读方按不可用处理）。
         let test_tone_json = match test_tone {
             Some(slot) => slot.status_json().to_string(),
@@ -960,7 +984,7 @@ mod app {
                 "\"receiver\":{{\"packets_received\":{},\"queue_full_drops\":{},\"recv_errors\":{}}},",
                 "\"graph_id\":{},\"last_error\":{},",
                 "\"device_state\":\"{}\",\"absent_since\":{},\"reopen_attempts\":{},\"last_device_error\":{},",
-                "\"format\":{},\"reconfigure\":{},\"speaker_test\":{}}}\n"
+                "\"format\":{},\"reconfigure\":{},\"input_streams\":{},\"speaker_test\":{}}}\n"
             ),
             status.blocks,
             status.state.as_str(),
@@ -988,6 +1012,7 @@ mod app {
             last_device_error,
             format_json,
             reconfigure_json,
+            input_streams_json,
             test_tone_json
         );
         let temporary = path.with_extension("tmp");
@@ -1308,6 +1333,12 @@ mod tests {
                 jitter_fill: 192,
                 ..Default::default()
             },
+            input_streams: vec![khaen_host::aes67_input::Aes67InputStats {
+                packets: 34,
+                underruns: 2,
+                jitter_fill: 192,
+                ..Default::default()
+            }],
             output: AlsaStats::default(),
             receiver: ReceiverStats::default(),
             device: SupervisorStatus {
@@ -1351,6 +1382,12 @@ mod tests {
         assert_eq!(doc["device_rate"], serde_json::Value::Null);
         assert_eq!(doc["input"]["packets"], serde_json::json!(34));
         assert_eq!(doc["input"]["ssrc"], serde_json::Value::Null);
+        assert_eq!(
+            doc["input_streams"].as_array().map(Vec::len),
+            Some(1),
+            "per-stream stats must be an array (primary stream only in this fixture)"
+        );
+        assert_eq!(doc["input_streams"][0]["packets"], serde_json::json!(34));
         // T41：未启用 ASRC 时 input.asrc 为 null（纯增量字段）。
         assert_eq!(doc["input"]["asrc"], serde_json::Value::Null);
         assert_eq!(doc["graph_id"], serde_json::Value::Null);

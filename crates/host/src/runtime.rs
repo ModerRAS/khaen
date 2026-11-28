@@ -1031,8 +1031,10 @@ pub struct RuntimeStatus {
     pub state: RuntimeState,
     /// 已处理的块数（含欠载/安全静音块）。
     pub blocks: u64,
-    /// AES67 输入统计快照（含 jitter 水位/SSRC）。
+    /// 主流 AES67 输入统计快照（含 jitter 水位/SSRC；多流时等价于 input_streams[0]）。
     pub input: Aes67InputStats,
+    /// 每路 AES67 输入统计快照（第一项主流；单流时长度 1；顺序与 RuntimeConfig 流表一致）。
+    pub input_streams: Vec<Aes67InputStats>,
     /// ALSA 输出统计快照。
     pub output: AlsaStats,
     /// 收包线程统计快照。
@@ -1660,6 +1662,7 @@ impl<P: PcmOutput> Runtime<P> {
                 .stream_input(0)
                 .map(Aes67Input::stats)
                 .unwrap_or_default(),
+            input_streams: self.input_bus_stats().streams,
             output: self.backend.stats(),
             receiver: self.receiver.stats(),
             device_rate: device.device_rate,

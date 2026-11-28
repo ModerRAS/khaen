@@ -169,12 +169,42 @@ export interface ChannelsOutput {
   channels_source: string | null
 }
 
-/** 输入侧：AES67 接收通道数/映射/来源/SDP sha256。 */
+/** 单路 AES67 输入的实时统计（rt-host 快照；不可用时为 null，不补 0）。 */
+export interface ChannelsInputStreamStats {
+  packets: number | null
+  frames_received: number | null
+  frames_filled: number | null
+  underruns: number | null
+  overruns: number | null
+  lost: number | null
+  late: number | null
+  malformed: number | null
+  foreign_payloads: number | null
+  ssrc: number | null
+  jitter_fill: number | null
+  asrc_bypasses: number | null
+}
+
+/** 一路 AES67 输入（channels_status.input_streams；第一项 primary）。 */
+export interface ChannelsInputStream {
+  primary: boolean | null
+  group: string | null
+  port: number | null
+  payload_type: number | null
+  channels: number | null
+  map: number[] | null
+  output_channels: number | null
+  jitter_frames: number | null
+  stats: ChannelsInputStreamStats | null
+}
+
+/** 输入侧：AES67 接收通道数/映射/来源/SDP sha256 + 多流流表（旧 rt-host 为 null）。 */
 export interface ChannelsInput {
   channels: number | null
   map: number[] | null
   source: InputSource | null
   sdp_sha256: string | null
+  streams: ChannelsInputStream[] | null
 }
 
 /** 单个 lane -> dac 路由项。 */
@@ -747,6 +777,56 @@ function parseHotReconfigure(value: unknown): ChannelsHotReconfigure {
   }
 }
 
+/** 多流流表（input.streams）：缺失/null -> null；数组逐项宽松校验，stats 可缺省。 */
+function parseChannelsInputStreams(
+  input: Record<string, unknown>,
+  path: string
+): ChannelsInputStream[] | null {
+  const value = input.streams
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (!Array.isArray(value)) {
+    throw invalidResponse(path + '.streams must be an array or null')
+  }
+  return value.map((item, index) => {
+    const itemPath = path + '.streams[' + String(index) + ']'
+    const record = asRecord(item)
+    if (record === null) {
+      throw invalidResponse(itemPath + ' must be an object')
+    }
+    const statsRaw = asRecord(record.stats)
+    const stats =
+      statsRaw === null
+        ? null
+        : {
+            packets: readNumber(statsRaw, 'packets', itemPath + '.stats'),
+            frames_received: readNumber(statsRaw, 'frames_received', itemPath + '.stats'),
+            frames_filled: readNumber(statsRaw, 'frames_filled', itemPath + '.stats'),
+            underruns: readNumber(statsRaw, 'underruns', itemPath + '.stats'),
+            overruns: readNumber(statsRaw, 'overruns', itemPath + '.stats'),
+            lost: readNumber(statsRaw, 'lost', itemPath + '.stats'),
+            late: readNumber(statsRaw, 'late', itemPath + '.stats'),
+            malformed: readNumber(statsRaw, 'malformed', itemPath + '.stats'),
+            foreign_payloads: readNumber(statsRaw, 'foreign_payloads', itemPath + '.stats'),
+            ssrc: readNumber(statsRaw, 'ssrc', itemPath + '.stats'),
+            jitter_fill: readNumber(statsRaw, 'jitter_fill', itemPath + '.stats'),
+            asrc_bypasses: readNumber(statsRaw, 'asrc_bypasses', itemPath + '.stats')
+          }
+    return {
+      primary: readBoolean(record, 'primary', itemPath),
+      group: readString(record, 'group', itemPath),
+      port: readNumber(record, 'port', itemPath),
+      payload_type: readNumber(record, 'payload_type', itemPath),
+      channels: readNumber(record, 'channels', itemPath),
+      map: readNumberArray(record, 'map', itemPath),
+      output_channels: readNumber(record, 'output_channels', itemPath),
+      jitter_frames: readNumber(record, 'jitter_frames', itemPath),
+      stats
+    }
+  })
+}
+
 /** 校验并归一化 GET /api/channels 响应（恒 200；缺字段 null + reasons，不编数值）。 */
 export function parseChannelsInfo(body: unknown): ChannelsInfo {
   const root = asRecord(body)
@@ -772,7 +852,8 @@ export function parseChannelsInfo(body: unknown): ChannelsInfo {
       channels: readNumber(input, 'channels', 'input'),
       map: readNumberArray(input, 'map', 'input'),
       source: source === 'sdp' || source === 'manual' ? source : null,
-      sdp_sha256: readString(input, 'sdp_sha256', 'input')
+      sdp_sha256: readString(input, 'sdp_sha256', 'input'),
+      streams: parseChannelsInputStreams(input, 'input')
     },
     mapping: parseMapping(root.mapping),
     plan: parseChannelsPlan(root.plan),

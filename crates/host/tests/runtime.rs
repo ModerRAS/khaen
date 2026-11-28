@@ -460,6 +460,10 @@ fn additional_aes67_streams_mix_into_one_input_block() {
         assert_eq!(block[base + 2].to_bits(), b_left.to_bits());
         assert_eq!(block[base + 3].to_bits(), b_right.to_bits());
     }
+    let status = runtime.status();
+    assert_eq!(status.input_streams.len(), 2);
+    assert_eq!(status.input_streams[0].packets, 1);
+    assert_eq!(status.input_streams[1].packets, 1);
     let bus = runtime.input_bus_stats();
     assert_eq!(bus.streams.len(), 2);
     assert_eq!(bus.streams[0].frames_filled, 8);

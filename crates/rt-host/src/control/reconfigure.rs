@@ -32,7 +32,8 @@ use khaen_core::rt::{MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
 use khaen_core::sha256::{sha256, sha256_hex};
 use khaen_host::admission::AdmissionLimits;
 use khaen_host::aes67_input::{
-    Aes67InputConfig, MAX_OUTPUT_CHANNELS as MAX_INPUT_BUS_CHANNELS, MAX_RTP_CHANNELS,
+    Aes67InputConfig, Aes67InputStats, MAX_OUTPUT_CHANNELS as MAX_INPUT_BUS_CHANNELS,
+    MAX_RTP_CHANNELS,
 };
 use khaen_host::backend::DeviceConfig;
 use khaen_host::control::{engine_token, ControlError};
@@ -861,12 +862,41 @@ impl ChannelsState {
         }
     }
 
-    /// 启动时的 AES67 流表（channels_status.input_streams；只读配置，不含实时统计）。
+    /// 启动时的 AES67 流表（channels_status.input_streams）。
     ///
     /// 第一项是主流（用当前视图，channels_commit 改过也如实反映）；其余是启动时
     /// `additional_inputs`（多流热重配未实现，这些流不会随 commit 改变）。
-    fn input_streams_json(&self) -> Value {
-        fn stream(config: &Aes67InputConfig, primary: bool) -> Value {
+    /// 每项带 config 字段 + 快照里的 per-stream stats（快照不可用时 stats:null，不编数）。
+    fn input_streams_json(&self, snapshot: Option<&RuntimeSnapshot>) -> Value {
+        let stats = snapshot.map(|snapshot| snapshot.status.input_streams.as_slice());
+        fn stream(
+            config: &Aes67InputConfig,
+            primary: bool,
+            stats: Option<&Aes67InputStats>,
+        ) -> Value {
+            let stats_json = match stats {
+                Some(stats) => json!({
+                    "packets": stats.packets,
+                    "frames_received": stats.frames_received,
+                    "frames_filled": stats.frames_filled,
+                    "underruns": stats.underruns,
+                    "overruns": stats.overruns,
+                    "lost": stats.lost,
+                    "late": stats.late,
+                    "malformed": stats.malformed,
+                    "foreign_payloads": stats.foreign_payloads,
+                    "ssrc": stats.ssrc,
+                    "jitter_fill": stats.jitter_fill,
+                    "asrc": stats.asrc.map(|asrc| json!({
+                        "enabled": asrc.enabled,
+                        "ratio_ppm": asrc.ratio_ppm,
+                        "ppm_estimate": asrc.ppm_estimate,
+                        "fill_frames": asrc.fill_frames,
+                    })),
+                    "asrc_bypasses": stats.asrc_bypasses,
+                }),
+                None => Value::Null,
+            };
             json!({
                 "primary": primary,
                 "group": config.multicast_addr.to_string(),
@@ -876,6 +906,7 @@ impl ChannelsState {
                 "map": config.channels_map,
                 "output_channels": config.output_channels,
                 "jitter_frames": config.jitter_target_frames,
+                "stats": stats_json,
             })
         }
         let primary_config = Aes67InputConfig {
@@ -890,9 +921,9 @@ impl ChannelsState {
             jitter_target_frames: self.current.jitter_frames,
         };
         let mut streams = Vec::with_capacity(1 + self.base_config.additional_inputs.len());
-        streams.push(stream(&primary_config, true));
-        for input in &self.base_config.additional_inputs {
-            streams.push(stream(input, false));
+        streams.push(stream(&primary_config, true, stats.and_then(|s| s.first())));
+        for (index, input) in self.base_config.additional_inputs.iter().enumerate() {
+            streams.push(stream(input, false, stats.and_then(|s| s.get(index + 1))));
         }
         Value::Array(streams)
     }
@@ -918,6 +949,12 @@ impl ChannelsState {
                 json!("a channels commit is in flight (or its acknowledgement was lost): a second commit is rejected with channels_busy until the block thread records the result"),
             );
         }
+        if snapshot.is_none() {
+            reasons.insert(
+                "input_streams.stats".to_string(),
+                json!("no runtime status snapshot is available, so per-stream counters are not reported (the stream config list is still real); counters are not fabricated"),
+            );
+        }
         if device_state == Some("absent") {
             reasons.insert(
                 "device".to_string(),
@@ -929,7 +966,7 @@ impl ChannelsState {
             "op": "channels_status",
             "generation": generation,
             "input_source": self.input_source.as_ref().map(Aes67InputSource::to_json),
-            "input_streams": self.input_streams_json(),
+            "input_streams": self.input_streams_json(snapshot),
             "current": self.current.to_json(),
             "format": {
                 "block_frames": self.current.block_frames,

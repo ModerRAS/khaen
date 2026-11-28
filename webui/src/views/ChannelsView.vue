@@ -244,7 +244,7 @@ const inputRows = computed<KvRow[]>(() => {
     return []
   }
   const input = info.input
-  return [
+  const rows: KvRow[] = [
     {
       label: t('channels.input.field.channels'),
       value: intText(input.channels),
@@ -265,8 +265,34 @@ const inputRows = computed<KvRow[]>(() => {
       value: shortenId(input.sdp_sha256, 12, 8),
       copy: input.sdp_sha256,
       reason: reasonForChannelsPath(info, 'input.sdp_sha256')
+    },
+    {
+      label: t('channels.input.field.streams'),
+      value: input.streams === null ? null : t('channels.input.streamsValue', { count: input.streams.length }),
+      reason: reasonForChannelsPath(info, 'input.streams')
     }
   ]
+  for (const [index, stream] of (input.streams ?? []).entries()) {
+    const group = stream.group ?? t('common.dash')
+    const port = stream.port === null ? t('common.dash') : String(stream.port)
+    const channels = stream.channels === null ? t('common.dash') : String(stream.channels)
+    const stats = stream.stats
+    rows.push({
+      label: t('channels.input.streamLabel', { index: index + 1 }),
+      value:
+        stats === null
+          ? t('channels.input.streamSummaryNoStats', { group, port, channels })
+          : t('channels.input.streamSummary', {
+              group,
+              port,
+              channels,
+              packets: formatInteger(stats.packets, localeId.value),
+              underruns: formatInteger(stats.underruns, localeId.value)
+            }),
+      reason: stats === null ? reasonForChannelsPath(info, 'input.streams.stats') : null
+    })
+  }
+  return rows
 })
 
 /* --------------------------------------------------------- 文件选择 / 上传 */

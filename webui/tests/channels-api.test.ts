@@ -80,6 +80,12 @@ test('parseChannelsInfo keeps the real khaen-channels/v1 shape (current/device/f
   assert.deepEqual(info.input.map, [0, 1])
   assert.equal(info.input.source, null)
   assert.equal(info.input.sdp_sha256, null)
+  assert.equal(info.input.streams?.length, 1)
+  assert.equal(info.input.streams?.[0].primary, true)
+  assert.equal(info.input.streams?.[0].group, '239.69.1.1')
+  assert.equal(info.input.streams?.[0].port, 5004)
+  assert.equal(info.input.streams?.[0].stats?.packets, 1200)
+  assert.equal(info.input.streams?.[0].stats?.underruns, 2)
   // mapping 是方案 routing 镜像
   assert.equal(info.mapping?.length, 22)
   assert.deepEqual(info.mapping?.[3], { lane: 3, dac: 3 })
