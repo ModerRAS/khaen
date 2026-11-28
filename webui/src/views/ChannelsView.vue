@@ -556,11 +556,16 @@ const currentDacMap = computed<Array<number | null> | null>(() => {
 
 const draftChannels = ref<number | null>(null)
 const draftSampleRate = ref<number | null>(null)
+/** 原始 SDP 文本（IO I2c）：非空时整体替换 AES67 接收参数，显式 aes67_* 字段不生效。 */
+const draftSdp = ref<string>('')
 const draftAes67Group = ref<string>('')
 const draftAes67Port = ref<number | null>(null)
 const draftPayloadType = ref<number | null>(null)
 const draftAes67Channels = ref<number | null>(null)
 const draftAes67MapText = ref<string>('')
+
+/** SDP 非空时整体替换 AES67 接收参数：逐字段草稿不参与补丁，也不参与逐字段校验。 */
+const sdpActive = computed(() => draftSdp.value.trim().length > 0)
 const draftJitter = ref<number | null>(null)
 /** 方案 routing 的 DAC -> lane 文本（'-' = 该 DAC 无 lane）；空 = 未编辑，不猜当前路由。 */
 const draftDacMapText = ref<string>('')
@@ -630,6 +635,7 @@ function syncDraftsFromChannels(): void {
   const info = channels.value
   draftChannels.value = currentOutputChannels.value
   draftSampleRate.value = currentSampleRate.value
+  draftSdp.value = ''
   draftAes67Group.value = channelsCurrent.value?.aes67_group ?? ''
   draftAes67Port.value = channelsCurrent.value?.aes67_port ?? null
   draftPayloadType.value = channelsCurrent.value?.aes67_payload_type ?? null
@@ -666,25 +672,31 @@ const channelsPatch = computed<ChannelsPatch>(() => {
   if (draftSampleRate.value !== null && draftSampleRate.value !== currentSampleRate.value) {
     patch.sample_rate = draftSampleRate.value
   }
-  const group = draftAes67Group.value.trim()
-  if (group.length > 0 && group !== (channelsCurrent.value?.aes67_group ?? null)) {
-    patch.aes67_group = group
-  }
-  if (draftAes67Port.value !== null && draftAes67Port.value !== (channelsCurrent.value?.aes67_port ?? null)) {
-    patch.aes67_port = draftAes67Port.value
-  }
-  if (
-    draftPayloadType.value !== null &&
-    draftPayloadType.value !== (channelsCurrent.value?.aes67_payload_type ?? null)
-  ) {
-    patch.aes67_payload_type = draftPayloadType.value
-  }
-  if (draftAes67Channels.value !== null && draftAes67Channels.value !== currentAes67Channels.value) {
-    patch.aes67_channels = draftAes67Channels.value
-  }
-  const parsedAes67Map = parseNumberList(draftAes67MapText.value)
-  if (parsedAes67Map !== null && !sameNumberList(parsedAes67Map, currentAes67Map.value)) {
-    patch.aes67_map = parsedAes67Map
+  // SDP 是整体替换：非空时只发 sdp，不再逐字段发 aes67_*（后端也会拒绝混用）。
+  const sdp = draftSdp.value.trim()
+  if (sdp.length > 0) {
+    patch.sdp = sdp
+  } else {
+    const group = draftAes67Group.value.trim()
+    if (group.length > 0 && group !== (channelsCurrent.value?.aes67_group ?? null)) {
+      patch.aes67_group = group
+    }
+    if (draftAes67Port.value !== null && draftAes67Port.value !== (channelsCurrent.value?.aes67_port ?? null)) {
+      patch.aes67_port = draftAes67Port.value
+    }
+    if (
+      draftPayloadType.value !== null &&
+      draftPayloadType.value !== (channelsCurrent.value?.aes67_payload_type ?? null)
+    ) {
+      patch.aes67_payload_type = draftPayloadType.value
+    }
+    if (draftAes67Channels.value !== null && draftAes67Channels.value !== currentAes67Channels.value) {
+      patch.aes67_channels = draftAes67Channels.value
+    }
+    const parsedAes67Map = parseNumberList(draftAes67MapText.value)
+    if (parsedAes67Map !== null && !sameNumberList(parsedAes67Map, currentAes67Map.value)) {
+      patch.aes67_map = parsedAes67Map
+    }
   }
   if (draftJitter.value !== null && draftJitter.value !== (channelsCurrent.value?.jitter_frames ?? null)) {
     patch.jitter_frames = draftJitter.value
@@ -698,7 +710,11 @@ const channelsPatch = computed<ChannelsPatch>(() => {
 
 /** 文本解析失败先于契约校验（否则会把非法文本当「未修改」静默丢掉）。 */
 const patchTextError = computed<string | null>(() => {
-  if (draftAes67MapText.value.trim().length > 0 && parseNumberList(draftAes67MapText.value) === null) {
+  if (
+    !sdpActive.value &&
+    draftAes67MapText.value.trim().length > 0 &&
+    parseNumberList(draftAes67MapText.value) === null
+  ) {
     return 'aes67_map_value'
   }
   if (draftDacMapText.value.trim().length > 0 && parseDacMapList(draftDacMapText.value) === null) {
@@ -709,6 +725,9 @@ const patchTextError = computed<string | null>(() => {
 
 /** 只改 aes67_channels 而映射长度不匹配时也要在客户端拦住（后端会 400）。 */
 const patchAes67ConsistencyError = computed<string | null>(() => {
+  if (sdpActive.value) {
+    return null
+  }
   const patch = channelsPatch.value
   const targetChannels = patch.aes67_channels ?? channelsCurrent.value?.aes67_channels ?? null
   const targetMap = patch.aes67_map ?? currentAes67Map.value
@@ -1432,9 +1451,21 @@ void loadChannelsHistory()
               <el-option v-for="rate in CHANNELS_SAMPLE_RATES_HZ" :key="rate" :label="String(rate)" :value="rate" />
             </el-select>
           </label>
+          <label class="channels-hotswap__field channels-hotswap__field--wide">
+            <span>{{ t('channelsEdit.hotswap.field.sdp') }}</span>
+            <el-input
+              v-model="draftSdp"
+              type="textarea"
+              :rows="4"
+              :placeholder="t('channelsEdit.hotswap.sdpPlaceholder')"
+              :disabled="channels === null || channelsWriteBusy !== null"
+              size="small"
+            />
+          </label>
+          <p class="aux-text channels-hotswap__sdp-hint">{{ t('channelsEdit.hotswap.sdpHint') }}</p>
           <label class="channels-hotswap__field">
             <span>{{ t('channelsEdit.hotswap.field.aes67Group') }}</span>
-            <el-input v-model="draftAes67Group" :disabled="channels === null || channelsWriteBusy !== null" size="small" />
+            <el-input v-model="draftAes67Group" :disabled="channels === null || channelsWriteBusy !== null || sdpActive" size="small" />
           </label>
           <label class="channels-hotswap__field">
             <span>{{ t('channelsEdit.hotswap.field.aes67Port') }}</span>
@@ -1442,7 +1473,7 @@ void loadChannelsHistory()
               v-model="draftAes67Port"
               :min="1"
               :max="65535"
-              :disabled="channels === null || channelsWriteBusy !== null"
+              :disabled="channels === null || channelsWriteBusy !== null || sdpActive"
               size="small"
             />
           </label>
@@ -1452,7 +1483,7 @@ void loadChannelsHistory()
               v-model="draftPayloadType"
               :min="96"
               :max="127"
-              :disabled="channels === null || channelsWriteBusy !== null"
+              :disabled="channels === null || channelsWriteBusy !== null || sdpActive"
               size="small"
             />
           </label>
@@ -1462,13 +1493,13 @@ void loadChannelsHistory()
               v-model="draftAes67Channels"
               :min="1"
               :max="8"
-              :disabled="channels === null || channelsWriteBusy !== null"
+              :disabled="channels === null || channelsWriteBusy !== null || sdpActive"
               size="small"
             />
           </label>
           <label class="channels-hotswap__field">
             <span>{{ t('channelsEdit.hotswap.field.aes67Map') }}</span>
-            <el-input v-model="draftAes67MapText" :disabled="channels === null || channelsWriteBusy !== null" size="small" />
+            <el-input v-model="draftAes67MapText" :disabled="channels === null || channelsWriteBusy !== null || sdpActive" size="small" />
           </label>
           <label class="channels-hotswap__field">
             <span>{{ t('channelsEdit.hotswap.field.jitterFrames') }}</span>
@@ -1959,6 +1990,11 @@ void loadChannelsHistory()
 .channels-hotswap__field--wide {
   flex: 1 1 320px;
   min-width: min(320px, 100%);
+}
+
+.channels-hotswap__sdp-hint {
+  flex: 1 1 100%;
+  margin: 0;
 }
 
 .channels-hotswap__routing {

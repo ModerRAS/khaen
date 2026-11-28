@@ -57,13 +57,16 @@ const messages = {
       probeValue: '{rate} Hz / {channels} ch',
       sourceLabel: '当前值来源',
       sourceValue:
-        '数据面 channels_status.current（rt-host 权威）；mapping 是 daemon 记录的方案 routing 镜像，不是实时回读。',
+        '数据面 channels_status.current（rt-host 权威）；mapping 优先来自 rt-host readback.routing，拿不到才回退到 daemon 记录的方案 routing。',
       mappingUnknown:
         '当前方案 routing 未知（mapping=null）：不预填 DAC 路由、不假设直通；提交格式变化后需准备匹配新格式的方案。',
       formTitle: '目标配置（本地草稿）',
+      sdpPlaceholder: '粘贴 SDP 文本；prepare 时由 rt-host 解析并整体替换 AES67 目的地址/端口/PT/通道/映射',
+      sdpHint: 'SDP 非空时会整体替换 AES67 接收参数，上面的逐字段 AES67 输入不生效；SDP 与显式字段互斥。',
       field: {
         channels: '输出通道数',
         sampleRate: '采样率（Hz）',
+        sdp: '原始 SDP（可选，运行期重载接收参数）',
         aes67Group: 'AES67 目的地址（组播或单播）',
         aes67Port: 'AES67 端口',
         payloadType: 'RTP payload type',
@@ -149,6 +152,8 @@ const messages = {
       validation: {
         channels_range: '输出通道数必须是 1–22 的整数',
         sample_rate_value: '采样率只支持 48000 / 96000 Hz',
+        sdp_value: 'SDP 不能为空',
+        sdp_conflict: 'SDP 与显式 AES67 字段互斥：只给 SDP 或逐字段参数其中一种',
         aes67_group_value: 'AES67 目的地址必须是具体 IPv4 地址（组播组或单播本端地址；不能是 0.0.0.0/广播）',
         aes67_port_value: 'AES67 端口必须是 1–65535 的整数',
         payload_type_value: 'RTP payload type 必须是 96–127 的整数',

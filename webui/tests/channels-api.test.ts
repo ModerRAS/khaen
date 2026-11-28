@@ -265,6 +265,9 @@ test('validateChannelsPatch enforces the real ranges from khaen_core::rt / aes67
   assert.equal(validateChannelsPatch({ channels: CHANNELS_MAX_OUTPUT + 1 }), 'channels_range')
   assert.equal(validateChannelsPatch({ sample_rate: 44100 }), 'sample_rate_value')
   assert.equal(validateChannelsPatch({ sample_rate: 96000 }), null)
+  assert.equal(validateChannelsPatch({ sdp: 'v=0\r\ns=test\r\n' }), null)
+  assert.equal(validateChannelsPatch({ sdp: '   ' }), 'sdp_value')
+  assert.equal(validateChannelsPatch({ sdp: 'v=0', aes67_port: 5004 }), 'sdp_conflict')
   // IO I2b：单播本端地址合法；0.0.0.0/广播没有具体接收端。
   assert.equal(validateChannelsPatch({ aes67_group: '192.168.1.1' }), null)
   assert.equal(validateChannelsPatch({ aes67_group: '0.0.0.0' }), 'aes67_group_value')
@@ -490,6 +493,15 @@ test('channels API uses documented paths/methods/bodies for the PUT two-phase an
     method: 'PUT',
     path: '/api/channels',
     body: { stage: 'prepare', dac_map: [0, null, 1, null] }
+  })
+
+  // SDP 补丁：raw SDP 原样放进 prepare body（rt-host 负责解析/替换接收参数）。
+  const sdpText = 'v=0\r\nc=IN IP4 239.69.1.9\r\nm=audio 5004 RTP/AVP 96\r\na=rtpmap:96 L24/48000/2\r\n'
+  await api.prepareChannels({ sdp: sdpText })
+  assert.deepEqual(bodies.at(-1), {
+    method: 'PUT',
+    path: '/api/channels',
+    body: { stage: 'prepare', sdp: sdpText }
   })
 
   // PUT stage=commit：body 精确 = {stage:'commit', engine_token}

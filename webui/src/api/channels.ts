@@ -292,6 +292,8 @@ export interface ChannelsPatch {
   aes67_channels?: number
   /** AES67 输出槽映射（长度必须 = aes67_channels；每个槽 < channels 且不重复）。 */
   aes67_map?: number[]
+  /** 原始 SDP 文本（IO I2c）：rt-host 解析并整体替换 AES67 接收参数；与显式 aes67_* 字段互斥。 */
+  sdp?: string
   jitter_frames?: number
   /** 方案 routing：lane -> DAC（dac 0-based；与 dac_map 二选一，同时给必须一致）。 */
   mapping?: ChannelMappingEntry[]
@@ -1261,6 +1263,21 @@ export function validateChannelsPatch(patch: ChannelsPatch): string | null {
   const sampleRate = patch.sample_rate
   if (sampleRate !== undefined && !CHANNELS_SAMPLE_RATES_HZ.includes(sampleRate)) {
     return 'sample_rate_value'
+  }
+  const sdp = patch.sdp
+  if (sdp !== undefined) {
+    if (typeof sdp !== 'string' || sdp.trim().length === 0) {
+      return 'sdp_value'
+    }
+    if (
+      patch.aes67_group !== undefined ||
+      patch.aes67_port !== undefined ||
+      patch.aes67_payload_type !== undefined ||
+      patch.aes67_channels !== undefined ||
+      patch.aes67_map !== undefined
+    ) {
+      return 'sdp_conflict'
+    }
   }
   if (patch.aes67_group !== undefined && !isConcreteIpv4Destination(patch.aes67_group)) {
     return 'aes67_group_value'

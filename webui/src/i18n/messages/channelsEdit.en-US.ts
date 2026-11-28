@@ -57,13 +57,16 @@ const messages = {
       probeValue: '{rate} Hz / {channels} ch',
       sourceLabel: 'current value source',
       sourceValue:
-        'data plane channels_status.current (rt-host is authoritative); mapping is the daemon-recorded plan routing mirror, not a live readback.',
+        'data plane channels_status.current (rt-host is authoritative); mapping prefers the rt-host readback.routing and only falls back to the daemon-recorded plan routing.',
       mappingUnknown:
         'the current plan routing is unknown (mapping=null): DAC routes are not prefilled and passthrough is not assumed; after a format change, prepare and commit a plan that matches the new format.',
       formTitle: 'Target configuration (local draft)',
+      sdpPlaceholder: 'Paste SDP text; rt-host parses it at prepare and replaces the AES67 group/port/PT/channels/map as a whole',
+      sdpHint: 'A non-empty SDP replaces the AES67 receiver parameters as a whole, so the per-field AES67 inputs above do not apply; SDP and explicit fields are mutually exclusive.',
       field: {
         channels: 'output channels',
         sampleRate: 'sample rate (Hz)',
+        sdp: 'Raw SDP (optional runtime receiver reload)',
         aes67Group: 'AES67 destination (multicast or unicast)',
         aes67Port: 'AES67 port',
         payloadType: 'RTP payload type',
@@ -150,6 +153,8 @@ const messages = {
       validation: {
         channels_range: 'output channels must be an integer in 1–22',
         sample_rate_value: 'only 48000 / 96000 Hz are supported',
+        sdp_value: 'SDP must not be empty',
+        sdp_conflict: 'SDP and explicit AES67 fields are mutually exclusive: give either the SDP or the per-field parameters',
         aes67_group_value: 'the AES67 destination must be a concrete IPv4 address (multicast group or unicast local address; not 0.0.0.0/broadcast)',
         aes67_port_value: 'the AES67 port must be an integer in 1–65535',
         payload_type_value: 'the RTP payload type must be an integer in 96–127',
