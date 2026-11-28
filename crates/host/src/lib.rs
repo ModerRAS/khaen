@@ -12,6 +12,7 @@ pub mod capture;
 pub mod control;
 pub mod engine;
 pub mod graph;
+pub mod output_stage;
 pub mod owner;
 pub mod ring;
 pub mod runtime;
@@ -33,6 +34,7 @@ pub use engine::{
     Processor, Silent, SlotEngine, DEFAULT_BLOCK_FRAMES, MAX_BLOCK_FRAMES,
 };
 pub use graph::{CompileError, PlanGraph};
+pub use output_stage::{OutputStage, OutputStageStatus, DEFAULT_FADE_MS};
 pub use owner::{DeviceGuard, DeviceId, OwnerError};
 pub use ring::{channel, Consumer, Producer};
 pub use runtime::{

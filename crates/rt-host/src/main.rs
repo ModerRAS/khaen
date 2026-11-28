@@ -1039,7 +1039,7 @@ mod app {
         let json = format!(
             concat!(
                 "{{\"schema\":\"khaen-rt-status/v1\",\"blocks\":{},",
-                "\"state\":\"{}\",\"muted\":{},\"safe\":{},",
+                "\"state\":\"{}\",\"muted\":{},\"safe\":{},\"program_mute\":{},\"calibration_bypass\":{},\"input_paused\":{},",
                 "\"plan_rate\":{},\"device_rate\":{},\"rate_asserted\":{},",
                 "\"input\":{{\"packets\":{},\"underruns\":{},\"jitter_fill\":{},\"ssrc\":{},\"asrc\":{}}},",
                 "\"output\":{{\"xruns\":{},\"blocks_written\":{},\"bytes_written\":{}}},",
@@ -1052,6 +1052,9 @@ mod app {
             status.state.as_str(),
             status.muted,
             safe,
+            status.output_stage.program_mute_applied,
+            status.output_stage.calibration_bypass,
+            status.input_paused,
             status.plan_rate,
             device_rate,
             status.rate_asserted,
@@ -1424,6 +1427,8 @@ mod tests {
             graph: Default::default(),
             switch_pending: false,
             muted: false,
+            output_stage: Default::default(),
+            input_paused: false,
             last_error: None,
         }
     }

@@ -170,9 +170,22 @@ impl SafetySupervisor {
         self.state
     }
 
-    /// 是否必须静音输出（音频线程只读这个）。
+    /// 是否必须静音输出（音频线程只读这个；含用户静音，供仍把用户静音放在安全监督器里的调用方使用）。
     pub fn requires_mute(&self) -> bool {
         self.state.requires_mute() || self.user_mute
+    }
+
+    /// 仅安全故障是否要求静音（不含用户静音）。
+    ///
+    /// Runtime 使用 OutputStage 单独处理用户静音/校准旁路；若这里仍把 user_mute 算进去，
+    /// 校准扫频会被用户静音再次清零，无法做到“保持用户静音状态但临时放行”。
+    pub fn fault_requires_mute(&self) -> bool {
+        self.state == RuntimeState::Faulted
+    }
+
+    /// 用户静音请求。
+    pub fn user_mute_requested(&self) -> bool {
+        self.user_mute
     }
 
     /// 开始运行（Idle → Running）。

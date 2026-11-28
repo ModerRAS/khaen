@@ -249,6 +249,10 @@ pub(crate) struct FakeTarget {
     pub(crate) last_reconfigure_target: Option<ChannelsView>,
     /// 引擎重建前的累计块数（热重配换引擎后块计数保持连续，与真实 Runtime 同语义）。
     pub(crate) blocks_offset: u64,
+    /// 校准旁路（fake 也模拟“用户静音 + 旁路”的状态，供状态机测试断言）。
+    pub(crate) calibration_bypass: bool,
+    /// 校准期间输入暂停。
+    pub(crate) input_paused: bool,
 }
 
 impl FakeTarget {
@@ -262,6 +266,8 @@ impl FakeTarget {
             reconfigure_failures: VecDeque::new(),
             last_reconfigure_target: None,
             blocks_offset: 0,
+            calibration_bypass: false,
+            input_paused: false,
         }
     }
 
@@ -361,13 +367,45 @@ impl ControlTarget for FakeTarget {
             output_started: true,
             graph: self.engine.graph_info(),
             switch_pending: self.engine.switch_pending(),
-            muted: self.engine.stats().mute,
+            muted: self.engine.stats().mute && !self.calibration_bypass,
+            output_stage: khaen_host::output_stage::OutputStageStatus {
+                program_mute_requested: self.user_mute,
+                program_mute_applied: self.engine.stats().mute,
+                calibration_bypass: self.calibration_bypass,
+                muffled: self.engine.stats().mute && !self.calibration_bypass,
+                hard_muted: false,
+                applied_block: 0,
+                blocks: 0,
+                muted_blocks: 0,
+                hard_muted_blocks: 0,
+                audible_blocks: 0,
+                fade_frames: 0,
+                gain: 1.0,
+            },
+            input_paused: self.input_paused,
             last_error: None,
         }
     }
 
     fn total_faults(&self) -> u64 {
         0
+    }
+
+    fn calibration_enter(&mut self) -> Result<bool, String> {
+        let prior = self.user_mute;
+        self.input_paused = true;
+        self.calibration_bypass = true;
+        self.user_mute = true;
+        let _ = self.engine.request_mute(true);
+        Ok(prior)
+    }
+
+    fn calibration_leave(&mut self, restore_mute: bool) -> Result<(), String> {
+        self.calibration_bypass = false;
+        self.user_mute = restore_mute;
+        let _ = self.engine.request_mute(restore_mute);
+        self.input_paused = false;
+        Ok(())
     }
 
     fn begin_calibration_playback(

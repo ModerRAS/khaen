@@ -149,6 +149,8 @@ pub struct ControlCore {
     channels: Option<ChannelsState>,
     /// 热重配/校准互斥门（提交在执行时持有；校准 enter 检查）。
     gate: Arc<ReconfigGate>,
+    /// cal_enter 之前的 user mute；cal_leave 原样恢复（None = 当前不在校准会话）。
+    cal_restore_mute: Option<bool>,
     /// 热重配追踪器（状态/状态文件同一份）。
     reconfigure: SharedReconfigure,
     /// 通道识别测试音会话（SPEAKER-MAPPING P3.5）：块线程只拥有 playback；这里只做会话/状态。
@@ -264,6 +266,7 @@ impl ControlCore {
             calibration,
             channels,
             gate,
+            cal_restore_mute: None,
             reconfigure,
             test_tone: TestToneSlot::shared(),
         }
@@ -479,11 +482,111 @@ impl ControlCore {
                 "a speaker test tone is playing (busy): cal_enter would start a measurement while the output is playing a test tone; call test_tone_stop first",
             ));
         }
-        self.calibration_mut()?.enter(object)
+        if self.calibration.is_none() {
+            return Err(Self::calibration_not_wired());
+        }
+        // 已经在校准模式：只更新 mic/校验，不重复做块边界过渡（否则会把“进入前静音”
+        // 覆盖成当前静音，cal_leave 无法恢复原状态）。
+        if self
+            .calibration
+            .as_ref()
+            .is_some_and(|cal| cal.mode() == CalMode::Calibration)
+        {
+            return self.calibration_mut()?.enter(object);
+        }
+        // 先在块线程做过渡：记录原 user mute → 暂停 AES67 输入 → 开校准旁路 → 软件静音。
+        // 这样 UMIK probe 失败时可以用回执里的 prior_mute 原样回滚。
+        let prior_mute = match self.send(|ack| ControlCommand::CalEnter { ack })? {
+            CommandReply::CalEntered { prior_mute } => prior_mute,
+            CommandReply::Rejected { code, message } => {
+                return Err(ControlError::new(code, message));
+            }
+            other => {
+                return Err(not_applied(format!(
+                    "cal_enter transition was not applied: the block loop replied with an unexpected receipt: {other:?}"
+                )));
+            }
+        };
+        match self.calibration_mut()?.enter(object) {
+            Ok(value) => {
+                self.cal_restore_mute = Some(prior_mute);
+                Ok(value)
+            }
+            Err(error) => {
+                // probe/校验失败：回滚块线程的输入暂停、旁路与静音，保持播放模式。
+                let rollback = self.send(|ack| ControlCommand::CalLeave {
+                    restore_mute: prior_mute,
+                    ack,
+                });
+                match rollback {
+                    Ok(CommandReply::CalLeft { .. }) => Err(error),
+                    Ok(CommandReply::Rejected { message, .. }) => Err(ControlError::new(
+                        error.code,
+                        format!(
+                            "{}; additionally the calibration-enter rollback failed: {message}",
+                            error.message
+                        ),
+                    )),
+                    Ok(other) => Err(ControlError::new(
+                        error.code,
+                        format!(
+                            "{}; additionally the calibration-enter rollback returned an unexpected receipt: {other:?}",
+                            error.message
+                        ),
+                    )),
+                    Err(rollback_error) => Err(ControlError::new(
+                        error.code,
+                        format!(
+                            "{}; additionally the calibration-enter rollback was not acknowledged: {}",
+                            error.message, rollback_error.message
+                        ),
+                    )),
+                }
+            }
+        }
     }
 
     fn cal_leave(&mut self) -> Result<Value, ControlError> {
-        self.calibration_mut()?.leave()
+        let was_calibration = self
+            .calibration
+            .as_ref()
+            .is_some_and(|cal| cal.mode() == CalMode::Calibration);
+        let prior_mute = self.cal_restore_mute.take();
+        let mut value = self.calibration_mut()?.leave()?;
+        if !was_calibration {
+            // 不在校准模式：leave 幂等返回，无需碰块线程输出/输入状态。
+            return Ok(value);
+        }
+        // 原状态缺失是内部状态异常：按 fail-closed 恢复为静音，不擅自解除静音。
+        let restore_mute = prior_mute.unwrap_or(true);
+        match self.send(|ack| ControlCommand::CalLeave {
+            restore_mute,
+            ack,
+        }) {
+            Ok(CommandReply::CalLeft { input_resumed }) => {
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("prior_mute_restored".to_string(), json!(restore_mute));
+                    object.insert("input_resumed".to_string(), json!(input_resumed));
+                }
+                Ok(value)
+            }
+            Ok(CommandReply::Rejected { code, message }) => Err(ControlError::new(
+                code,
+                format!(
+                    "calibration mode was left, but restoring the output/input state failed: {message}"
+                ),
+            )),
+            Ok(other) => Err(not_applied(format!(
+                "calibration mode was left, but the block loop replied with an unexpected receipt: {other:?}"
+            ))),
+            Err(error) => Err(ControlError::new(
+                error.code,
+                format!(
+                    "calibration mode was left, but the output/input restore was not acknowledged: {}",
+                    error.message
+                ),
+            )),
+        }
     }
 
     fn cal_measure(
@@ -1003,6 +1106,9 @@ impl ControlCore {
             "faults": snapshot.faults,
             "silent": silent,
             "mute": status.muted,
+            "program_mute": status.output_stage.program_mute_applied,
+            "calibration_bypass": status.output_stage.calibration_bypass,
+            "input_paused": status.input_paused,
             "safe_mode": safe_mode,
             "actual_version": graph.version,
             "mode": self.mode.as_str(),

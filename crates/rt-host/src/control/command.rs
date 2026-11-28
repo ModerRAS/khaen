@@ -50,6 +50,20 @@ pub enum ControlCommand {
         /// 一次性回执通道。
         ack: Sender<CommandReply>,
     },
+    /// 进入校准模式：记录原 user mute → 暂停输入 → 开校准旁路 → 软件静音。
+    ///
+    /// 与 cal_enter 的 UMIK probe 分开：probe 失败时控制面会发 CalLeave 回滚。
+    CalEnter {
+        /// 一次性回执通道。
+        ack: Sender<CommandReply>,
+    },
+    /// 离开校准模式：关旁路 → 恢复原 user mute → 恢复 AES67 输入。
+    CalLeave {
+        /// cal_enter 之前的 user mute（原样恢复，不强制静音）。
+        restore_mute: bool,
+        /// 一次性回执通道。
+        ack: Sender<CommandReply>,
+    },
     /// 热重配（M3b）：控制线程已校验/探测的完整新配置；块线程在块边界执行
     /// （静音 → 关旧 PCM → 换配置/重开设备/重建收包 → hw 回读校验 → 恢复）。
     Reconfigure {
@@ -132,6 +146,16 @@ pub enum CommandReply {
         /// 结束前是否有进行中的校准播放。
         was_active: bool,
     },
+    /// 已进入校准模式。
+    CalEntered {
+        /// cal_enter 之前的 user mute（cal_leave 原样恢复）。
+        prior_mute: bool,
+    },
+    /// 已离开校准模式。
+    CalLeft {
+        /// 是否成功恢复 AES67 输入。
+        input_resumed: bool,
+    },
     /// 热重配成功（新配置已生效并通过 hw 回读校验；实测 gap 在内）。
     Reconfigured {
         /// 机械结果 + 目标视图。
@@ -186,6 +210,14 @@ pub trait ControlTarget {
     /// 用户静音请求（热重配前后原样恢复用；安全静音不在此列）。
     fn user_mute_requested(&self) -> bool;
 
+    /// 校准进入：记录原 user mute，暂停输入，开校准旁路，再软件静音。
+    ///
+    /// 返回 cal_enter 之前的 user mute（供 cal_leave 原样恢复）。
+    fn calibration_enter(&mut self) -> Result<bool, String>;
+
+    /// 校准离开：关校准旁路，恢复原 user mute，恢复输入。
+    fn calibration_leave(&mut self, restore_mute: bool) -> Result<(), String>;
+
     /// 输出设备当前是否已打开（重配失败上报用）。
     fn device_started(&self) -> bool;
 
@@ -235,6 +267,31 @@ impl<P: PcmOutput> ControlTarget for Runtime<P> {
 
     fn user_mute_requested(&self) -> bool {
         Runtime::<P>::user_mute_requested(self)
+    }
+
+    fn calibration_enter(&mut self) -> Result<bool, String> {
+        let prior_mute = self.user_mute_requested();
+        self.pause_input().map_err(|err| {
+            format!(
+                "pause AES67 input for calibration failed: [{:?}] {err}",
+                err.code()
+            )
+        })?;
+        self.set_calibration_bypass(true);
+        let _ = self.request_mute(true);
+        Ok(prior_mute)
+    }
+
+    fn calibration_leave(&mut self, restore_mute: bool) -> Result<(), String> {
+        // 先关旁路并恢复用户静音（此时若原状态是静音，输出立即静音），最后恢复输入。
+        self.set_calibration_bypass(false);
+        let _ = self.request_mute(restore_mute);
+        self.resume_input().map_err(|err| {
+            format!(
+                "resume AES67 input after calibration failed: [{:?}] {err}",
+                err.code()
+            )
+        })
     }
 
     fn device_started(&self) -> bool {
@@ -300,6 +357,34 @@ pub fn execute_command<T: ControlTarget>(
         ControlCommand::CalPlaybackEnd { ack } => {
             let was_active = target.end_calibration_playback();
             let _ = ack.send(CommandReply::CalPlaybackEnded { was_active });
+        }
+        ControlCommand::CalEnter { ack } => match target.calibration_enter() {
+            Ok(prior_mute) => {
+                let _ = ack.send(CommandReply::CalEntered { prior_mute });
+            }
+            Err(message) => {
+                let _ = ack.send(CommandReply::Rejected {
+                    code: error::NOT_APPLIED,
+                    message: format!("calibration enter transition failed: {message}"),
+                });
+            }
+        },
+        ControlCommand::CalLeave { restore_mute, ack } => {
+            match target.calibration_leave(restore_mute) {
+                Ok(()) => {
+                    let _ = ack.send(CommandReply::CalLeft {
+                        input_resumed: true,
+                    });
+                }
+                Err(message) => {
+                    // 恢复输入失败时静音状态已经恢复且仍 fail-closed；回执如实报告，
+                    // 控制面保留错误细节而不是假装成功。
+                    let _ = ack.send(CommandReply::Rejected {
+                        code: error::NOT_APPLIED,
+                        message: format!("calibration leave transition failed: {message}"),
+                    });
+                }
+            }
         }
         ControlCommand::Reconfigure {
             token,

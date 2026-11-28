@@ -202,3 +202,26 @@ v1 的 `tspi-motu-48k-keeper` 与 `tspi-motu-net.service` 在 v2 里被**监督�
 | 模式 | **两阶段接通**（`surface=mode`） | `off` = 块边界静音整链；`on`/`aes67` = 解除静音（当前唯一实现的输入源是 aes67）。`toslink`/`dante` 等采集源未实现，显式拒绝；真实采集源切换属数据面/设备监督层（T70g 未实现） |
 
 `status` 的 `surfaces` / `surface_reasons` 逐项如实上报；未接通的界面不得返回假成功。
+
+## 输出级与软件静音（2026-11-28）
+
+数据流在原有 DSP 图之后、ALSA `playout` 之前增加一个 **OutputStage**：
+
+```
+AES67/采集输入 -> 输入总线 -> DSP 图（content/crossover/matrix/protection/routing）
+              -> OutputStage（program mute / calibration bypass / hard mute）
+              -> AlsaOutputBackend::playout
+```
+
+- `program_mute`：用户日常静音的应用软件实现，块边界生效；mute 立即整块清零，unmute 直接恢复（当前未启用淡入淡出，保持既有逐位直通合同）。不依赖声卡型号，不写 MOTU/CueMix/ALSA 音量。
+- `calibration_bypass`：校准扫频期间临时放行 program mute；由 `cal_enter` 打开、`cal_leave` 关闭。安全故障的 hard mute 始终优先。
+- `hard_mute`：安全监督器 faulted 或输入欠载时立即清零（fail-closed），不推进`gain`、不把输出状态带进恢复块。
+- 状态：`RuntimeStatus.muted` 表示“节目当前是否被软件静音”（校准旁路时 false）；`RuntimeStatus.output_stage` 给出 requested/applied/bypass/hard/muted 计数；`RuntimeStatus.input_paused` 表示校准暂停输入。
+
+### 校准期间的输入暂停
+
+`Runtime::pause_input()` 停止并 join 所有 AES67 收包线程，清空 SPSC 与输入总线；暂停期间 `run_block` 写静音，但**不计输入欠载、不触发安全故障**。`Runtime::resume_input()` 用 `SourceFactory` 按当前配置重建收包线程与全新抖动缓冲（预填从零开始）。`cal_enter` 记录进入前的 user mute 后执行 pause+bypass+mute；`cal_leave` 关闭旁路、恢复原 user mute、再 resume 输入。这样外部发送端无需停止，且校准结束不会把用户原本的静音状态改掉。
+
+### MOTU/CueMix 边界
+
+MOTU/CueMix 是同一项目内的**独立可选控制模块**，不是输出链路的一部分：OutputStage/校准/输入暂停路径没有任何 MOTU 调用；`/api/mute` 也不写 CueMix。MOTU 页面只通过 `/api/motu*` 的显式设备操作驱动，遵守既有单通道/单飞/回读约束。两者只共享物理设备的使用时间，不共享软件状态。

@@ -1765,3 +1765,117 @@ fn open_device_restarts_jitter_prefill_after_device_loss() {
     assert_bits(&block, &decoded_all(&[1100, 2200, 3300, 4400]));
     assert_eq!(runtime.status().state, RuntimeState::Running);
 }
+
+// ===========================================================================
+// 输入暂停/恢复（校准自动停输入用）
+// ===========================================================================
+
+#[test]
+fn pause_input_stops_receivers_and_writes_silence_without_underrun_fault() {
+    const SIGNAL: [i32; 16] = [
+        1_000_000, -1_000_000, 500_000, -500_000, 42, -42, 7, -7, 0, 0, 100, -100, 3, -3, 9, -9,
+    ];
+    let (source, handle) = fake_source();
+    let factory_handle = handle.clone();
+    let mut runtime = Runtime::<FakePcm>::with_source_factory(
+        runtime_config(2, 8),
+        source,
+        move |_input: &Aes67InputConfig,
+              _receiver: &ReceiverConfig|
+              -> Result<Box<dyn PacketSource + Send>, khaen_host::runtime::ReceiverError> {
+            Ok(Box::new(FakeSource {
+                handle: factory_handle.clone(),
+            }))
+        },
+    )
+    .expect("runtime with source factory");
+
+    handle.send(packet(0, 0, &SIGNAL));
+    wait_for_packets(&runtime, 1);
+    runtime.run_block().expect("running block");
+    assert!(runtime.receivers_running());
+
+    runtime.pause_input().expect("pause");
+    assert!(runtime.input_paused());
+    assert!(!runtime.receivers_running());
+    assert!(runtime.pause_input().is_ok(), "pause is idempotent");
+
+    for _ in 0..4 {
+        let block = runtime.run_block().expect("paused block");
+        assert!(
+            block.iter().all(|sample| *sample == 0.0),
+            "paused input must write silence"
+        );
+    }
+    let status = runtime.status();
+    assert!(status.input_paused);
+    assert_eq!(
+        status.state,
+        RuntimeState::Running,
+        "paused input must not be counted as underrun/fault"
+    );
+    assert_eq!(status.input.underruns, 0);
+
+    runtime.resume_input().expect("resume");
+    assert!(!runtime.input_paused());
+    assert!(runtime.receivers_running());
+    handle.send(packet(1, 8, &SIGNAL));
+    // 恢复后是新收包线程，统计从 0 开始。
+    wait_for_packets(&runtime, 1);
+    let block = runtime.run_block().expect("resumed block");
+    assert!(
+        block.iter().any(|sample| *sample != 0.0),
+        "resumed input must reach output"
+    );
+    assert_eq!(runtime.status().state, RuntimeState::Running);
+}
+
+#[test]
+fn pause_input_without_factory_refuses_resume_and_stays_fail_closed() {
+    let (source, _handle) = fake_source();
+    let mut runtime = Runtime::<FakePcm>::with_source(runtime_config(2, 8), source)
+        .expect("runtime without factory");
+    runtime
+        .pause_input()
+        .expect("pause does not need a factory");
+    assert!(runtime.input_paused());
+    assert!(!runtime.receivers_running());
+
+    let err = runtime
+        .resume_input()
+        .expect_err("resume must refuse without a source factory");
+    assert_eq!(err.code(), codes::CONFIG);
+    assert!(runtime.input_paused(), "failed resume must stay paused");
+    assert!(!runtime.receivers_running());
+    let block = runtime.run_block().expect("paused block");
+    assert!(block.iter().all(|sample| *sample == 0.0));
+}
+
+#[test]
+fn user_mute_does_not_block_calibration_bypass_playback() {
+    let (mut runtime, _handle) = runtime_for(2, 8);
+    let block_frames = runtime.config().engine.block_frames;
+    let channels = runtime.config().engine.output_channels;
+    let block_samples = block_frames * channels;
+    let progress = Arc::new(khaen_host::runtime::CalibrationProgress::new(1));
+    let playback = khaen_host::runtime::CalibrationPlayback::new(
+        vec![0.5f32; block_samples],
+        block_frames,
+        channels,
+        progress,
+    )
+    .expect("playback");
+    runtime.request_mute(true);
+    runtime.set_calibration_bypass(true);
+    assert_eq!(
+        runtime.begin_calibration_playback(playback).expect("begin"),
+        1
+    );
+    let block = runtime.run_calibration_block().expect("sweep block");
+    assert!(
+        block.iter().all(|sample| (*sample - 0.5).abs() < 1e-6),
+        "calibration bypass must stay audible while the user mute is preserved"
+    );
+    assert!(runtime.user_mute_requested());
+    assert!(runtime.calibration_bypass());
+}

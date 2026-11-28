@@ -357,6 +357,79 @@ fn enter_requires_audible_and_reports_calibration_mode_and_wiring() {
 }
 
 #[test]
+fn enter_while_muted_pauses_input_bypasses_mute_and_leave_restores_prior_mute() {
+    let dir = TempDir::new("enter-muted");
+    let mut harness = fake_harness(dir.path());
+    publish_snapshot(&mut harness);
+
+    // 进入前是用户静音：cal_enter 不再拒绝它，而是记录并自动暂停输入+软件静音。
+    let mute = harness.call_json(&json!({ "op": "mute", "mute": true }));
+    assert_eq!(mute["ok"], json!(true), "{mute}");
+    harness.run_blocks(1);
+    assert!(harness.user_mute_requested());
+
+    let entered = call_cal_enter(&mut harness, true);
+    assert_eq!(entered["mode"], json!("calibration"), "{entered}");
+    harness.run_blocks(1);
+    let status = harness.call_json(&json!({ "op": "status" }));
+    assert_eq!(status["input_paused"], json!(true));
+    assert_eq!(status["calibration_bypass"], json!(true));
+    assert_eq!(status["program_mute"], json!(true));
+    assert_eq!(
+        status["mute"],
+        json!(false),
+        "bypass keeps the sweep audible even though the user mute is preserved"
+    );
+
+    // 静音状态下仍可测量（不必先手动解除静音）。
+    let measure = harness.call_json(&json!({
+        "op": "cal_measure",
+        "audible": true,
+        "wait_ms": 300_000,
+    }));
+    assert_eq!(measure["ok"], json!(true), "measure failed: {measure}");
+
+    let left = harness.call_json(&json!({ "op": "cal_leave" }));
+    assert_eq!(left["ok"], json!(true), "{left}");
+    assert_eq!(left["prior_mute_restored"], json!(true));
+    assert!(
+        harness.user_mute_requested(),
+        "prior muted state must be restored"
+    );
+    harness.run_blocks(1);
+    let status = harness.call_json(&json!({ "op": "status" }));
+    assert_eq!(status["input_paused"], json!(false));
+    assert_eq!(status["calibration_bypass"], json!(false));
+    assert_eq!(status["program_mute"], json!(true));
+    assert_eq!(status["mute"], json!(true));
+}
+
+#[test]
+fn enter_while_unmuted_restores_unmuted_on_leave() {
+    let dir = TempDir::new("enter-unmuted");
+    let mut harness = fake_harness(dir.path());
+    publish_snapshot(&mut harness);
+    assert!(!harness.user_mute_requested());
+    let entered = call_cal_enter(&mut harness, true);
+    assert_eq!(entered["mode"], json!("calibration"), "{entered}");
+    assert!(
+        harness.user_mute_requested(),
+        "cal enter uses software mute"
+    );
+    let left = harness.call_json(&json!({ "op": "cal_leave" }));
+    assert_eq!(left["ok"], json!(true), "{left}");
+    assert_eq!(left["prior_mute_restored"], json!(false));
+    assert!(
+        !harness.user_mute_requested(),
+        "leave must restore the prior unmuted state instead of forcing mute"
+    );
+    harness.run_blocks(1);
+    let status = harness.call_json(&json!({ "op": "status" }));
+    assert_eq!(status["program_mute"], json!(false));
+    assert_eq!(status["mute"], json!(false));
+}
+
+#[test]
 fn measure_before_enter_is_rejected_with_not_in_calibration() {
     let dir = TempDir::new("not-in-cal");
     let mut harness = fake_harness(dir.path());

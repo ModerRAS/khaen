@@ -95,6 +95,7 @@ use crate::engine::{
     EngineConfig, EngineError, GraphInfo, MuteReceipt, Passthrough, Processor, Silent, SlotEngine,
 };
 use crate::graph::{CompileError, PlanGraph};
+use crate::output_stage::{OutputStage, OutputStageStatus};
 use crate::ring::{self, Consumer, Producer};
 use crate::safety::{FaultReason, RuntimeState, SafetyPolicy, SafetySupervisor};
 use crate::supervisor::{
@@ -1133,8 +1134,12 @@ pub struct RuntimeStatus {
     pub graph: GraphInfo,
     /// 是否有已 stage、尚未在块边界生效的图切换。
     pub switch_pending: bool,
-    /// 引擎实际静音状态（块边界后的值；用户请求与安全静音任一为真即为 true）。
+    /// 节目输出是否被软件静音（块边界后的值；校准旁路期间为 false）。
     pub muted: bool,
+    /// 输出级完整状态：用户静音/校准旁路/硬静音计数/淡入进度。
+    pub output_stage: OutputStageStatus,
+    /// AES67/采集输入是否被暂停（校准期间自动停输入；暂停时块路径写静音且不计欠载）。
+    pub input_paused: bool,
     /// 最近一次错误码：优先数据面（块路径）错误，否则设备监督器最近失败码；没有则 None。
     ///
     /// 数据面错误码见 codes；设备错误码见 SupervisorErrorCode::as_str
@@ -1188,10 +1193,12 @@ pub struct Runtime<P: PcmOutput> {
     last_error: Option<&'static str>,
     /// 进行中的校准播放（T70f-c；None = 播放模式）。
     calibration: Option<ActiveCalibration>,
-    /// 收包源工厂（热重配重建收包线程用；测试注入的假包源为 None）。
+    /// 收包源工厂（热重配/输入暂停恢复重建收包线程用；测试注入的假包源为 None）。
     source_factory: Option<SourceFactory>,
-    /// 用户静音请求（与安全静音独立的用户意图；热重配前后要原样恢复）。
-    user_mute: bool,
+    /// 输入暂停标记：true 时块路径不抽包、不填输入、不计欠载，输出硬静音。
+    input_paused: bool,
+    /// 输出级：DSP 之后的软件静音/校准旁路/安全硬静音唯一真值源。
+    output_stage: OutputStage,
 }
 
 impl<P: PcmOutput> fmt::Debug for Runtime<P> {
@@ -1437,6 +1444,10 @@ impl<P: PcmOutput> Runtime<P> {
         };
         let block = vec![0.0f32; input.samples_per_block()];
         let out_block = vec![0.0f32; engine.output_samples_per_block()];
+        // Runtime 保持既有“块边界立即切换”的逐位合同：不引入淡入淡出；
+        // OutputStage 仍保留可配置淡入能力，供将来显式启用。
+        let output_stage =
+            OutputStage::new(config.engine.sample_rate, config.engine.output_channels, 0);
         let packet_buf = vec![0u8; config.receiver.packet_bytes];
         Ok(Self {
             config,
@@ -1461,7 +1472,8 @@ impl<P: PcmOutput> Runtime<P> {
             last_error: None,
             calibration: None,
             source_factory,
-            user_mute: false,
+            input_paused: false,
+            output_stage,
         })
     }
 
@@ -1549,6 +1561,107 @@ impl<P: PcmOutput> Runtime<P> {
                 .additional_receivers
                 .iter()
                 .all(Aes67Receiver::is_running)
+    }
+
+    /// 输入是否处于暂停状态（校准自动停输入）。
+    pub fn input_paused(&self) -> bool {
+        self.input_paused
+    }
+
+    /// 控制路径：暂停输入（停止/join 所有 AES67 收包线程并清空抖动缓冲；采集模式清采集队列）。
+    ///
+    /// 暂停后 `run_block` 写静音、**不**累计输入欠载、**不**触发安全故障；这是校准期间
+    /// “不依赖外部发送端停止/iptables 也能安全测量”的入口。恢复走 [`Runtime::resume_input`]。
+    ///
+    /// AES67 模式需要构造时提供收包源工厂（生产 `new/new_deferred` 都有；注入假源通常没有，
+    /// 此时暂停可以成功，恢复会如实返回配置错误，不假装重建）。
+    pub fn pause_input(&mut self) -> Result<(), RuntimeError> {
+        if self.input_paused {
+            return Ok(());
+        }
+        // 先构造新输入总线（配置已校验，失败概率只可能是内部错误），再停线程，避免停完才发现分配失败。
+        let fresh_input = if self.capture.is_some() {
+            None
+        } else {
+            Some(Aes67InputBus::new(self.input_configs()).map_err(RuntimeError::Bus)?)
+        };
+        let mut first_error = None;
+        if let Some(capture) = self.capture.as_mut() {
+            capture.flush();
+        } else {
+            if let Err(err) = self.receiver.stop() {
+                first_error = Some(err);
+            }
+            for receiver in &mut self.additional_receivers {
+                if let Err(err) = receiver.stop() {
+                    first_error.get_or_insert(err);
+                }
+            }
+            while self.receiver.next_packet(&mut self.packet_buf).is_some() {}
+            for receiver in &mut self.additional_receivers {
+                while receiver.next_packet(&mut self.packet_buf).is_some() {}
+            }
+            if let Some(fresh) = fresh_input {
+                self.input = fresh;
+            }
+        }
+        self.input_paused = true;
+        self.consecutive_underruns = 0;
+        self.consecutive_overruns = 0;
+        match first_error {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
+    }
+
+    /// 控制路径：恢复输入（AES67 模式按当前配置重新绑定组播并发包线程；采集模式清队列）。
+    ///
+    /// 新抖动缓冲从零预填（Warmup 静音块），恢复后不会把暂停期间旧包/断流混进节目。
+    /// 失败时保持暂停状态并返回错误（fail-closed）；已构造的临时接收器由 Drop 停止。
+    pub fn resume_input(&mut self) -> Result<(), RuntimeError> {
+        if !self.input_paused {
+            return Ok(());
+        }
+        if let Some(capture) = self.capture.as_mut() {
+            capture.flush();
+            self.input_paused = false;
+            self.consecutive_underruns = 0;
+            self.consecutive_overruns = 0;
+            return Ok(());
+        }
+        let Some(factory) = self.source_factory.as_ref() else {
+            return Err(RuntimeError::Config(
+                "input source factory unavailable; cannot resume AES67 input",
+            ));
+        };
+        let streams = self.input_configs();
+        let mut sources = Vec::with_capacity(streams.len());
+        for input in &streams {
+            sources.push(factory(input, &self.config.receiver)?);
+        }
+        let fresh_input = Aes67InputBus::new(streams).map_err(RuntimeError::Bus)?;
+        let primary = Aes67Receiver::spawn(BoxedSource(sources.remove(0)), &self.config.receiver)?;
+        let mut additional = Vec::with_capacity(sources.len());
+        for source in sources {
+            additional.push(Aes67Receiver::spawn(
+                BoxedSource(source),
+                &self.config.receiver,
+            )?);
+        }
+        self.receiver = primary;
+        self.additional_receivers = additional;
+        self.input = fresh_input;
+        self.input_paused = false;
+        self.consecutive_underruns = 0;
+        self.consecutive_overruns = 0;
+        Ok(())
+    }
+
+    /// 当前配置对应的输入流表（主流 + additional_inputs；控制路径分配）。
+    fn input_configs(&self) -> Vec<Aes67InputConfig> {
+        std::iter::once(self.config.input.clone())
+            .chain(self.config.additional_inputs.iter().cloned())
+            .collect()
     }
 
     /// 输出设备是否已打开（PCM 句柄在手；设备掉线/尚未打开时为 false）。
@@ -1659,9 +1772,14 @@ impl<P: PcmOutput> Runtime<P> {
             // 控制路径用 open_device 重开成功后再恢复块循环（进程本身不退出）。
             return Err(RuntimeError::Backend(BackendError::NotStarted));
         }
-        // 1) 输入：采集模式从采集块队列拉一块；AES67 模式先抽干收包 SPSC 再填抖动环。
+        // 1) 输入：暂停期间不抽包、不填抖动环、不计欠载；校准控制路径会显式 pause/resume。
+        //    非暂停时：采集模式从采集块队列拉一块；AES67 模式先抽干收包 SPSC 再填抖动环。
         //    两条路径的 fill 都是声明的实时安全操作（零分配/无锁/无 IO）。
-        let input_filled = if let Some(capture) = self.capture.as_mut() {
+        let input_paused = self.input_paused;
+        let input_filled = if input_paused {
+            self.block.fill(0.0);
+            false
+        } else if let Some(capture) = self.capture.as_mut() {
             let outcome = capture.fill_block(&mut self.block);
             outcome.status == CaptureFillStatus::Filled
         } else {
@@ -1702,7 +1820,9 @@ impl<P: PcmOutput> Runtime<P> {
                 }
             }
         };
-        if input_filled {
+        if input_paused {
+            // 暂停是控制面主动状态：不累计输入欠载，不触发安全故障。
+        } else if input_filled {
             self.consecutive_underruns = 0;
             self.consecutive_overruns = 0;
         } else {
@@ -1723,11 +1843,13 @@ impl<P: PcmOutput> Runtime<P> {
         };
         self.out_block.copy_from_slice(processed);
 
-        // 4) 安全静音/输入静音：图已处理过本块（状态保持前进），输出整块清零。
-        let muted = !input_filled || self.safety.requires_mute() || self.pending_fault.is_some();
-        if muted {
-            self.out_block.fill(0.0);
-        }
+        // 4) 输出级：安全故障/输入欠载立即硬清零；用户静音/校准旁路/淡入都在这里统一处理。
+        //    图已处理过本块（状态保持前进），不会因为静音回退 DSP 状态。
+        let hard_mute = input_paused
+            || !input_filled
+            || self.safety.fault_requires_mute()
+            || self.pending_fault.is_some();
+        self.output_stage.apply(&mut self.out_block, hard_mute);
 
         // 5) 写输出后端。
         self.blocks = self.blocks.saturating_add(1);
@@ -1790,20 +1912,37 @@ impl<P: PcmOutput> Runtime<P> {
     /// 与安全静音相互独立：用户解除静音不会清除安全故障，锁存期间 run_block 仍然整块清零
     /// （fail-closed）。这里同时把请求写进安全监督器的 user_mute，状态与引擎保持一致。
     pub fn request_mute(&mut self, mute: bool) -> MuteReceipt {
-        let receipt = self.engine.request_mute(mute);
+        let receipt = self.output_stage.request_program_mute(mute);
         self.safety.set_user_mute(mute);
-        self.user_mute = mute;
         receipt
     }
 
     /// 用户静音请求（与安全静音独立的用户意图；热重配前后原样恢复用）。
     pub fn user_mute_requested(&self) -> bool {
-        self.user_mute
+        self.output_stage.program_mute_requested()
     }
 
-    /// 引擎当前实际静音状态（块边界后的值，来自块引擎统计）。
+    /// 输出级当前实际静音状态（块边界后的值；校准旁路时即使请求了静音也为 false）。
     pub fn muted(&self) -> bool {
-        self.engine.stats().mute
+        self.output_stage.muffled()
+    }
+
+    /// 输出级视图（测试/控制面诊断）。
+    pub fn output_stage(&self) -> &OutputStage {
+        &self.output_stage
+    }
+
+    /// 控制路径：设置/清除校准旁路。
+    ///
+    /// 旁路为 true 时 program mute 不再清零输出（扫频可闻），但安全故障仍优先；
+    /// cal_enter/cal_leave 负责与输入暂停、原静音状态一起成对使用。
+    pub fn set_calibration_bypass(&mut self, on: bool) {
+        self.output_stage.set_calibration_bypass(on);
+    }
+
+    /// 当前校准旁路是否开启。
+    pub fn calibration_bypass(&self) -> bool {
+        self.output_stage.calibration_bypass()
     }
 
     /// 状态快照（非实时路径；会克隆设备监督器的错误文本）。
@@ -1834,7 +1973,9 @@ impl<P: PcmOutput> Runtime<P> {
             output_started: self.backend.is_started(),
             graph: self.engine.graph_info(),
             switch_pending: self.engine.switch_pending(),
-            muted: self.engine.stats().mute,
+            muted: self.output_stage.muffled(),
+            output_stage: self.output_stage.status(),
+            input_paused: self.input_paused,
             last_error: self.last_error.or(device_error),
             device,
         }
@@ -2324,10 +2465,10 @@ impl<P: PcmOutput> Runtime<P> {
                 .finished
                 .store(true, Ordering::Release);
         }
-        let muted = self.safety.requires_mute() || self.pending_fault.is_some();
-        if muted {
-            self.out_block.fill(0.0);
-        }
+        // 校准播放同样经过输出级：安全故障硬清零；program mute 在 calibration_bypass
+        // 为 true 时放行，保证扫频不被用户静音状态吞掉。输入暂停不参与校准播放。
+        let hard_mute = self.safety.fault_requires_mute() || self.pending_fault.is_some();
+        self.output_stage.apply(&mut self.out_block, hard_mute);
         self.blocks = self.blocks.saturating_add(1);
         if let Err(err) = self.backend.playout(&self.out_block) {
             self.output_errors = self.output_errors.saturating_add(1);

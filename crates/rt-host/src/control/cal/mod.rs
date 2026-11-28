@@ -47,6 +47,7 @@ use khaen_calibration::sweep::PLACEHOLDER_GRAPH_ID;
 use khaen_host::control::{error as host_error, ControlError};
 use khaen_host::engine::EngineConfig;
 use khaen_host::plan::Plan;
+use khaen_host::safety::RuntimeState;
 use serde_json::{json, Map, Value};
 
 use crate::control::reconfigure::{ReconfigGate, RECONFIGURING_LABEL};
@@ -966,12 +967,31 @@ impl CalibrationCore {
                 json!("output device is absent: the block loop is fail-closed and retries with backoff; cal_measure/cal_enter return device_absent until the device recovers (no fabricated measurement)"),
             );
         }
+        // 进入校准模式后，输入暂停/校准旁路是状态机的保证；快照可能还没发布到这一块，
+        // 用 mode 兜底，避免 cal_enter 回执立即读时谎报 false。离开后以快照为准。
+        let snapshot = self.snapshot();
+        let in_calibration = self.mode == CalMode::Calibration;
+        let input_paused = in_calibration
+            || snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.status.input_paused);
+        let calibration_bypass = in_calibration
+            || snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.status.output_stage.calibration_bypass);
+        let program_mute = in_calibration
+            || snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.status.output_stage.program_mute_applied);
         json!({
             "device": device,
             "ok": true,
             "mode": self.mode.as_str(),
             "capture_source": if self.mode == CalMode::Calibration { "cal" } else { "program" },
-            "program_input_reaches_dsp": self.mode != CalMode::Calibration,
+            "input_paused": input_paused,
+            "calibration_bypass": calibration_bypass,
+            "program_mute": program_mute,
+            "program_input_reaches_dsp": self.mode != CalMode::Calibration && !input_paused,
             "playback_restored": self.mode == CalMode::Playback,
             "simulated": simulated,
             "engine": engine,
@@ -1126,7 +1146,7 @@ impl CalibrationCore {
         }
         let snapshot = self.require_snapshot()?;
         self.ensure_device_present(&snapshot)?;
-        self.ensure_not_muted(&snapshot)?;
+        self.ensure_safety_allows_audible(&snapshot)?;
         let mic = match mic_override.as_ref() {
             Some(over) => over.mic.clone(),
             None => self.mic_or_error()?,
@@ -1262,7 +1282,7 @@ impl CalibrationCore {
         }
         let snapshot = self.require_snapshot()?;
         self.ensure_device_present(&snapshot)?;
-        self.ensure_not_muted(&snapshot)?;
+        self.ensure_safety_allows_audible(&snapshot)?;
         let previous = {
             let shared = self.shared();
             shared.summary.clone()
@@ -1518,16 +1538,17 @@ impl CalibrationCore {
         Ok(())
     }
 
-    fn ensure_not_muted(&self, snapshot: &RuntimeSnapshot) -> Result<(), ControlError> {
-        if snapshot.status.muted
-            || snapshot.status.state.requires_mute()
-            || snapshot.lifecycle.is_absent()
-        {
+    /// 安全故障/设备缺失会真正堵住可闻路径；**用户静音不在此列**——cal_enter 会记录它、
+    /// 自动进入软件静音+校准旁路，cal_leave 再恢复。这里只拒绝“旁路也救不了”的状态。
+    fn ensure_safety_allows_audible(&self, snapshot: &RuntimeSnapshot) -> Result<(), ControlError> {
+        if snapshot.status.state == RuntimeState::Faulted || snapshot.lifecycle.is_absent() {
             return Err(ControlError::new(
                 error::AUDIO_BLOCKED,
                 format!(
-                    "output is muted/safety-muted (muted={}, state={:?}): an audible sweep would be silent, so the measurement is rejected instead of fabricating data",
-                    snapshot.status.muted, snapshot.status.state
+                    "output is safety-latched or device-absent (state={:?}, muted={}, program_mute={}): an audible sweep would be silent, so the measurement is rejected instead of fabricating data",
+                    snapshot.status.state,
+                    snapshot.status.muted,
+                    snapshot.status.output_stage.program_mute_applied
                 ),
             ));
         }
