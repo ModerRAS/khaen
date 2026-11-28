@@ -808,8 +808,48 @@ mod app {
             }
             None => Vec::new(),
         };
+        // IO I4b：可选 ALSA 采集输入（Some = 用本机 capture 替代 AES67 收包）。
+        // 与 SDP/多流互斥：两套输入来源同时配置会含糊，按配置错误拒绝而不是静默忽略。
+        let capture = match env_optional("KHAEN_ALSA_CAPTURE") {
+            Some(device) => {
+                if env_optional("KHAEN_AES67_SDP").is_some() {
+                    return Err(ConfigError::new(
+                        "KHAEN_ALSA_CAPTURE cannot be combined with KHAEN_AES67_SDP; choose one input source",
+                    ));
+                }
+                if env_optional("KHAEN_AES67_ADDITIONAL_STREAMS").is_some() {
+                    return Err(ConfigError::new(
+                        "KHAEN_ALSA_CAPTURE cannot be combined with KHAEN_AES67_ADDITIONAL_STREAMS; choose one input source",
+                    ));
+                }
+                let capture_channels: usize =
+                    env_parse("KHAEN_ALSA_CAPTURE_CHANNELS", input_channels)?;
+                let channels_map = match env_optional("KHAEN_ALSA_CAPTURE_MAP") {
+                    Some(raw) => parse_channels_map(&raw)?,
+                    None => (0..capture_channels as u16).collect(),
+                };
+                if channels_map.len() != capture_channels {
+                    return Err(ConfigError::new(format!(
+                        "KHAEN_ALSA_CAPTURE_MAP has {} entries but KHAEN_ALSA_CAPTURE_CHANNELS is {capture_channels}",
+                        channels_map.len()
+                    )));
+                }
+                let pending_blocks: usize = env_parse("KHAEN_ALSA_CAPTURE_PENDING_BLOCKS", 4)?;
+                Some(khaen_host::capture::CaptureConfig {
+                    device,
+                    channels: capture_channels,
+                    channels_map,
+                    input_channels,
+                    sample_rate,
+                    block_frames,
+                    pending_blocks,
+                })
+            }
+            None => None,
+        };
         let config = RuntimeConfig {
             additional_inputs,
+            capture,
             input,
             engine: EngineConfig {
                 block_frames,
@@ -974,6 +1014,28 @@ mod app {
             }
             None => "null".to_string(),
         };
+        // IO I4b：采集统计（AES67 模式为 null；纯增量字段）。
+        let capture_json = match &status.capture {
+            Some(capture) => format!(
+                "{{\"blocks_captured\":{},\"frames_captured\":{},\"frames_delivered\":{},\"blocks_skipped\":{},\"frames_dropped\":{},\"partial_blocks\":{},\"queue_full\":{},\"underruns\":{},\"xruns\":{},\"read_errors\":{},\"running\":{},\"last_error\":{}}}",
+                capture.blocks_captured,
+                capture.frames_captured,
+                capture.frames_delivered,
+                capture.blocks_skipped,
+                capture.frames_dropped,
+                capture.partial_blocks,
+                capture.queue_full,
+                capture.underruns,
+                capture.xruns,
+                capture.read_errors,
+                capture.running,
+                match capture.last_error {
+                    Some(code) => json_string(code),
+                    None => "null".to_string(),
+                }
+            ),
+            None => "null".to_string(),
+        };
         let json = format!(
             concat!(
                 "{{\"schema\":\"khaen-rt-status/v1\",\"blocks\":{},",
@@ -984,7 +1046,7 @@ mod app {
                 "\"receiver\":{{\"packets_received\":{},\"queue_full_drops\":{},\"recv_errors\":{}}},",
                 "\"graph_id\":{},\"last_error\":{},",
                 "\"device_state\":\"{}\",\"absent_since\":{},\"reopen_attempts\":{},\"last_device_error\":{},",
-                "\"format\":{},\"reconfigure\":{},\"input_streams\":{},\"speaker_test\":{}}}\n"
+                "\"format\":{},\"reconfigure\":{},\"input_streams\":{},\"input_mode\":\"{}\",\"capture\":{},\"speaker_test\":{}}}\n"
             ),
             status.blocks,
             status.state.as_str(),
@@ -1013,6 +1075,8 @@ mod app {
             format_json,
             reconfigure_json,
             input_streams_json,
+            status.input_mode,
+            capture_json,
             test_tone_json
         );
         let temporary = path.with_extension("tmp");
@@ -1339,6 +1403,8 @@ mod tests {
                 jitter_fill: 192,
                 ..Default::default()
             }],
+            input_mode: "aes67",
+            capture: None,
             output: AlsaStats::default(),
             receiver: ReceiverStats::default(),
             device: SupervisorStatus {
@@ -1388,6 +1454,8 @@ mod tests {
             "per-stream stats must be an array (primary stream only in this fixture)"
         );
         assert_eq!(doc["input_streams"][0]["packets"], serde_json::json!(34));
+        assert_eq!(doc["input_mode"], serde_json::json!("aes67"));
+        assert_eq!(doc["capture"], serde_json::Value::Null);
         // T41：未启用 ASRC 时 input.asrc 为 null（纯增量字段）。
         assert_eq!(doc["input"]["asrc"], serde_json::Value::Null);
         assert_eq!(doc["graph_id"], serde_json::Value::Null);
@@ -1399,6 +1467,46 @@ mod tests {
         assert_eq!(doc["last_device_error"], serde_json::Value::Null);
         // 原子替换：临时文件不残留。
         assert!(!path.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn status_file_reports_capture_stats_in_capture_mode() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "khaen-rt-host-status-capture-{}.json",
+            std::process::id()
+        ));
+        let mut runtime_status = status();
+        runtime_status.input_mode = "alsa_capture";
+        runtime_status.capture = Some(khaen_host::capture::CaptureStats {
+            blocks_captured: 7,
+            frames_captured: 896,
+            frames_delivered: 768,
+            blocks_skipped: 1,
+            frames_dropped: 128,
+            partial_blocks: 0,
+            queue_full: 0,
+            underruns: 2,
+            xruns: 1,
+            read_errors: 0,
+            recycle_full: 0,
+            running: true,
+            last_error: Some("xrun: underrun"),
+        });
+        app::write_status_file(&path, &runtime_status, &DeviceLifecycle::new())
+            .expect("write status file");
+        let text = std::fs::read_to_string(&path).expect("read status file");
+        let _ = std::fs::remove_file(&path);
+        let doc: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        assert_eq!(doc["input_mode"], serde_json::json!("alsa_capture"));
+        assert_eq!(doc["capture"]["blocks_captured"], serde_json::json!(7));
+        assert_eq!(doc["capture"]["underruns"], serde_json::json!(2));
+        assert_eq!(doc["capture"]["xruns"], serde_json::json!(1));
+        assert_eq!(doc["capture"]["running"], serde_json::json!(true));
+        assert_eq!(
+            doc["capture"]["last_error"],
+            serde_json::json!("xrun: underrun")
+        );
     }
 
     #[test]
@@ -1747,6 +1855,28 @@ mod tests {
         assert_eq!(error.code(), app::STARTUP_PLAN_REJECTED);
         assert_eq!(error.exit_code(), 1);
         assert!(error.message().contains("lanes"), "{}", error.message());
+    }
+
+    #[test]
+    fn capture_env_builds_capture_config() {
+        std::env::set_var("KHAEN_ALSA_CAPTURE", "hw:CARD=FAKE,DEV=0");
+        std::env::set_var("KHAEN_ALSA_CAPTURE_CHANNELS", "2");
+        std::env::set_var("KHAEN_ALSA_CAPTURE_MAP", "0,1");
+        let settings = app::build_settings().unwrap_or_else(|err| panic!("{}", err.message()));
+        let capture = settings.config.capture.expect("capture config");
+        assert_eq!(capture.device, "hw:CARD=FAKE,DEV=0");
+        assert_eq!(capture.channels, 2);
+        assert_eq!(capture.channels_map, vec![0, 1]);
+        assert_eq!(
+            capture.input_channels,
+            settings.config.engine.input_channels
+        );
+        assert_eq!(capture.sample_rate, settings.config.engine.sample_rate);
+        assert_eq!(capture.block_frames, settings.config.engine.block_frames);
+        assert!(settings.config.additional_inputs.is_empty());
+        std::env::remove_var("KHAEN_ALSA_CAPTURE");
+        std::env::remove_var("KHAEN_ALSA_CAPTURE_CHANNELS");
+        std::env::remove_var("KHAEN_ALSA_CAPTURE_MAP");
     }
 
     #[test]

@@ -100,6 +100,7 @@
 - plan-builder 的 `PlanConfig` 对应拆成 `input_channels` / `output_channels`
   （`PlanConfig::new` 保持等宽旧行为，`new_split` 构造不等宽配置）。
 - **多路 AES67（host 运行时）**：`RuntimeConfig.additional_inputs` 是加法字段（空 = 单流旧行为）；每路独立抖动环，按各自 `channels_map` 稀疏混入同一条输入总线（f64 求和、断流贡献 0、不 gate）。所有流必须同 `output_channels`/`block_frames`/`sample_rate`，总线宽度 = `engine.input_channels`。**多流运行时的热重配尚未实现**：`Runtime::reconfigure` 遇 `additional_inputs` 非空会 fail-closed（返回多流未支持），不静默丢流；多流需要在启动时配置。rt-host/daemon 的配置面（env/API/UI）尚未暴露该字段。
+- **ALSA 采集输入（IO I4b）**：`RuntimeConfig.capture` 是加法字段（None = AES67 收包旧行为；Some = 本机 PCM capture 替代收包，与 `additional_inputs` 互斥）。采集格式 S24_3LE，`input_channels`/`block_frames`/`sample_rate` 必须等于 engine 的三项；`channels_map` 是设备通道 → 输入 slot 的稀疏映射（slot 互不重复且 < input_channels）。`PcmCapture` 是平台无关采集接口，Linux `AlsaCapture` 是真实实现，Windows/测试用注入假源；采集线程与块线程通过两个 SPSC 队列搬运预分配块（总块数守恒，RT 侧不分配）。块线程无块时整块静音计 underrun，积压时只交付最新块、旧块计跳过。**采集输入热重配尚未实现**：`Runtime::reconfigure` 遇 capture 非空 fail-closed；改采集配置需重启。
 - **热重配**：`channels_prepare` 的 `content_channels` 显式改输入宽度，`channels` 只改输出宽度；
   只给 `channels` 时输入宽度跟随它（旧客户端兼容）。`channels_status.current` 同时上报
   `content_channels`（输入）与 `channels`（输出），`aes67_map` 槽位按 `content_channels` 校验。

@@ -341,6 +341,8 @@ impl ControlTarget for FakeTarget {
             blocks: self.engine.stats().blocks,
             input: khaen_host::aes67_input::Aes67InputStats::default(),
             input_streams: vec![khaen_host::aes67_input::Aes67InputStats::default()],
+            input_mode: "aes67",
+            capture: None,
             output: khaen_host::alsa_backend::AlsaStats::default(),
             receiver: khaen_host::runtime::ReceiverStats::default(),
             device: SupervisorStatus {
@@ -891,6 +893,7 @@ impl PacketSource for IdleSource {
 pub(crate) fn fake_runtime() -> Runtime<FakePcm> {
     let config = RuntimeConfig {
         additional_inputs: Vec::new(),
+        capture: None,
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,
@@ -1000,6 +1003,7 @@ impl DeviceProbe for FakeProbe {
 pub(crate) fn fake_runtime_config() -> RuntimeConfig {
     RuntimeConfig {
         additional_inputs: Vec::new(),
+        capture: None,
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,

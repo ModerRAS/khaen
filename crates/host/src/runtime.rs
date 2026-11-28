@@ -88,6 +88,9 @@ use crate::aes67_input::{
 };
 use crate::alsa_backend::{AlsaOutputBackend, AlsaStats, PcmOutput};
 use crate::backend::{AudioBackend, BackendError, DeviceConfig};
+use crate::capture::{
+    CaptureConfig, CaptureError, CaptureFillStatus, CaptureInput, CaptureStats, PcmCapture,
+};
 use crate::engine::{
     EngineConfig, EngineError, GraphInfo, MuteReceipt, Passthrough, Processor, Silent, SlotEngine,
 };
@@ -130,6 +133,8 @@ pub mod codes {
     pub const OVERRUN: &str = "ERR_RUNTIME_INPUT_OVERRUN";
     /// 多流输入总线配置错误。
     pub const INPUT_BUS: &str = "ERR_RUNTIME_INPUT_BUS";
+    /// ALSA 采集输入错误。
+    pub const CAPTURE: &str = "ERR_RUNTIME_CAPTURE";
     /// 其它内部故障。
     pub const INTERNAL: &str = "ERR_RUNTIME_INTERNAL";
     /// UDP socket 绑定失败。
@@ -197,6 +202,8 @@ pub enum RuntimeError {
     Input(InputError),
     /// 多流 AES67 输入总线配置错误。
     Bus(crate::aes67_bus::BusError),
+    /// ALSA 采集输入错误（配置/打开/线程/设备故障）。
+    Capture(CaptureError),
     /// 块引擎错误。
     Engine(EngineError),
     /// 输出后端错误。
@@ -220,6 +227,10 @@ impl RuntimeError {
             RuntimeError::Config(_) => codes::CONFIG,
             RuntimeError::Input(err) => err.name(),
             RuntimeError::Bus(_) => codes::INPUT_BUS,
+            RuntimeError::Capture(err) => match err {
+                CaptureError::BadConfig(_) => codes::CONFIG,
+                _ => codes::CAPTURE,
+            },
             RuntimeError::Engine(_) => codes::ENGINE,
             RuntimeError::Backend(_) => codes::BACKEND,
             RuntimeError::Receiver(err) => err.code,
@@ -237,6 +248,7 @@ impl fmt::Display for RuntimeError {
             RuntimeError::Config(message) => write!(f, "runtime config: {message}"),
             RuntimeError::Input(err) => write!(f, "aes67 input: {err}"),
             RuntimeError::Bus(err) => write!(f, "aes67 input bus: {err}"),
+            RuntimeError::Capture(err) => write!(f, "alsa capture: {err}"),
             RuntimeError::Engine(err) => write!(f, "engine: {err}"),
             RuntimeError::Backend(err) => write!(f, "backend: {err}"),
             RuntimeError::Receiver(err) => write!(f, "receiver: {err}"),
@@ -324,6 +336,20 @@ pub trait PacketSource: Send {
     /// SO_RCVBUF 是否真的设置成功（best-effort；默认 false）。
     fn rcvbuf_applied(&self) -> bool {
         false
+    }
+}
+
+/// 采集模式下替代 UDP 的惰性包源：不占端口，按固定节拍返回 WouldBlock。
+///
+/// 采集模式不复用 AES67 收包路径，但 Runtime 的 receiver 字段仍是单所有者结构；
+/// 用惰性源保持"收包线程可停止/统计可读"的形状，避免让接收器变成 Option 后
+/// 在热重配/设备重开的每条路径上都多一层分支（采集模式的热重配本身 fail-closed）。
+struct IdlePacketSource;
+
+impl PacketSource for IdlePacketSource {
+    fn recv(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        thread::sleep(Duration::from_millis(20));
+        Err(io::Error::from(io::ErrorKind::WouldBlock))
     }
 }
 
@@ -635,6 +661,35 @@ impl PacketSource for BoxedSource {
     }
 }
 
+/// 启动装配：采集模式用惰性包源占位（不占 UDP 端口），否则按每路 AES67 流绑定 UDP。
+fn startup_sources(
+    config: &RuntimeConfig,
+) -> Result<Vec<Box<dyn PacketSource + Send>>, RuntimeError> {
+    if config.capture.is_some() {
+        return Ok(vec![Box::new(IdlePacketSource)]);
+    }
+    let mut sources: Vec<Box<dyn PacketSource + Send>> = Vec::new();
+    for input in std::iter::once(&config.input).chain(config.additional_inputs.iter()) {
+        sources.push(Box::new(UdpPacketSource::bind(input, &config.receiver)?));
+    }
+    Ok(sources)
+}
+
+/// 打开真实 ALSA 采集源并启动采集线程（仅 Linux；其它平台 fail-closed）。
+#[cfg(target_os = "linux")]
+fn open_capture(config: &CaptureConfig) -> Result<CaptureInput, RuntimeError> {
+    let source = crate::capture::AlsaCapture::open(config).map_err(RuntimeError::Capture)?;
+    CaptureInput::spawn_boxed(Box::new(source), config.clone()).map_err(RuntimeError::Capture)
+}
+
+/// 非 Linux：没有真实 ALSA 采集路径，如实 fail-closed（测试用 with_capture_source 注入）。
+#[cfg(not(target_os = "linux"))]
+fn open_capture(_config: &CaptureConfig) -> Result<CaptureInput, RuntimeError> {
+    Err(RuntimeError::Capture(CaptureError::Open(String::from(
+        "ALSA capture input is only supported on Linux; inject a capture source in tests",
+    ))))
+}
+
 /// 生产收包源工厂：真实 UDP 绑定（bind + join 组播 + 读超时）。
 fn udp_source_factory() -> SourceFactory {
     Box::new(|input: &Aes67InputConfig, receiver: &ReceiverConfig| {
@@ -729,6 +784,9 @@ pub struct RuntimeConfig {
     pub input: Aes67InputConfig,
     /// 额外 AES67 流（多流稀疏混入同一条输入总线；空 = 单流旧行为）。
     pub additional_inputs: Vec<Aes67InputConfig>,
+    /// ALSA 采集输入（Some = 用本机 PCM 采集替代 AES67 收包；IO I4）。
+    /// 与 `additional_inputs` 互斥；宽度/块长/速率必须与 engine 一致。
+    pub capture: Option<CaptureConfig>,
     /// 块引擎配置（块长/速率/通道）。
     pub engine: EngineConfig,
     /// 输出设备配置（设备名/速率/块长/通道）。
@@ -761,6 +819,22 @@ impl RuntimeConfig {
             {
                 return Err(RuntimeError::Config(
                     "additional_inputs must match the primary input's output_channels/block_frames/sample_rate",
+                ));
+            }
+        }
+        if let Some(capture) = &self.capture {
+            capture.validate().map_err(RuntimeError::Capture)?;
+            if !self.additional_inputs.is_empty() {
+                return Err(RuntimeError::Config(
+                    "capture input and additional AES67 streams are mutually exclusive",
+                ));
+            }
+            if capture.input_channels != self.engine.input_channels
+                || capture.block_frames != self.engine.block_frames
+                || capture.sample_rate != self.engine.sample_rate
+            {
+                return Err(RuntimeError::Config(
+                    "capture input width/block/rate must match engine input_channels/block_frames/sample_rate",
                 ));
             }
         }
@@ -1035,6 +1109,10 @@ pub struct RuntimeStatus {
     pub input: Aes67InputStats,
     /// 每路 AES67 输入统计快照（第一项主流；单流时长度 1；顺序与 RuntimeConfig 流表一致）。
     pub input_streams: Vec<Aes67InputStats>,
+    /// 输入模式：`"aes67"` 或 `"alsa_capture"`。
+    pub input_mode: &'static str,
+    /// ALSA 采集统计快照（采集模式为 Some；AES67 模式为 None）。
+    pub capture: Option<CaptureStats>,
     /// ALSA 输出统计快照。
     pub output: AlsaStats,
     /// 收包线程统计快照。
@@ -1088,6 +1166,8 @@ pub struct Runtime<P: PcmOutput> {
     receiver: Aes67Receiver,
     /// 额外流的收包线程（与 `config.additional_inputs` 同序；空 = 单流）。
     additional_receivers: Vec<Aes67Receiver>,
+    /// ALSA 采集输入（Some = 采集模式；AES67 收包路径不参与输入）。
+    capture: Option<CaptureInput>,
     /// 输入块（block_frames × output_channels），构造期分配。
     block: Vec<f32>,
     /// 输出块（block_frames × channels），构造期分配；含安全静音后的最终写设备内容。
@@ -1125,6 +1205,7 @@ impl<P: PcmOutput> fmt::Debug for Runtime<P> {
             .field("device_fault", &self.device_fault)
             .field("last_error", &self.last_error)
             .field("receiver", &self.receiver.stats())
+            .field("capture", &self.capture.as_ref().map(CaptureInput::stats))
             .field("graph", &self.engine.graph_info())
             .finish_non_exhaustive()
     }
@@ -1137,12 +1218,16 @@ impl<P: PcmOutput> Runtime<P> {
     /// 失败时已启动的资源由 Drop 释放（收包线程若已启动会被 join）。
     pub fn new(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         config.validate()?;
-        let mut sources: Vec<Box<dyn PacketSource + Send>> = Vec::new();
-        for input in std::iter::once(&config.input).chain(config.additional_inputs.iter()) {
-            sources.push(Box::new(UdpPacketSource::bind(input, &config.receiver)?));
-        }
+        let sources = startup_sources(&config)?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, sources, driver, true, Some(udp_source_factory()))
+        Self::build_validated(
+            config,
+            sources,
+            driver,
+            true,
+            Some(udp_source_factory()),
+            None,
+        )
     }
 
     /// 构造运行时但**不打开输出设备**：设备缺失/掉线由控制路径 [`Runtime::open_device`] 重试。
@@ -1152,12 +1237,16 @@ impl<P: PcmOutput> Runtime<P> {
     /// 不写设备）。用于"声卡不在位也要保持进程运行"的宿主（rt-host）。
     pub fn new_deferred(config: RuntimeConfig) -> Result<Self, RuntimeError> {
         config.validate()?;
-        let mut sources: Vec<Box<dyn PacketSource + Send>> = Vec::new();
-        for input in std::iter::once(&config.input).chain(config.additional_inputs.iter()) {
-            sources.push(Box::new(UdpPacketSource::bind(input, &config.receiver)?));
-        }
+        let sources = startup_sources(&config)?;
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, sources, driver, false, Some(udp_source_factory()))
+        Self::build_validated(
+            config,
+            sources,
+            driver,
+            false,
+            Some(udp_source_factory()),
+            None,
+        )
     }
 
     /// 用注入的多个包源构造运行时（测试/嵌入式接线用）：第一个是主流，其余与
@@ -1167,6 +1256,11 @@ impl<P: PcmOutput> Runtime<P> {
         sources: Vec<Box<dyn PacketSource + Send>>,
     ) -> Result<Self, RuntimeError> {
         config.validate()?;
+        if config.capture.is_some() {
+            return Err(RuntimeError::Config(
+                "with_sources cannot be used with capture input; use Runtime::with_capture_source",
+            ));
+        }
         let expected = 1 + config.additional_inputs.len();
         if sources.len() != expected {
             return Err(RuntimeError::Config(
@@ -1174,7 +1268,7 @@ impl<P: PcmOutput> Runtime<P> {
             ));
         }
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, sources, driver, true, None)
+        Self::build_validated(config, sources, driver, true, None, None)
     }
 
     /// 用注入的 PacketSource（假包源/其它 socket 实现）构造运行时。
@@ -1241,6 +1335,31 @@ impl<P: PcmOutput> Runtime<P> {
         Ok(runtime)
     }
 
+    /// 用注入的采集源构造运行时（测试/嵌入式接线用；`config.capture` 必须为 Some）。
+    ///
+    /// 生产装配走 [`Runtime::new`]/[`Runtime::new_deferred`]：Linux 上打开真实 ALSA capture；
+    /// 测试在本机注入假采集源，验证块路径/统计/停止语义。
+    pub fn with_capture_source(
+        config: RuntimeConfig,
+        source: Box<dyn PcmCapture>,
+    ) -> Result<Self, RuntimeError> {
+        if config.capture.is_none() {
+            return Err(RuntimeError::Config(
+                "with_capture_source requires config.capture",
+            ));
+        }
+        config.validate()?;
+        let driver = build_device_driver(&config)?;
+        Self::build_validated(
+            config,
+            vec![Box::new(IdlePacketSource)],
+            driver,
+            true,
+            None,
+            Some(source),
+        )
+    }
+
     /// 单包源注入的统一入口：`additional_inputs` 必须为空（注入构造函数只能给主流一个源）。
     fn build_validated_one(
         config: RuntimeConfig,
@@ -1254,8 +1373,20 @@ impl<P: PcmOutput> Runtime<P> {
                 "injected-source constructors cannot supply additional AES67 streams; use Runtime::new or Runtime::with_sources",
             ));
         }
+        if config.capture.is_some() {
+            return Err(RuntimeError::Config(
+                "injected AES67 sources cannot be combined with capture input; use Runtime::with_capture_source",
+            ));
+        }
         let driver = build_device_driver(&config)?;
-        Self::build_validated(config, vec![source], driver, open_device, source_factory)
+        Self::build_validated(
+            config,
+            vec![source],
+            driver,
+            open_device,
+            source_factory,
+            None,
+        )
     }
 
     fn build_validated(
@@ -1264,6 +1395,7 @@ impl<P: PcmOutput> Runtime<P> {
         driver: Box<dyn DeviceDriver>,
         open_device: bool,
         source_factory: Option<SourceFactory>,
+        injected_capture: Option<Box<dyn PcmCapture>>,
     ) -> Result<Self, RuntimeError> {
         let expected = 1 + config.additional_inputs.len();
         if sources.len() != expected {
@@ -1290,6 +1422,19 @@ impl<P: PcmOutput> Runtime<P> {
         for source in sources {
             additional_receivers.push(Aes67Receiver::spawn(BoxedSource(source), &config.receiver)?);
         }
+        let capture = match (&config.capture, injected_capture) {
+            (Some(capture_config), Some(source)) => Some(
+                CaptureInput::spawn_boxed(source, capture_config.clone())
+                    .map_err(RuntimeError::Capture)?,
+            ),
+            (Some(capture_config), None) => Some(open_capture(capture_config)?),
+            (None, Some(_)) => {
+                return Err(RuntimeError::Config(
+                    "injected capture source requires config.capture",
+                ));
+            }
+            (None, None) => None,
+        };
         let block = vec![0.0f32; input.samples_per_block()];
         let out_block = vec![0.0f32; engine.output_samples_per_block()];
         let packet_buf = vec![0u8; config.receiver.packet_bytes];
@@ -1302,6 +1447,7 @@ impl<P: PcmOutput> Runtime<P> {
             driver,
             receiver,
             additional_receivers,
+            capture,
             block,
             out_block,
             packet_buf,
@@ -1437,6 +1583,9 @@ impl<P: PcmOutput> Runtime<P> {
         for receiver in &mut self.additional_receivers {
             while receiver.next_packet(&mut self.packet_buf).is_some() {}
         }
+        if let Some(capture) = self.capture.as_mut() {
+            capture.flush();
+        }
         self.input = fresh_input;
         self.consecutive_underruns = 0;
         self.consecutive_overruns = 0;
@@ -1510,22 +1659,15 @@ impl<P: PcmOutput> Runtime<P> {
             // 控制路径用 open_device 重开成功后再恢复块循环（进程本身不退出）。
             return Err(RuntimeError::Backend(BackendError::NotStarted));
         }
-        // 1) 网络包 → 各路输入抖动缓冲。feed_packet 与 fill_block 都是声明的实时安全操作。
-        while let Some(len) = self.receiver.next_packet(&mut self.packet_buf) {
-            if let Ok(FeedOutcome::Overflow { .. }) =
-                self.input.feed_packet(0, &self.packet_buf[..len])
-            {
-                self.consecutive_overruns = self.consecutive_overruns.saturating_add(1);
-                if self.consecutive_overruns >= self.config.safety.max_consecutive_overruns {
-                    self.note_fault(FaultReason::Overrun);
-                }
-            }
-        }
-        for index in 0..self.additional_receivers.len() {
-            while let Some(len) = self.additional_receivers[index].next_packet(&mut self.packet_buf)
-            {
+        // 1) 输入：采集模式从采集块队列拉一块；AES67 模式先抽干收包 SPSC 再填抖动环。
+        //    两条路径的 fill 都是声明的实时安全操作（零分配/无锁/无 IO）。
+        let input_filled = if let Some(capture) = self.capture.as_mut() {
+            let outcome = capture.fill_block(&mut self.block);
+            outcome.status == CaptureFillStatus::Filled
+        } else {
+            while let Some(len) = self.receiver.next_packet(&mut self.packet_buf) {
                 if let Ok(FeedOutcome::Overflow { .. }) =
-                    self.input.feed_packet(index + 1, &self.packet_buf[..len])
+                    self.input.feed_packet(0, &self.packet_buf[..len])
                 {
                     self.consecutive_overruns = self.consecutive_overruns.saturating_add(1);
                     if self.consecutive_overruns >= self.config.safety.max_consecutive_overruns {
@@ -1533,17 +1675,31 @@ impl<P: PcmOutput> Runtime<P> {
                     }
                 }
             }
-        }
-
-        // 2) 取一块输入；至少一路有数据即视为已填（断流流按 0 贡献，不 gate 其它流）。
-        let input_filled = match self.input.fill_block(&mut self.block) {
-            Ok(outcome) => outcome.filled_streams > 0,
-            Err(_) => {
-                self.last_error = Some(codes::CONFIG);
-                self.note_fault(FaultReason::Underrun);
-                return Err(RuntimeError::Input(InputError::BadConfig(
-                    "input bus fill_block rejected its own preallocated block",
-                )));
+            for index in 0..self.additional_receivers.len() {
+                while let Some(len) =
+                    self.additional_receivers[index].next_packet(&mut self.packet_buf)
+                {
+                    if let Ok(FeedOutcome::Overflow { .. }) =
+                        self.input.feed_packet(index + 1, &self.packet_buf[..len])
+                    {
+                        self.consecutive_overruns = self.consecutive_overruns.saturating_add(1);
+                        if self.consecutive_overruns >= self.config.safety.max_consecutive_overruns
+                        {
+                            self.note_fault(FaultReason::Overrun);
+                        }
+                    }
+                }
+            }
+            // 2) 取一块输入；至少一路有数据即视为已填（断流流按 0 贡献，不 gate 其它流）。
+            match self.input.fill_block(&mut self.block) {
+                Ok(outcome) => outcome.filled_streams > 0,
+                Err(_) => {
+                    self.last_error = Some(codes::CONFIG);
+                    self.note_fault(FaultReason::Underrun);
+                    return Err(RuntimeError::Input(InputError::BadConfig(
+                        "input bus fill_block rejected its own preallocated block",
+                    )));
+                }
             }
         };
         if input_filled {
@@ -1663,6 +1819,12 @@ impl<P: PcmOutput> Runtime<P> {
                 .map(Aes67Input::stats)
                 .unwrap_or_default(),
             input_streams: self.input_bus_stats().streams,
+            input_mode: if self.capture.is_some() {
+                "alsa_capture"
+            } else {
+                "aes67"
+            },
+            capture: self.capture.as_ref().map(CaptureInput::stats),
             output: self.backend.stats(),
             receiver: self.receiver.stats(),
             device_rate: device.device_rate,
@@ -1756,6 +1918,17 @@ impl<P: PcmOutput> Runtime<P> {
         let old = self.config.clone();
         let old_device_was_started = self.backend.is_started();
         let old_receiver_was_running = self.receiver.is_running();
+        // 采集输入的热重配（换设备/通道/映射）尚未实现：fail-closed，不静默换源。
+        if old.capture.is_some() || target.capture.is_some() {
+            return Err(ReconfigureFailure {
+                code: codes::RECONFIGURE_CONFIG,
+                stage: "capture",
+                message: "ALSA capture input hot reconfiguration is not implemented yet; restart the runtime with the new capture config instead (fail-closed, no source is silently swapped)".to_string(),
+                rolled_back: true,
+                device_started: old_device_was_started,
+                receiver_running: old_receiver_was_running,
+            });
+        }
         // 多流输入的热重配（重绑/重建每路收包线程）尚未实现：fail-closed，不静默丢流。
         if !old.additional_inputs.is_empty() || !target.additional_inputs.is_empty() {
             return Err(ReconfigureFailure {

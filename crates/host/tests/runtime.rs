@@ -33,6 +33,7 @@ use khaen_host::alsa_backend::{
     encode_s24_3le_block, AlsaStats, PcmError, PcmFault, PcmOutput, BYTES_PER_SAMPLE,
 };
 use khaen_host::backend::{BackendError, DeviceConfig};
+use khaen_host::capture::{CaptureConfig, PcmCapture};
 use khaen_host::engine::{EngineConfig, GraphInfo};
 use khaen_host::owner::{DeviceGuard, DeviceId, OwnerError};
 use khaen_host::runtime::{
@@ -112,6 +113,44 @@ impl PcmOutput for FakePcm {
 }
 
 // ===========================================================================
+// 假采集源（PcmCapture 注入；IO I4b）
+// ===========================================================================
+
+/// 假 ALSA 采集设备：每帧 2 声道常量（0.25 / 0.5），用于断言采集块进入引擎输入。
+#[derive(Debug)]
+struct FakeCapture {
+    reads: u64,
+}
+
+impl FakeCapture {
+    fn new() -> Self {
+        Self { reads: 0 }
+    }
+}
+
+impl PcmCapture for FakeCapture {
+    fn read(&mut self, out: &mut [f32]) -> Result<usize, PcmError> {
+        let channels = 2;
+        if !out.len().is_multiple_of(channels) {
+            return Err(PcmError::Fatal("fake capture read not frame aligned"));
+        }
+        let frames = out.len() / channels;
+        for frame in 0..frames {
+            out[frame * 2] = 0.25;
+            out[frame * 2 + 1] = -0.25;
+        }
+        self.reads += 1;
+        Ok(frames)
+    }
+
+    fn prepare(&mut self, _fault: PcmFault) -> Result<(), khaen_host::capture::CaptureError> {
+        Ok(())
+    }
+
+    fn close(&mut self) {}
+}
+
+// ===========================================================================
 // 假包源（PacketSource 注入）
 // ===========================================================================
 
@@ -172,6 +211,7 @@ fn fake_source() -> (FakeSource, FakeSourceHandle) {
 fn runtime_config(output_channels: usize, block_frames: usize) -> RuntimeConfig {
     RuntimeConfig {
         additional_inputs: Vec::new(),
+        capture: None,
         input: Aes67InputConfig {
             multicast_addr: Ipv4Addr::new(239, 69, 0, 1),
             port: 5004,
@@ -718,6 +758,60 @@ fn unloaded_policy_passthrough_until_plan_committed() {
     assert_eq!(status.graph.version, Some(1));
     assert_eq!(status.graph.applied_block, Some(3));
     assert!(!status.switch_pending);
+}
+
+#[test]
+fn capture_input_feeds_engine_and_reports_capture_mode() {
+    let mut config = runtime_config(2, 128);
+    config.capture = Some(CaptureConfig {
+        device: String::from("fake-capture"),
+        channels: 2,
+        channels_map: vec![0, 1],
+        input_channels: 2,
+        sample_rate: SAMPLE_RATE,
+        block_frames: 128,
+        pending_blocks: 4,
+    });
+    let mut runtime = Runtime::<FakePcm>::with_capture_source(config, Box::new(FakeCapture::new()))
+        .expect("runtime with capture");
+    assert_eq!(runtime.status().input_mode, "alsa_capture");
+    assert!(runtime.status().capture.is_some());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while runtime
+        .status()
+        .capture
+        .as_ref()
+        .map_or(0, |stats| stats.blocks_captured)
+        < 2
+    {
+        assert!(Instant::now() < deadline, "capture did not produce blocks");
+        thread::sleep(Duration::from_millis(2));
+    }
+    let mut seen = None;
+    while Instant::now() < deadline {
+        let _ = runtime.run_block().expect("run block with capture");
+        let captured = runtime
+            .backend()
+            .output()
+            .expect("fake pcm open")
+            .captured
+            .clone();
+        // 等采集块真正进入引擎（采集线程启动与首块之间可能先拉到静音）。
+        if captured.iter().any(|byte| *byte != 0) {
+            seen = Some(captured);
+            break;
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+    let bytes = seen.expect("capture input never reached the engine");
+    // 0.25 -> S24 左移 8 位编码 = 0x200000，S24_3LE 小端为 00 00 20。
+    assert_eq!(&bytes[..3], &[0x00, 0x00, 0x20], "left sample bytes");
+    // -0.25 -> 0xE00000（补码），小端 00 00 E0。
+    assert_eq!(&bytes[3..6], &[0x00, 0x00, 0xE0], "right sample bytes");
+    let stats = runtime.status();
+    let capture = stats.capture.expect("capture stats");
+    assert!(capture.frames_delivered >= 128, "stats={capture:?}");
+    assert!(capture.blocks_captured >= 2);
 }
 
 #[test]
