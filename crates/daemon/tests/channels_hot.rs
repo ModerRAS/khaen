@@ -326,6 +326,7 @@ async fn put_prepare_forwards_rt_host_fields_verbatim() {
         "stage": "prepare",
         "output": { "dac_map": [0, null, 1, null] },
         "input": { "channels": 4, "map": [0, 1, 2, 3] },
+        "content_channels": 2,
         "sample_rate": 48_000,
         "aes67_group": "239.69.1.9",
         "aes67_port": 5_006,
@@ -369,6 +370,7 @@ async fn put_prepare_forwards_rt_host_fields_verbatim() {
         json!({
             "op": "channels_prepare",
             "channels": 4,
+            "content_channels": 2,
             "sample_rate": 48_000,
             "aes67_group": "239.69.1.9",
             "aes67_port": 5_006,
