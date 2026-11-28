@@ -130,7 +130,7 @@ test('mock control: mute applies immediately and /api/status reads it back', asy
     assert.equal(before.state.muted, false)
 
     const ack = await h.control.setMute(true)
-    assert.deepEqual(ack, { ok: true, mute: true, applied_block: 897, idempotent: false, motu: null })
+    assert.deepEqual(ack, { ok: true, mute: true, applied_block: 897, idempotent: false, software_only: true })
     assert.equal(mock.control.muted, true)
     const after = await h.status.fetchStatus()
     assert.equal(after.state.muted, true)

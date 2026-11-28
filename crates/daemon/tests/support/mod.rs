@@ -37,9 +37,9 @@ pub const TEST_PASSWORD: &str = "khaen-test-password";
 
 /// 测试默认的 MOTU 控制面：检测不到设备（no_motu_card），**绝不碰真实设备**。
 ///
-/// 需求 T57 的"检测到 MOTU 时 /api/mute 同时写设备"在测试里必须用 `spawn_with_motu` 显式注入
-/// `FakeCueMix` 才能触发；否则即使这台机器接着 MOTU，测试也不会写任何 CueMix 属性
-/// （避免 `cargo test` 在设备机上造成未授权写入）。
+/// 测试只有显式调用 `/api/motu/volume` 并通过 `spawn_with_motu` 注入 `FakeCueMix` 才会碰
+/// CueMix；`/api/mute` 是应用软件静音，**不**写设备。默认注入 no_motu_card，避免在设备机上
+/// 造成未授权写入。
 pub fn default_test_motu() -> Arc<dyn MotuControl> {
     motu_fake::FakeCueMix::no_motu_card()
 }

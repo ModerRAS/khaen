@@ -177,36 +177,8 @@ test('parseControlMuteAck / parseControlAbortAck / parseDeviceRetryAck validate 
   const mute = parseControlMuteAck({ ok: true, mute: true, applied_block: 9, idempotent: false })
   assert.equal(mute.mute, true)
   assert.equal(mute.applied_block, 9)
-  assert.equal(mute.motu, null)
+  assert.equal(mute.software_only, true)
   assert.throws(() => parseControlMuteAck({ ok: true, mute: 'yes' }), /mute must be a boolean/)
-
-  // §4 加法：/api/mute 成功回执可带 MOTU 设备副作用（applied=false 表示设备不可用/跳过，仍是 200）。
-  const muteWithMotu = parseControlMuteAck({
-    ok: true,
-    mute: true,
-    applied_block: 9,
-    motu: {
-      detected: true,
-      model: 'UL5L',
-      control_reachable: true,
-      reason: 'ok',
-      reason_detail: 'MOTU UltraLite-mk5 detected',
-      side_effect: true,
-      applied: true,
-      write: { key: 'kMuteEnable', index: 0, wrote: true, readback: true, changed: true, verified: true }
-    }
-  })
-  assert.equal(muteWithMotu.motu?.applied, true)
-  assert.equal(muteWithMotu.motu?.model, 'UL5L')
-  assert.equal(muteWithMotu.motu?.write?.key, 'kMuteEnable')
-  const skipped = parseControlMuteAck({
-    ok: true,
-    mute: false,
-    motu: { detected: false, reason: 'no_motu_card', reason_detail: 'no card', side_effect: true, applied: false }
-  })
-  assert.equal(skipped.motu?.detected, false)
-  assert.equal(skipped.motu?.applied, false)
-  assert.throws(() => parseControlMuteAck({ ok: true, mute: true, motu: 'yes' }), /motu must be an object/)
 
   const abort = parseControlAbortAck({ ok: true, aborted: true, aborted_surface: 'mode' })
   assert.equal(abort.aborted, true)
@@ -346,30 +318,6 @@ test('classifyControlError maps stable codes to categories and i18n keys', () =>
   const unknown = classifyControlError(new Error('boom'))
   assert.equal(unknown.category, 'unknown')
   assert.equal(unknown.i18nKey, 'error.control.unknown')
-})
-
-test('classifyControlError surfaces the MOTU side-effect details of a failed /api/mute', () => {
-  const error = new ApiError({
-    status: 502,
-    code: 'motu_write_failed',
-    message: '/api/mute was applied to the daemon control plane (see control) but the MOTU device write failed: timeout',
-    details: {
-      phase: 'motu_mute',
-      motu: { detected: true, model: 'UL5L', control_reachable: true, reason: 'ok', reason_detail: 'MOTU UltraLite-mk5 detected' },
-      motu_error: { code: 'E_CUEMIX_TIMEOUT', message: 'no reply from the CueMix control port', retryable: true }
-    }
-  })
-  const info = classifyControlError(error)
-  assert.equal(info.sideEffect?.errorCode, 'E_CUEMIX_TIMEOUT')
-  assert.equal(info.sideEffect?.errorMessage, 'no reply from the CueMix control port')
-  assert.equal(info.sideEffect?.retryable, true)
-  assert.equal(info.sideEffect?.detected, true)
-  assert.equal(info.sideEffect?.model, 'UL5L')
-
-  const unrelated = classifyControlError(
-    new ApiError({ status: 502, code: 'reconfigure_failed', message: 'boom', details: { phase: 'commit' } })
-  )
-  assert.equal(unrelated.sideEffect, undefined)
 })
 
 test('supported capability sets mirror the backend', () => {

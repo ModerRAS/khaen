@@ -1,4 +1,4 @@
-//! MOTU REST 层（T57）：`GET /api/motu` + `POST/PUT /api/motu/volume`（两阶段）+ /api/mute 副作用。
+//! MOTU REST 层（T57，独立可选控制模块）：`GET /api/motu` + `POST/PUT /api/motu/volume`（两阶段）。
 //!
 //! 阻塞边界：检测（/proc 读 + TCP probe）与设备读写都是阻塞调用，全部放进 tokio blocking
 //! 线程池；handler 里没有 await 期间的锁持有。
@@ -10,8 +10,8 @@
 //!   单键写 + 回读。设备不可用 503（稳定码），设备写失败/回读不一致 502 + 设备错误码；
 //!   部分成功时 `completed` 列出已验证的通道，绝不报告"全部成功"。
 //! - 批量拒绝：一次请求超过两个主通道（或列表里点名其它总线）400——CueMix 设备对批量写敏感。
-//! - /api/mute：target=process 时先做原控制面静音，再把同一次请求单键写 kMuteEnable[0]；
-//!   设备写失败 502 且响应里保留 `control` 原回执（引擎静音成功 ≠ 设备静音成功）。
+//! - 本模块只服务显式 MOTU 设备操作；`/api/mute` 是应用输出软件静音，**不**调用这里，
+//!   也不因 mute/校准改变 CueMix 状态（两个能力域设计解耦，同一项目内独立）。
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -817,121 +817,6 @@ impl MotuApiError {
     }
 }
 
-// ---------------------------------------------------------------------------
-// /api/mute 的 MOTU 副作用
-// ---------------------------------------------------------------------------
-
-/// 副作用结果：设备不可用时跳过（如实上报），可用时写入并回读，失败时带上检测对象。
-enum MuteEffect {
-    /// 设备不可用：不写设备，200 + 原因。
-    Skipped(DeviceDetection),
-    /// 写入并回读成功。
-    Written(DeviceDetection, WriteReceipt<bool>),
-    /// 设备写入/回读失败（检测对象一并带回，便于响应说明设备状态）。
-    Failed(DeviceDetection, Box<MotuError>),
-}
-
-fn apply_mute_effect(control: &Arc<dyn MotuControl>, mute: bool) -> MuteEffect {
-    let detection = control.detection();
-    if !detection.is_ready() {
-        return MuteEffect::Skipped(detection);
-    }
-    match control.write_mute(mute) {
-        Ok(receipt) => MuteEffect::Written(detection, receipt),
-        Err(error) => MuteEffect::Failed(detection, Box::new(error)),
-    }
-}
-
-/// /api/mute（target=process）的 MOTU 附加副作用。
-///
-/// 先由调用方完成原控制面静音（`control_body` 是它的回执），这里只追加设备写入：
-/// - 设备不可用：原回执照常 200 + `motu` 说明未应用（不报错，Windows/无设备是常态）；
-/// - 设备写入并回读成功：200 + `motu.write` 回执；
-/// - 设备写入/回读失败：502（或内部 500）+ `error`，并把原控制面回执放在 `control` 里
-///   —— 明确区分"引擎已静音"与"设备静音失败"，不假成功。
-pub(crate) async fn with_mute_side_effect(
-    state: &Arc<DaemonState>,
-    mute: bool,
-    control_body: Value,
-) -> (StatusCode, Json<Value>) {
-    let control = Arc::clone(state.motu().control());
-    let result = tokio::task::spawn_blocking(move || apply_mute_effect(&control, mute)).await;
-    match result {
-        Ok(MuteEffect::Skipped(detection)) => (
-            StatusCode::OK,
-            Json(attach_motu(control_body, mute_motu_json(&detection, None))),
-        ),
-        Ok(MuteEffect::Written(detection, receipt)) => {
-            state.motu().invalidate_snapshot();
-            (
-                StatusCode::OK,
-                Json(attach_motu(
-                    control_body,
-                    mute_motu_json(&detection, Some(&receipt)),
-                )),
-            )
-        }
-        Ok(MuteEffect::Failed(detection, error)) => {
-            let status = device_status(error.code);
-            (
-                status,
-                Json(json!({
-                    "ok": false,
-                    "error": {
-                        "code": error.code,
-                        "message": format!(
-                            "/api/mute was applied to the daemon control plane (see control) but the MOTU device write failed: {}",
-                            error.message
-                        ),
-                        "details": {
-                            "phase": "motu_mute",
-                            "motu": detection_json(&detection),
-                            "motu_error": error.to_json(),
-                        },
-                    },
-                    "control": control_body,
-                })),
-            )
-        }
-        Err(join_error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "ok": false,
-                "error": {
-                    "code": sys_code::INTERNAL_ERROR,
-                    "message": format!(
-                        "/api/mute was applied to the daemon control plane (see control) but the MOTU side-effect task failed: {join_error}"
-                    ),
-                    "details": {"phase": "motu_mute"},
-                },
-                "control": control_body,
-            })),
-        ),
-    }
-}
-
-/// 把 motu 对象挂到原控制面回执上（回执必须是 JSON object；不是就原样返回）。
-fn attach_motu(mut body: Value, motu: Value) -> Value {
-    if let Some(object) = body.as_object_mut() {
-        object.insert("motu".to_string(), motu);
-    }
-    body
-}
-
-/// /api/mute 响应里的 MOTU 说明对象。
-fn mute_motu_json(detection: &DeviceDetection, receipt: Option<&WriteReceipt<bool>>) -> Value {
-    json!({
-        "detected": detection.detected,
-        "model": &detection.model,
-        "control_reachable": detection.control_reachable,
-        "reason": detection.reason,
-        "reason_detail": detection_reason_text(detection.reason),
-        "side_effect": true,
-        "applied": receipt.is_some(),
-        "write": receipt.map(WriteReceipt::to_json),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::MotuHub;
@@ -1159,28 +1044,6 @@ mod tests {
         assert_eq!(json[0]["name"], json!("Main 1"));
         assert_eq!(json[0]["verified"], json!(true));
         assert_eq!(json[0]["frame_sent"], json!(true));
-    }
-
-    #[test]
-    fn mute_side_effect_json_is_explicit_about_applied_state() {
-        let skipped = mute_motu_json(&absent_detection(REASON_CARDS_UNAVAILABLE), None);
-        assert_eq!(skipped["applied"], json!(false));
-        assert_eq!(skipped["write"], Value::Null);
-        assert_eq!(skipped["reason"], json!(REASON_CARDS_UNAVAILABLE));
-
-        let receipt = WriteReceipt {
-            key: "kMuteEnable",
-            index: 0,
-            before: Some(false),
-            wrote: true,
-            readback: true,
-            changed: true,
-            frame_sent: true,
-        };
-        let written = mute_motu_json(&ready_detection(), Some(&receipt));
-        assert_eq!(written["applied"], json!(true));
-        assert_eq!(written["write"]["wrote"], json!(true));
-        assert_eq!(written["write"]["verified"], json!(true));
     }
 
     /// GET 合成用替身：可编排检测与读取结果，不碰网络。

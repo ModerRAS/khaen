@@ -50,7 +50,10 @@ async fn plain_test_servers_never_wire_a_real_device() {
 
     let response = request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#).await;
     assert_eq!(response.status, 200, "{}", response.body_text());
-    assert_eq!(response.json()["motu"]["applied"], json!(false));
+    assert!(
+        response.json().get("motu").is_none(),
+        "/api/mute must not perform a CueMix side effect"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -493,80 +496,28 @@ async fn volume_commit_keeps_the_draft_when_the_device_disappears() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn mute_writes_the_device_as_an_explicit_side_effect_when_ready() {
+async fn mute_is_software_only_and_never_writes_cuemix() {
     let fake = FakeCueMix::ready();
     let server = support::spawn_with_motu(fake.clone()).await;
 
-    let response = request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#).await;
-    assert_eq!(response.status, 200, "{}", response.body_text());
-    let body = response.json();
-    // 原控制面语义完全保留。
-    assert_eq!(body["mute"], json!(true));
-    assert_eq!(body["target"], json!("daemon-process"));
-    assert!(body["applied_block"].as_u64().is_some());
-    // 设备副作用如实上报。
-    assert_eq!(body["motu"]["detected"], json!(true));
-    assert_eq!(body["motu"]["control_reachable"], json!(true));
-    assert_eq!(body["motu"]["applied"], json!(true));
-    assert_eq!(body["motu"]["write"]["key"], json!("kMuteEnable"));
-    assert_eq!(body["motu"]["write"]["readback"], json!(true));
-    assert_eq!(body["motu"]["write"]["verified"], json!(true));
-    assert_eq!(body["motu"]["write"]["frame_sent"], json!(true));
-    assert!(fake.mute_state());
-    assert_eq!(fake.writes(), vec![WriteCall::Mute(true)]);
-
-    // 目标值已在位：不再发写帧（幂等），但仍确认设备现状。
-    let response = request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#).await;
-    assert_eq!(response.status, 200);
-    let body = response.json();
-    assert_eq!(body["motu"]["applied"], json!(true));
-    assert_eq!(body["motu"]["write"]["frame_sent"], json!(false));
-
-    let response = request_json(&server, "POST", "/api/mute", r#"{"mute":false}"#).await;
-    assert_eq!(response.status, 200);
-    assert!(!fake.mute_state(), "unmute must reach the device too");
-    assert_eq!(fake.writes().last(), Some(&WriteCall::Mute(false)));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn mute_stays_200_and_skips_the_device_when_not_detected() {
-    let fake = FakeCueMix::no_motu_card();
-    let server = support::spawn_with_motu(fake.clone()).await;
-
-    let response = request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#).await;
-    assert_eq!(response.status, 200, "{}", response.body_text());
-    let body = response.json();
-    assert_eq!(body["mute"], json!(true));
-    assert_eq!(body["motu"]["detected"], json!(false));
-    assert_eq!(body["motu"]["applied"], json!(false));
-    assert_eq!(body["motu"]["reason"], json!("no_motu_card"));
-    assert_eq!(body["motu"]["write"], Value::Null);
-    assert!(fake.writes().is_empty());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn mute_device_failure_is_502_with_the_control_receipt_preserved() {
-    let fake = FakeCueMix::ready();
-    let server = support::spawn_with_motu(fake.clone()).await;
-    fake.fail_mute(InjectedFailure::error(khaen_daemon::motu::MotuError::new(
-        device_codes::READBACK_TIMEOUT,
-        "device did not echo kMuteEnable[0]",
-    )));
-
-    let response = request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#).await;
-    assert_eq!(response.status, 502, "{}", response.body_text());
-    let body = response.json();
-    assert_eq!(body["ok"], json!(false));
-    assert_eq!(body["error"]["code"], json!(device_codes::READBACK_TIMEOUT));
-    assert!(body["error"]["message"]
-        .as_str()
-        .expect("message")
-        .contains("control plane"));
-    // 引擎侧静音确实完成了；设备失败单独说明，绝不合并成一个成功。
-    assert_eq!(body["control"]["mute"], json!(true));
-    assert_eq!(body["control"]["target"], json!("daemon-process"));
-    assert_eq!(body["error"]["details"]["motu"]["detected"], json!(true));
-    assert!(!fake.mute_state(), "device mute did not take effect");
+    for mute in [true, false] {
+        let body = json!({ "mute": mute });
+        let response = request_json(&server, "POST", "/api/mute", &body.to_string()).await;
+        assert_eq!(response.status, 200, "{}", response.body_text());
+        let body = response.json();
+        assert_eq!(body["mute"], json!(mute));
+        assert_eq!(body["target"], json!("daemon-process"));
+        assert!(
+            body.get("motu").is_none(),
+            "mute must not report or perform a CueMix operation: {body}"
+        );
+    }
+    assert!(
+        fake.writes().is_empty(),
+        "mute/umute must never write CueMix: {:?}",
+        fake.writes()
+    );
+    assert!(!fake.mute_state(), "device mute state must stay untouched");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -639,11 +590,8 @@ async fn concurrent_commits_with_the_same_token_only_one_wins() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn concurrent_mute_requests_both_report_the_device_truth() {
-    let fake = FakeCueMix::ready();
-    let server = support::spawn_with_motu(fake.clone()).await;
-    fake.set_slow(Duration::from_millis(30));
-
+async fn concurrent_mute_requests_are_software_only() {
+    let server = support::spawn().await;
     let (first, second) = tokio::join!(
         request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#),
         request_json(&server, "POST", "/api/mute", r#"{"mute":true}"#),
@@ -652,14 +600,6 @@ async fn concurrent_mute_requests_both_report_the_device_truth() {
         assert_eq!(response.status, 200, "{}", response.body_text());
         let body = response.json();
         assert_eq!(body["mute"], json!(true));
-        assert_eq!(body["motu"]["applied"], json!(true));
-        assert_eq!(body["motu"]["write"]["readback"], json!(true));
+        assert!(body.get("motu").is_none());
     }
-    assert!(fake.mute_state());
-    assert_eq!(fake.write_count(), 2, "one device write per request");
-    assert!(
-        fake.max_concurrent() >= 2,
-        "the test must actually exercise concurrency (max {})",
-        fake.max_concurrent()
-    );
 }

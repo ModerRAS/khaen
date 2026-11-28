@@ -1069,15 +1069,6 @@ const messages = {
       noReceipt: '尚无静音回执',
       successMuted: '已静音（回读见 /api/status）',
       successUnmuted: '已取消静音（回读见 /api/status）',
-      motu: {
-        field: 'MOTU 设备副作用',
-        failedField: 'MOTU 设备写入失败',
-        applied: '已写入设备并回读',
-        skipped: '设备不可用，未写设备（已跳过）',
-        notApplied: '设备未回执写入',
-        failedToast: '引擎已静音，但 MOTU 设备写入失败：{code} {message}',
-        skippedToast: '引擎已静音；MOTU 设备副作用已跳过：{reason}'
-      },
       recoveryNote:
         '设备安全锁存后的恢复路径就是显式取消静音：因此故障/安全态下静音开关仍然可用，其它写入被禁用。'
     },

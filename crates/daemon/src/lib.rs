@@ -63,8 +63,7 @@
 //!   （detected/model/control_reachable/reason）+ mute/vol 现状，设备读不到就 null + reasons，
 //!   Windows/无设备 detected=false 不报错。POST/PUT `/api/motu/volume` 两阶段：prepare 只校验
 //!   并签发 token（不写设备），commit 才逐通道单键写 + 回读；批量 400、设备写失败 502 + 设备码。
-//!   POST `/api/mute` 在 target=process 且检测到 MOTU 时把同一次静音写成设备副作用
-//!   （kMuteEnable[0] 单键写 + 回读，失败 502 且响应保留原控制面回执 `control`）。
+//!   该模块只服务显式 `/api/motu*` 设备操作；`/api/mute` 是应用输出软件静音，绝不写 CueMix。
 //! - `/api/auth/*`：M1 认证（setup/login/session/logout/password），argon2id PHC 存
 //!   `${KHAEN_STATE_DIR:-/var/lib/khaen}/auth.json`（见 `auth` 模块）。除 `/healthz` 与
 //!   `/api/auth/status|setup|login` 外，全部 `/api` 要求会话；写方法（Cookie 会话）额外要求
@@ -92,7 +91,7 @@ pub mod device;
 /// daemon → rt-host 控制通道代理（T70f-b）：契约 B 行 JSON 客户端 + 诚实降级。
 pub mod host_link;
 mod meta;
-/// MOTU UltraLite-mk5 控制面（T57）：/api/motu 检测 + 两阶段音量 + /api/mute 设备副作用。
+/// MOTU UltraLite-mk5 控制面（独立可选模块）：/api/motu 检测 + 两阶段音量；**不参与输出/mute/校准**。
 pub mod motu;
 /// M4 方案 REST（T55）：POST /api/plan/upload、GET /api/plan/history。
 pub mod plan_api;
@@ -302,7 +301,7 @@ impl DaemonState {
         self
     }
 
-    /// MOTU 控制面（/api/motu* 与 /api/mute 副作用使用）。
+    /// MOTU 控制面（只服务 /api/motu* 的显式设备操作；输出/mute/校准不依赖它）。
     pub fn motu(&self) -> &motu::MotuHub {
         &self.motu
     }
@@ -717,13 +716,12 @@ async fn mute(
         (None, None) => return bad_request("missing field: mute"),
     };
     if state.host_link().target() == Target::Process {
-        // 原控制面路径先走完（语义不变），MOTU 设备写入只作为附加副作用；
-        // 设备写失败会把状态码改成 502 并在响应里保留这里的 control 回执（不假成功）。
+        // 输出 mute 只是应用软件静音：不在这里碰 MOTU/CueMix（那是独立控制模块的事）。
         let mut control_body = process_marker(state.control().mute_json(mute));
         if let Some(object) = control_body.as_object_mut() {
             object.insert("muted".to_string(), Value::Bool(mute));
         }
-        return crate::motu::api::with_mute_side_effect(&state, mute, control_body).await;
+        return (StatusCode::OK, Json(control_body));
     }
     let (status, Json(mut body)) =
         forward(&state, serde_json::json!({ "op": "mute", "mute": mute })).await;

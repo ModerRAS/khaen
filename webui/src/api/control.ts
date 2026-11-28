@@ -161,39 +161,15 @@ export interface ControlCommitAck {
   note: string | null
 }
 
-/** /api/mute 的 MOTU 设备副作用回执（docs/API.md §4；设备不可用时 applied=false + reason，仍是 200）。 */
-export interface ControlMuteDeviceEffect {
-  detected: boolean | null
-  model: string | null
-  control_reachable: boolean | null
-  reason: string | null
-  reason_detail: string | null
-  side_effect: true
-  applied: boolean | null
-  /** 单键写回执（key/index/before/wrote/readback/changed/frame_sent/verified）；未写设备时 null。 */
-  write: Record<string, unknown> | null
-}
-
-/** /api/mute 502 时 error.details 的 MOTU 失败信息（引擎已静音，但设备写入失败，不假成功）。 */
-export interface ControlMuteSideEffectFailure {
-  detected: boolean | null
-  model: string | null
-  control_reachable: boolean | null
-  reason: string | null
-  reason_detail: string | null
-  errorCode: string | null
-  errorMessage: string | null
-  retryable: boolean | null
-}
-
+/** 静音回执（mute_json）；只是应用软件静音，不包含/不执行 MOTU 设备副作用。 */
 /** 静音回执（mute_json）+ 【加法】motu 设备副作用。 */
 export interface ControlMuteAck {
   ok: true
   mute: boolean
   applied_block: number | null
   idempotent: boolean | null
-  /** 后端未带 motu 字段（例如 target=rt-host）= null；不猜测设备是否写入。 */
-  motu: ControlMuteDeviceEffect | null
+  /** 只是应用软件静音：没有 MOTU/CueMix 副作用。 */
+  software_only: true
 }
 
 /** abort 回执。 */
@@ -409,27 +385,6 @@ export function parseControlCommitAck(body: unknown): ControlCommitAck {
   }
 }
 
-/** 归一化 /api/mute 的 motu 副作用对象（§4 加法；缺失 null，非对象视为契约漂移）。 */
-function readMuteDeviceEffect(value: unknown): ControlMuteDeviceEffect | null {
-  if (value === null || value === undefined) {
-    return null
-  }
-  const record = asRecord(value)
-  if (record === null) {
-    throw invalidResponse('motu must be an object or null')
-  }
-  return {
-    detected: readBoolean(record, 'detected'),
-    model: readString(record, 'model'),
-    control_reachable: readBoolean(record, 'control_reachable'),
-    reason: readString(record, 'reason'),
-    reason_detail: readString(record, 'reason_detail'),
-    side_effect: true,
-    applied: readBoolean(record, 'applied'),
-    write: readJsonObject(record, 'write')
-  }
-}
-
 /** 校验并归一化 POST /api/mute 响应：mute 必须是真实布尔值（回读值）。 */
 export function parseControlMuteAck(body: unknown): ControlMuteAck {
   const record = asRecord(body)
@@ -446,7 +401,7 @@ export function parseControlMuteAck(body: unknown): ControlMuteAck {
     mute,
     applied_block: readNumber(record, 'applied_block'),
     idempotent: readBoolean(record, 'idempotent'),
-    motu: readMuteDeviceEffect(record.motu)
+    software_only: true
   }
 }
 
@@ -750,8 +705,7 @@ export interface ControlErrorInfo {
   detail?: string
   /** 是否值得重试（401 不重试：会话失效应去登录）。 */
   retryable: boolean
-  /** /api/mute 的 MOTU 设备副作用失败（error.details.phase=motu_mute）；其它错误没有该字段。 */
-  sideEffect?: ControlMuteSideEffectFailure
+  /** 控制面错误不包含设备副作用：/api/mute 只做应用软件静音。 */
 }
 
 const CONTROL_ERROR_KEYS: Record<ControlErrorCategory, string> = {
@@ -797,34 +751,6 @@ const CONTROL_CODE_CATEGORIES: Record<string, ControlErrorCategory> = {
   network_error: 'network'
 }
 
-/** 从 /api/mute 失败 details 解析 MOTU 副作用失败信息；不是该形状返回 null（不误判其它 502）。 */
-function readMuteSideEffectFailure(details: unknown): ControlMuteSideEffectFailure | null {
-  const record = asRecord(details)
-  if (record === null || record.phase !== 'motu_mute') {
-    return null
-  }
-  const motu = asRecord(record.motu)
-  const motuError = asRecord(record.motu_error)
-  const boolField = (source: Record<string, unknown> | null, field: string): boolean | null => {
-    const value = source === null ? undefined : source[field]
-    return typeof value === 'boolean' ? value : null
-  }
-  const textField = (source: Record<string, unknown> | null, field: string): string | null => {
-    const value = source === null ? undefined : source[field]
-    return typeof value === 'string' && value.length > 0 ? value : null
-  }
-  return {
-    detected: boolField(motu, 'detected'),
-    model: textField(motu, 'model'),
-    control_reachable: boolField(motu, 'control_reachable'),
-    reason: textField(motu, 'reason'),
-    reason_detail: textField(motu, 'reason_detail'),
-    errorCode: textField(motuError, 'code'),
-    errorMessage: textField(motuError, 'message'),
-    retryable: boolField(motuError, 'retryable')
-  }
-}
-
 /** 把控制面失败归类为 UI 可分支的稳定类别 + 本地化文案键。 */
 export function classifyControlError(error: unknown): ControlErrorInfo {
   if (!(error instanceof ApiError)) {
@@ -851,14 +777,12 @@ export function classifyControlError(error: unknown): ControlErrorInfo {
     category = CONTROL_CODE_CATEGORIES[error.code] ?? (error.status >= 500 ? 'server' : error.status === 404 ? 'not_found' : 'conflict')
   }
   const detail = error.message.length > 0 ? error.message : undefined
-  const sideEffect = readMuteSideEffectFailure(error.details)
   return {
     category,
     status: error.status,
     code: error.code,
     i18nKey: CONTROL_ERROR_KEYS[category],
     ...(detail ? { detail } : {}),
-    retryable: category !== 'unauthorized' && category !== 'invalid_response',
-    ...(sideEffect === null ? {} : { sideEffect })
+    retryable: category !== 'unauthorized' && category !== 'invalid_response'
   }
 }

@@ -638,10 +638,12 @@ impl RtHostJobBackend {
                 "rt-host output device has not started (output_started=false): calibration cannot play a sweep",
             ));
         }
-        if device_bool(&status.raw, "muted") == Some(true) {
+        // 用户静音不再拒绝：rt-host cal_enter 会记录原状态、自动暂停输入并开校准旁路，
+        // 测量结束 cal_leave 原样恢复。这里只拒绝真正堵住可闻路径的安全故障。
+        if device_str(&status.raw, "state") == Some("faulted") {
             return Err(StageFailure::failed(
                 UNAVAILABLE,
-                "rt-host output is muted/safety-muted (device.muted=true): an audible sweep would be silent, so the measurement is rejected instead of fabricating data",
+                "rt-host output is safety-faulted (state=faulted): an audible sweep would be silent, so the measurement is rejected instead of fabricating data",
             ));
         }
         Ok(())

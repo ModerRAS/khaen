@@ -214,30 +214,11 @@ async function onToggleMute(next: boolean | string | number): Promise<void> {
   const target = next === true
   const ack = await setControlMute(target)
   if (ack === null) {
-    // MOTU 副作用失败（502 + error.details.phase=motu_mute）：引擎已静音但设备写入失败，分开如实提示。
-    const failure = controlState.error?.sideEffect ?? null
-    if (failure !== null) {
-      ElMessage.error(
-        t('volume.mute.motu.failedToast', {
-          code: failure.errorCode ?? t('common.dash'),
-          message: failure.errorMessage ?? (controlState.error?.detail ?? '')
-        })
-      )
-      return
-    }
     ElMessage.error(controlState.error === null ? t('error.control.unknown') : t(controlState.error.i18nKey))
     return
   }
-  if (ack.motu !== null && ack.motu.applied === false) {
-    // 引擎静音成功、设备副作用跳过：别弹“成功”，让用户看到设备未写入的真实原因。
-    ElMessage.warning(
-      t('volume.mute.motu.skippedToast', {
-        reason: ack.motu.reason_detail ?? ack.motu.reason ?? t('common.dash')
-      })
-    )
-  } else {
-    ElMessage.success(ack.mute ? t('volume.mute.successMuted') : t('volume.mute.successUnmuted'))
-  }
+  // /api/mute 只是应用软件静音：不显示、也不期待任何 MOTU/CueMix 设备副作用。
+  ElMessage.success(ack.mute ? t('volume.mute.successMuted') : t('volume.mute.successUnmuted'))
   await refresh()
 }
 
@@ -279,39 +260,7 @@ const muteRows = computed<KvRow[]>(() => {
       value: lastMuteAppliedBlockText.value,
       reason: controlState.lastMute === null ? t('volume.mute.noReceipt') : null
     },
-    ...muteMotuRows.value
   ]
-})
-
-/** /api/mute 的 MOTU 设备副作用：成功回执里的 motu 对象 + 失败回执里的 details 都如实展示。 */
-const muteMotuRows = computed<KvRow[]>(() => {
-  const rows: KvRow[] = []
-  const motu = controlState.lastMute?.motu ?? null
-  if (motu !== null) {
-    rows.push({
-      label: t('volume.mute.motu.field'),
-      value:
-        motu.applied === true
-          ? t('volume.mute.motu.applied')
-          : motu.detected === false
-            ? t('volume.mute.motu.skipped')
-            : t('volume.mute.motu.notApplied'),
-      reason: motu.reason_detail ?? motu.reason,
-      tone: motu.applied === true ? ('ok' as const) : motu.detected === false ? ('warn' as const) : ('bad' as const)
-    })
-  }
-  const failure = controlState.error?.sideEffect ?? null
-  if (failure !== null) {
-    rows.push({
-      label: t('volume.mute.motu.failedField'),
-      value: failure.errorCode ?? t('common.dash'),
-      reason:
-        [failure.errorMessage, failure.reason_detail ?? failure.reason].filter((part) => part !== null && part.length > 0).join(' · ') ||
-        null,
-      tone: 'bad' as const
-    })
-  }
-  return rows
 })
 
 /* --------------------------------------------------------- 逐 lane 增益草稿 */
