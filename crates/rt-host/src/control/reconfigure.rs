@@ -31,7 +31,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use khaen_core::rt::{MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
 use khaen_core::sha256::{sha256, sha256_hex};
 use khaen_host::admission::AdmissionLimits;
-use khaen_host::aes67_input::{MAX_OUTPUT_CHANNELS as MAX_INPUT_BUS_CHANNELS, MAX_RTP_CHANNELS};
+use khaen_host::aes67_input::{
+    Aes67InputConfig, MAX_OUTPUT_CHANNELS as MAX_INPUT_BUS_CHANNELS, MAX_RTP_CHANNELS,
+};
 use khaen_host::backend::DeviceConfig;
 use khaen_host::control::{engine_token, ControlError};
 use khaen_host::engine::EngineConfig;
@@ -859,6 +861,42 @@ impl ChannelsState {
         }
     }
 
+    /// 启动时的 AES67 流表（channels_status.input_streams；只读配置，不含实时统计）。
+    ///
+    /// 第一项是主流（用当前视图，channels_commit 改过也如实反映）；其余是启动时
+    /// `additional_inputs`（多流热重配未实现，这些流不会随 commit 改变）。
+    fn input_streams_json(&self) -> Value {
+        fn stream(config: &Aes67InputConfig, primary: bool) -> Value {
+            json!({
+                "primary": primary,
+                "group": config.multicast_addr.to_string(),
+                "port": config.port,
+                "payload_type": config.payload_type,
+                "channels": config.channels,
+                "map": config.channels_map,
+                "output_channels": config.output_channels,
+                "jitter_frames": config.jitter_target_frames,
+            })
+        }
+        let primary_config = Aes67InputConfig {
+            multicast_addr: self.current.aes67_group,
+            port: self.current.aes67_port,
+            payload_type: self.current.aes67_payload_type,
+            sample_rate: self.current.sample_rate,
+            channels: self.current.aes67_channels,
+            channels_map: self.current.aes67_map.clone(),
+            output_channels: self.current.content_channels,
+            block_frames: self.current.block_frames,
+            jitter_target_frames: self.current.jitter_frames,
+        };
+        let mut streams = Vec::with_capacity(1 + self.base_config.additional_inputs.len());
+        streams.push(stream(&primary_config, true));
+        for input in &self.base_config.additional_inputs {
+            streams.push(stream(input, false));
+        }
+        Value::Array(streams)
+    }
+
     /// channels_status 响应。
     pub fn status_json(&self, snapshot: Option<&RuntimeSnapshot>) -> Value {
         let tracker = lock_tracker(&self.tracker);
@@ -891,6 +929,7 @@ impl ChannelsState {
             "op": "channels_status",
             "generation": generation,
             "input_source": self.input_source.as_ref().map(Aes67InputSource::to_json),
+            "input_streams": self.input_streams_json(),
             "current": self.current.to_json(),
             "format": {
                 "block_frames": self.current.block_frames,

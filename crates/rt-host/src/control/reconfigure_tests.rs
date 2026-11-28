@@ -169,6 +169,48 @@ fn channels_prepare_bounds_aes67_map_by_content_width_not_output_width() {
 }
 
 #[test]
+fn channels_status_reports_startup_input_streams() {
+    let mut config = fake_runtime_config();
+    let mut additional = config.input.clone();
+    additional.multicast_addr = std::net::Ipv4Addr::new(239, 69, 0, 2);
+    additional.port = 5006;
+    additional.channels_map = vec![0];
+    additional.channels = 1;
+    additional.output_channels = config.input.output_channels;
+    config.additional_inputs = vec![additional];
+    let state = ChannelsState::new(
+        config,
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    let status = state.status_json(None);
+    let streams = status["input_streams"].as_array().expect("streams array");
+    assert_eq!(streams.len(), 2);
+    assert_eq!(streams[0]["primary"], json!(true));
+    assert_eq!(streams[0]["group"], json!("239.69.0.1"));
+    assert_eq!(streams[0]["port"], json!(5004));
+    assert_eq!(streams[1]["primary"], json!(false));
+    assert_eq!(streams[1]["group"], json!("239.69.0.2"));
+    assert_eq!(streams[1]["port"], json!(5006));
+
+    let single = ChannelsState::new(
+        fake_runtime_config(),
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    assert_eq!(
+        single.status_json(None)["input_streams"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+}
+
+#[test]
 fn channels_status_reports_aes67_input_source_provenance() {
     let sdp = ChannelsState::new(
         fake_runtime_config(),

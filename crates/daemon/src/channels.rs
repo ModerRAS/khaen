@@ -562,6 +562,17 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
     }
     // input.source / input.sdp_sha256：rt-host channels_status 的加法字段 input_source
     // `{source:"sdp"|"manual", sdp_sha256}`；旧 rt-host / 手工配置分别给原因。
+    // IO I3c 加法字段：rt-host 启动时的 AES67 流表（第一项=主流；多流热重配未实现）。
+    let input_streams = channels_status
+        .and_then(|body| body.get("input_streams"))
+        .filter(|value| value.is_array())
+        .cloned();
+    if input_streams.is_none() {
+        reasons.insert(
+            "input_streams".to_string(),
+            "the rt-host channels status does not report its AES67 input stream list (older rt-host, or channels status unavailable); the daemon does not fabricate a stream list".to_string(),
+        );
+    }
     let input_source = channels_status
         .and_then(|body| body.get("input_source"))
         .filter(|value| value.is_object());
@@ -732,6 +743,7 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
             "map": input_map,
             "source": input_source_value,
             "sdp_sha256": input_sdp_sha256,
+            "streams": input_streams.unwrap_or(Value::Null),
         },
         "mapping": mapping,
         "plan": {

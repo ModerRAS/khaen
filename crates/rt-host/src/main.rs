@@ -222,6 +222,180 @@ mod app {
             .map_err(|_| ConfigError::new(format!("KHAEN_AES67_SDP {path} is not valid UTF-8")))
     }
 
+    /// 读取多流配置文件（启动期一次；限制 64 KiB）。
+    fn read_streams_file(path: &str) -> Result<String, ConfigError> {
+        const MAX_BYTES: u64 = 64 * 1024;
+        let metadata = std::fs::metadata(path).map_err(|error| {
+            ConfigError::new(format!(
+                "KHAEN_AES67_ADDITIONAL_STREAMS cannot stat {path}: {error}"
+            ))
+        })?;
+        if !metadata.is_file() {
+            return Err(ConfigError::new(format!(
+                "KHAEN_AES67_ADDITIONAL_STREAMS {path} is not a regular file"
+            )));
+        }
+        if metadata.len() > MAX_BYTES {
+            return Err(ConfigError::new(format!(
+                "KHAEN_AES67_ADDITIONAL_STREAMS {path} is {} bytes, limit {MAX_BYTES}",
+                metadata.len()
+            )));
+        }
+        let bytes = std::fs::read(path).map_err(|error| {
+            ConfigError::new(format!(
+                "KHAEN_AES67_ADDITIONAL_STREAMS cannot read {path}: {error}"
+            ))
+        })?;
+        String::from_utf8(bytes).map_err(|_| {
+            ConfigError::new(format!(
+                "KHAEN_AES67_ADDITIONAL_STREAMS {path} is not valid UTF-8"
+            ))
+        })
+    }
+
+    /// 解析多流 JSON（数组；每项 group/port/payload_type/channels/map，可选 jitter_frames）。
+    ///
+    /// 输出宽度/块长/采样率继承主流（RuntimeConfig 要求所有流一致）；槽位必须 < 输入宽度。
+    pub fn parse_additional_streams(
+        text: &str,
+        sample_rate: u32,
+        block_frames: usize,
+        output_channels: usize,
+        default_jitter_frames: usize,
+    ) -> Result<Vec<Aes67InputConfig>, ConfigError> {
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|error| {
+            ConfigError::new(format!(
+                "KHAEN_AES67_ADDITIONAL_STREAMS is not valid JSON: {error}"
+            ))
+        })?;
+        let Some(entries) = value.as_array() else {
+            return Err(ConfigError::new(
+                "KHAEN_AES67_ADDITIONAL_STREAMS must be a JSON array",
+            ));
+        };
+        const MAX_ADDITIONAL: usize = khaen_host::aes67_bus::MAX_BUS_STREAMS - 1;
+        if entries.len() > MAX_ADDITIONAL {
+            return Err(ConfigError::new(format!(
+                "KHAEN_AES67_ADDITIONAL_STREAMS has {} entries, limit {MAX_ADDITIONAL}",
+                entries.len()
+            )));
+        }
+        let mut streams: Vec<Aes67InputConfig> = Vec::with_capacity(entries.len());
+        let mut endpoints: Vec<(std::net::Ipv4Addr, u16)> = Vec::new();
+        for (index, entry) in entries.iter().enumerate() {
+            let object = entry.as_object().ok_or_else(|| {
+                ConfigError::new(format!(
+                    "KHAEN_AES67_ADDITIONAL_STREAMS[{index}] must be a JSON object"
+                ))
+            })?;
+            for key in object.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "group" | "port" | "payload_type" | "channels" | "map" | "jitter_frames"
+                ) {
+                    return Err(ConfigError::new(format!(
+                        "KHAEN_AES67_ADDITIONAL_STREAMS[{index}] has unknown field {key:?}; supported: group/port/payload_type/channels/map/jitter_frames"
+                    )));
+                }
+            }
+            let group_text = object
+                .get("group")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| {
+                    ConfigError::new(format!(
+                        "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].group must be an IPv4 address string"
+                    ))
+                })?;
+            let group: std::net::Ipv4Addr = group_text.parse().map_err(|_| {
+                ConfigError::new(format!(
+                    "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].group is not an IPv4 address"
+                ))
+            })?;
+            let port = object
+                .get("port")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u16::try_from(value).ok())
+                .ok_or_else(|| {
+                    ConfigError::new(format!(
+                        "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].port must be 1..=65535"
+                    ))
+                })?;
+            let payload_type = object
+                .get("payload_type")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u8::try_from(value).ok())
+                .ok_or_else(|| {
+                    ConfigError::new(format!(
+                        "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].payload_type must be 96..=127"
+                    ))
+                })?;
+            let channels = object
+                .get("channels")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| {
+                    ConfigError::new(format!(
+                        "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].channels must be a positive integer"
+                    ))
+                })?;
+            let map_entries = object
+                .get("map")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| {
+                    ConfigError::new(format!(
+                        "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].map must be an array of input slots"
+                    ))
+                })?;
+            let mut channels_map = Vec::with_capacity(map_entries.len());
+            for slot in map_entries {
+                let slot = slot.as_u64().and_then(|value| u16::try_from(value).ok()).ok_or_else(
+                    || {
+                        ConfigError::new(format!(
+                            "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].map entries must be u16 channel slots"
+                        ))
+                    },
+                )?;
+                channels_map.push(slot);
+            }
+            let jitter_frames = match object.get("jitter_frames") {
+                Some(value) => value
+                    .as_u64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| {
+                        ConfigError::new(format!(
+                            "KHAEN_AES67_ADDITIONAL_STREAMS[{index}].jitter_frames must be a non-negative integer"
+                        ))
+                    })?,
+                None => default_jitter_frames,
+            };
+            let config = Aes67InputConfig {
+                multicast_addr: group,
+                port,
+                payload_type,
+                sample_rate,
+                channels,
+                channels_map,
+                output_channels,
+                block_frames,
+                jitter_target_frames: jitter_frames,
+            };
+            config.validate().map_err(|error| {
+                ConfigError::new(format!(
+                    "KHAEN_AES67_ADDITIONAL_STREAMS[{index}] is invalid: {}",
+                    error.name()
+                ))
+            })?;
+            if endpoints.contains(&(group, port)) {
+                return Err(ConfigError::new(format!(
+                    "KHAEN_AES67_ADDITIONAL_STREAMS[{index}] duplicates another stream's group/port ({group}:{port})"
+                )));
+            }
+            endpoints.push((group, port));
+            streams.push(config);
+        }
+        Ok(streams)
+    }
+
     fn parse_channels_map(text: &str) -> Result<Vec<u16>, ConfigError> {
         let mut map = Vec::new();
         for part in text.split(',') {
@@ -611,8 +785,31 @@ mod app {
             block_frames,
             jitter_target_frames: jitter_frames,
         };
+        // 多路 AES67（IO I3c）：额外的流从 JSON 文件读入；宽度/块长/速率继承主流。
+        let additional_inputs = match env_optional("KHAEN_AES67_ADDITIONAL_STREAMS") {
+            Some(path) => {
+                let text = read_streams_file(&path)?;
+                let streams = parse_additional_streams(
+                    &text,
+                    sample_rate,
+                    block_frames,
+                    input_channels,
+                    jitter_frames,
+                )?;
+                if streams.iter().any(|stream| {
+                    stream.multicast_addr == input.multicast_addr && stream.port == input.port
+                }) {
+                    return Err(ConfigError::new(format!(
+                        "KHAEN_AES67_ADDITIONAL_STREAMS duplicates the primary AES67 endpoint {}:{}",
+                        input.multicast_addr, input.port
+                    )));
+                }
+                streams
+            }
+            None => Vec::new(),
+        };
         let config = RuntimeConfig {
-            additional_inputs: Vec::new(),
+            additional_inputs,
             input,
             engine: EngineConfig {
                 block_frames,
@@ -1067,6 +1264,39 @@ mod tests {
     use khaen_host::runtime::{ReceiverStats, RuntimeStatus};
     use khaen_host::safety::RuntimeState;
     use khaen_host::supervisor::{LifecycleState, SupervisorStatus};
+
+    #[test]
+    fn additional_streams_json_is_strict_and_validated() {
+        let text = r#"[
+            {"group":"239.69.1.2","port":5006,"payload_type":97,"channels":2,"map":[2,3],"jitter_frames":64},
+            {"group":"239.69.1.3","port":5008,"payload_type":98,"channels":1,"map":[1]}
+        ]"#;
+        let streams = app::parse_additional_streams(text, 48_000, 128, 4, 192)
+            .unwrap_or_else(|error| panic!("parse streams: {}", error.message()));
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].multicast_addr.to_string(), "239.69.1.2");
+        assert_eq!(streams[0].port, 5006);
+        assert_eq!(streams[0].channels_map, vec![2, 3]);
+        assert_eq!(streams[0].jitter_target_frames, 64);
+        assert_eq!(
+            streams[1].jitter_target_frames, 192,
+            "default jitter inherited"
+        );
+        assert_eq!(streams[1].output_channels, 4);
+
+        for bad in [
+            r#"[{"group":"239.69.1.2","port":5006,"payload_type":97,"channels":2,"map":[2,3],"extra":1}]"#,
+            r#"[{"group":"239.69.1.2","port":5006,"payload_type":97,"channels":2,"map":[4,3]}]"#,
+            r#"[{"group":"239.69.1.2","port":5006,"payload_type":97,"channels":2,"map":[1]}]"#,
+            r#"{"group":"239.69.1.2"}"#,
+            r#"[{"group":"239.69.1.2","port":5006,"payload_type":97,"channels":2,"map":[2,3]},{"group":"239.69.1.2","port":5006,"payload_type":97,"channels":2,"map":[0,1]}]"#,
+        ] {
+            assert!(
+                app::parse_additional_streams(bad, 48_000, 128, 4, 192).is_err(),
+                "must reject {bad}"
+            );
+        }
+    }
 
     fn status() -> RuntimeStatus {
         RuntimeStatus {
