@@ -669,8 +669,6 @@ mod linux {
         pcm: Option<PCM>,
         /// 设备通道数。
         channels: usize,
-        /// 每块帧数。
-        block_frames: usize,
         /// S24_3LE 原始字节缓冲（构造期分配）。
         bytes: Vec<u8>,
     }
@@ -758,7 +756,6 @@ mod linux {
             Ok(Self {
                 pcm: Some(pcm),
                 channels: config.channels,
-                block_frames: config.block_frames,
                 bytes,
             })
         }
@@ -794,11 +791,9 @@ mod linux {
             };
             let read_frames = read_frames.min(frames);
             let samples = read_frames * channels;
-            for (sample, chunk) in out[..samples]
-                .iter_mut()
-                .zip(self.bytes[..samples * BYTES_PER_SAMPLE].chunks_exact(BYTES_PER_SAMPLE))
-            {
-                *sample = decode_s24_3le(chunk);
+            for index in 0..samples {
+                let offset = index * BYTES_PER_SAMPLE;
+                out[index] = decode_s24_3le(&self.bytes[offset..offset + BYTES_PER_SAMPLE]);
             }
             Ok(read_frames)
         }
