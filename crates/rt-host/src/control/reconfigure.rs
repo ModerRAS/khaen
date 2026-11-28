@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use khaen_core::rt::{MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
-use khaen_core::sha256::sha256;
+use khaen_core::sha256::{sha256, sha256_hex};
 use khaen_host::admission::AdmissionLimits;
 use khaen_host::aes67_input::MAX_RTP_CHANNELS;
 use khaen_host::backend::DeviceConfig;
@@ -236,6 +236,10 @@ pub struct ChannelsPatch {
     pub aes67_map: Option<Vec<u16>>,
     /// 抖动目标帧数。
     pub jitter_frames: Option<usize>,
+    /// 原始 SDP 文本（运行期替换 AES67 接收参数；与显式 aes67_* 字段互斥）。
+    pub sdp: Option<String>,
+    /// SDP 解析出的来源信息（prepare 成功后用于更新 channels_status.input_source）。
+    sdp_source: Option<Aes67InputSource>,
 }
 
 fn unsigned_field(object: &Map<String, Value>, name: &str) -> Result<u64, ControlError> {
@@ -254,7 +258,7 @@ fn bad(message: impl Into<String>) -> ControlError {
 
 impl ChannelsPatch {
     /// 允许的字段名（未知字段直接拒绝：拼错字段不能静默变成"什么都没改"）。
-    const FIELDS: [&'static str; 8] = [
+    const FIELDS: [&'static str; 9] = [
         "channels",
         "sample_rate",
         "aes67_group",
@@ -263,6 +267,7 @@ impl ChannelsPatch {
         "aes67_channels",
         "aes67_map",
         "jitter_frames",
+        "sdp",
     ];
 
     /// 解析请求对象里的可选字段；空补丁返回错误（至少改一项）。
@@ -338,6 +343,13 @@ impl ChannelsPatch {
                 usize::try_from(value).map_err(|_| bad("jitter_frames does not fit in usize"))?,
             );
         }
+        if object.contains_key("sdp") {
+            let text = object
+                .get("sdp")
+                .and_then(Value::as_str)
+                .ok_or_else(|| bad("field sdp must be the raw SDP text"))?;
+            patch.sdp = Some(text.to_string());
+        }
         if patch.is_empty() {
             return Err(bad(format!(
                 "channels_prepare needs at least one of {:?}",
@@ -345,6 +357,56 @@ impl ChannelsPatch {
             )));
         }
         Ok(patch)
+    }
+
+    /// 解析原始 SDP 并展开成 AES67 参数（channels_prepare 的 sdp 字段）。
+    ///
+    /// `sample_rate` 是目标采样率（同一补丁里显式改了速率就按目标速率校验），
+    /// `input_channels` 是运行时输入宽度（SDP RTP 通道数必须 ≤ 它）。
+    /// SDP 与显式 `aes67_*` 字段互斥（不静默让其中一边覆盖另一边）。
+    pub fn resolve_sdp(
+        &mut self,
+        sample_rate: u32,
+        input_channels: usize,
+    ) -> Result<(), ControlError> {
+        let Some(text) = self.sdp.take() else {
+            return Ok(());
+        };
+        if self.aes67_group.is_some()
+            || self.aes67_port.is_some()
+            || self.aes67_payload_type.is_some()
+            || self.aes67_channels.is_some()
+            || self.aes67_map.is_some()
+        {
+            return Err(bad(
+                "field sdp cannot be combined with explicit aes67_group/aes67_port/aes67_payload_type/aes67_channels/aes67_map; give only one source (the SDP is authoritative for all of them)",
+            ));
+        }
+        let parsed = crate::sdp_config::parse_sdp_input(&text, sample_rate, input_channels)
+            .map_err(|message| bad(format!("field sdp is not usable: {message}")))?;
+        self.aes67_group = Some(parsed.multicast_addr);
+        self.aes67_port = Some(parsed.port);
+        self.aes67_payload_type = Some(parsed.payload_type);
+        self.aes67_channels = Some(parsed.channels);
+        self.aes67_map = Some(parsed.channels_map);
+        self.sdp_source = Some(Aes67InputSource::Sdp {
+            sha256: sha256_hex(text.as_bytes()),
+        });
+        Ok(())
+    }
+
+    /// SDP 来源（prepare 成功后控制面用它更新 channels_status.input_source）。
+    pub fn sdp_input_source(&self) -> Option<&Aes67InputSource> {
+        self.sdp_source.as_ref()
+    }
+
+    /// 补丁是否改动了 AES67 接收参数（用于把启动来源标成运行期手工覆盖）。
+    pub fn touches_aes67_input(&self) -> bool {
+        self.aes67_group.is_some()
+            || self.aes67_port.is_some()
+            || self.aes67_payload_type.is_some()
+            || self.aes67_channels.is_some()
+            || self.aes67_map.is_some()
     }
 
     /// 是否为空补丁。
@@ -670,6 +732,9 @@ pub(crate) struct ChannelsDraft {
     pub target: ChannelsView,
     /// 目标完整运行时配置（提交时交给块线程）。
     pub config: RuntimeConfig,
+    /// 目标 AES67 输入来源：SDP 补丁给 SDP（附 sha256）；显式改 AES67 参数给 Manual；
+    /// None = 本补丁不涉及输入来源，commit 后保持原值。
+    pub input_source: Option<Aes67InputSource>,
     /// 是否有变化（false = 幂等 no-op 草稿）。
     pub changed: bool,
     /// prepare 响应（同 token 重复 prepare 原样返回）。
@@ -836,7 +901,16 @@ impl ChannelsState {
                 "a previous channels commit is still in flight (or its acknowledgement was lost); wait for channels_status to show the result before preparing another configuration",
             ));
         }
-        let patch = ChannelsPatch::parse(request)?;
+        let mut patch = ChannelsPatch::parse(request)?;
+        let target_sample_rate = patch.sample_rate.unwrap_or(self.current.sample_rate);
+        patch.resolve_sdp(target_sample_rate, self.base_config.engine.input_channels)?;
+        let input_source = patch.sdp_input_source().cloned().or_else(|| {
+            if patch.touches_aes67_input() {
+                Some(Aes67InputSource::Manual)
+            } else {
+                None
+            }
+        });
         let target = patch.apply(&self.current);
         let planned_generation = self.generation().saturating_add(1);
         let token = channels_token(planned_generation, &target);
@@ -918,6 +992,7 @@ impl ChannelsState {
             planned_generation,
             target,
             config,
+            input_source,
             changed,
             response: response.clone(),
         });
@@ -967,9 +1042,13 @@ impl ChannelsState {
                 "aes67_port must be 1..=65535 (0 would bind an ephemeral port)",
             ));
         }
-        if !target.aes67_group.is_multicast() {
+        // IO I2b：目的地址可以是组播组，也可以是单播本端地址（SDP c= 为单播时）；
+        // 只拒绝 unspecified/broadcast 这类没有具体接收端的地址。
+        if target.aes67_group.is_unspecified()
+            || target.aes67_group == std::net::Ipv4Addr::BROADCAST
+        {
             return Err(bad(format!(
-                "aes67_group {} is not an IPv4 multicast address (224.0.0.0/4)",
+                "aes67_group {} must be a concrete IPv4 destination (multicast group or unicast local address, not 0.0.0.0/broadcast)",
                 target.aes67_group
             )));
         }
@@ -1108,6 +1187,9 @@ impl ChannelsState {
         self.commit_in_flight = None;
         self.base_config = draft.config.clone();
         self.current = draft.target.clone();
+        if let Some(source) = draft.input_source.clone() {
+            self.input_source = Some(source);
+        }
         let generation = self.generation();
         let outcome: &ReconfigureOutcome = &done.outcome;
         let response = json!({

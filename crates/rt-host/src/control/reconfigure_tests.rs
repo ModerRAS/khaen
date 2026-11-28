@@ -16,7 +16,7 @@ use khaen_calibration::capture::UmikDeviceConfig;
 use khaen_host::control::error as host_error;
 use khaen_host::runtime::{HwReadback, ReconfigureFailure};
 use khaen_host::AdmissionLimits;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::control::cal::engine::FakeCalFactory;
 use crate::control::cal::{CalEngineKind, CalibrationConfig, CalibrationSetup};
@@ -34,6 +34,72 @@ use crate::control::test_support::{fake_runtime_config, FakeProbe, FakeProbeStat
 // ===========================================================================
 // 夹具
 // ===========================================================================
+
+fn object(value: Value) -> Map<String, Value> {
+    value.as_object().expect("object").clone()
+}
+
+const UNICAST_SDP: &str = "v=0\r\n\
+o=- 0 0 IN IP4 0.0.0.0\r\n\
+s=unicast\r\n\
+c=IN IP4 192.0.2.222\r\n\
+t=0 0\r\n\
+m=audio 5004 RTP/AVP 96\r\n\
+a=rtpmap:96 L24/48000/2\r\n\
+a=ptime:1\r\n\
+a=sendonly\r\n\
+a=ts-refclk:ptp=IEEE1588-2008:0\r\n";
+
+#[test]
+fn channels_prepare_expands_sdp_into_receiver_fields() {
+    let mut state = ChannelsState::new(
+        fake_runtime_config(),
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    let response = state
+        .prepare(&object(json!({ "sdp": UNICAST_SDP })))
+        .expect("valid SDP");
+    assert_eq!(response["target"]["aes67_group"], json!("192.0.2.222"));
+    assert_eq!(response["target"]["aes67_port"], json!(5004));
+    assert_eq!(response["target"]["aes67_payload_type"], json!(96));
+    assert_eq!(response["target"]["aes67_channels"], json!(2));
+    assert_eq!(response["target"]["aes67_map"], json!([0, 1]));
+}
+
+#[test]
+fn channels_prepare_rejects_sdp_mixed_with_explicit_receiver_fields() {
+    let mut state = ChannelsState::new(
+        fake_runtime_config(),
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    let error = state
+        .prepare(&object(json!({ "sdp": UNICAST_SDP, "aes67_port": 5006 })))
+        .expect_err("conflict");
+    assert_eq!(error.code, host_error::BAD_REQUEST);
+    assert!(error.message.contains("cannot be combined"), "{error:?}");
+}
+
+#[test]
+fn channels_prepare_rejects_malformed_sdp() {
+    let mut state = ChannelsState::new(
+        fake_runtime_config(),
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    let error = state
+        .prepare(&object(json!({ "sdp": "not an sdp" })))
+        .expect_err("malformed");
+    assert_eq!(error.code, host_error::BAD_REQUEST);
+    assert!(error.message.contains("sdp"), "{error:?}");
+}
 
 #[test]
 fn channels_status_reports_aes67_input_source_provenance() {
@@ -290,11 +356,20 @@ fn channels_prepare_validates_targets_fail_closed() {
     let response = prepare(&mut harness, json!({ "channels": 0 }));
     assert_error(&response, host_error::ADMISSION_REJECTED);
 
-    // 端口 0 / 非组播地址。
+    // 端口 0 / 没有具体接收端的地址；单播本端地址是合法的（IO I2b）。
     let response = prepare(&mut harness, json!({ "aes67_port": 0 }));
     assert_error(&response, host_error::BAD_REQUEST);
-    let response = prepare(&mut harness, json!({ "aes67_group": "10.0.0.1" }));
+    let response = prepare(&mut harness, json!({ "aes67_group": "0.0.0.0" }));
     assert_error(&response, host_error::BAD_REQUEST);
+    let response = prepare(&mut harness, json!({ "aes67_group": "255.255.255.255" }));
+    assert_error(&response, host_error::BAD_REQUEST);
+    let response = prepare(&mut harness, json!({ "aes67_group": "10.0.0.1" }));
+    assert_eq!(response["target"]["aes67_group"], json!("10.0.0.1"));
+    let unicast_token = token_of(&response);
+    call(
+        &mut harness,
+        json!({ "op": "channels_abort", "token": unicast_token }),
+    );
 
     // 未知字段（拼错不能静默变成"什么都没改"）/ 空补丁。
     let response = prepare(&mut harness, json!({ "chanels": 4 }));

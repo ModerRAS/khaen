@@ -381,6 +381,18 @@ async fn put_prepare_forwards_rt_host_fields_verbatim() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn put_prepare_forwards_raw_sdp_to_the_rt_host() {
+    let (_, graph_id) = plan_bytes();
+    let (server, fake) = spawn_with_graph(&graph_id, 4).await;
+    let sdp = "v=0\r\ns=test\r\nc=IN IP4 239.69.1.9\r\n";
+    let response = put_channels(&server, json!({ "stage": "prepare", "sdp": sdp })).await;
+    assert_eq!(response.status, 200, "{}", response.body_text());
+    let calls = fake.calls();
+    assert_eq!(op_of(&calls[0]), "channels_prepare");
+    assert_eq!(calls[0]["sdp"], json!(sdp));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn put_prepare_rt_host_business_error_is_passed_through() {
     let fake = FakeTransport::new();
     fake.push_error_reply(

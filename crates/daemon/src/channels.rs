@@ -1054,6 +1054,7 @@ const PATCH_FIELDS: &[&str] = &[
     "input_channels",
     "input_map",
     "jitter_frames",
+    "sdp",
 ];
 
 fn parse_channels_patch(object: &Map<String, Value>) -> Result<ChannelsPatch, ChannelApiError> {
@@ -1257,6 +1258,13 @@ fn parse_channels_patch(object: &Map<String, Value>) -> Result<ChannelsPatch, Ch
     }
     if let Some((_, map)) = input_map {
         patch.rt_fields.insert("aes67_map".to_string(), map);
+    }
+    // 原始 SDP（IO I2c）：原样交给 rt-host 解析；与显式 aes67_* 字段的冲突由 rt-host fail-closed。
+    if let Some(value) = object.get("sdp") {
+        let text = value.as_str().ok_or_else(|| {
+            ChannelApiError::invalid("sdp", "field sdp must be the raw SDP text (string)")
+        })?;
+        patch.rt_fields.insert("sdp".to_string(), json!(text));
     }
     // ---- 嵌套组里出现未知键：拼错不静默 ----
     if let Some(output) = &output {
@@ -2052,6 +2060,20 @@ mod tests {
             patch.warnings.is_empty(),
             "dac_map with explicit channels: no derivation warning"
         );
+    }
+
+    #[test]
+    fn patch_forwards_raw_sdp_for_rt_host_to_parse() {
+        let patch = parse_channels_patch(&object(json!({
+            "sdp": "v=0\r\ns=test\r\n"
+        })))
+        .expect("sdp patch");
+        assert_eq!(
+            patch.rt_fields.get("sdp"),
+            Some(&json!("v=0\r\ns=test\r\n"))
+        );
+        let error = parse_channels_patch(&object(json!({ "sdp": 42 }))).expect_err("type");
+        assert_eq!(error.details["field"], json!("sdp"));
     }
 
     #[test]
