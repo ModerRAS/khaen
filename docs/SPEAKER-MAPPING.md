@@ -93,7 +93,9 @@
 6. **下混规则在 folds 层实现**（不额外占矩阵）：缺 C 时把 C 输入通道 fold 到 L/R 组各 lane（gain 0.707）；缺 LFE/Sub 时把 LFE 输入通道 fold 到所有其它已启用 lane（默认 gain 0.707，是否含天空可配）。生成预览必须明确列出「无中置 → C 下混到 L/R」「无低音炮 → LFE 分配到 N 只音箱」，并给出每条实际 fold 的增益；
 7. 生成后必须走 `inspect`（准入预算/图编译）→ `prepare` → `commit`，失败/mismatch 如实报错，不自动回退到旧方案。
 
-### 4.1 MOTU/CueMix 控制边界（硬规则）
+### 4.1 MOTU/CueMix 控制边界（硬规则；独立可选模块）
+> 这里的 4 类写入是 MOTU/CueMix 模块自己的显式设备操作，与 khaen 的输出/mute/校准无关；`/api/mute` 是应用软件静音，绝不写 CueMix（见 DECISIONS D-017）。
+
 CueMix/控制面写入**只有 4 类用途**：
 1. 切换采样率；
 2. 切换光口模式 ADAT ↔ Toslink(S/PDIF)；

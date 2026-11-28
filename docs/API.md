@@ -282,7 +282,9 @@
 3. `fanout.mode`：`unity`（默认，每 lane 1.0）或 `group`（同角色组按 1/√N 归一化，给被动并联音箱用）。
 4. 生成预览必须列出真实 fold 列表与下混应用明细；生成后必须 inspect → prepare → commit。
 
-### 12.4 MOTU/CueMix 控制边界（硬规则）
+### 12.4 MOTU/CueMix 控制边界（硬规则；独立可选模块）
+> 以下 4 类是 MOTU/CueMix 模块的显式设备操作，不是 `/api/mute` 的实现；`/api/mute` 只做应用软件静音，不写 CueMix（DECISIONS D-017）。
+
 CueMix/控制面写入只允许 4 类用途：①切采样率；②切光口模式 ADAT↔Toslink(S/PDIF)；③整体静音；④整体音量。除此之外不通过 CueMix 写任何东西（不做 per-channel mute/gain/路由，不给未使用 DAC 静音，不给测试音选通道）。只读探测（采样率、光口模式、全局音量/静音）允许，用于能力上报。
 
 ### 12.5 UI 约定（“音频映射 / Speaker Layout”页）
