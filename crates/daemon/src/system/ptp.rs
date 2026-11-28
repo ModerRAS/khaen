@@ -215,11 +215,18 @@ fn parse_pmc_output(text: &str) -> Result<PtpProbe, String> {
         if line.is_empty() {
             continue;
         }
+        // 两种 pmc 输出格式都接受：
+        // - 汇总/交互：`PARENT_DATA_SET:`；
+        // - `-u`：`<clockid> seq N RESPONSE MANAGEMENT PARENT_DATA_SET`。
         if let Some(name) = line.strip_suffix(':') {
-            if name
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
-            {
+            if is_section_name(name) {
+                section = name.to_string();
+                continue;
+            }
+        }
+        if let Some(position) = line.find("MANAGEMENT ") {
+            let name = line[position + "MANAGEMENT ".len()..].trim();
+            if is_section_name(name) {
                 section = name.to_string();
                 continue;
             }
@@ -261,6 +268,13 @@ fn parse_pmc_output(text: &str) -> Result<PtpProbe, String> {
         );
     }
     Ok(probe)
+}
+
+fn is_section_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
 }
 
 fn parse_bool(value: &str) -> Option<bool> {
@@ -464,6 +478,35 @@ TIME_STATUS_NP:
 	gmPresent                  true
 	gmIdentity                 ae6f0d.fffe.8e86fc
 "#;
+
+    /// `pmc -u -b 0 ...` 的真实输出（N150 / linuxptp 4.2，2026-11-28 实测）：
+    /// section 名在 `RESPONSE MANAGEMENT <NAME>` 行尾，没有冒号。
+    const PMC_UNICAST_SAMPLE: &str = r#"	e051d8.fffe.1a1b33-0 seq 0 RESPONSE MANAGEMENT TIME_STATUS_NP
+		master_offset              -7086404
+		gmPresent                  true
+		gmIdentity                 ae6f0d.fffe.8e86fc
+	e051d8.fffe.1a1b33-0 seq 1 RESPONSE MANAGEMENT PARENT_DATA_SET
+		gm.ClockClass                         248
+		grandmasterIdentity                   ae6f0d.fffe.8e86fc
+	e051d8.fffe.1a1b33-0 seq 2 RESPONSE MANAGEMENT CURRENT_DATA_SET
+		stepsRemoved     1
+		offsetFromMaster -7086404.0
+		meanPathDelay    60936.0
+	e051d8.fffe.1a1b33-0 seq 3 RESPONSE MANAGEMENT DEFAULT_DATA_SET
+		domainNumber            0
+"#;
+
+    #[test]
+    fn parses_the_unicast_pmc_output() {
+        let probe = parse_pmc_output(PMC_UNICAST_SAMPLE).expect("unicast sample must parse");
+        assert_eq!(probe.gm_present, Some(true));
+        assert_eq!(probe.gm_identity.as_deref(), Some("ae6f0d.fffe.8e86fc"));
+        assert_eq!(probe.domain, Some(0));
+        assert_eq!(probe.clock_class, Some(248));
+        assert_eq!(probe.offset_ns, Some(-7086404.0));
+        assert_eq!(probe.mean_path_delay_ns, Some(60936.0));
+        assert_eq!(probe.steps_removed, Some(1));
+    }
 
     #[test]
     fn parses_the_linuxptp_probe_output() {
