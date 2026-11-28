@@ -61,10 +61,13 @@ const messages = {
       mappingUnknown:
         'the current plan routing is unknown (mapping=null): DAC routes are not prefilled and passthrough is not assumed; after a format change, prepare and commit a plan that matches the new format.',
       formTitle: 'Target configuration (local draft)',
+      followOutputChannels: 'input width follows output channels',
+      contentUnreported: 'the rt-host does not report content_channels (older build): the output channel count is shown as a fallback, not as the real input width',
       sdpPlaceholder: 'Paste SDP text; rt-host parses it at prepare and replaces the AES67 group/port/PT/channels/map as a whole',
       sdpHint: 'A non-empty SDP replaces the AES67 receiver parameters as a whole, so the per-field AES67 inputs above do not apply; SDP and explicit fields are mutually exclusive.',
       field: {
         channels: 'output channels',
+        contentChannels: 'input width (plan content)',
         sampleRate: 'sample rate (Hz)',
         sdp: 'Raw SDP (optional runtime receiver reload)',
         aes67Group: 'AES67 destination (multicast or unicast)',
@@ -152,6 +155,7 @@ const messages = {
       failureUnknown: 'not reported by the server',
       validation: {
         channels_range: 'output channels must be an integer in 1–22',
+        content_channels_range: 'input width must be an integer in 1–64 (host input bus limit)',
         sample_rate_value: 'only 48000 / 96000 Hz are supported',
         sdp_value: 'SDP must not be empty',
         sdp_conflict: 'SDP and explicit AES67 fields are mutually exclusive: give either the SDP or the per-field parameters',

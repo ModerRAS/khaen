@@ -15,6 +15,7 @@ import {
   parseChannelsAbortAck,
   parseChannelsCommitAck,
   parseChannelsCommitFailure,
+  CHANNELS_MAX_CONTENT,
   parseChannelsInfo,
   parseChannelsPrepareAck,
   parsePlanHistory,
@@ -92,6 +93,7 @@ test('parseChannelsInfo keeps the real khaen-channels/v1 shape (current/device/f
   assert.equal(info.device?.state, 'present')
   assert.equal(info.device?.probe?.available, true)
   assert.equal(info.current?.channels, 22)
+  assert.equal(info.current?.content_channels, 2)
   assert.equal(info.current?.aes67_group, '239.69.1.1')
   assert.equal(info.current?.aes67_port, 5004)
   assert.equal(info.current?.aes67_payload_type, 98)
@@ -265,6 +267,10 @@ test('validateChannelsPatch enforces the real ranges from khaen_core::rt / aes67
   assert.equal(validateChannelsPatch({ channels: CHANNELS_MAX_OUTPUT + 1 }), 'channels_range')
   assert.equal(validateChannelsPatch({ sample_rate: 44100 }), 'sample_rate_value')
   assert.equal(validateChannelsPatch({ sample_rate: 96000 }), null)
+  assert.equal(validateChannelsPatch({ content_channels: 2 }), null)
+  assert.equal(validateChannelsPatch({ content_channels: 0 }), 'content_channels_range')
+  assert.equal(validateChannelsPatch({ content_channels: CHANNELS_MAX_CONTENT + 1 }), 'content_channels_range')
+  assert.equal(validateChannelsPatch({ channels: 22, content_channels: 2 }), null)
   assert.equal(validateChannelsPatch({ sdp: 'v=0\r\ns=test\r\n' }), null)
   assert.equal(validateChannelsPatch({ sdp: '   ' }), 'sdp_value')
   assert.equal(validateChannelsPatch({ sdp: 'v=0', aes67_port: 5004 }), 'sdp_conflict')
@@ -502,6 +508,14 @@ test('channels API uses documented paths/methods/bodies for the PUT two-phase an
     method: 'PUT',
     path: '/api/channels',
     body: { stage: 'prepare', sdp: sdpText }
+  })
+
+  // 独立输入宽度：content_channels 与输出 channels 一起进 prepare body。
+  await api.prepareChannels({ channels: 22, content_channels: 2 })
+  assert.deepEqual(bodies.at(-1), {
+    method: 'PUT',
+    path: '/api/channels',
+    body: { stage: 'prepare', channels: 22, content_channels: 2 }
   })
 
   // PUT stage=commit：body 精确 = {stage:'commit', engine_token}

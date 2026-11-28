@@ -1237,6 +1237,7 @@ const messages = {
       desc: '来自 /api/channels（rt-host 实际配置 + 当前方案 routing 段）；已知位置才标注 L/R/SL/SR/TF/TFR/LFE，未知位置显示输出序号。',
       field: {
         channels: '输出通道数',
+        contentChannels: '输入宽度（plan content）',
         dacMap: 'DAC 映射（0-based）',
         knownLabels: '已知位置标签'
       },

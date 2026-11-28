@@ -37,6 +37,7 @@ import ControlErrorNotice from '@/components/control/ControlErrorNotice.vue'
 import { useStatusPolling } from '@/composables/useStatusPolling'
 import { reasonForPath, runStateKind, runStateLabelKey } from '@/api/status'
 import {
+  CHANNELS_MAX_CONTENT,
   CHANNELS_SAMPLE_RATES_HZ,
   MOTU_KNOWN_OUTPUT_NUMBERS,
   PLAN_UPLOAD_MAX_BYTES,
@@ -525,6 +526,10 @@ const channelsCurrent = computed(() => channels.value?.current ?? null)
 const currentOutputChannels = computed(
   () => channelsCurrent.value?.channels ?? channels.value?.output.channels ?? null
 )
+/** 当前输入宽度：rt-host current.content_channels；旧 rt-host 不报时回退输出宽度（旧耦合语义）。 */
+const currentContentChannels = computed(
+  () => channelsCurrent.value?.content_channels ?? currentOutputChannels.value
+)
 const currentSampleRate = computed(
   () => channelsCurrent.value?.sample_rate ?? channels.value?.format?.sample_rate ?? null
 )
@@ -555,6 +560,9 @@ const currentDacMap = computed<Array<number | null> | null>(() => {
 })
 
 const draftChannels = ref<number | null>(null)
+const draftContentChannels = ref<number | null>(null)
+/** 输入宽度是否跟随输出通道（旧行为默认开；关掉后显式发送 content_channels）。 */
+const followOutputChannels = ref(true)
 const draftSampleRate = ref<number | null>(null)
 /** 原始 SDP 文本（IO I2c）：非空时整体替换 AES67 接收参数，显式 aes67_* 字段不生效。 */
 const draftSdp = ref<string>('')
@@ -634,6 +642,11 @@ function sameNullableList(
 function syncDraftsFromChannels(): void {
   const info = channels.value
   draftChannels.value = currentOutputChannels.value
+  draftContentChannels.value = currentContentChannels.value
+  followOutputChannels.value =
+    currentContentChannels.value === null ||
+    currentOutputChannels.value === null ||
+    currentContentChannels.value === currentOutputChannels.value
   draftSampleRate.value = currentSampleRate.value
   draftSdp.value = ''
   draftAes67Group.value = channelsCurrent.value?.aes67_group ?? ''
@@ -644,6 +657,13 @@ function syncDraftsFromChannels(): void {
   draftJitter.value = channelsCurrent.value?.jitter_frames ?? null
   draftDacMapText.value = info !== null && info.mapping !== null ? dacMapToText(currentDacMap.value) : ''
 }
+
+watch(draftChannels, (value) => {
+  // 跟随模式下输入宽度字段只读展示输出宽度；关掉后保留独立草稿。
+  if (followOutputChannels.value) {
+    draftContentChannels.value = value
+  }
+})
 
 watch(
   () => channels.value,
@@ -668,6 +688,18 @@ const channelsPatch = computed<ChannelsPatch>(() => {
   }
   if (draftChannels.value !== null && draftChannels.value !== currentOutputChannels.value) {
     patch.channels = draftChannels.value
+  }
+  // 跟随模式由后端保持旧语义（输入宽度 = channels）；独立模式显式发送 content_channels。
+  const contentChanged =
+    draftContentChannels.value !== null &&
+    currentContentChannels.value !== null &&
+    draftContentChannels.value !== currentContentChannels.value
+  if (
+    !followOutputChannels.value &&
+    draftContentChannels.value !== null &&
+    (contentChanged || patch.channels !== undefined)
+  ) {
+    patch.content_channels = draftContentChannels.value
   }
   if (draftSampleRate.value !== null && draftSampleRate.value !== currentSampleRate.value) {
     patch.sample_rate = draftSampleRate.value
@@ -1189,6 +1221,11 @@ void loadChannelsHistory()
             :reason="channels === null ? t('channelsEdit.unavailable.reason') : reasonForChannelsPath(channels, 'output.channels')"
           />
           <StatRow
+            :label="t('channels.output.field.contentChannels')"
+            :value="intText(currentContentChannels)"
+            :reason="channels === null ? t('channelsEdit.unavailable.reason') : (channelsCurrent?.content_channels ?? null) === null ? t('channelsEdit.hotswap.contentUnreported') : null"
+          />
+          <StatRow
             :label="t('channels.output.field.dacMap')"
             :value="dacMapText"
             :copy="dacMapText"
@@ -1440,6 +1477,19 @@ void loadChannelsHistory()
               :disabled="channels === null || channelsWriteBusy !== null"
               size="small"
             />
+          </label>
+          <label class="channels-hotswap__field">
+            <span>{{ t('channelsEdit.hotswap.field.contentChannels') }}</span>
+            <el-input-number
+              v-model="draftContentChannels"
+              :min="1"
+              :max="CHANNELS_MAX_CONTENT"
+              :disabled="channels === null || channelsWriteBusy !== null || followOutputChannels"
+              size="small"
+            />
+            <el-checkbox v-model="followOutputChannels" :disabled="channels === null || channelsWriteBusy !== null" size="small">
+              {{ t('channelsEdit.hotswap.followOutputChannels') }}
+            </el-checkbox>
           </label>
           <label class="channels-hotswap__field">
             <span>{{ t('channelsEdit.hotswap.field.sampleRate') }}</span>

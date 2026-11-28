@@ -83,8 +83,11 @@ function buildInspect(overrides = {}) {
 
 /** rt-host channels_status 的 current 视图（数据面真实配置）。 */
 export function buildChannelsCurrent(overrides = {}) {
+  const channels = overrides.channels ?? 22
   return {
-    channels: 22,
+    channels,
+    // 输入宽度与输出宽度默认同宽；2 输入 → 22 输出的 fixture 显式覆盖。
+    content_channels: overrides.content_channels ?? channels,
     sample_rate: 48000,
     block_frames: 128,
     aes67_group: '239.69.1.1',
@@ -177,6 +180,7 @@ export function buildChannelsSeed(fixture) {
     // 只有 lane0->dac0 / lane1->dac2；dac_map 里的 null = 该 DAC 静音/没有 lane 喂入（合法）。
     const current = buildChannelsCurrent({
       channels: 4,
+      content_channels: 2,
       sample_rate: 48000,
       aes67_channels: 2,
       aes67_map: [0, 1],
@@ -232,7 +236,7 @@ export function buildChannelsSeed(fixture) {
     }
   }
   const channels = 22
-  const current = buildChannelsCurrent({ channels })
+  const current = buildChannelsCurrent({ channels, content_channels: 2 })
   return {
     fixture: name,
     unavailable: false,

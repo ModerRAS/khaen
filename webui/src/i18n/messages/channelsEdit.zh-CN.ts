@@ -61,10 +61,13 @@ const messages = {
       mappingUnknown:
         '当前方案 routing 未知（mapping=null）：不预填 DAC 路由、不假设直通；提交格式变化后需准备匹配新格式的方案。',
       formTitle: '目标配置（本地草稿）',
+      followOutputChannels: '输入宽度跟随输出通道',
+      contentUnreported: 'rt-host 未上报 content_channels（旧版本）：这里回退显示输出通道数，不能当作真实输入宽度',
       sdpPlaceholder: '粘贴 SDP 文本；prepare 时由 rt-host 解析并整体替换 AES67 目的地址/端口/PT/通道/映射',
       sdpHint: 'SDP 非空时会整体替换 AES67 接收参数，上面的逐字段 AES67 输入不生效；SDP 与显式字段互斥。',
       field: {
         channels: '输出通道数',
+        contentChannels: '输入宽度（plan content）',
         sampleRate: '采样率（Hz）',
         sdp: '原始 SDP（可选，运行期重载接收参数）',
         aes67Group: 'AES67 目的地址（组播或单播）',
@@ -151,6 +154,7 @@ const messages = {
       failureUnknown: '服务端未上报',
       validation: {
         channels_range: '输出通道数必须是 1–22 的整数',
+        content_channels_range: '输入宽度必须是 1–64 的整数（host 输入总线上限）',
         sample_rate_value: '采样率只支持 48000 / 96000 Hz',
         sdp_value: 'SDP 不能为空',
         sdp_conflict: 'SDP 与显式 AES67 字段互斥：只给 SDP 或逐字段参数其中一种',

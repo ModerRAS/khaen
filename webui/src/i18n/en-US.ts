@@ -1240,6 +1240,7 @@ const messages: Messages = {
       desc: 'From /api/channels (actual rt-host configuration + the running plan routing section); only known positions are labelled L/R/SL/SR/TF/TFR/LFE, unknown positions show the output number.',
       field: {
         channels: 'Output channels',
+        contentChannels: 'Input width (plan content)',
         dacMap: 'DAC map (0-based)',
         knownLabels: 'Known position labels'
       },

@@ -88,6 +88,8 @@ export type InputSource = 'sdp' | 'manual'
 /** 数据面当前配置（rt-host channels_status.current；docs/API.md §5 的 current 段）。 */
 export interface ChannelsCurrent {
   channels: number | null
+  /** 引擎输入宽度（plan content.in_channels / AES67 输入总线）；旧 rt-host 不报时为 null。 */
+  content_channels: number | null
   sample_rate: number | null
   block_frames: number | null
   aes67_group: string | null
@@ -285,6 +287,8 @@ export interface PlanInspect {
 export interface ChannelsPatch {
   /** 目标输出通道数（显式给；dac_map 长度会自动推导，两者不一致 400）。 */
   channels?: number
+  /** 引擎输入宽度（plan content.in_channels / AES67 输入总线）；与 channels 独立。 */
+  content_channels?: number
   sample_rate?: number
   aes67_group?: string
   aes67_port?: number
@@ -655,6 +659,7 @@ function parseChannelsCurrent(value: unknown, path: string): ChannelsCurrent | n
   }
   return {
     channels: readNumber(record, 'channels', path),
+    content_channels: readNumber(record, 'content_channels', path),
     sample_rate: readNumber(record, 'sample_rate', path),
     block_frames: readNumber(record, 'block_frames', path),
     aes67_group: readString(record, 'aes67_group', path),
@@ -1218,6 +1223,8 @@ export function formatChannelMap(map: readonly (number | null)[] | null | undefi
 export const CHANNELS_SAMPLE_RATES_HZ: readonly number[] = [48000, 96000]
 /** 输出通道上限（khaen_core::rt::MAX_OUTPUT_CHANNELS = MOTU UltraLite-mk5 的 22 通道）。 */
 export const CHANNELS_MAX_OUTPUT = 22
+/** host AES67 输入总线当前实现上限（docs/API.md §5；plan ABI 预算更大，后续放开）。 */
+export const CHANNELS_MAX_CONTENT = 64
 /** AES67 RTP 通道上限（khaen_host::aes67_input::MAX_RTP_CHANNELS）。 */
 export const CHANNELS_MAX_AES67 = 8
 
@@ -1259,6 +1266,15 @@ export function validateChannelsPatch(patch: ChannelsPatch): string | null {
     if (!Number.isInteger(channels) || channels < 1 || channels > CHANNELS_MAX_OUTPUT) {
       return 'channels_range'
     }
+  }
+  const contentChannels = patch.content_channels
+  if (
+    contentChannels !== undefined &&
+    (!Number.isInteger(contentChannels) ||
+      contentChannels < 1 ||
+      contentChannels > CHANNELS_MAX_CONTENT)
+  ) {
+    return 'content_channels_range'
   }
   const sampleRate = patch.sample_rate
   if (sampleRate !== undefined && !CHANNELS_SAMPLE_RATES_HZ.includes(sampleRate)) {
