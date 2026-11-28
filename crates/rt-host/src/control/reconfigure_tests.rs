@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use khaen_calibration::capture::UmikDeviceConfig;
+use khaen_host::capture::CaptureConfig;
 use khaen_host::control::error as host_error;
 use khaen_host::runtime::{HwReadback, ReconfigureFailure};
 use khaen_host::AdmissionLimits;
@@ -207,6 +208,37 @@ fn channels_status_reports_startup_input_streams() {
             .as_array()
             .map(Vec::len),
         Some(1)
+    );
+}
+
+#[test]
+fn channels_status_reports_capture_mode_without_fabricating_aes67_streams() {
+    let mut config = fake_runtime_config();
+    config.capture = Some(CaptureConfig {
+        device: String::from("hw:CARD=CAPTURE,DEV=0"),
+        channels: 2,
+        channels_map: vec![0, 1],
+        input_channels: config.engine.input_channels,
+        sample_rate: config.engine.sample_rate,
+        block_frames: config.engine.block_frames,
+        pending_blocks: 4,
+    });
+    let state = ChannelsState::new(
+        config,
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    let status = state.status_json(None);
+    // 采集模式没有 AES67 输入：不编一条假流，也不复用 input_source。
+    assert_eq!(status["input_streams"].as_array().map(Vec::len), Some(0));
+    assert!(status["input_source"].is_null());
+    assert!(status["input_mode"].is_null());
+    assert!(status["input_capture"].is_null());
+    assert!(
+        status["reasons"]["input_capture.stats"].is_string(),
+        "capture counters must carry a reason when no snapshot is available"
     );
 }
 

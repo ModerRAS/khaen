@@ -65,6 +65,41 @@ function createClient(handler: (call: any, index: number) => Response, csrf = 'c
 
 /* ------------------------------------------------------------------ GET 解析 */
 
+test('parseChannelsInfo parses ALSA capture mode and capture stats without fabricating AES67 input', () => {
+  const doc = clone(buildChannelsSeed('wired').channels)
+  doc.input.mode = 'alsa_capture'
+  doc.input.channels = null
+  doc.input.map = null
+  doc.input.streams = []
+  doc.input.capture = {
+    device: 'hw:CARD=FAKE,DEV=0',
+    blocks_captured: 7,
+    frames_captured: 896,
+    frames_delivered: 768,
+    blocks_skipped: 1,
+    frames_dropped: 128,
+    partial_blocks: 0,
+    queue_full: 0,
+    underruns: 2,
+    xruns: 1,
+    read_errors: 0,
+    recycle_full: 0,
+    running: true,
+    last_error: 'xrun: underrun'
+  }
+  const info = parseChannelsInfo(doc)
+  assert.equal(info.input.mode, 'alsa_capture')
+  assert.equal(info.input.channels, null)
+  assert.equal(info.input.map, null)
+  assert.equal(info.input.streams?.length, 0)
+  assert.equal(info.input.capture?.device, 'hw:CARD=FAKE,DEV=0')
+  assert.equal(info.input.capture?.blocks_captured, 7)
+  assert.equal(info.input.capture?.underruns, 2)
+  assert.equal(info.input.capture?.xruns, 1)
+  assert.equal(info.input.capture?.running, true)
+  assert.equal(info.input.capture?.last_error, 'xrun: underrun')
+})
+
 test('parseChannelsInfo keeps the real khaen-channels/v1 shape (current/device/format/generation/hot_reconfigure)', () => {
   const doc = clone(buildChannelsSeed('wired').channels)
   const info = parseChannelsInfo(doc)
@@ -86,6 +121,9 @@ test('parseChannelsInfo keeps the real khaen-channels/v1 shape (current/device/f
   assert.equal(info.input.streams?.[0].port, 5004)
   assert.equal(info.input.streams?.[0].stats?.packets, 1200)
   assert.equal(info.input.streams?.[0].stats?.underruns, 2)
+  // IO I4c：AES67 模式 mode=aes67、capture=null（不把采集统计编进 AES67 模式）。
+  assert.equal(info.input.mode, 'aes67')
+  assert.equal(info.input.capture, null)
   // mapping 是方案 routing 镜像
   assert.equal(info.mapping?.length, 22)
   assert.deepEqual(info.mapping?.[3], { lane: 3, dac: 3 })

@@ -198,13 +198,36 @@ export interface ChannelsInputStream {
   stats: ChannelsInputStreamStats | null
 }
 
+/** 输入模式：AES67 收包或本机 ALSA 采集（rt-host 上报；拿不到为 null，不猜）。 */
+export type ChannelsInputMode = 'aes67' | 'alsa_capture'
+
+/** ALSA 采集统计（rt-host 快照；采集模式外/拿不到为 null）。 */
+export interface ChannelsCaptureStats {
+  device: string | null
+  blocks_captured: number | null
+  frames_captured: number | null
+  frames_delivered: number | null
+  blocks_skipped: number | null
+  frames_dropped: number | null
+  partial_blocks: number | null
+  queue_full: number | null
+  underruns: number | null
+  xruns: number | null
+  read_errors: number | null
+  recycle_full: number | null
+  running: boolean | null
+  last_error: string | null
+}
+
 /** 输入侧：AES67 接收通道数/映射/来源/SDP sha256 + 多流流表（旧 rt-host 为 null）。 */
 export interface ChannelsInput {
+  mode: ChannelsInputMode | null
   channels: number | null
   map: number[] | null
   source: InputSource | null
   sdp_sha256: string | null
   streams: ChannelsInputStream[] | null
+  capture: ChannelsCaptureStats | null
 }
 
 /** 单个 lane -> dac 路由项。 */
@@ -777,6 +800,33 @@ function parseHotReconfigure(value: unknown): ChannelsHotReconfigure {
   }
 }
 
+/** 采集统计（input.capture）：缺失/null -> null；对象逐项宽松校验。 */
+function parseChannelsCapture(
+  input: Record<string, unknown>,
+  path: string
+): ChannelsCaptureStats | null {
+  const record = asRecord(input.capture)
+  if (record === null) {
+    return null
+  }
+  return {
+    device: readString(record, 'device', path + '.capture'),
+    blocks_captured: readNumber(record, 'blocks_captured', path + '.capture'),
+    frames_captured: readNumber(record, 'frames_captured', path + '.capture'),
+    frames_delivered: readNumber(record, 'frames_delivered', path + '.capture'),
+    blocks_skipped: readNumber(record, 'blocks_skipped', path + '.capture'),
+    frames_dropped: readNumber(record, 'frames_dropped', path + '.capture'),
+    partial_blocks: readNumber(record, 'partial_blocks', path + '.capture'),
+    queue_full: readNumber(record, 'queue_full', path + '.capture'),
+    underruns: readNumber(record, 'underruns', path + '.capture'),
+    xruns: readNumber(record, 'xruns', path + '.capture'),
+    read_errors: readNumber(record, 'read_errors', path + '.capture'),
+    recycle_full: readNumber(record, 'recycle_full', path + '.capture'),
+    running: readBoolean(record, 'running', path + '.capture'),
+    last_error: readString(record, 'last_error', path + '.capture')
+  }
+}
+
 /** 多流流表（input.streams）：缺失/null -> null；数组逐项宽松校验，stats 可缺省。 */
 function parseChannelsInputStreams(
   input: Record<string, unknown>,
@@ -839,6 +889,9 @@ export function parseChannelsInfo(body: unknown): ChannelsInfo {
   const output = group(root.output, 'output')
   const input = group(root.input, 'input')
   const source = readString(input, 'source', 'input')
+  const rawMode = readString(input, 'mode', 'input')
+  const mode: ChannelsInputMode | null =
+    rawMode === 'aes67' || rawMode === 'alsa_capture' ? rawMode : null
   return {
     schema: CHANNELS_SCHEMA,
     target: readString(root, 'target', 'channels'),
@@ -849,11 +902,13 @@ export function parseChannelsInfo(body: unknown): ChannelsInfo {
       channels_source: readString(output, 'channels_source', 'output')
     },
     input: {
+      mode,
       channels: readNumber(input, 'channels', 'input'),
       map: readNumberArray(input, 'map', 'input'),
       source: source === 'sdp' || source === 'manual' ? source : null,
       sdp_sha256: readString(input, 'sdp_sha256', 'input'),
-      streams: parseChannelsInputStreams(input, 'input')
+      streams: parseChannelsInputStreams(input, 'input'),
+      capture: parseChannelsCapture(input, 'input')
     },
     mapping: parseMapping(root.mapping),
     plan: parseChannelsPlan(root.plan),

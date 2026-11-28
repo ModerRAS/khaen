@@ -1255,15 +1255,23 @@ const messages: Messages = {
         'The routing section of the running plan is unknown (mapping=null): the daemon cannot associate the applied plan routing, so the page draws no lane → DAC mapping and assumes no passthrough.'
     },
     input: {
-      title: 'AES67 input',
-      desc: 'From /api/channels.input (SDP descriptor or manual configuration); sdp_sha256 identifies the input descriptor version.',
+      title: 'Input (AES67 / ALSA capture)',
+      desc: 'From /api/channels.input: mode says whether the runtime input is AES67 receive or local ALSA capture; in AES67 mode sdp_sha256 identifies the input descriptor version, in capture mode the page shows captured blocks/frames/underruns/xruns.',
       field: {
         channels: 'Input channels',
         map: 'Channel map',
         source: 'Input source',
         sdpSha: 'SDP sha256',
-        streams: 'AES67 streams'
+        streams: 'AES67 streams',
+        mode: 'Input mode',
+        capture: 'ALSA capture',
+        captureError: 'Capture last error'
       },
+      mode: {
+        aes67: 'AES67 receive',
+        capture: 'ALSA capture (local PCM)'
+      },
+      captureValue: '{blocks} blocks / {frames} frames / {underruns} underruns / {xruns} xruns',
       source: {
         sdp: 'SDP descriptor (sdp)',
         manual: 'Manual configuration (manual)'

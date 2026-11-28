@@ -1252,15 +1252,23 @@ const messages = {
         '当前方案的 routing 段未知（mapping=null）：daemon 关联不到已生效方案的路由，页面不画 lane → DAC 映射、不假设直通。'
     },
     input: {
-      title: 'AES67 输入',
-      desc: '来自 /api/channels.input（SDP 描述符或手工配置）；sdp_sha256 用于核对输入描述符版本。',
+      title: '输入（AES67 / ALSA 采集）',
+      desc: '来自 /api/channels.input：mode 说明当前输入是 AES67 收包还是本机 ALSA 采集；AES67 模式下 sdp_sha256 用于核对输入描述符版本，采集模式显示采集块/帧/欠载/xrun 统计。',
       field: {
         channels: '接收声道数',
         map: '通道映射',
         source: '输入来源',
         sdpSha: 'SDP sha256',
-        streams: 'AES67 流数'
+        streams: 'AES67 流数',
+        mode: '输入模式',
+        capture: 'ALSA 采集',
+        captureError: '采集最近错误'
       },
+      mode: {
+        aes67: 'AES67 收包',
+        capture: 'ALSA 采集（本机 PCM）'
+      },
+      captureValue: '{blocks} 块 / {frames} 帧 / {underruns} 欠载 / {xruns} xrun',
       source: {
         sdp: 'SDP 描述符（sdp）',
         manual: '手工配置（manual）'

@@ -36,6 +36,7 @@ use khaen_host::aes67_input::{
     MAX_RTP_CHANNELS,
 };
 use khaen_host::backend::DeviceConfig;
+use khaen_host::capture::CaptureStats;
 use khaen_host::control::{engine_token, ControlError};
 use khaen_host::engine::EngineConfig;
 use khaen_host::owner::DeviceId;
@@ -928,6 +929,26 @@ impl ChannelsState {
         Value::Array(streams)
     }
 
+    /// 采集统计 JSON（IO I4c；AES67 模式为 null）。
+    fn capture_json(capture: &CaptureStats, device: &str) -> Value {
+        json!({
+            "device": device,
+            "blocks_captured": capture.blocks_captured,
+            "frames_captured": capture.frames_captured,
+            "frames_delivered": capture.frames_delivered,
+            "blocks_skipped": capture.blocks_skipped,
+            "frames_dropped": capture.frames_dropped,
+            "partial_blocks": capture.partial_blocks,
+            "queue_full": capture.queue_full,
+            "underruns": capture.underruns,
+            "xruns": capture.xruns,
+            "read_errors": capture.read_errors,
+            "recycle_full": capture.recycle_full,
+            "running": capture.running,
+            "last_error": capture.last_error,
+        })
+    }
+
     /// channels_status 响应。
     pub fn status_json(&self, snapshot: Option<&RuntimeSnapshot>) -> Value {
         let tracker = lock_tracker(&self.tracker);
@@ -954,7 +975,28 @@ impl ChannelsState {
                 "input_streams.stats".to_string(),
                 json!("no runtime status snapshot is available, so per-stream counters are not reported (the stream config list is still real); counters are not fabricated"),
             );
+            reasons.insert(
+                "input_capture.stats".to_string(),
+                json!("no runtime status snapshot is available, so ALSA capture counters are not reported; counters are not fabricated"),
+            );
         }
+        let input_mode = snapshot.map(|snapshot| snapshot.status.input_mode);
+        // 采集模式下没有 AES67 收流：流表必须是空数组而不是从 current 配置编一条假流。
+        let capture_mode = input_mode == Some("alsa_capture") || self.base_config.capture.is_some();
+        let input_streams = if capture_mode {
+            Value::Array(Vec::new())
+        } else {
+            self.input_streams_json(snapshot)
+        };
+        let capture_device = self
+            .base_config
+            .capture
+            .as_ref()
+            .map(|capture| capture.device.as_str())
+            .unwrap_or("");
+        let input_capture = snapshot
+            .and_then(|snapshot| snapshot.status.capture.as_ref())
+            .map(|capture| Self::capture_json(capture, capture_device));
         if device_state == Some("absent") {
             reasons.insert(
                 "device".to_string(),
@@ -965,8 +1007,10 @@ impl ChannelsState {
             "ok": true,
             "op": "channels_status",
             "generation": generation,
-            "input_source": self.input_source.as_ref().map(Aes67InputSource::to_json),
-            "input_streams": self.input_streams_json(snapshot),
+            "input_mode": input_mode,
+            "input_source": if capture_mode { Value::Null } else { self.input_source.as_ref().map(Aes67InputSource::to_json).unwrap_or(Value::Null) },
+            "input_streams": input_streams,
+            "input_capture": input_capture,
             "current": self.current.to_json(),
             "format": {
                 "block_frames": self.current.block_frames,

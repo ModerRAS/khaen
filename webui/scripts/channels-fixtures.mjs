@@ -213,7 +213,15 @@ export function buildChannelsSeed(fixture) {
         target: 'rt-host',
         runtime_mode: 'aes67',
         output: { channels: 4, dac_map: [0, null, 1, null], channels_source: 'rt-host-channels-status' },
-        input: { channels: 2, map: [0, 1], source: null, sdp_sha256: null, streams: buildInputStreams() },
+        input: {
+          mode: 'aes67',
+          channels: 2,
+          map: [0, 1],
+          source: null,
+          sdp_sha256: null,
+          streams: buildInputStreams(),
+          capture: null
+        },
         mapping: [
           { lane: 0, dac: 0 },
           { lane: 1, dac: 2 }
@@ -268,7 +276,15 @@ export function buildChannelsSeed(fixture) {
         dac_map: buildMapping(channels).map((entry) => entry.dac),
         channels_source: 'rt-host-channels-status'
       },
-      input: { channels: 2, map: [0, 1], source: null, sdp_sha256: null, streams: buildInputStreams() },
+      input: {
+          mode: 'aes67',
+          channels: 2,
+          map: [0, 1],
+          source: null,
+          sdp_sha256: null,
+          streams: buildInputStreams(),
+          capture: null
+        },
       mapping: buildMapping(channels),
       plan: {
         source: 'rt-host',

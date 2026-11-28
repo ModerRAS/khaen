@@ -154,6 +154,72 @@ async fn get_channels_reports_the_live_channels_status_shape() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn get_channels_reports_alsa_capture_mode_and_stats() {
+    let (bytes, graph_id) = plan_bytes();
+    let mut channels = channels_status_document();
+    channels["input_mode"] = json!("alsa_capture");
+    channels["input_source"] = Value::Null;
+    channels["input_streams"] = json!([]);
+    channels["input_capture"] = json!({
+        "device": "hw:CARD=CAPTURE,DEV=0",
+        "blocks_captured": 7,
+        "frames_captured": 896,
+        "frames_delivered": 768,
+        "blocks_skipped": 1,
+        "frames_dropped": 128,
+        "partial_blocks": 0,
+        "queue_full": 0,
+        "underruns": 2,
+        "xruns": 1,
+        "read_errors": 0,
+        "recycle_full": 0,
+        "running": true,
+        "last_error": "xrun: underrun"
+    });
+    let fake = FakeTransport::with_rt_status_and_channels(rt_status(&graph_id, 4), channels);
+    let link = support::injected_link(Arc::clone(&fake));
+    let server = support::spawn_with_link(link, None).await;
+    let response = support::request_bytes(
+        &server,
+        "POST",
+        "/api/plan/upload",
+        "application/octet-stream",
+        &bytes,
+    )
+    .await;
+    assert_eq!(response.status, 201, "{}", response.body_text());
+
+    let response = support::request(&server, "GET", "/api/channels").await;
+    assert_eq!(response.status, 200, "{}", response.body_text());
+    let body = response.json();
+    assert_eq!(body["input"]["mode"], json!("alsa_capture"));
+    // 采集模式没有 AES67 输入：通道/映射/source/流表都不把未使用的 AES67 配置当当前值。
+    assert!(body["input"]["channels"].is_null());
+    assert!(body["input"]["map"].is_null());
+    assert!(body["input"]["source"].is_null());
+    assert!(body["input"]["sdp_sha256"].is_null());
+    assert_eq!(body["input"]["streams"], json!([]));
+    assert_eq!(
+        body["input"]["capture"]["device"],
+        json!("hw:CARD=CAPTURE,DEV=0")
+    );
+    assert_eq!(body["input"]["capture"]["blocks_captured"], json!(7));
+    assert_eq!(body["input"]["capture"]["underruns"], json!(2));
+    assert_eq!(body["input"]["capture"]["xruns"], json!(1));
+    assert_eq!(
+        body["input"]["capture"]["last_error"],
+        json!("xrun: underrun")
+    );
+    assert!(body["reasons"]["input.channels"]
+        .as_str()
+        .is_some_and(|reason| reason.contains("ALSA capture")));
+    assert!(body["reasons"]["input.source"]
+        .as_str()
+        .is_some_and(|reason| reason.contains("ALSA capture")));
+    assert!(body["reasons"]["input.mode"].is_null());
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn get_channels_reports_the_rt_host_aes67_input_provenance() {
     let (_, graph_id) = plan_bytes();
     let mut channels = channels_status_document();

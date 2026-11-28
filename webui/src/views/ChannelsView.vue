@@ -272,6 +272,12 @@ const inputRows = computed<KvRow[]>(() => {
       reason: reasonForChannelsPath(info, 'input.streams')
     }
   ]
+  if (input.mode !== null) {
+    rows.push({
+      label: t('channels.input.field.mode'),
+      value: t(input.mode === 'alsa_capture' ? 'channels.input.mode.capture' : 'channels.input.mode.aes67')
+    })
+  }
   for (const [index, stream] of (input.streams ?? []).entries()) {
     const group = stream.group ?? t('common.dash')
     const port = stream.port === null ? t('common.dash') : String(stream.port)
@@ -291,6 +297,24 @@ const inputRows = computed<KvRow[]>(() => {
             }),
       reason: stats === null ? reasonForChannelsPath(info, 'input.streams.stats') : null
     })
+  }
+  if (input.capture !== null) {
+    rows.push({
+      label: t('channels.input.field.capture'),
+      value: input.capture.device === null ? null : t('channels.input.captureValue', {
+        blocks: formatInteger(input.capture.blocks_captured, localeId.value),
+        frames: formatInteger(input.capture.frames_delivered, localeId.value),
+        underruns: formatInteger(input.capture.underruns, localeId.value),
+        xruns: formatInteger(input.capture.xruns, localeId.value)
+      }),
+      reason: input.capture.device === null ? reasonForChannelsPath(info, 'input.capture') : null
+    })
+    if (input.capture.last_error !== null) {
+      rows.push({
+        label: t('channels.input.field.captureError'),
+        value: input.capture.last_error
+      })
+    }
   }
   return rows
 })

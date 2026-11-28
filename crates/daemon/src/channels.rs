@@ -546,19 +546,61 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
             }
         }
     };
-    // input：AES67 接收配置来自 channels_status.current；source/sdp 控制通道不报。
-    let input_channels = current
-        .and_then(|current| current.get("aes67_channels"))
-        .and_then(Value::as_u64);
-    let input_map = current
-        .and_then(|current| current.get("aes67_map"))
-        .filter(|value| value.is_array())
+    // IO I4c：rt-host 输入模式（aes67 | alsa_capture）与采集统计（加法字段）。
+    let input_mode = channels_status
+        .and_then(|body| body.get("input_mode"))
+        .and_then(Value::as_str)
+        .filter(|mode| *mode == "aes67" || *mode == "alsa_capture");
+    let capture_mode = input_mode == Some("alsa_capture");
+    let input_capture = channels_status
+        .and_then(|body| body.get("input_capture"))
+        .filter(|value| value.is_object())
         .cloned();
+    if input_mode.is_none() {
+        reasons.insert(
+            "input.mode".to_string(),
+            "the rt-host channels status does not report the input mode (older rt-host, or channels status unavailable); the daemon does not guess aes67 vs alsa_capture".to_string(),
+        );
+    }
+    if capture_mode && input_capture.is_none() {
+        reasons.insert(
+            "input.capture".to_string(),
+            "the rt-host reports alsa_capture mode but no capture stats snapshot; the daemon does not fabricate counters".to_string(),
+        );
+    }
+    // input：AES67 接收配置来自 channels_status.current；采集模式下 AES67 输入不参与，
+    // 通道/映射给 null + 原因，而不是把 current 里未使用的 AES67 配置当“当前输入”。
+    let input_channels = if capture_mode {
+        None
+    } else {
+        current
+            .and_then(|current| current.get("aes67_channels"))
+            .and_then(Value::as_u64)
+    };
+    let input_map = if capture_mode {
+        None
+    } else {
+        current
+            .and_then(|current| current.get("aes67_map"))
+            .filter(|value| value.is_array())
+            .cloned()
+    };
+    let input_not_reported_reason = if capture_mode {
+        "the runtime input is ALSA capture, so AES67 input channels/map are not used; the daemon leaves them null instead of reporting an unused AES67 config"
+    } else {
+        AES67_INPUT_REASON
+    };
     if input_channels.is_none() {
-        reasons.insert("input.channels".to_string(), AES67_INPUT_REASON.to_string());
+        reasons.insert(
+            "input.channels".to_string(),
+            input_not_reported_reason.to_string(),
+        );
     }
     if input_map.is_none() {
-        reasons.insert("input.map".to_string(), AES67_INPUT_REASON.to_string());
+        reasons.insert(
+            "input.map".to_string(),
+            input_not_reported_reason.to_string(),
+        );
     }
     // input.source / input.sdp_sha256：rt-host channels_status 的加法字段 input_source
     // `{source:"sdp"|"manual", sdp_sha256}`；旧 rt-host / 手工配置分别给原因。
@@ -583,16 +625,27 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
     let input_sdp_sha256 = input_source
         .and_then(|value| value.get("sdp_sha256"))
         .and_then(Value::as_str);
-    if input_source_value.is_none() {
-        reasons.insert("input.source".to_string(), AES67_SOURCE_REASON.to_string());
-    }
-    if input_sdp_sha256.is_none() {
-        let reason = if input_source_value == Some("manual") {
-            AES67_MANUAL_SDP_REASON
-        } else {
-            AES67_SDP_REASON
-        };
-        reasons.insert("input.sdp_sha256".to_string(), reason.to_string());
+    if capture_mode {
+        reasons.insert(
+            "input.source".to_string(),
+            "the runtime input is ALSA capture, so there is no AES67 input source; the daemon leaves it null instead of reporting an unused AES67 source config".to_string(),
+        );
+        reasons.insert(
+            "input.sdp_sha256".to_string(),
+            "the runtime input is ALSA capture, so there is no AES67 SDP descriptor; the daemon leaves it null instead of reporting an unused SDP hash".to_string(),
+        );
+    } else {
+        if input_source_value.is_none() {
+            reasons.insert("input.source".to_string(), AES67_SOURCE_REASON.to_string());
+        }
+        if input_sdp_sha256.is_none() {
+            let reason = if input_source_value == Some("manual") {
+                AES67_MANUAL_SDP_REASON
+            } else {
+                AES67_SDP_REASON
+            };
+            reasons.insert("input.sdp_sha256".to_string(), reason.to_string());
+        }
     }
     // format：channels_status.current 的格式字段（引擎/设备口径）；拿不到时退回契约 B
     // status 的 data-plane format（仍是真的，但只有 flat 视图，block_frames 来自 block_size）。
@@ -739,11 +792,13 @@ fn compose_channels(state: &DaemonState, now: SystemTime) -> Value {
             "channels_source": output_source,
         },
         "input": {
+            "mode": input_mode,
             "channels": input_channels,
             "map": input_map,
             "source": input_source_value,
             "sdp_sha256": input_sdp_sha256,
             "streams": input_streams.unwrap_or(Value::Null),
+            "capture": input_capture.unwrap_or(Value::Null),
         },
         "mapping": mapping,
         "plan": {
