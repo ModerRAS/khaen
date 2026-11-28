@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use khaen_core::rt::{MAX_OUTPUT_CHANNELS, SAMPLE_RATES_HZ};
 use khaen_core::sha256::{sha256, sha256_hex};
 use khaen_host::admission::AdmissionLimits;
-use khaen_host::aes67_input::MAX_RTP_CHANNELS;
+use khaen_host::aes67_input::{MAX_OUTPUT_CHANNELS as MAX_INPUT_BUS_CHANNELS, MAX_RTP_CHANNELS};
 use khaen_host::backend::DeviceConfig;
 use khaen_host::control::{engine_token, ControlError};
 use khaen_host::engine::EngineConfig;
@@ -78,6 +78,9 @@ pub mod error {
 pub struct ChannelsView {
     /// 输出通道数（引擎/设备/DAC）。
     pub channels: usize,
+    /// 引擎输入宽度（plan content.in_channels / AES67 输入总线宽度）。
+    /// 与 `channels` 独立：2 输入 → 22 输出时这里是 2、channels 是 22。
+    pub content_channels: usize,
     /// 采样率（Hz）。
     pub sample_rate: u32,
     /// 块长（帧；format op 管，channels 重配不改）。
@@ -105,6 +108,7 @@ impl ChannelsView {
     pub fn from_config(config: &RuntimeConfig) -> Self {
         Self {
             channels: config.engine.output_channels,
+            content_channels: config.engine.input_channels,
             sample_rate: config.engine.sample_rate,
             block_frames: config.engine.block_frames,
             aes67_group: config.input.multicast_addr,
@@ -122,6 +126,7 @@ impl ChannelsView {
     pub fn to_json(&self) -> Value {
         json!({
             "channels": self.channels,
+            "content_channels": self.content_channels,
             "sample_rate": self.sample_rate,
             "block_frames": self.block_frames,
             "aes67_group": self.aes67_group.to_string(),
@@ -149,6 +154,11 @@ impl ChannelsView {
             };
         }
         field!("channels", self.channels, target.channels);
+        field!(
+            "content_channels",
+            self.content_channels,
+            target.content_channels
+        );
         field!("sample_rate", self.sample_rate, target.sample_rate);
         field!("block_frames", self.block_frames, target.block_frames);
         if self.aes67_group != target.aes67_group {
@@ -174,6 +184,7 @@ impl ChannelsView {
     /// 引擎格式是否变化（变化会重建引擎、丢弃旧图）。
     pub fn engine_changed(&self, target: &Self) -> bool {
         self.channels != target.channels
+            || self.content_channels != target.content_channels
             || self.sample_rate != target.sample_rate
             || self.block_frames != target.block_frames
     }
@@ -187,20 +198,20 @@ impl ChannelsView {
         config.input.sample_rate = self.sample_rate;
         config.input.channels = self.aes67_channels;
         config.input.channels_map = self.aes67_map.clone();
-        config.input.output_channels = self.channels;
+        config.input.output_channels = self.content_channels;
         config.input.block_frames = self.block_frames;
         config.input.jitter_target_frames = self.jitter_frames;
         config.engine = EngineConfig {
             block_frames: self.block_frames,
             sample_rate: self.sample_rate,
-            input_channels: self.channels,
+            input_channels: self.content_channels,
             output_channels: self.channels,
         };
         config.device = DeviceConfig {
             device: DeviceId::new(self.device.clone()),
             sample_rate: self.sample_rate,
             block_frames: self.block_frames,
-            input_channels: self.channels,
+            input_channels: self.content_channels,
             output_channels: self.channels,
         };
         // 设备监督器的方案速率：原来跟随引擎速率（含 0 = 未显式指定）时跟随新速率。
@@ -221,7 +232,10 @@ impl ChannelsView {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChannelsPatch {
     /// 输出通道数。
+    /// 只给本字段时输入宽度跟随它（兼容旧客户端）；同时给 `content_channels` 时两者独立。
     pub channels: Option<usize>,
+    /// 引擎输入宽度（plan content.in_channels / AES67 输入总线宽度）。
+    pub content_channels: Option<usize>,
     /// 采样率（Hz）。
     pub sample_rate: Option<u32>,
     /// AES67 组播地址。
@@ -258,8 +272,9 @@ fn bad(message: impl Into<String>) -> ControlError {
 
 impl ChannelsPatch {
     /// 允许的字段名（未知字段直接拒绝：拼错字段不能静默变成"什么都没改"）。
-    const FIELDS: [&'static str; 9] = [
+    const FIELDS: [&'static str; 10] = [
         "channels",
+        "content_channels",
         "sample_rate",
         "aes67_group",
         "aes67_port",
@@ -285,6 +300,13 @@ impl ChannelsPatch {
             let value = unsigned_field(object, "channels")?;
             patch.channels =
                 Some(usize::try_from(value).map_err(|_| bad("channels does not fit in usize"))?);
+        }
+        if object.contains_key("content_channels") {
+            let value = unsigned_field(object, "content_channels")?;
+            patch.content_channels = Some(
+                usize::try_from(value)
+                    .map_err(|_| bad("content_channels does not fit in usize"))?,
+            );
         }
         if object.contains_key("sample_rate") {
             let value = unsigned_field(object, "sample_rate")?;
@@ -419,6 +441,13 @@ impl ChannelsPatch {
         let mut target = current.clone();
         if let Some(channels) = self.channels {
             target.channels = channels;
+            // 旧语义：只改输出通道时输入宽度跟随；显式 content_channels 才独立。
+            if self.content_channels.is_none() {
+                target.content_channels = channels;
+            }
+        }
+        if let Some(content_channels) = self.content_channels {
+            target.content_channels = content_channels;
         }
         if let Some(sample_rate) = self.sample_rate {
             target.sample_rate = sample_rate;
@@ -903,7 +932,12 @@ impl ChannelsState {
         }
         let mut patch = ChannelsPatch::parse(request)?;
         let target_sample_rate = patch.sample_rate.unwrap_or(self.current.sample_rate);
-        patch.resolve_sdp(target_sample_rate, self.base_config.engine.input_channels)?;
+        // SDP 的 RTP 通道数必须装进目标输入总线：显式 content_channels > 只改 channels 的跟随值 > 当前值。
+        let target_content_channels = patch
+            .content_channels
+            .or(patch.channels)
+            .unwrap_or(self.current.content_channels);
+        patch.resolve_sdp(target_sample_rate, target_content_channels)?;
         let input_source = patch.sdp_input_source().cloned().or_else(|| {
             if patch.touches_aes67_input() {
                 Some(Aes67InputSource::Manual)
@@ -936,7 +970,7 @@ impl ChannelsState {
         let graph = if engine_changed {
             json!({
                 "action": "dropped",
-                "reason": "the engine format (channels/sample rate/block) changes, so the running graph is compiled for the old format; it is dropped at commit and a matching plan must be prepared+committed again (or pass a precompiled draft through the internal command)",
+                "reason": "the engine format (output channels/content_channels/sample rate/block) changes, so the running graph is compiled for the old format; it is dropped at commit and a matching plan must be prepared+committed again (or pass a precompiled draft through the internal command)",
             })
         } else {
             json!({
@@ -1019,6 +1053,24 @@ impl ChannelsState {
                 ),
             ));
         }
+        if target.content_channels == 0 || target.content_channels > MAX_INPUT_BUS_CHANNELS {
+            return Err(ControlError::new(
+                error::ADMISSION_REJECTED,
+                format!(
+                    "content_channels {} is outside 1..={MAX_INPUT_BUS_CHANNELS} (host AES67 input bus limit; plan ABI input budget is larger but the receiver bus is capped here)",
+                    target.content_channels
+                ),
+            ));
+        }
+        if usize::from(self.limits.max_input_channels) < target.content_channels {
+            return Err(ControlError::new(
+                error::ADMISSION_REJECTED,
+                format!(
+                    "content_channels {} exceeds the admission limit max_input_channels={}",
+                    target.content_channels, self.limits.max_input_channels
+                ),
+            ));
+        }
         if !SAMPLE_RATES_HZ.contains(&target.sample_rate) {
             return Err(bad(format!(
                 "sample_rate {} Hz is not supported; supported values are {SAMPLE_RATES_HZ:?}",
@@ -1063,10 +1115,10 @@ impl ChannelsState {
         }
         let mut seen = std::collections::BTreeSet::new();
         for &slot in &target.aes67_map {
-            if usize::from(slot) >= target.channels {
+            if usize::from(slot) >= target.content_channels {
                 return Err(bad(format!(
-                    "aes67_map slot {slot} is not a valid output channel index (channels = {})",
-                    target.channels
+                    "aes67_map slot {slot} is not a valid input bus slot (content_channels = {})",
+                    target.content_channels
                 )));
             }
             if !seen.insert(slot) {

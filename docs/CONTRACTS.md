@@ -99,6 +99,9 @@
   engine.input_channels`，以及 `device.output_channels == engine.output_channels`。
 - plan-builder 的 `PlanConfig` 对应拆成 `input_channels` / `output_channels`
   （`PlanConfig::new` 保持等宽旧行为，`new_split` 构造不等宽配置）。
+- **热重配**：`channels_prepare` 的 `content_channels` 显式改输入宽度，`channels` 只改输出宽度；
+  只给 `channels` 时输入宽度跟随它（旧客户端兼容）。`channels_status.current` 同时上报
+  `content_channels`（输入）与 `channels`（输出），`aes67_map` 槽位按 `content_channels` 校验。
 - **边界**：输入宽度和输出宽度仍是两个独立预算；不等宽不是“自动上混/下混”，content folds
   必须显式写出映射，未映射的 lane 输出 +0.0。daemon 的 audio profile 用 `inputs.channels`
   （输入容器宽度）与 `device.channels`（物理输出行数）分别表达，plan 生成时分别对应

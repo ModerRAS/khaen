@@ -1045,6 +1045,7 @@ const PATCH_FIELDS: &[&str] = &[
     "input",
     "output_channels",
     "channels",
+    "content_channels",
     "sample_rate",
     "aes67_group",
     "aes67_port",
@@ -1161,6 +1162,15 @@ fn parse_channels_patch(object: &Map<String, Value>) -> Result<ChannelsPatch, Ch
         patch
             .rt_fields
             .insert("channels".to_string(), json!(channels));
+    }
+    // ---- 引擎输入宽度（IO：与输出通道解耦）----
+    // 注意：AES67 RTP 通道数的别名是 input_channels/input.channels（保留旧合同），
+    // 这里用 content_channels 表示 plan content.in_channels / 输入总线宽度，避免语义碰撞。
+    if let Some(value) = object.get("content_channels") {
+        patch.rt_fields.insert(
+            "content_channels".to_string(),
+            json!(unsigned(value, "content_channels")?),
+        );
     }
     // ---- 其余 rt-host 通道字段（原样转发）----
     for field in [
@@ -2074,6 +2084,34 @@ mod tests {
         );
         let error = parse_channels_patch(&object(json!({ "sdp": 42 }))).expect_err("type");
         assert_eq!(error.details["field"], json!("sdp"));
+    }
+
+    #[test]
+    fn patch_forwards_content_channels_separately_from_aes67_input_channels() {
+        // content_channels = 引擎输入宽度（plan content.in_channels）；aes67_channels = RTP 线上通道数。
+        let patch = parse_channels_patch(&object(json!({
+            "channels": 22,
+            "content_channels": 2,
+            "aes67_channels": 2,
+            "aes67_map": [0, 1]
+        })))
+        .expect("split width patch");
+        assert_eq!(patch.rt_fields.get("channels"), Some(&json!(22)));
+        assert_eq!(patch.rt_fields.get("content_channels"), Some(&json!(2)));
+        assert_eq!(patch.rt_fields.get("aes67_channels"), Some(&json!(2)));
+
+        // 旧别名 input_channels 仍然表示 AES67 RTP 通道数，不能被误当成 content_channels。
+        let legacy = parse_channels_patch(&object(json!({
+            "channels": 22,
+            "input_channels": 4
+        })))
+        .expect("legacy alias patch");
+        assert_eq!(legacy.rt_fields.get("aes67_channels"), Some(&json!(4)));
+        assert!(!legacy.rt_fields.contains_key("content_channels"));
+
+        let error =
+            parse_channels_patch(&object(json!({ "content_channels": "2" }))).expect_err("type");
+        assert_eq!(error.details["field"], json!("content_channels"));
     }
 
     #[test]

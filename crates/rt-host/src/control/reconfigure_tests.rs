@@ -102,6 +102,73 @@ fn channels_prepare_rejects_malformed_sdp() {
 }
 
 #[test]
+fn channels_prepare_can_change_output_width_without_changing_input_width() {
+    let mut state = ChannelsState::new(
+        fake_runtime_config(),
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    assert_eq!(state.status_json(None)["current"]["channels"], json!(2));
+    assert_eq!(
+        state.status_json(None)["current"]["content_channels"],
+        json!(2)
+    );
+
+    // 2 输入 → 4 输出：content_channels 显式给 2，输出 channels 给 4。
+    let response = state
+        .prepare(&object(json!({ "channels": 4, "content_channels": 2 })))
+        .expect("split width target");
+    assert_eq!(response["target"]["channels"], json!(4));
+    assert_eq!(response["target"]["content_channels"], json!(2));
+    assert_eq!(response["diff"]["channels"], json!({ "from": 2, "to": 4 }));
+    assert!(response["diff"].get("content_channels").is_none());
+    assert_eq!(response["graph"]["action"], json!("dropped"));
+    let token = token_of(&response);
+    let draft = state.take_draft(&token).expect("draft");
+    assert_eq!(draft.config.engine.input_channels, 2);
+    assert_eq!(draft.config.engine.output_channels, 4);
+    assert_eq!(draft.config.input.output_channels, 2);
+    assert_eq!(draft.config.device.input_channels, 2);
+    assert_eq!(draft.config.device.output_channels, 4);
+
+    // 旧客户端只给 channels：输入宽度跟随输出宽度，保持旧语义。
+    let legacy = state
+        .prepare(&object(json!({ "channels": 4 })))
+        .expect("legacy follow target");
+    assert_eq!(legacy["target"]["content_channels"], json!(4));
+    assert!(legacy["diff"].get("content_channels").is_some());
+}
+
+#[test]
+fn channels_prepare_bounds_aes67_map_by_content_width_not_output_width() {
+    let mut state = ChannelsState::new(
+        fake_runtime_config(),
+        None,
+        Arc::new(FakeProbe::new(FakeProbeState::default())),
+        shared_tracker(),
+        AdmissionLimits::default(),
+    );
+    // 输入总线只有 1 个槽时，映射到 slot 1 越界（即使输出有 4 个通道）。
+    let error = state
+        .prepare(&object(json!({ "channels": 4, "content_channels": 1 })))
+        .expect_err("map slot outside content width");
+    assert_eq!(error.code, host_error::BAD_REQUEST);
+    assert!(error.message.contains("content_channels = 1"), "{error:?}");
+
+    // 输入总线 3 个槽时 slot 2 合法。
+    let response = state
+        .prepare(&object(json!({
+            "channels": 4,
+            "content_channels": 3,
+            "aes67_map": [0, 2]
+        })))
+        .expect("slot inside content width");
+    assert_eq!(response["target"]["aes67_map"], json!([0, 2]));
+}
+
+#[test]
 fn channels_status_reports_aes67_input_source_provenance() {
     let sdp = ChannelsState::new(
         fake_runtime_config(),
